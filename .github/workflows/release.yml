@@ -1,0 +1,87 @@
+name: Release
+
+# Publishing uses PyPI Trusted Publishing (OIDC): no API tokens are stored anywhere.
+# PyPI verifies the request came from this repository, this workflow file, and the named
+# environment, then mints a short-lived token for that one upload.
+#
+#   TestPyPI : run this workflow manually (Actions -> Release -> Run workflow)
+#   PyPI     : publish a GitHub Release, or push a v* tag
+#
+# Both jobs rebuild from a clean checkout rather than uploading a locally built artifact,
+# so what ships is exactly what the tagged source produces.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Verify the wheel installs and works
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install "$(ls dist/*.whl)[png]"
+          cd /tmp
+          /tmp/verify/bin/python -c "
+          import pptx2svg
+          print('version', pptx2svg.__version__)
+          print('backends', pptx2svg.available_backends())
+          "
+          /tmp/verify/bin/pptx2svg --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    # Manual runs go to TestPyPI so a release can be rehearsed end to end.
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/pptx2svg
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # TestPyPI accumulates rehearsal uploads; do not fail the run on a re-run.
+          skip-existing: true
+
+  pypi:
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pptx2svg
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

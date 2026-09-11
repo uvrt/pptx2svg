@@ -1,0 +1,10 @@
+# The wheel carries only the package; the sdist additionally carries everything needed
+# to run the test suite from a source checkout, which is what distro packagers and
+# conda-forge do. Shipping test_*.py without conftest.py and the fixtures would give
+# them a suite that cannot run.
+include LICENSE README.md ROADMAP.md
+recursive-include tests *.py *.pptx *.md
+recursive-include tools *.applescript
+
+# Never ship build or editor droppings.
+global-exclude __pycache__ *.py[cod] .DS_Store
