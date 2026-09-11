@@ -1,5 +1,9 @@
 # pptx2svg
 
+[![CI](https://github.com/uvrt/pptx2svg/actions/workflows/ci.yml/badge.svg)](https://github.com/uvrt/pptx2svg/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/pptx2svg/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Render PowerPoint (`.pptx`) slides to **SVG**, and SVG to **PNG**.
 
 Parsing, layout and SVG generation are pure Python with no dependencies beyond the
