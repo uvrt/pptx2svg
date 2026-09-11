@@ -1,0 +1,731 @@
+"""Text body layout and SVG generation.
+
+Output is one ``<text>`` element per text body, with a ``<tspan>`` per run fragment.
+Line advance is expressed as ``dy`` on the first tspan of each line, which is why the
+whole body has to be laid out before any of it is emitted: the ``y`` of the ``<text>``
+element depends on the *total* height (for middle/bottom anchoring), and the height
+depends on how the text wraps.
+
+The order of operations, therefore:
+
+1. swap width/height and rotate margins if the body is vertical;
+2. pick the default font size and, for ``normAutofit``, shrink until the text fits;
+3. wrap each paragraph and emit its tspans, accumulating line advances;
+4. measure the total height and offset the ``<text>`` element's ``y`` for the anchor;
+5. add the first line's ascender so ``y`` lands on the baseline, not the line top.
+
+PowerPoint's own line metrics are font-dependent, so a line's height comes from the
+tallest run on it, using the font's ``(ascender + |descender|) / unitsPerEm``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .. import model as m
+from ..text.fontmap import font_family_value
+from ..text.measure import is_cjk
+from ..text.wrap import LineSegment, wrap_paragraph
+from ..units import PX_PER_PT, emu_to_px, px_to_emu
+from .context import RenderContext, escape_xml_attr, escape_xml_text, num
+
+DEFAULT_LINE_SPACING = 1.0
+DEFAULT_FONT_SIZE_PT = 18.0
+
+_VERTICAL_TYPES = frozenset({"vert", "eaVert", "wordArtVert", "mongolianVert"})
+
+
+@dataclass
+class _Dimensions:
+    width: float
+    height: float
+    margin_left: float
+    margin_right: float
+    margin_top: float
+    margin_bottom: float
+
+
+def _resolve_dimensions(
+    body: m.BodyProperties, original_width: float, original_height: float
+) -> _Dimensions:
+    """Vertical text lays out in a rotated box, so swap the axes and the margins with it."""
+    if body.vert in _VERTICAL_TYPES:
+        # 90 degrees clockwise.
+        return _Dimensions(
+            width=original_height,
+            height=original_width,
+            margin_left=emu_to_px(body.margin_top),
+            margin_right=emu_to_px(body.margin_bottom),
+            margin_top=emu_to_px(body.margin_right),
+            margin_bottom=emu_to_px(body.margin_left),
+        )
+    if body.vert == "vert270":
+        # 90 degrees counter-clockwise.
+        return _Dimensions(
+            width=original_height,
+            height=original_width,
+            margin_left=emu_to_px(body.margin_bottom),
+            margin_right=emu_to_px(body.margin_top),
+            margin_top=emu_to_px(body.margin_left),
+            margin_bottom=emu_to_px(body.margin_right),
+        )
+    return _Dimensions(
+        width=original_width,
+        height=original_height,
+        margin_left=emu_to_px(body.margin_left),
+        margin_right=emu_to_px(body.margin_right),
+        margin_top=emu_to_px(body.margin_top),
+        margin_bottom=emu_to_px(body.margin_bottom),
+    )
+
+
+def render_text_body(
+    text_body: m.TextBody, transform: m.Transform, context: RenderContext
+) -> str:
+    body = text_body.body_properties
+    paragraphs = text_body.paragraphs
+
+    if not any(run.text for para in paragraphs for run in para.runs):
+        return ""
+
+    original_width = emu_to_px(transform.extent_width)
+    original_height = emu_to_px(transform.extent_height)
+    dims = _resolve_dimensions(body, original_width, original_height)
+
+    full_text_width = dims.width - dims.margin_left - dims.margin_right
+    num_col = max(1, body.num_col)
+    text_width = full_text_width / num_col if num_col > 1 else full_text_width
+
+    default_font_size = _default_font_size(paragraphs)
+    should_wrap = body.wrap != "none"
+
+    font_scale = body.font_scale
+    ln_spc_reduction = body.ln_spc_reduction
+
+    if body.auto_fit == "normAutofit" and should_wrap:
+        available_height = dims.height - dims.margin_top - dims.margin_bottom
+        font_scale = _shrink_to_fit_scale(
+            paragraphs,
+            default_font_size,
+            font_scale,
+            ln_spc_reduction,
+            text_width,
+            available_height,
+            context,
+        )
+
+    scaled_default_size = default_font_size * font_scale
+    default_line_ratio = _default_line_height_ratio(paragraphs, context)
+    default_ascender_ratio = _default_ascender_ratio(paragraphs, context)
+    default_natural_height = scaled_default_size * default_line_ratio
+
+    tspans: list[str] = []
+    is_first_line = True
+    auto_num_counters: dict[str, int] = {}
+    previous_space_after = 0.0
+
+    for paragraph in paragraphs:
+        properties = paragraph.properties
+        para_margin_left = emu_to_px(properties.margin_left or 0)
+        para_indent = emu_to_px(properties.indent or 0)
+
+        text_start_x = dims.margin_left + para_margin_left
+        # `indent` is normally negative: it hangs the bullet left of the text.
+        bullet_x = text_start_x + para_indent
+        effective_text_width = text_width - para_margin_left
+
+        bullet_text = _bullet_text(properties, auto_num_counters)
+        x_pos, anchor = _alignment(
+            properties.alignment, text_start_x, effective_text_width, dims.width, dims.margin_right
+        )
+
+        para_font_size = _paragraph_font_size(paragraph, default_font_size) * font_scale
+        space_before = _spacing_px(properties.space_before, para_font_size)
+        # Adjacent paragraphs collapse their spacing to the larger of the two.
+        paragraph_gap = max(previous_space_after, space_before)
+
+        if not any(run.text for run in paragraph.runs):
+            empty_height = para_font_size if para_font_size > 0 else default_natural_height
+            dy = _compute_dy(
+                is_first_line, _line_height_px(paragraph, empty_height, ln_spc_reduction), paragraph_gap
+            )
+            tspans.append(f'<tspan x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}"> </tspan>')
+            is_first_line = False
+            previous_space_after = _spacing_px(properties.space_after, para_font_size)
+            continue
+
+        if should_wrap:
+            lines = wrap_paragraph(
+                paragraph,
+                effective_text_width,
+                scaled_default_size,
+                font_scale,
+                context.measurer,
+            )
+            for line_index, line in enumerate(lines):
+                line_gap = paragraph_gap if line_index == 0 else 0.0
+
+                if not line.segments:
+                    dy = _compute_dy(
+                        is_first_line,
+                        _line_height_px(paragraph, default_natural_height, ln_spc_reduction),
+                        line_gap,
+                    )
+                    tspans.append(
+                        f'<tspan x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}"> </tspan>'
+                    )
+                    is_first_line = False
+                    continue
+
+                natural_height = _line_natural_height(
+                    line.segments, default_font_size, font_scale, context
+                )
+                dy = _compute_dy(
+                    is_first_line,
+                    _line_height_px(paragraph, natural_height, ln_spc_reduction),
+                    line_gap,
+                )
+
+                if line_index == 0 and bullet_text:
+                    line_font_size = (
+                        _line_font_size(line.segments, default_font_size) * font_scale
+                    )
+                    first_segment = line.segments[0]
+                    tspans.append(
+                        f'<tspan x="{num(bullet_x)}" dy="{dy}" text-anchor="start" '
+                        f'{_bullet_style_attrs(properties, line_font_size, first_segment, context)}>'
+                        f"{escape_xml_text(bullet_text)}</tspan>"
+                    )
+                    # The bullet already advanced the line, so the text only sets x.
+                    for index, segment in enumerate(line.segments):
+                        prefix = f'x="{num(x_pos)}" text-anchor="{anchor}" ' if index == 0 else ""
+                        tspans.append(_render_segment(segment, font_scale, prefix, context))
+                else:
+                    for index, segment in enumerate(line.segments):
+                        prefix = (
+                            f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
+                            if index == 0
+                            else ""
+                        )
+                        tspans.append(_render_segment(segment, font_scale, prefix, context))
+                is_first_line = False
+        else:
+            natural_height = _line_natural_height(
+                [LineSegment(run.text, run.properties) for run in paragraph.runs],
+                default_font_size,
+                font_scale,
+                context,
+            )
+            dy = _compute_dy(
+                is_first_line,
+                _line_height_px(paragraph, natural_height, ln_spc_reduction),
+                paragraph_gap,
+            )
+            if bullet_text:
+                first_run = next((run for run in paragraph.runs if run.text), None)
+                size = (
+                    (first_run.properties.font_size if first_run and first_run.properties.font_size
+                     else default_font_size)
+                    * font_scale
+                )
+                segment = LineSegment(
+                    text="",
+                    properties=first_run.properties if first_run else m.RunProperties(),
+                )
+                tspans.append(
+                    f'<tspan x="{num(bullet_x)}" dy="{dy}" text-anchor="start" '
+                    f"{_bullet_style_attrs(properties, size, segment, context)}>"
+                    f"{escape_xml_text(bullet_text)}</tspan>"
+                )
+
+            first_rendered = False
+            for run in paragraph.runs:
+                if not run.text:
+                    continue
+                segment = LineSegment(text=run.text, properties=run.properties)
+                if not first_rendered:
+                    if bullet_text:
+                        prefix = f'x="{num(x_pos)}" text-anchor="{anchor}" '
+                    else:
+                        prefix = f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
+                    tspans.append(_render_segment(segment, font_scale, prefix, context))
+                    first_rendered = True
+                else:
+                    tspans.append(_render_segment(segment, font_scale, "", context))
+            is_first_line = False
+
+        previous_space_after = _spacing_px(properties.space_after, para_font_size)
+
+    if not tspans:
+        return ""
+
+    # Vertical anchoring needs the total height, which is only known now.
+    y_start = dims.margin_top
+    total_height = _estimate_text_height(
+        paragraphs,
+        default_font_size,
+        should_wrap,
+        text_width,
+        ln_spc_reduction,
+        font_scale,
+        context,
+    )
+    if body.anchor == "ctr":
+        y_start = max(dims.margin_top, (dims.height - total_height) / 2)
+    elif body.anchor == "b":
+        y_start = max(dims.margin_top, dims.height - total_height - dims.margin_bottom)
+
+    # `y` on <text> is the baseline, not the top of the line box.
+    first_font_size = _paragraph_font_size(paragraphs[0], default_font_size) * font_scale
+    y_start += first_font_size * default_ascender_ratio * PX_PER_PT
+
+    element = f'<text x="0" y="{num(y_start)}" xml:space="preserve">{"".join(tspans)}</text>'
+
+    if body.vert in _VERTICAL_TYPES:
+        return f'<g transform="translate({num(original_width)}, 0) rotate(90)">{element}</g>'
+    if body.vert == "vert270":
+        return f'<g transform="translate(0, {num(original_height)}) rotate(-90)">{element}</g>'
+    return element
+
+
+# --------------------------------------------------------------------------------------
+# Bullets
+# --------------------------------------------------------------------------------------
+
+
+def _bullet_text(
+    properties: m.ParagraphProperties, counters: dict[str, int]
+) -> str | None:
+    bullet = properties.bullet
+    if bullet is None or isinstance(bullet, m.NoBullet):
+        return None
+    if isinstance(bullet, m.CharBullet):
+        return bullet.char
+    if isinstance(bullet, m.AutoNumBullet):
+        # Numbering restarts per scheme+level, matching PowerPoint's list behaviour.
+        key = f"{bullet.scheme}-{properties.level}"
+        counters[key] = counters.get(key, 0) + 1
+        return format_auto_num(bullet.scheme, bullet.start_at + counters[key] - 1)
+    return None
+
+
+def format_auto_num(scheme: str, index: int) -> str:
+    if scheme == "arabicPeriod":
+        return f"{index}."
+    if scheme == "arabicParenR":
+        return f"{index})"
+    if scheme == "arabicPlain":
+        return str(index)
+    if scheme == "romanUcPeriod":
+        return f"{_to_roman(index)}."
+    if scheme == "romanLcPeriod":
+        return f"{_to_roman(index).lower()}."
+    if scheme == "alphaUcPeriod":
+        return f"{_to_alpha(index)}."
+    if scheme == "alphaLcPeriod":
+        return f"{_to_alpha(index).lower()}."
+    if scheme == "alphaUcParenR":
+        return f"{_to_alpha(index)})"
+    if scheme == "alphaLcParenR":
+        return f"{_to_alpha(index).lower()})"
+    return f"{index}."
+
+
+_ROMAN_NUMERALS = (
+    (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+    (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+)
+
+
+def _to_roman(number: int) -> str:
+    result = ""
+    remaining = number
+    for value, symbol in _ROMAN_NUMERALS:
+        while remaining >= value:
+            result += symbol
+            remaining -= value
+    return result
+
+
+def _to_alpha(number: int) -> str:
+    """1 -> A, 26 -> Z, 27 -> AA."""
+    result = ""
+    remaining = number
+    while remaining > 0:
+        remaining -= 1
+        result = chr(65 + remaining % 26) + result
+        remaining //= 26
+    return result
+
+
+def _bullet_style_attrs(
+    properties: m.ParagraphProperties,
+    text_font_size_pt: float,
+    first_segment: LineSegment,
+    context: RenderContext,
+) -> str:
+    styles: list[str] = []
+
+    if properties.bullet_size_pct is not None:
+        size = text_font_size_pt * (properties.bullet_size_pct / 100000)
+        styles.append(f'font-size="{num(size * PX_PER_PT)}"')
+    elif text_font_size_pt:
+        styles.append(f'font-size="{num(text_font_size_pt * PX_PER_PT)}"')
+
+    # A bullet with no `buFont` inherits the first run's typeface.
+    chain = [
+        properties.bullet_font,
+        first_segment.properties.font_family,
+        first_segment.properties.font_family_ea,
+    ]
+    family = font_family_value(chain, context.font_mapping)
+    if family:
+        styles.append(f'font-family="{escape_xml_attr(family)}"')
+
+    if properties.bullet_color is not None:
+        styles.append(f'fill="{properties.bullet_color.hex}"')
+        if properties.bullet_color.alpha < 1:
+            styles.append(f'fill-opacity="{num(properties.bullet_color.alpha)}"')
+    elif first_segment.properties.color is not None:
+        styles.append(f'fill="{first_segment.properties.color.hex}"')
+
+    return " ".join(styles)
+
+
+# --------------------------------------------------------------------------------------
+# Segments
+# --------------------------------------------------------------------------------------
+
+
+def _needs_script_split(properties: m.RunProperties) -> bool:
+    """A run with distinct Latin and East Asian typefaces must be split per script."""
+    return (
+        properties.font_family is not None
+        and properties.font_family_ea is not None
+        and properties.font_family != properties.font_family_ea
+    )
+
+
+def _split_by_script(text: str) -> list[tuple[str, bool]]:
+    parts: list[tuple[str, bool]] = []
+    current = ""
+    current_is_ea: bool | None = None
+
+    for char in text:
+        east_asian = is_cjk(ord(char))
+        if current_is_ea is not None and east_asian != current_is_ea:
+            parts.append((current, current_is_ea))
+            current = ""
+        current_is_ea = east_asian
+        current += char
+
+    if current and current_is_ea is not None:
+        parts.append((current, current_is_ea))
+    return parts
+
+
+def _render_segment(
+    segment: LineSegment, font_scale: float, prefix: str, context: RenderContext
+) -> str:
+    properties = segment.properties
+
+    if not _needs_script_split(properties):
+        styles = _style_attrs(properties, font_scale, None, context)
+        content = f"<tspan {prefix}{styles}>{escape_xml_text(segment.text)}</tspan>"
+    else:
+        pieces: list[str] = []
+        for index, (part_text, east_asian) in enumerate(_split_by_script(segment.text)):
+            fonts = (
+                [properties.font_family_ea, context.jpan_fallback_font, properties.font_family]
+                if east_asian
+                else [properties.font_family, properties.font_family_ea]
+            )
+            styles = _style_attrs(properties, font_scale, fonts, context)
+            open_prefix = prefix if index == 0 else ""
+            pieces.append(
+                f"<tspan {open_prefix}{styles}>{escape_xml_text(part_text)}</tspan>"
+            )
+        content = "".join(pieces)
+
+    if properties.hyperlink is not None:
+        return f'<a href="{escape_xml_attr(properties.hyperlink.url)}">{content}</a>'
+    return content
+
+
+def _style_attrs(
+    properties: m.RunProperties,
+    font_scale: float,
+    fonts: list[str | None] | None,
+    context: RenderContext,
+) -> str:
+    styles: list[str] = []
+
+    if properties.font_size:
+        # Written as user units (px), not `pt`: resvg's presentation-attribute parser
+        # rejects unit suffixes on font-size, and px is understood by every backend.
+        styles.append(f'font-size="{num(properties.font_size * font_scale * PX_PER_PT)}"')
+
+    chain = fonts if fonts is not None else [properties.font_family, properties.font_family_ea]
+    family = font_family_value(chain, context.font_mapping)
+    if family:
+        styles.append(f'font-family="{escape_xml_attr(family)}"')
+
+    if properties.bold:
+        styles.append('font-weight="bold"')
+    if properties.italic:
+        styles.append('font-style="italic"')
+
+    if properties.color is not None:
+        styles.append(f'fill="{properties.color.hex}"')
+        if properties.color.alpha < 1:
+            styles.append(f'fill-opacity="{num(properties.color.alpha)}"')
+
+    decorations = []
+    if properties.underline:
+        decorations.append("underline")
+    if properties.strikethrough:
+        decorations.append("line-through")
+    if decorations:
+        styles.append(f'text-decoration="{" ".join(decorations)}"')
+
+    if properties.baseline > 0:
+        styles.append('baseline-shift="super"')
+    elif properties.baseline < 0:
+        styles.append('baseline-shift="sub"')
+
+    if properties.outline is not None:
+        styles.append(f'stroke="{properties.outline.color.hex}"')
+        styles.append(f'stroke-width="{num(emu_to_px(properties.outline.width))}"')
+        if properties.outline.color.alpha < 1:
+            styles.append(f'stroke-opacity="{num(properties.outline.color.alpha)}"')
+        # Stroke first so the outline sits behind the glyph fill, as PowerPoint does.
+        styles.append('paint-order="stroke"')
+
+    return " ".join(styles)
+
+
+# --------------------------------------------------------------------------------------
+# Metrics
+# --------------------------------------------------------------------------------------
+
+
+def _alignment(
+    alignment: str | None,
+    margin_left: float,
+    text_width: float,
+    width: float,
+    margin_right: float,
+) -> tuple[float, str]:
+    if alignment == "ctr":
+        return margin_left + text_width / 2, "middle"
+    if alignment == "r":
+        return width - margin_right, "end"
+    return margin_left, "start"
+
+
+def _line_height_px(
+    paragraph: m.Paragraph, natural_height_pt: float, ln_spc_reduction: float = 0.0
+) -> float:
+    """``a:lnSpc`` is either a fixed point size or a multiplier on the natural height."""
+    line_spacing = paragraph.properties.line_spacing
+    if isinstance(line_spacing, m.PointsSpacing):
+        return (line_spacing.value / 100) * PX_PER_PT * (1 - ln_spc_reduction)
+    factor = (
+        max(0.5, line_spacing.value / 100000)
+        if isinstance(line_spacing, m.PercentSpacing)
+        else DEFAULT_LINE_SPACING
+    )
+    return natural_height_pt * PX_PER_PT * factor * (1 - ln_spc_reduction)
+
+
+def _spacing_px(spacing: m.SpacingValue, font_size_pt: float) -> float:
+    if isinstance(spacing, m.PointsSpacing):
+        return (spacing.value / 100) * PX_PER_PT
+    return font_size_pt * (spacing.value / 100000) * PX_PER_PT
+
+
+def _compute_dy(is_first_line: bool, line_height_px: float, paragraph_gap_px: float) -> str:
+    if is_first_line:
+        return "0"
+    return f"{line_height_px + paragraph_gap_px:.2f}"
+
+
+def _default_font_size(paragraphs: list[m.Paragraph]) -> float:
+    for paragraph in paragraphs:
+        for run in paragraph.runs:
+            if run.properties.font_size:
+                return run.properties.font_size
+    return DEFAULT_FONT_SIZE_PT
+
+
+def _paragraph_font_size(paragraph: m.Paragraph, default_font_size: float) -> float:
+    for run in paragraph.runs:
+        if run.text and run.properties.font_size:
+            return run.properties.font_size
+    if paragraph.end_para_run_properties and paragraph.end_para_run_properties.font_size:
+        return paragraph.end_para_run_properties.font_size
+    return default_font_size
+
+
+def _line_font_size(segments: list[LineSegment], default_font_size: float) -> float:
+    for segment in segments:
+        if segment.properties.font_size:
+            return segment.properties.font_size
+    return default_font_size
+
+
+def _line_natural_height(
+    segments: list[LineSegment],
+    default_font_size: float,
+    font_scale: float,
+    context: RenderContext,
+) -> float:
+    """A line is as tall as its tallest run."""
+    tallest = 0.0
+    for segment in segments:
+        font_size = (segment.properties.font_size or default_font_size) * font_scale
+        ratio = context.measurer.line_height_ratio(
+            segment.properties.font_family, segment.properties.font_family_ea
+        )
+        tallest = max(tallest, font_size * ratio)
+    return tallest if tallest > 0 else default_font_size * font_scale * 1.2
+
+
+def _default_line_height_ratio(paragraphs: list[m.Paragraph], context: RenderContext) -> float:
+    for paragraph in paragraphs:
+        for run in paragraph.runs:
+            if run.properties.font_family or run.properties.font_family_ea:
+                return context.measurer.line_height_ratio(
+                    run.properties.font_family, run.properties.font_family_ea
+                )
+    return 1.2
+
+
+def _default_ascender_ratio(paragraphs: list[m.Paragraph], context: RenderContext) -> float:
+    for paragraph in paragraphs:
+        for run in paragraph.runs:
+            if run.properties.font_family or run.properties.font_family_ea:
+                return context.measurer.ascender_ratio(
+                    run.properties.font_family, run.properties.font_family_ea
+                )
+    return 1.0
+
+
+def _estimate_text_height(
+    paragraphs: list[m.Paragraph],
+    default_font_size: float,
+    should_wrap: bool,
+    text_width: float,
+    ln_spc_reduction: float,
+    font_scale: float,
+    context: RenderContext,
+) -> float:
+    total = 0.0
+    default_ratio = _default_line_height_ratio(paragraphs, context)
+    previous_space_after = 0.0
+    scaled_default = default_font_size * font_scale
+
+    for index, paragraph in enumerate(paragraphs):
+        has_text = any(run.text for run in paragraph.runs)
+        if not has_text and paragraph.end_para_run_properties and paragraph.end_para_run_properties.font_size:
+            natural_height = (
+                paragraph.end_para_run_properties.font_size * font_scale * default_ratio
+            )
+        else:
+            natural_height = _line_natural_height(
+                [LineSegment(run.text, run.properties) for run in paragraph.runs],
+                default_font_size,
+                font_scale,
+                context,
+            )
+        if natural_height <= 0:
+            natural_height = default_font_size * font_scale * default_ratio
+
+        line_height = _line_height_px(paragraph, natural_height, ln_spc_reduction)
+
+        if should_wrap and has_text:
+            line_count = len(
+                wrap_paragraph(
+                    paragraph, text_width, scaled_default, font_scale, context.measurer
+                )
+            )
+        else:
+            line_count = 1
+
+        total += line_count * line_height
+
+        if index > 0:
+            para_font_size = _paragraph_font_size(paragraph, default_font_size) * font_scale
+            space_before = _spacing_px(paragraph.properties.space_before, para_font_size)
+            total += max(previous_space_after, space_before)
+
+        after_font_size = _paragraph_font_size(paragraph, default_font_size) * font_scale
+        previous_space_after = _spacing_px(paragraph.properties.space_after, after_font_size)
+
+    return total
+
+
+def _shrink_to_fit_scale(
+    paragraphs: list[m.Paragraph],
+    default_font_size: float,
+    font_scale: float,
+    ln_spc_reduction: float,
+    text_width: float,
+    available_height: float,
+    context: RenderContext,
+) -> float:
+    """``normAutofit``: shrink text until it fits, converging in a few passes.
+
+    The stored ``fontScale`` is PowerPoint's own answer, but it was computed against
+    PowerPoint's font metrics; re-deriving it keeps text inside the box when our
+    measurements differ.
+    """
+    if available_height <= 0:
+        return font_scale
+
+    min_scale = font_scale * 0.1
+    scale = font_scale
+
+    for _ in range(5):
+        height = _estimate_text_height(
+            paragraphs, default_font_size, True, text_width, ln_spc_reduction, scale, context
+        )
+        if height <= available_height:
+            break
+        scale = max(scale * (available_height / height), min_scale)
+        if scale <= min_scale:
+            break
+
+    return scale
+
+
+def compute_sp_autofit_height(
+    text_body: m.TextBody, transform: m.Transform, context: RenderContext
+) -> float | None:
+    """``spAutofit``: grow the shape to fit its text.  ``None`` when it already fits."""
+    body = text_body.body_properties
+    paragraphs = text_body.paragraphs
+
+    if not any(run.text for para in paragraphs for run in para.runs):
+        return None
+
+    dims = _resolve_dimensions(
+        body, emu_to_px(transform.extent_width), emu_to_px(transform.extent_height)
+    )
+    full_text_width = dims.width - dims.margin_left - dims.margin_right
+    num_col = max(1, body.num_col)
+    text_width = full_text_width / num_col if num_col > 1 else full_text_width
+
+    height = _estimate_text_height(
+        paragraphs,
+        _default_font_size(paragraphs),
+        body.wrap != "none",
+        text_width,
+        0.0,
+        1.0,
+        context,
+    )
+    required = height + dims.margin_top + dims.margin_bottom
+    if required <= dims.height:
+        return None
+    return px_to_emu(required)

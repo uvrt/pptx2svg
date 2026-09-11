@@ -1,0 +1,837 @@
+"""DrawingML readers: colours, fills, outlines, effects, transforms and geometry.
+
+Everything here stays unresolved -- ``a:schemeClr val="tx1"`` becomes a
+:class:`SchemeColor`, not a hex string, because the colour map that gives ``tx1`` a
+meaning lives on the slide master, not on the shape.  Likewise ``lumMod``/``tint`` are
+recorded but not applied.
+"""
+
+from __future__ import annotations
+
+import math
+from xml.etree.ElementTree import Element
+
+from ..model import ArrowEndpoint, CustomGeometryPath
+from ..xmlutil import (
+    attr,
+    child,
+    children,
+    has_child,
+    is_true,
+    local_name,
+    ns_attr,
+    num_attr,
+)
+from .source import (
+    ColorTransform,
+    SchemeColor,
+    SourceColor,
+    SourceCustomGeometry,
+    SourceEffectList,
+    SourceFill,
+    SourceGeometry,
+    SourceGlow,
+    SourceGradientFill,
+    SourceGradientStop,
+    SourceGroupFill,
+    SourceImageFill,
+    SourceImageFillTile,
+    SourceInnerShadow,
+    SourceNoFill,
+    SourceOuterShadow,
+    SourceOutline,
+    SourcePatternFill,
+    SourcePresetGeometry,
+    SourceShapeStyle,
+    SourceSoftEdge,
+    SourceSolidFill,
+    SourceStyleReference,
+    SourceBlipEffects,
+    SourceTransform,
+    SrgbColor,
+    SystemColor,
+)
+
+COLOR_ELEMENTS = ("srgbClr", "schemeClr", "sysClr", "prstClr", "scrgbClr", "hslClr")
+COLOR_TRANSFORM_KINDS = {"lumMod", "lumOff", "tint", "shade", "alpha", "satMod", "satOff"}
+
+DASH_STYLES = {
+    "solid",
+    "dash",
+    "dot",
+    "dashDot",
+    "lgDash",
+    "lgDashDot",
+    "lgDashDotDot",
+    "sysDash",
+    "sysDot",
+}
+ARROW_TYPES = {"triangle", "stealth", "diamond", "oval", "arrow"}
+ARROW_SIZES = {"sm", "med", "lg"}
+RECTANGLE_ALIGNMENTS = {"tl", "t", "tr", "l", "ctr", "r", "bl", "b", "br"}
+LINE_CAP_MAP = {"flat": "butt", "sq": "square", "rnd": "round"}
+
+#: ``a:prstClr`` names we map; the full ECMA-376 list is ~140 entries and the rest fall
+#: back to black.
+PRESET_COLOR_HEX = {
+    "black": "000000",
+    "white": "FFFFFF",
+    "red": "FF0000",
+    "green": "008000",
+    "lime": "00FF00",
+    "blue": "0000FF",
+    "yellow": "FFFF00",
+    "cyan": "00FFFF",
+    "aqua": "00FFFF",
+    "magenta": "FF00FF",
+    "fuchsia": "FF00FF",
+    "gray": "808080",
+    "grey": "808080",
+    "darkGray": "A9A9A9",
+    "lightGray": "D3D3D3",
+    "silver": "C0C0C0",
+    "maroon": "800000",
+    "olive": "808000",
+    "navy": "000080",
+    "purple": "800080",
+    "teal": "008080",
+    "orange": "FFA500",
+    "pink": "FFC0CB",
+    "brown": "A52A2A",
+    "gold": "FFD700",
+    "violet": "EE82EE",
+    "indigo": "4B0082",
+}
+
+
+# --------------------------------------------------------------------------------------
+# Colour
+# --------------------------------------------------------------------------------------
+
+
+def parse_color(parent: Element | None) -> SourceColor | None:
+    """Read the colour child of a colour-holding element (``a:solidFill``, ``a:buClr``...)."""
+    if parent is None:
+        return None
+    for node in parent:
+        color = parse_color_node(node)
+        if color is not None:
+            return color
+    return None
+
+
+def parse_color_node(node: Element) -> SourceColor | None:
+    """Read one ``a:srgbClr`` / ``a:schemeClr`` / ``a:sysClr`` / ``a:prstClr`` element."""
+    name = local_name(node.tag)
+    if name == "srgbClr":
+        value = attr(node, "val")
+        if value is None:
+            return None
+        return SrgbColor(hex=value.upper(), transforms=parse_color_transforms(node))
+    if name == "schemeClr":
+        value = attr(node, "val")
+        if value is None:
+            return None
+        return SchemeColor(scheme=value, transforms=parse_color_transforms(node))
+    if name == "sysClr":
+        value = attr(node, "val")
+        if value is None:
+            return None
+        last = attr(node, "lastClr")
+        return SystemColor(
+            value=value,
+            last_color=last.upper() if last else None,
+            transforms=parse_color_transforms(node),
+        )
+    if name == "prstClr":
+        hex_value = PRESET_COLOR_HEX.get(attr(node, "val") or "", None)
+        if hex_value is None:
+            return None
+        return SrgbColor(hex=hex_value, transforms=parse_color_transforms(node))
+    if name == "scrgbClr":
+        # Linear RGB percentages; approximate by treating them as sRGB percentages.
+        components = [
+            max(0.0, min(1.0, (num_attr(node, key) or 0) / 100000)) for key in ("r", "g", "b")
+        ]
+        hex_value = "".join(f"{round(component * 255):02X}" for component in components)
+        return SrgbColor(hex=hex_value, transforms=parse_color_transforms(node))
+    if name == "hslClr":
+        hue = (num_attr(node, "hue") or 0) / 60000 / 360
+        sat = (num_attr(node, "sat") or 0) / 100000
+        lum = (num_attr(node, "lum") or 0) / 100000
+        return SrgbColor(hex=_hsl_to_hex(hue, sat, lum), transforms=parse_color_transforms(node))
+    return None
+
+
+def parse_color_transforms(node: Element) -> list[ColorTransform]:
+    transforms: list[ColorTransform] = []
+    for item in node:
+        kind = local_name(item.tag)
+        if kind not in COLOR_TRANSFORM_KINDS:
+            continue
+        value = num_attr(item, "val")
+        if value is None:
+            continue
+        transforms.append(ColorTransform(kind=kind, value=value))  # type: ignore[arg-type]
+    return transforms
+
+
+def _hsl_to_hex(hue: float, sat: float, lum: float) -> str:
+    if sat == 0:
+        level = round(lum * 255)
+        return f"{level:02X}{level:02X}{level:02X}"
+
+    def hue_to_rgb(p: float, q: float, t: float) -> float:
+        t = t % 1.0
+        if t < 1 / 6:
+            return p + (q - p) * 6 * t
+        if t < 1 / 2:
+            return q
+        if t < 2 / 3:
+            return p + (q - p) * (2 / 3 - t) * 6
+        return p
+
+    q = lum * (1 + sat) if lum < 0.5 else lum + sat - lum * sat
+    p = 2 * lum - q
+    values = (hue_to_rgb(p, q, hue + 1 / 3), hue_to_rgb(p, q, hue), hue_to_rgb(p, q, hue - 1 / 3))
+    return "".join(f"{max(0, min(255, round(v * 255))):02X}" for v in values)
+
+
+# --------------------------------------------------------------------------------------
+# Fill
+# --------------------------------------------------------------------------------------
+
+
+def parse_fill(parent: Element | None) -> SourceFill | None:
+    """Read the fill child of ``a:spPr`` / ``a:ln`` / ``p:bgPr`` / ``a:tcPr``."""
+    if parent is None:
+        return None
+
+    solid = child(parent, "solidFill")
+    if solid is not None:
+        color = parse_color(solid)
+        return SourceSolidFill(color=color) if color is not None else None
+
+    if has_child(parent, "noFill"):
+        return SourceNoFill()
+
+    gradient = child(parent, "gradFill")
+    if gradient is not None:
+        parsed = parse_gradient_fill(gradient)
+        if parsed is not None:
+            return parsed
+
+    blip_fill = child(parent, "blipFill")
+    if blip_fill is not None:
+        parsed = parse_blip_fill(blip_fill)
+        if parsed is not None:
+            return parsed
+
+    pattern = child(parent, "pattFill")
+    if pattern is not None:
+        parsed = parse_pattern_fill(pattern)
+        if parsed is not None:
+            return parsed
+
+    if has_child(parent, "grpFill"):
+        return SourceGroupFill()
+
+    return None
+
+
+def parse_gradient_fill(gradient: Element) -> SourceFill | None:
+    stops: list[SourceGradientStop] = []
+    for stop in children(child(gradient, "gsLst"), "gs"):
+        color = parse_color(stop)
+        if color is None:
+            continue
+        stops.append(SourceGradientStop(position=(num_attr(stop, "pos") or 0) / 100000, color=color))
+    if not stops:
+        return None
+
+    path = child(gradient, "path")
+    if path is not None:
+        # Radial/shape gradient: fillToRect gives the focus rectangle as inset percentages.
+        rect = child(path, "fillToRect")
+        left = num_attr(rect, "l") or 0
+        top = num_attr(rect, "t") or 0
+        right = num_attr(rect, "r") or 0
+        bottom = num_attr(rect, "b") or 0
+        return SourceGradientFill(
+            stops=stops,
+            gradient_type="radial",
+            center_x=(left + (100000 - right)) / 2 / 100000,
+            center_y=(top + (100000 - bottom)) / 2 / 100000,
+        )
+
+    return SourceGradientFill(
+        stops=stops,
+        gradient_type="linear",
+        angle=num_attr(child(gradient, "lin"), "ang") or 0,
+    )
+
+
+def parse_blip_fill(blip_fill: Element) -> SourceFill | None:
+    blip = child(blip_fill, "blip")
+    embed = ns_attr(blip, "embed")
+    if embed is None:
+        return None
+    return SourceImageFill(
+        blip_relationship_id=embed,
+        tile=parse_image_fill_tile(child(blip_fill, "tile")),
+        src_rect=parse_relative_rect(child(blip_fill, "srcRect")),
+        stretch=parse_relative_rect(child(child(blip_fill, "stretch"), "fillRect")),
+    )
+
+
+def parse_image_fill_tile(tile: Element | None) -> SourceImageFillTile | None:
+    if tile is None:
+        return None
+    flip = attr(tile, "flip") or "none"
+    return SourceImageFillTile(
+        tx=num_attr(tile, "tx") or 0,
+        ty=num_attr(tile, "ty") or 0,
+        sx=(num_attr(tile, "sx") or 100000) / 100000,
+        sy=(num_attr(tile, "sy") or 100000) / 100000,
+        flip=flip if flip in ("x", "y", "xy") else "none",  # type: ignore[arg-type]
+        align=parse_rectangle_alignment(attr(tile, "algn"), "tl"),
+    )
+
+
+def parse_relative_rect(rect: Element | None) -> tuple[float, float, float, float] | None:
+    """``a:srcRect`` / ``a:fillRect`` inset percentages -> 0..1 ratios (l, t, r, b)."""
+    if rect is None:
+        return None
+    return (
+        (num_attr(rect, "l") or 0) / 100000,
+        (num_attr(rect, "t") or 0) / 100000,
+        (num_attr(rect, "r") or 0) / 100000,
+        (num_attr(rect, "b") or 0) / 100000,
+    )
+
+
+def parse_rectangle_alignment(value: str | None, fallback: str) -> str:
+    return value if value in RECTANGLE_ALIGNMENTS else fallback
+
+
+def parse_pattern_fill(pattern: Element) -> SourceFill | None:
+    foreground = parse_color(child(pattern, "fgClr"))
+    background = parse_color(child(pattern, "bgClr"))
+    if foreground is None or background is None:
+        return None
+    return SourcePatternFill(
+        preset=attr(pattern, "prst") or "ltDnDiag",
+        foreground_color=foreground,
+        background_color=background,
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Outline
+# --------------------------------------------------------------------------------------
+
+
+def parse_outline(sp_pr: Element | None) -> SourceOutline | None:
+    return parse_line(child(sp_pr, "ln"))
+
+
+def parse_line(ln: Element | None) -> SourceOutline | None:
+    """Read ``a:ln`` / ``a:lnL`` / ``a:lnR`` / ``a:lnT`` / ``a:lnB``."""
+    if ln is None:
+        return None
+
+    dash = attr(child(ln, "prstDash"), "val")
+    cap = attr(ln, "cap")
+    return SourceOutline(
+        width=num_attr(ln, "w"),
+        fill=parse_fill(ln),
+        dash_style=dash if dash in DASH_STYLES else None,  # type: ignore[arg-type]
+        custom_dash=parse_custom_dash(ln),
+        line_cap=LINE_CAP_MAP.get(cap) if cap else None,  # type: ignore[arg-type]
+        line_join=parse_line_join(ln),
+        head_end=parse_arrow_endpoint(child(ln, "headEnd")),
+        tail_end=parse_arrow_endpoint(child(ln, "tailEnd")),
+    )
+
+
+def parse_custom_dash(ln: Element) -> list[float] | None:
+    segments = children(child(ln, "custDash"), "ds")
+    if not segments:
+        return None
+    dashes: list[float] = []
+    for segment in segments:
+        dashes.append((num_attr(segment, "d") or 100000) / 100000)
+        dashes.append((num_attr(segment, "sp") or 100000) / 100000)
+    return dashes
+
+
+def parse_line_join(ln: Element) -> str | None:
+    for name in ("round", "bevel", "miter"):
+        if has_child(ln, name):
+            return name
+    return None
+
+
+def parse_arrow_endpoint(node: Element | None) -> ArrowEndpoint | None:
+    if node is None:
+        return None
+    arrow_type = attr(node, "type")
+    if arrow_type not in ARROW_TYPES:
+        return None
+    width = attr(node, "w") or "med"
+    length = attr(node, "len") or "med"
+    return ArrowEndpoint(
+        type=arrow_type,  # type: ignore[arg-type]
+        width=width if width in ARROW_SIZES else "med",  # type: ignore[arg-type]
+        length=length if length in ARROW_SIZES else "med",  # type: ignore[arg-type]
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Style references (a:style)
+# --------------------------------------------------------------------------------------
+
+
+def parse_style_reference(node: Element | None) -> SourceStyleReference | None:
+    if node is None:
+        return None
+    return SourceStyleReference(idx=int(num_attr(node, "idx") or 0), color=parse_color(node))
+
+
+def parse_shape_style(style: Element | None) -> SourceShapeStyle | None:
+    if style is None:
+        return None
+    parsed = SourceShapeStyle(
+        fill_ref=parse_style_reference(child(style, "fillRef")),
+        line_ref=parse_style_reference(child(style, "lnRef")),
+        effect_ref=parse_style_reference(child(style, "effectRef")),
+        font_ref=parse_style_reference(child(style, "fontRef")),
+    )
+    if parsed.fill_ref or parsed.line_ref or parsed.effect_ref or parsed.font_ref:
+        return parsed
+    return None
+
+
+# --------------------------------------------------------------------------------------
+# Effects
+# --------------------------------------------------------------------------------------
+
+
+def parse_effect_list(effect_list: Element | None) -> SourceEffectList | None:
+    if effect_list is None:
+        return None
+
+    outer = child(effect_list, "outerShdw")
+    inner = child(effect_list, "innerShdw")
+    glow = child(effect_list, "glow")
+    soft = child(effect_list, "softEdge")
+
+    parsed = SourceEffectList(
+        outer_shadow=_parse_outer_shadow(outer),
+        inner_shadow=_parse_inner_shadow(inner),
+        glow=_parse_glow(glow),
+        soft_edge=SourceSoftEdge(radius=num_attr(soft, "rad") or 0) if soft is not None else None,
+    )
+    if parsed.outer_shadow or parsed.inner_shadow or parsed.glow or parsed.soft_edge:
+        return parsed
+    return None
+
+
+def _parse_outer_shadow(node: Element | None) -> SourceOuterShadow | None:
+    if node is None:
+        return None
+    color = parse_color(node)
+    if color is None:
+        return None
+    return SourceOuterShadow(
+        blur_radius=num_attr(node, "blurRad") or 0,
+        distance=num_attr(node, "dist") or 0,
+        direction=num_attr(node, "dir") or 0,
+        color=color,
+        alignment=parse_rectangle_alignment(attr(node, "algn"), "b"),  # type: ignore[arg-type]
+        rotate_with_shape=attr(node, "rotWithShape") != "0",
+    )
+
+
+def _parse_inner_shadow(node: Element | None) -> SourceInnerShadow | None:
+    if node is None:
+        return None
+    color = parse_color(node)
+    if color is None:
+        return None
+    return SourceInnerShadow(
+        blur_radius=num_attr(node, "blurRad") or 0,
+        distance=num_attr(node, "dist") or 0,
+        direction=num_attr(node, "dir") or 0,
+        color=color,
+    )
+
+
+def _parse_glow(node: Element | None) -> SourceGlow | None:
+    if node is None:
+        return None
+    color = parse_color(node)
+    if color is None:
+        return None
+    return SourceGlow(radius=num_attr(node, "rad") or 0, color=color)
+
+
+def parse_blip_effects(blip: Element | None) -> SourceBlipEffects | None:
+    """Read the image adjustment children of ``a:blip`` (grayscale, duotone, ...)."""
+    if blip is None:
+        return None
+
+    bi_level = child(blip, "biLevel")
+    blur = child(blip, "blur")
+    lum = child(blip, "lum")
+    duotone = child(blip, "duotone")
+    clr_change = child(blip, "clrChange")
+
+    duotone_colors = None
+    if duotone is not None:
+        colors = [c for c in (parse_color_node(node) for node in duotone) if c is not None]
+        if len(colors) >= 2:
+            duotone_colors = (colors[0], colors[1])
+
+    change = None
+    if clr_change is not None:
+        source = parse_color(child(clr_change, "clrFrom"))
+        target = parse_color(child(clr_change, "clrTo"))
+        if source is not None and target is not None:
+            change = (source, target)
+
+    parsed = SourceBlipEffects(
+        grayscale=has_child(blip, "grayscl"),
+        bi_level=(num_attr(bi_level, "thresh") or 50000) / 100000 if bi_level is not None else None,
+        blur=(num_attr(blur, "rad") or 0, attr(blur, "grow") != "0") if blur is not None else None,
+        lum=(
+            ((num_attr(lum, "bright") or 0) / 100000, (num_attr(lum, "contrast") or 0) / 100000)
+            if lum is not None
+            else None
+        ),
+        duotone=duotone_colors,
+        clr_change=change,
+    )
+    if (
+        parsed.grayscale
+        or parsed.bi_level is not None
+        or parsed.blur is not None
+        or parsed.lum is not None
+        or parsed.duotone is not None
+        or parsed.clr_change is not None
+    ):
+        return parsed
+    return None
+
+
+# --------------------------------------------------------------------------------------
+# Transform
+# --------------------------------------------------------------------------------------
+
+
+def parse_transform(sp_pr: Element | None) -> SourceTransform | None:
+    """Read ``a:xfrm`` -- offset / extent / rotation / flip."""
+    return _transform_from_xfrm(child(sp_pr, "xfrm"))
+
+
+def parse_group_transforms(
+    grp_sp_pr: Element | None,
+) -> tuple[SourceTransform | None, SourceTransform | None]:
+    """Group ``a:xfrm`` carries both the outer placement and the child coordinate space."""
+    xfrm = child(grp_sp_pr, "xfrm")
+    if xfrm is None:
+        return None, None
+    outer = _transform_from_xfrm(xfrm)
+    child_off = child(xfrm, "chOff")
+    child_ext = child(xfrm, "chExt")
+    if child_off is None or child_ext is None:
+        return outer, None
+    inner = SourceTransform(
+        offset_x=num_attr(child_off, "x") or 0,
+        offset_y=num_attr(child_off, "y") or 0,
+        width=num_attr(child_ext, "cx") or 0,
+        height=num_attr(child_ext, "cy") or 0,
+    )
+    return outer, inner
+
+
+def _transform_from_xfrm(xfrm: Element | None) -> SourceTransform | None:
+    if xfrm is None:
+        return None
+    off = child(xfrm, "off")
+    ext = child(xfrm, "ext")
+    offset_x = num_attr(off, "x")
+    offset_y = num_attr(off, "y")
+    width = num_attr(ext, "cx")
+    height = num_attr(ext, "cy")
+    if offset_x is None or offset_y is None or width is None or height is None:
+        return None
+    return SourceTransform(
+        offset_x=offset_x,
+        offset_y=offset_y,
+        width=width,
+        height=height,
+        rotation=num_attr(xfrm, "rot") or 0,
+        flip_horizontal=is_true(attr(xfrm, "flipH")),
+        flip_vertical=is_true(attr(xfrm, "flipV")),
+    )
+
+
+# --------------------------------------------------------------------------------------
+# Geometry
+# --------------------------------------------------------------------------------------
+
+
+def parse_geometry(sp_pr: Element | None) -> SourceGeometry | None:
+    if sp_pr is None:
+        return None
+
+    preset = child(sp_pr, "prstGeom")
+    if preset is not None:
+        return SourcePresetGeometry(
+            preset=attr(preset, "prst") or "rect",
+            adjust_values={
+                name: value
+                for name, value in (
+                    (attr(gd, "name"), _adjust_value(attr(gd, "fmla")))
+                    for gd in children(child(preset, "avLst"), "gd")
+                )
+                if name is not None and value is not None
+            },
+        )
+
+    custom = child(sp_pr, "custGeom")
+    if custom is not None:
+        paths = parse_custom_geometry(custom)
+        if paths:
+            return SourceCustomGeometry(paths=paths)
+
+    return None
+
+
+def _adjust_value(formula: str | None) -> float | None:
+    """``avLst`` guides are always ``val N`` for preset adjustments."""
+    if formula is None:
+        return None
+    tokens = formula.split()
+    if len(tokens) == 2 and tokens[0] == "val":
+        try:
+            return float(tokens[1])
+        except ValueError:
+            return None
+    return None
+
+
+def parse_custom_geometry(cust_geom: Element | None) -> list[CustomGeometryPath]:
+    """Convert ``a:custGeom`` into SVG path data, evaluating the guide formulas."""
+    path_list = child(cust_geom, "pathLst")
+    paths = children(path_list, "path")
+    if not paths:
+        return []
+
+    av_guides = _parse_guide_list(child(cust_geom, "avLst"))
+    gd_guides = _parse_guide_list(child(cust_geom, "gdLst"))
+
+    result: list[CustomGeometryPath] = []
+    for path in paths:
+        width = num_attr(path, "w") or 0
+        height = num_attr(path, "h") or 0
+        if width == 0 and height == 0:
+            continue
+        variables = _evaluate_guides(av_guides, gd_guides, width, height)
+        commands = _build_path_commands(path, variables)
+        if commands:
+            result.append(CustomGeometryPath(width=width, height=height, commands=commands))
+    return result
+
+
+def _parse_guide_list(parent: Element | None) -> list[tuple[str, str]]:
+    guides: list[tuple[str, str]] = []
+    for guide in children(parent, "gd"):
+        name = attr(guide, "name")
+        formula = attr(guide, "fmla")
+        if name and formula:
+            guides.append((name, formula))
+    return guides
+
+
+def _build_path_commands(path: Element, variables: dict[str, float]) -> str:
+    parts: list[str] = []
+    current_x = current_y = start_x = start_y = 0.0
+
+    for node in path:
+        command = local_name(node.tag)
+        if command == "moveTo":
+            point = _first_point(node, variables)
+            if point is not None:
+                parts.append(f"M {_fmt(point[0])} {_fmt(point[1])}")
+                current_x, current_y = point
+                start_x, start_y = point
+        elif command == "lnTo":
+            point = _first_point(node, variables)
+            if point is not None:
+                parts.append(f"L {_fmt(point[0])} {_fmt(point[1])}")
+                current_x, current_y = point
+        elif command == "cubicBezTo":
+            points = _all_points(node, variables)
+            if len(points) >= 3:
+                parts.append("C " + ", ".join(f"{_fmt(x)} {_fmt(y)}" for x, y in points))
+                current_x, current_y = points[-1]
+        elif command == "quadBezTo":
+            points = _all_points(node, variables)
+            if len(points) >= 2:
+                parts.append("Q " + ", ".join(f"{_fmt(x)} {_fmt(y)}" for x, y in points))
+                current_x, current_y = points[-1]
+        elif command == "arcTo":
+            arc = _convert_arc_to(node, current_x, current_y, variables)
+            if arc is not None:
+                parts.append(arc[0])
+                current_x, current_y = arc[1], arc[2]
+        elif command == "close":
+            parts.append("Z")
+            current_x, current_y = start_x, start_y
+
+    return " ".join(parts)
+
+
+def _first_point(node: Element, variables: dict[str, float]) -> tuple[float, float] | None:
+    points = _all_points(node, variables)
+    return points[0] if points else None
+
+
+def _all_points(node: Element, variables: dict[str, float]) -> list[tuple[float, float]]:
+    return [
+        (
+            _resolve_value(attr(point, "x") or "0", variables),
+            _resolve_value(attr(point, "y") or "0", variables),
+        )
+        for point in children(node, "pt")
+    ]
+
+
+def _convert_arc_to(
+    arc: Element, current_x: float, current_y: float, variables: dict[str, float]
+) -> tuple[str, float, float] | None:
+    width_radius = _resolve_value(attr(arc, "wR") or "0", variables)
+    height_radius = _resolve_value(attr(arc, "hR") or "0", variables)
+    start_angle = _resolve_value(attr(arc, "stAng") or "0", variables)
+    sweep_angle = _resolve_value(attr(arc, "swAng") or "0", variables)
+    if (width_radius == 0 and height_radius == 0) or sweep_angle == 0:
+        return None
+
+    start_radians = math.radians(start_angle / 60000)
+    end_radians = math.radians((start_angle + sweep_angle) / 60000)
+    center_x = current_x - width_radius * math.cos(start_radians)
+    center_y = current_y - height_radius * math.sin(start_radians)
+    end_x = center_x + width_radius * math.cos(end_radians)
+    end_y = center_y + height_radius * math.sin(end_radians)
+    large_arc = 1 if abs(sweep_angle / 60000) > 180 else 0
+    sweep_flag = 1 if sweep_angle > 0 else 0
+
+    command = (
+        f"A {_round(width_radius)} {_round(height_radius)} 0 "
+        f"{large_arc} {sweep_flag} {_round(end_x)} {_round(end_y)}"
+    )
+    return command, end_x, end_y
+
+
+def _evaluate_guides(
+    av_guides: list[tuple[str, str]],
+    gd_guides: list[tuple[str, str]],
+    width: float,
+    height: float,
+) -> dict[str, float]:
+    variables = _builtin_variables(width, height)
+    for name, formula in av_guides:
+        variables[name] = _evaluate_formula(formula, variables)
+    for name, formula in gd_guides:
+        variables[name] = _evaluate_formula(formula, variables)
+    return variables
+
+
+def _builtin_variables(width: float, height: float) -> dict[str, float]:
+    return {
+        "w": width,
+        "h": height,
+        "l": 0.0,
+        "t": 0.0,
+        "r": width,
+        "b": height,
+        "wd2": width / 2,
+        "hd2": height / 2,
+        "wd4": width / 4,
+        "hd4": height / 4,
+        "ss": min(width, height),
+        "ls": max(width, height),
+        # Angle constants in 1/60000 degrees: cd2 == 180deg, cd4 == 90deg ...
+        "cd2": 10800000.0,
+        "cd4": 5400000.0,
+        "cd8": 2700000.0,
+        "3cd4": 16200000.0,
+    }
+
+
+def _evaluate_formula(formula: str, variables: dict[str, float]) -> float:
+    """Evaluate one ``a:gd`` formula (ECMA-376 §20.1.9.11 guide formula grammar)."""
+    tokens = formula.strip().split()
+    if not tokens:
+        return 0.0
+    op = tokens[0]
+
+    def value(index: int) -> float:
+        return _resolve_value(tokens[index], variables) if index < len(tokens) else 0.0
+
+    if op == "val":
+        return value(1)
+    if op == "+-":
+        return value(1) + value(2) - value(3)
+    if op == "*/":
+        return round((value(1) * value(2)) / (value(3) or 1))
+    if op == "+/":
+        return round((value(1) + value(2)) / (value(3) or 1))
+    if op == "pin":
+        return max(value(1), min(value(2), value(3)))
+    if op == "min":
+        return min(value(1), value(2))
+    if op == "max":
+        return max(value(1), value(2))
+    if op == "abs":
+        return abs(value(1))
+    if op == "sqrt":
+        return round(math.sqrt(max(0.0, value(1))))
+    if op == "sin":
+        return round(value(1) * math.sin(math.radians(value(2) / 60000)))
+    if op == "cos":
+        return round(value(1) * math.cos(math.radians(value(2) / 60000)))
+    if op == "tan":
+        return round(value(1) * math.tan(math.radians(value(2) / 60000)))
+    if op == "at2":
+        return round(math.degrees(math.atan2(value(2), value(1))) * 60000)
+    if op == "mod":
+        return round(math.sqrt(value(1) ** 2 + value(2) ** 2 + value(3) ** 2))
+    if op == "cat2":
+        return round(value(1) * math.cos(math.atan2(value(3), value(2))))
+    if op == "sat2":
+        return round(value(1) * math.sin(math.atan2(value(3), value(2))))
+    if op == "?:":
+        return value(2) if value(1) > 0 else value(3)
+    return 0.0
+
+
+def _resolve_value(token: str, variables: dict[str, float]) -> float:
+    try:
+        return float(token)
+    except ValueError:
+        return variables.get(token, 0.0)
+
+
+def _round(value: float) -> str:
+    return _fmt(value)
+
+
+def _fmt(value: float) -> str:
+    """Compact coordinate formatting: 0.0 -> "0", 12.3456 -> "12.346"."""
+    rounded = round(value, 3)
+    if rounded == int(rounded):
+        return str(int(rounded))
+    return f"{rounded:g}"

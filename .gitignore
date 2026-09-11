@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Ground-truth exports and VRT diffs (see ROADMAP.md Phase 0)
+/oracle-runtime/
+/tests/vrt/diffs/

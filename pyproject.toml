@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pptx2svg"
+version = "0.1.0"
+description = "Render PowerPoint (.pptx) slides to SVG (and PNG) in pure Python"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Evert Koks" }]
+keywords = ["pptx", "powerpoint", "svg", "png", "ooxml", "render"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+  "Topic :: Office/Business :: Office Suites",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler
+# and no system libraries; it is the same renderer pptx-glimpse rasterises with.
+png = ["resvg-py>=0.5"]
+# Alternative backend for environments that already have Cairo. Its SVG filter support
+# is weaker, so shadows and glows differ from resvg.
+cairo = ["cairosvg>=2.7"]
+# Measure with real installed fonts instead of the bundled metric tables.
+fonts = ["fonttools>=4.40"]
+dev = ["pytest>=7", "resvg-py>=0.5", "fonttools>=4.40"]
+
+[project.urls]
+Homepage = "https://github.com/uvrt/pptx2svg"
+Repository = "https://github.com/uvrt/pptx2svg"
+Issues = "https://github.com/uvrt/pptx2svg/issues"
+Changelog = "https://github.com/uvrt/pptx2svg/blob/main/ROADMAP.md"
+
+[project.scripts]
+pptx2svg = "pptx2svg.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
