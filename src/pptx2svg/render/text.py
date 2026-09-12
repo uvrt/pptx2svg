@@ -34,6 +34,25 @@ DEFAULT_FONT_SIZE_PT = 18.0
 
 _VERTICAL_TYPES = frozenset({"vert", "eaVert", "wordArtVert", "mongolianVert"})
 
+#: ``a:rPr@u`` -> the nearest ``text-decoration-style``.  OOXML distinguishes weights
+#: that CSS does not ("heavy", "dashLongHeavy"), so those collapse onto the plain form.
+UNDERLINE_STYLES = {
+    "dbl": "double",
+    "wavyDbl": "double",
+    "wavy": "wavy",
+    "wavyHeavy": "wavy",
+    "dotted": "dotted",
+    "dottedHeavy": "dotted",
+    "dotDash": "dotted",
+    "dotDashHeavy": "dotted",
+    "dotDotDash": "dotted",
+    "dotDotDashHeavy": "dotted",
+    "dash": "dashed",
+    "dashHeavy": "dashed",
+    "dashLong": "dashed",
+    "dashLongHeavy": "dashed",
+}
+
 
 @dataclass
 class _Dimensions:
@@ -123,6 +142,11 @@ def render_text_body(
     is_first_line = True
     auto_num_counters: dict[str, int] = {}
     previous_space_after = 0.0
+    # SVG has no text background, so `a:highlight` is drawn as rectangles behind the
+    # <text> element.  Their vertical position is the running sum of the `dy` advances,
+    # which is why it is accumulated here rather than recovered afterwards.
+    baseline = 0.0
+    highlights: list[_Highlight] = []
 
     for paragraph in paragraphs:
         properties = paragraph.properties
@@ -150,6 +174,7 @@ def render_text_body(
                 is_first_line, _line_height_px(paragraph, empty_height, ln_spc_reduction), paragraph_gap
             )
             tspans.append(f'<tspan x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}"> </tspan>')
+            baseline += float(dy)
             is_first_line = False
             previous_space_after = _spacing_px(properties.space_after, para_font_size)
             continue
@@ -174,6 +199,7 @@ def render_text_body(
                     tspans.append(
                         f'<tspan x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}"> </tspan>'
                     )
+                    baseline += float(dy)
                     is_first_line = False
                     continue
 
@@ -197,17 +223,23 @@ def render_text_body(
                         f"{escape_xml_text(bullet_text)}</tspan>"
                     )
                     # The bullet already advanced the line, so the text only sets x.
-                    for index, segment in enumerate(line.segments):
-                        prefix = f'x="{num(x_pos)}" text-anchor="{anchor}" ' if index == 0 else ""
-                        tspans.append(_render_segment(segment, font_scale, prefix, context))
+                    leading = f'x="{num(x_pos)}" text-anchor="{anchor}" '
                 else:
-                    for index, segment in enumerate(line.segments):
-                        prefix = (
-                            f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
-                            if index == 0
-                            else ""
-                        )
-                        tspans.append(_render_segment(segment, font_scale, prefix, context))
+                    leading = f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
+                tspans.extend(
+                    _render_line(
+                        line.segments, x_pos, anchor, leading, dims.margin_left,
+                        properties, body.default_tab_size, default_font_size,
+                        font_scale, context,
+                    )
+                )
+                baseline += float(dy)
+                highlights.extend(
+                    _line_highlights(
+                        line.segments, x_pos, anchor, baseline,
+                        default_font_size, font_scale, context,
+                    )
+                )
                 is_first_line = False
         else:
             natural_height = _line_natural_height(
@@ -238,20 +270,24 @@ def render_text_body(
                     f"{escape_xml_text(bullet_text)}</tspan>"
                 )
 
-            first_rendered = False
-            for run in paragraph.runs:
-                if not run.text:
-                    continue
-                segment = LineSegment(text=run.text, properties=run.properties)
-                if not first_rendered:
-                    if bullet_text:
-                        prefix = f'x="{num(x_pos)}" text-anchor="{anchor}" '
-                    else:
-                        prefix = f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
-                    tspans.append(_render_segment(segment, font_scale, prefix, context))
-                    first_rendered = True
-                else:
-                    tspans.append(_render_segment(segment, font_scale, "", context))
+            if bullet_text:
+                leading = f'x="{num(x_pos)}" text-anchor="{anchor}" '
+            else:
+                leading = f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
+            tspans.extend(
+                _render_line(
+                    [LineSegment(run.text, run.properties) for run in paragraph.runs if run.text],
+                    x_pos, anchor, leading, dims.margin_left, properties,
+                    body.default_tab_size, default_font_size, font_scale, context,
+                )
+            )
+            baseline += float(dy)
+            highlights.extend(
+                _line_highlights(
+                    [LineSegment(run.text, run.properties) for run in paragraph.runs if run.text],
+                    x_pos, anchor, baseline, default_font_size, font_scale, context,
+                )
+            )
             is_first_line = False
 
         previous_space_after = _spacing_px(properties.space_after, para_font_size)
@@ -280,12 +316,230 @@ def render_text_body(
     y_start += first_font_size * default_ascender_ratio * PX_PER_PT
 
     element = f'<text x="0" y="{num(y_start)}" xml:space="preserve">{"".join(tspans)}</text>'
+    if highlights:
+        # Behind the text, and in one go: a highlight run is a background, so it must not
+        # paint over a neighbouring run's glyphs.
+        element = "".join(rect.svg(y_start) for rect in highlights) + element
 
     if body.vert in _VERTICAL_TYPES:
-        return f'<g transform="translate({num(original_width)}, 0) rotate(90)">{element}</g>'
-    if body.vert == "vert270":
-        return f'<g transform="translate(0, {num(original_height)}) rotate(-90)">{element}</g>'
+        element = (
+            f'<g transform="translate({num(original_width)}, 0) rotate(90)">{element}</g>'
+        )
+    elif body.vert == "vert270":
+        element = (
+            f'<g transform="translate(0, {num(original_height)}) rotate(-90)">{element}</g>'
+        )
+
+    if body.rotation:
+        # `a:bodyPr@rot` turns the text within the shape without turning the shape, so
+        # the pivot is the text box's centre and the rotation composes on top of any
+        # vertical-text transform rather than replacing it.
+        element = (
+            f'<g transform="rotate({num(body.rotation)}, '
+            f'{num(original_width / 2)}, {num(original_height / 2)})">{element}</g>'
+        )
     return element
+
+
+# --------------------------------------------------------------------------------------
+# Tab stops
+# --------------------------------------------------------------------------------------
+
+#: ``a:tab@algn`` -> the SVG ``text-anchor`` that puts the text on the right side of the
+#: stop.  A decimal tab lines the decimal point up with the stop; with no way to find
+#: that point in SVG, right-aligning is much closer than left-aligning for the numbers
+#: decimal tabs are used on.
+TAB_ANCHORS = {"l": "start", "ctr": "middle", "r": "end", "dec": "end"}
+
+
+def _next_tab_stop(
+    x: float, origin: float, stops: list[m.TabStop], default_size: float
+) -> tuple[float, str]:
+    """Where a tab at ``x`` lands, and how the text after it is anchored.
+
+    Explicit ``a:tabLst`` stops come first; past the last of them PowerPoint falls back
+    to the implicit grid of ``a:bodyPr@defTabSz``.  Both are measured from the text
+    body's left inset, not from the paragraph indent.
+    """
+    for stop in stops:
+        position = origin + emu_to_px(stop.position)
+        if position > x + 0.01:
+            return position, TAB_ANCHORS.get(stop.alignment, "start")
+    step = emu_to_px(default_size) or 1.0
+    steps = int((x - origin) / step) + 1
+    return origin + steps * step, "start"
+
+
+def _split_on_tabs(segments: list[LineSegment]) -> list[LineSegment | None]:
+    """Flatten a line into pieces, with ``None`` standing in for each tab character."""
+    pieces: list[LineSegment | None] = []
+    for segment in segments:
+        if "\t" not in segment.text:
+            pieces.append(segment)
+            continue
+        parts = segment.text.split("\t")
+        for index, part in enumerate(parts):
+            if index:
+                pieces.append(None)
+            if part:
+                pieces.append(LineSegment(part, segment.properties))
+    return pieces
+
+
+def _render_line(
+    segments: list[LineSegment],
+    x_pos: float,
+    anchor: str,
+    leading: str,
+    origin: float,
+    properties: m.ParagraphProperties,
+    default_tab_size: float,
+    default_font_size: float,
+    font_scale: float,
+    context: RenderContext,
+) -> list[str]:
+    """Emit one line's tspans, starting a new chunk at every tab stop.
+
+    A tab is not a character with a width -- it is a jump to the next stop -- so each
+    piece after one gets its own absolute ``x``, which in SVG starts a fresh text chunk
+    and lets a centre or right stop be expressed as that chunk's ``text-anchor``.
+
+    Tabs are only honoured in left-aligned paragraphs.  In a centred or right-aligned
+    one the line's own anchor already decides where the text sits, and a stop measured
+    from the left inset would fight with it; PowerPoint effectively ignores them there
+    too.
+    """
+    pieces = _split_on_tabs(segments)
+    if anchor != "start" or not any(piece is None for piece in pieces):
+        out = []
+        first = True
+        for piece in pieces:
+            if piece is None:
+                continue
+            out.append(_render_segment(piece, font_scale, leading if first else "", context))
+            first = False
+        return out
+
+    stops = properties.tab_stops
+    out: list[str] = []
+    # `x` tracks where the next glyph would land; `chunk_*` remember where the current
+    # chunk began and how wide it has grown, because a right- or centre-anchored chunk
+    # does not end where it started plus its width.
+    x = chunk_start = x_pos
+    chunk_width = 0.0
+    chunk_anchor = "start"
+    pending = leading
+    for piece in pieces:
+        if piece is None:
+            x = _chunk_end(chunk_start, chunk_width, chunk_anchor)
+            stop, chunk_anchor = _next_tab_stop(x, origin, stops, default_tab_size)
+            pending = f'x="{num(stop)}" text-anchor="{chunk_anchor}" '
+            chunk_start, chunk_width = stop, 0.0
+            continue
+        out.append(_render_segment(piece, font_scale, pending, context))
+        pending = ""
+        chunk_width += _segment_width(piece, default_font_size, font_scale, context)
+    return out
+
+
+def _chunk_end(start: float, width: float, anchor: str) -> float:
+    if anchor == "end":
+        return start
+    if anchor == "middle":
+        return start + width / 2
+    return start + width
+
+
+# --------------------------------------------------------------------------------------
+# Highlight
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class _Highlight:
+    """One run's highlight, positioned relative to the ``<text>`` element's own ``y``."""
+
+    x: float
+    #: distance from the <text> element's y down to this line's baseline
+    baseline: float
+    width: float
+    ascent: float
+    descent: float
+    color: m.ResolvedColor
+
+    def svg(self, y_start: float) -> str:
+        y = y_start + self.baseline - self.ascent
+        attrs = f'fill="{self.color.hex}"'
+        if self.color.alpha < 1:
+            attrs += f' fill-opacity="{num(self.color.alpha)}"'
+        return (
+            f'<rect x="{num(self.x)}" y="{num(y)}" width="{num(self.width)}" '
+            f'height="{num(self.ascent + self.descent)}" {attrs}/>'
+        )
+
+
+def _line_highlights(
+    segments: list[LineSegment],
+    x_pos: float,
+    anchor: str,
+    baseline: float,
+    default_font_size: float,
+    font_scale: float,
+    context: RenderContext,
+) -> list[_Highlight]:
+    """Rectangles for whichever runs on this line are highlighted.
+
+    ``x_pos`` is the anchor point rather than the left edge, so a centred or
+    right-aligned line has to be measured in full before any run's position is known.
+    """
+    if not any(segment.properties.highlight for segment in segments):
+        return []
+
+    widths = [_segment_width(segment, default_font_size, font_scale, context) for segment in segments]
+    total = sum(widths)
+    if anchor == "middle":
+        left = x_pos - total / 2
+    elif anchor == "end":
+        left = x_pos - total
+    else:
+        left = x_pos
+
+    rectangles: list[_Highlight] = []
+    for segment, width in zip(segments, widths):
+        highlight = segment.properties.highlight
+        if highlight is not None and width > 0:
+            size = (segment.properties.font_size or default_font_size) * font_scale * PX_PER_PT
+            ascent = context.measurer.ascender_ratio(
+                segment.properties.font_family, segment.properties.font_family_ea
+            )
+            line = context.measurer.line_height_ratio(
+                segment.properties.font_family, segment.properties.font_family_ea
+            )
+            rectangles.append(
+                _Highlight(
+                    x=left,
+                    baseline=baseline,
+                    width=width,
+                    ascent=size * ascent,
+                    descent=size * max(0.0, line - ascent),
+                    color=highlight,
+                )
+            )
+        left += width
+    return rectangles
+
+
+def _segment_width(
+    segment: LineSegment, default_font_size: float, font_scale: float, context: RenderContext
+) -> float:
+    properties = segment.properties
+    return context.measurer.measure_text_width(
+        segment.text,
+        (properties.font_size or default_font_size) * font_scale,
+        properties.bold,
+        properties.font_family,
+        properties.font_family_ea,
+    )
 
 
 # --------------------------------------------------------------------------------------
@@ -439,7 +693,7 @@ def _render_segment(
                 [properties.font_family_ea, context.jpan_fallback_font, properties.font_family]
                 if east_asian
                 else [properties.font_family, properties.font_family_ea]
-            )
+            ) + [properties.font_family_cs]
             styles = _style_attrs(properties, font_scale, fonts, context)
             open_prefix = prefix if index == 0 else ""
             pieces.append(
@@ -465,7 +719,14 @@ def _style_attrs(
         # rejects unit suffixes on font-size, and px is understood by every backend.
         styles.append(f'font-size="{num(properties.font_size * font_scale * PX_PER_PT)}"')
 
-    chain = fonts if fonts is not None else [properties.font_family, properties.font_family_ea]
+    # `a:cs` names the typeface for complex scripts -- Arabic, Hebrew, Thai, Devanagari.
+    # There is no per-script selection to make here the way `_split_by_script` makes one
+    # for East Asian text, because the run is not split on script ranges; putting it last
+    # in the stack lets the renderer fall through to it for glyphs the Latin face lacks,
+    # which is what a `font-family` list is for.
+    chain = fonts if fonts is not None else [
+        properties.font_family, properties.font_family_ea, properties.font_family_cs
+    ]
     family = font_family_value(chain, context.font_mapping)
     if family:
         styles.append(f'font-family="{escape_xml_attr(family)}"')
@@ -487,6 +748,12 @@ def _style_attrs(
         decorations.append("line-through")
     if decorations:
         styles.append(f'text-decoration="{" ".join(decorations)}"')
+    line_style = UNDERLINE_STYLES.get(properties.underline_style or "")
+    if properties.underline and line_style:
+        # `text-decoration-style` is a presentation attribute, not a CSS rule, so this
+        # stays within the inline-attributes-only constraint.  Renderers that do not
+        # implement it ignore it and draw the plain rule, which is the right fallback.
+        styles.append(f'text-decoration-style="{line_style}"')
 
     if properties.baseline > 0:
         styles.append('baseline-shift="super"')

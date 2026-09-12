@@ -270,6 +270,9 @@ class SourceRunProperties:
     bold: bool | None = None
     italic: bool | None = None
     underline: bool | None = None
+    #: ``a:rPr@u`` verbatim (``"dbl"``, ``"wavy"``, ``"dotDash"``...) when it is not
+    #: ``"sng"``; the bool above only says *whether* the run is underlined.
+    underline_style: str | None = None
     strikethrough: bool | None = None
     baseline: float | None = None
     #: points
@@ -340,6 +343,8 @@ class SourceTextBodyProperties:
     num_col: int | None = None
     vert: TextVerticalType | None = None
     rotation: float | None = None
+    #: ``a:bodyPr@defTabSz`` -- the interval of the implicit tab stops, in EMU.
+    default_tab_size: float | None = None
 
 
 @dataclass
@@ -373,6 +378,8 @@ class SourceShape:
     effects: SourceEffectList | None = None
     style: SourceShapeStyle | None = None
     text_body: SourceTextBody | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     hyperlink_rel_id: str | None = None
     kind: Literal["shape"] = "shape"
 
@@ -386,6 +393,8 @@ class SourceConnector:
     geometry: SourceGeometry | None = None
     outline: SourceOutline | None = None
     effects: SourceEffectList | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     style: SourceShapeStyle | None = None
     kind: Literal["connector"] = "connector"
 
@@ -405,6 +414,8 @@ class SourceImage:
     src_rect: tuple[float, float, float, float] | None = None
     stretch: tuple[float, float, float, float] | None = None
     tile: SourceImageFillTile | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     hyperlink_rel_id: str | None = None
     kind: Literal["image"] = "image"
 
@@ -451,6 +462,8 @@ class SourceTable:
     band_col: bool = False
     #: ``a:tableStyleId`` -- a GUID, resolved against ``tableStyles.xml`` or the built-in
     #: catalogue.  ``None`` means "use the presentation's default table style".
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     style_id: str | None = None
     kind: Literal["table"] = "table"
 
@@ -535,6 +548,8 @@ class SourceGroup:
     child_transform: SourceTransform | None = None
     fill: SourceFill | None = None
     effects: SourceEffectList | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     children: list["SourceShapeNode"] = field(default_factory=list)
     kind: Literal["group"] = "group"
 
@@ -549,6 +564,8 @@ class SourceUnsupported:
     transform: SourceTransform | None = None
     #: Relationship id of a rendered fallback, when the frame ships one.
     fallback_rel_id: str | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     fallback_part: str | None = None
     kind: Literal["unsupported"] = "unsupported"
 

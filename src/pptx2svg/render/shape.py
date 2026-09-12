@@ -153,9 +153,43 @@ def render_image(image: m.ImageElement, context: RenderContext) -> str:
             + (f" {blip_attr}" if blip_attr else "")
             + "/></g>"
         )
-    else:
+    elif image.tile is not None:
+        # `a:tile` repeats the bitmap instead of stretching it.  The tile is sized as a
+        # fraction of the frame, matching how `render/fill.py` handles a tiled shape
+        # fill -- `sx`/`sy` are really percentages of the bitmap's own pixel size, which
+        # would mean decoding the image to find out, and the two paths agreeing with
+        # each other matters more than either being exact.
+        tile = image.tile
+        tile_width = max(1e-6, width * tile.sx)
+        tile_height = max(1e-6, height * tile.sy)
+        pattern_id = context.new_id("imgtile")
+        context.add_def(
+            f'<pattern id="{pattern_id}" patternUnits="userSpaceOnUse" '
+            f'x="{num(emu_to_px(tile.tx))}" y="{num(emu_to_px(tile.ty))}" '
+            f'width="{num(tile_width)}" height="{num(tile_height)}">'
+            f'<image href="{href}" width="{num(tile_width)}" height="{num(tile_height)}" '
+            'preserveAspectRatio="none"'
+            + (f" {blip_attr}" if blip_attr else "")
+            + "/></pattern>"
+        )
         inner.append(
-            f'<image href="{href}" width="{num(width)}" height="{num(height)}" '
+            f'<rect width="{num(width)}" height="{num(height)}" fill="url(#{pattern_id})"/>'
+        )
+    else:
+        # `a:stretch/a:fillRect` insets the bitmap from the frame's edges as a fraction
+        # of the frame; the usual all-zero rect means "fill it", and a negative inset
+        # pushes the bitmap outside, which the frame's clip then trims.
+        left = top = 0.0
+        draw_width, draw_height = width, height
+        stretch = image.stretch
+        if stretch is not None and _has_crop(stretch):
+            left = stretch.left * width
+            top = stretch.top * height
+            draw_width = max(1e-6, width * (1 - stretch.left - stretch.right))
+            draw_height = max(1e-6, height * (1 - stretch.top - stretch.bottom))
+        inner.append(
+            f'<image href="{href}" x="{num(left)}" y="{num(top)}" '
+            f'width="{num(draw_width)}" height="{num(draw_height)}" '
             'preserveAspectRatio="none"'
             + (f" {blip_attr}" if blip_attr else "")
             + "/>"
@@ -181,7 +215,8 @@ def _is_plain_rect(geometry: m.Geometry) -> bool:
     return isinstance(geometry, m.PresetGeometry) and geometry.preset in ("rect", "flowChartProcess")
 
 
-def _has_crop(rect: m.SrcRect) -> bool:
+def _has_crop(rect: m.SrcRect | m.StretchFillRect) -> bool:
+    """Does this relative rect actually inset anything?"""
     return any(value for value in (rect.left, rect.top, rect.right, rect.bottom))
 
 

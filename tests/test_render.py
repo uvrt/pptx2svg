@@ -214,3 +214,129 @@ def test_slide_text_reaches_the_svg(product_page):
 
 def test_rendering_is_reproducible(product_page):
     assert convert_pptx_to_svg(product_page) == convert_pptx_to_svg(product_page)
+
+
+# -- Run and body properties the renderer used to drop -----------------------------------
+
+
+def text_svg(body: m.TextBody, width: float = 6000000, height: float = 800000) -> str:
+    from pptx2svg.render.text import render_text_body
+
+    context = RenderContext(
+        measurer=DefaultTextMeasurer(), font_mapping={}, jpan_fallback_font=None
+    )
+    return render_text_body(
+        body, m.Transform(extent_width=width, extent_height=height), context
+    )
+
+
+def one_run(text: str, **properties) -> m.TextBody:
+    return m.TextBody(
+        paragraphs=[m.Paragraph(runs=[m.TextRun(text, m.RunProperties(**properties))])]
+    )
+
+
+def test_highlight_paints_a_rectangle_behind_the_run():
+    body = m.TextBody(paragraphs=[m.Paragraph(runs=[
+        m.TextRun("plain ", m.RunProperties(font_size=18)),
+        m.TextRun("lit", m.RunProperties(font_size=18, highlight=m.ResolvedColor(hex="#ffff00"))),
+    ])])
+    svg = text_svg(body)
+    # SVG has no text background, so the highlight is a rect -- and it has to come first
+    # so it cannot paint over the glyphs.
+    assert svg.index("<rect") < svg.index("<text")
+    rect = re.search(r"<rect [^>]*/>", svg).group()
+    assert 'fill="#ffff00"' in rect
+    # It starts where the unhighlighted run ends, not at the left inset.
+    assert float(re.search(r'x="([\d.]+)"', rect).group(1)) > 60
+
+
+def test_text_without_a_highlight_emits_no_rectangle():
+    assert "<rect" not in text_svg(one_run("plain", font_size=18))
+
+
+def test_underline_style_is_carried_through_to_the_attribute():
+    svg = text_svg(one_run("x", font_size=18, underline=True, underline_style="dbl"))
+    assert 'text-decoration="underline"' in svg
+    assert 'text-decoration-style="double"' in svg
+    # A plain single underline stays plain: no redundant attribute.
+    plain = text_svg(one_run("x", font_size=18, underline=True))
+    assert "text-decoration-style" not in plain
+
+
+def test_complex_script_font_joins_the_family_stack():
+    svg = text_svg(one_run("x", font_size=18, font_family="Calibri", font_family_cs="Arial"))
+    family = re.search(r'font-family="([^"]+)"', svg).group(1)
+    assert "Calibri" in family and "Arial" in family
+    assert family.index("Calibri") < family.index("Arial")
+
+
+def test_body_rotation_turns_the_text_about_the_box_centre():
+    body = one_run("x", font_size=18)
+    body.body_properties.rotation = 45
+    svg = text_svg(body, width=2000000, height=1000000)
+    assert svg.startswith('<g transform="rotate(45, 104.987, 52.493)">')
+
+
+def test_tabs_jump_to_the_default_one_inch_grid():
+    svg = text_svg(one_run("a\tb\tc", font_size=18))
+    # 1 inch is 96 px, measured from the 0.1 inch left inset.
+    assert 'x="105.6"' in svg and 'x="201.6"' in svg
+
+
+def test_an_explicit_tab_stop_wins_and_carries_its_alignment():
+    paragraph = m.Paragraph(
+        runs=[m.TextRun("name\tvalue", m.RunProperties(font_size=18))],
+        properties=m.ParagraphProperties(
+            tab_stops=[m.TabStop(position=2743200, alignment="r")]
+        ),
+    )
+    svg = text_svg(m.TextBody(paragraphs=[paragraph]))
+    assert 'x="297.6" text-anchor="end"' in svg
+
+
+def test_tabs_are_left_alone_in_a_centred_paragraph():
+    paragraph = m.Paragraph(
+        runs=[m.TextRun("a\tb", m.RunProperties(font_size=18))],
+        properties=m.ParagraphProperties(alignment="ctr"),
+    )
+    svg = text_svg(m.TextBody(paragraphs=[paragraph]))
+    # One chunk, anchored once: the paragraph's own alignment decides the position.
+    assert svg.count("text-anchor=") == 1
+
+
+# -- Images ------------------------------------------------------------------------------
+
+
+def image_svg(**kwargs) -> str:
+    from pptx2svg.render.shape import render_image
+
+    context = RenderContext(
+        measurer=DefaultTextMeasurer(), font_mapping={}, jpan_fallback_font=None
+    )
+    element = m.ImageElement(
+        transform=m.Transform(extent_width=1000000, extent_height=500000),
+        image_data="AAAA",
+        mime_type="image/png",
+        **kwargs,
+    )
+    svg = render_image(element, context)
+    return "".join(context.defs) + svg if hasattr(context, "defs") else svg
+
+
+def test_stretch_fill_rect_insets_the_bitmap():
+    svg = image_svg(stretch=m.StretchFillRect(left=0.1, top=0.2, right=0.1, bottom=0.0))
+    image = re.search(r"<image [^>]*/>", svg).group()
+    assert 'x="10.499"' in image and 'y="10.499"' in image
+    assert 'width="83.99"' in image and 'height="41.995"' in image
+
+
+def test_an_all_zero_stretch_rect_still_fills_the_frame():
+    svg = image_svg(stretch=m.StretchFillRect())
+    image = re.search(r"<image [^>]*/>", svg).group()
+    assert 'x="0"' in image and 'width="104.987"' in image
+
+
+def test_tile_repeats_the_bitmap_through_a_pattern():
+    svg = image_svg(tile=m.TileInfo(sx=0.5, sy=0.25, tx=91440, ty=0))
+    assert "<rect" in svg and 'fill="url(#' in svg

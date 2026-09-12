@@ -268,6 +268,10 @@ def _resolve_background(context: ResolveContext) -> m.Background | None:
 
 
 def resolve_element(context: ResolveContext, node: s.SourceShapeNode) -> m.SlideElement | None:
+    # `p:cNvPr@hidden` is PowerPoint's "hide" in the selection pane: the shape is still
+    # in the file, with all its formatting, and simply is not drawn.
+    if getattr(node, "hidden", False):
+        return None
     if isinstance(node, s.SourceShape):
         return _resolve_shape(context, node)
     if isinstance(node, s.SourceConnector):

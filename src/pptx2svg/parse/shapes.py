@@ -126,6 +126,7 @@ def parse_shape(sp: Element) -> SourceShape:
         style=parse_shape_style(child(sp, "style")),
         text_body=parse_text_body(child(sp, "txBody")),
         hyperlink_rel_id=_hyperlink_rel_id(c_nv_pr),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -143,6 +144,7 @@ def parse_connector(cxn_sp: Element) -> SourceConnector:
         outline=parse_outline(sp_pr),
         effects=parse_effect_list(child(sp_pr, "effectLst")),
         style=parse_shape_style(child(cxn_sp, "style")),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -168,6 +170,7 @@ def parse_picture(pic: Element) -> SourceImage:
         stretch=parse_relative_rect(child(child(blip_fill, "stretch"), "fillRect")),
         tile=parse_image_fill_tile(child(blip_fill, "tile")),
         hyperlink_rel_id=_hyperlink_rel_id(c_nv_pr),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -186,6 +189,7 @@ def parse_group(grp_sp: Element) -> SourceGroup:
         fill=parse_fill(grp_sp_pr),
         effects=parse_effect_list(child(grp_sp_pr, "effectLst")),
         children=parse_shape_tree(grp_sp),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -194,6 +198,11 @@ def parse_placeholder(nv_pr_parent: Element | None) -> SourcePlaceholder | None:
     if ph is None:
         return None
     return SourcePlaceholder(type=attr(ph, "type"), idx=int_attr(ph, "idx"))
+
+
+def _hidden(c_nv_pr: Element | None) -> bool:
+    """``p:cNvPr@hidden`` -- PowerPoint's "hide" in the selection pane."""
+    return is_true(attr(c_nv_pr, "hidden"))
 
 
 def _alt_text(c_nv_pr: Element | None) -> str | None:
@@ -226,6 +235,7 @@ def parse_graphic_frame(frame: Element) -> SourceShapeNode | None:
             shape_id=attr(c_nv_pr, "id"),
             alt_text=_alt_text(c_nv_pr),
             transform=transform,
+            hidden=_hidden(c_nv_pr),
         )
 
     if uri == GRAPHIC_DATA_CHART:
@@ -247,6 +257,7 @@ def parse_graphic_frame(frame: Element) -> SourceShapeNode | None:
         alt_text=_alt_text(c_nv_pr),
         transform=transform,
         fallback_rel_id=fallback_rel_id,
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -288,6 +299,7 @@ def parse_table(
     shape_id: str | None,
     alt_text: str | None,
     transform,
+    hidden: bool = False,
 ) -> SourceTable:
     tbl_pr = child(tbl, "tblPr")
     columns = [num_attr(col, "w") or 0 for col in children(child(tbl, "tblGrid"), "gridCol")]
@@ -307,6 +319,7 @@ def parse_table(
         band_row=is_true(attr(tbl_pr, "bandRow")),
         band_col=is_true(attr(tbl_pr, "bandCol")),
         style_id=(child_text(tbl_pr, "tableStyleId") or "").strip() or None,
+        hidden=hidden,
     )
 
 

@@ -24,12 +24,16 @@ from typing import Sequence
 
 from .. import model as m
 from ..parse import source as s
+from ..units import ROTATION_UNIT
 from .color import resolve_color
 
 #: Properties inherited from every level of the chain.
 _ALWAYS_INHERITED = ("font_size", "typeface", "typeface_ea", "typeface_cs", "color")
 #: Properties inherited only from the shape's own paragraph/list style.
-_DECORATIONS = ("bold", "italic", "underline", "strikethrough", "baseline", "highlight")
+_DECORATIONS = (
+    "bold", "italic", "underline", "underline_style", "strikethrough", "baseline",
+    "highlight",
+)
 
 #: ``p:txStyles`` child chosen by placeholder type.
 _TITLE_PLACEHOLDERS = frozenset({"title", "ctrTitle"})
@@ -110,6 +114,8 @@ def _body_properties(properties: s.SourceTextBodyProperties | None) -> m.BodyPro
         ln_spc_reduction=_or(properties.ln_spc_reduction, 0.0),
         num_col=_or(properties.num_col, 1),
         vert=properties.vert or default.vert,
+        rotation=(properties.rotation or 0.0) / ROTATION_UNIT,
+        default_tab_size=_or(properties.default_tab_size, default.default_tab_size),
     )
 
 
@@ -279,6 +285,7 @@ def _resolve_run_properties(
         bold=bool(merged.bold),
         italic=bool(merged.italic),
         underline=bool(merged.underline),
+        underline_style=merged.underline_style if merged.underline else None,
         strikethrough=bool(merged.strikethrough),
         color=resolve_color(context.colors, merged.color),
         baseline=merged.baseline or 0.0,
