@@ -490,3 +490,65 @@ def test_the_unrendered_list_has_no_stale_entries():
         for field in dataclasses.fields(getattr(model, name))
     }
     assert not (set(UNRENDERED_FIELDS) - known)
+
+
+# -- Tables --------------------------------------------------------------------------
+
+
+def cell_text(text: str) -> m.TextBody:
+    return m.TextBody(
+        paragraphs=[m.Paragraph(runs=[m.TextRun(text, m.RunProperties(font_size=18))])]
+    )
+
+
+def test_a_row_grows_to_fit_text_that_does_not_fit_its_stated_height():
+    """`a:tr@h` is a minimum, not an exact height."""
+    from pptx2svg.render.shape import render_table
+
+    marker = m.CellBorders(
+        top=m.Outline(fill=m.SolidFill(color=m.ResolvedColor(hex="#ff0000")))
+    )
+    rows = [
+        m.TableRow(height=200000, cells=[m.TableCell(text_body=cell_text("short"))]),
+        m.TableRow(height=200000, cells=[m.TableCell(text_body=cell_text(
+            "a much longer run of text that has to wrap over several lines here"
+        ))]),
+        m.TableRow(height=200000, cells=[
+            m.TableCell(text_body=cell_text("last"), borders=marker)
+        ]),
+    ]
+    table = m.TableElement(
+        transform=m.Transform(extent_width=1500000, extent_height=600000),
+        table=m.TableData(rows=rows, columns=[m.TableColumn(width=1500000)]),
+    )
+    context = RenderContext(
+        measurer=DefaultTextMeasurer(), font_mapping={}, jpan_fallback_font=None
+    )
+    svg = render_table(table, context)
+
+    # The marked border sits below two rows.  Taking `h` literally would put it at
+    # 2 x 21 px; the middle row has to have grown well past that.
+    y = float(re.search(r'<line x1="0" y1="([\d.]+)"', svg).group(1))
+    assert y > 100
+
+
+def test_rows_that_already_fit_keep_their_stated_height():
+    from pptx2svg.render.shape import render_table
+
+    marker = m.CellBorders(
+        top=m.Outline(fill=m.SolidFill(color=m.ResolvedColor(hex="#ff0000")))
+    )
+    rows = [
+        m.TableRow(height=900000, cells=[m.TableCell(text_body=cell_text("a"))]),
+        m.TableRow(height=900000, cells=[m.TableCell(text_body=cell_text("b"), borders=marker)]),
+    ]
+    table = m.TableElement(
+        transform=m.Transform(extent_width=3000000, extent_height=1800000),
+        table=m.TableData(rows=rows, columns=[m.TableColumn(width=3000000)]),
+    )
+    context = RenderContext(
+        measurer=DefaultTextMeasurer(), font_mapping={}, jpan_fallback_font=None
+    )
+    svg = render_table(table, context)
+    y = float(re.search(r'<line x1="0" y1="([\d.]+)"', svg).group(1))
+    assert abs(y - 94.49) < 0.5

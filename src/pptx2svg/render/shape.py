@@ -233,9 +233,10 @@ def render_table(table: m.TableElement, context: RenderContext) -> str:
     for column in data.columns:
         column_offsets.append(column_offsets[-1] + emu_to_px(column.width))
 
+    row_heights = _row_heights(data, context)
     row_offsets: list[float] = [0.0]
-    for row in data.rows:
-        row_offsets.append(row_offsets[-1] + emu_to_px(row.height))
+    for height in row_heights:
+        row_offsets.append(row_offsets[-1] + emu_to_px(height))
 
     # Fills and text first, then every border on top, so a neighbour's fill cannot
     # paint over a shared edge.
@@ -270,7 +271,9 @@ def render_table(table: m.TableElement, context: RenderContext) -> str:
                     offset_x=0,
                     offset_y=0,
                     extent_width=table.table.columns[column_index].width * max(1, cell.grid_span),
-                    extent_height=data.rows[row_index].height * max(1, cell.row_span),
+                    extent_height=sum(
+                        row_heights[row_index: row_index + max(1, cell.row_span)]
+                    ),
                 )
                 text_svg = render_text_body(cell.text_body, cell_transform, context)
                 if text_svg:
@@ -281,6 +284,35 @@ def render_table(table: m.TableElement, context: RenderContext) -> str:
     parts.extend(borders)
     parts.append("</g>")
     return "".join(parts)
+
+
+def _row_heights(data: m.TableData, context: RenderContext) -> list[float]:
+    """Row heights in EMU, grown to fit their text.
+
+    ``a:tr@h`` is a *minimum*: PowerPoint makes a row taller when its text needs the
+    space, and everything below it moves down.  Taking the attribute as exact leaves the
+    gridlines of a text-heavy table drifting further out of place with every row.
+
+    Only cells that occupy a single row get a vote.  A cell spanning several rows has no
+    one row to grow, and guessing how to share its height between them would do more
+    harm than leaving it alone.
+    """
+    heights = [row.height for row in data.rows]
+    for row_index, row in enumerate(data.rows):
+        for column_index, cell in enumerate(row.cells):
+            if cell.text_body is None or cell.h_merge or cell.v_merge:
+                continue
+            if cell.row_span > 1 or column_index >= len(data.columns):
+                continue
+            width = data.columns[column_index].width * max(1, cell.grid_span)
+            required = compute_sp_autofit_height(
+                cell.text_body,
+                m.Transform(extent_width=width, extent_height=heights[row_index]),
+                context,
+            )
+            if required is not None:
+                heights[row_index] = required
+    return heights
 
 
 def _cell_borders(
