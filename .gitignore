@@ -24,3 +24,4 @@ venv/
 # Ground-truth exports and VRT diffs (see ROADMAP.md Phase 0)
 /oracle-runtime/
 /tests/vrt/diffs/
+.claude/
