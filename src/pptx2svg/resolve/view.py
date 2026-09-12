@@ -97,6 +97,10 @@ class ResolveContext:
     part_path: str = ""
     #: Fill inherited by ``a:grpFill`` children, innermost last.
     group_fill_stack: list[m.Fill] = field(default_factory=list)
+    #: Namespace for element ids of the part currently being resolved.  Slide shapes are
+    #: addressable and editable; layout and master shapes are inherited decoration, and the
+    #: prefix says so rather than leaving a caller to guess from the id alone.
+    id_prefix: str = ""
 
     def warn(self, code: str, message: str) -> None:
         self.warnings.append(
@@ -192,10 +196,13 @@ def resolve_slide(context: ResolveContext) -> m.Slide:
 
     elements: list[m.SlideElement] = []
     if show_master and master is not None:
+        context.id_prefix = "mst:"
         elements.extend(_resolve_template_elements(context, master.shapes, master.part_path))
     if layout is not None:
+        context.id_prefix = "lay:"
         elements.extend(_resolve_template_elements(context, layout.shapes, layout.part_path))
     context.part_path = slide.part_path
+    context.id_prefix = f"{slide.slide_id}." if slide.slide_id is not None else ""
     elements.extend(_resolve_slide_elements(context, slide.shapes, slide.part_path))
 
     return m.Slide(
@@ -212,10 +219,10 @@ def _resolve_template_elements(
     """Master/layout shapes minus placeholders -- the slide supplies its own copies."""
     context.part_path = part_path
     resolved: list[m.SlideElement] = []
-    for shape in shapes:
+    for index, shape in enumerate(shapes):
         if _node_placeholder(shape) is not None:
             continue
-        element = resolve_element(context, shape)
+        element = resolve_element(context, shape, (index,))
         if element is not None:
             resolved.append(element)
     return resolved
@@ -226,10 +233,10 @@ def _resolve_slide_elements(
 ) -> list[m.SlideElement]:
     context.part_path = part_path
     resolved: list[m.SlideElement] = []
-    for shape in shapes:
+    for index, shape in enumerate(shapes):
         if isinstance(shape, s.SourceShape) and _is_empty_placeholder(shape):
             continue
-        element = resolve_element(context, shape)
+        element = resolve_element(context, shape, (index,))
         if element is not None:
             resolved.append(element)
     return resolved
@@ -266,20 +273,37 @@ def _resolve_background(context: ResolveContext) -> m.Background | None:
 # --------------------------------------------------------------------------------------
 
 
-def resolve_element(context: ResolveContext, node: s.SourceShapeNode) -> m.SlideElement | None:
+def resolve_element(
+    context: ResolveContext,
+    node: s.SourceShapeNode,
+    path: tuple[int, ...] = (),
+) -> m.SlideElement | None:
+    """Resolve one shape node.
+
+    Being the single dispatch point for every element at every nesting depth, this is also
+    where identity is attached -- doing it here rather than in each ``_resolve_*`` keeps groups
+    and their descendants consistent for free.
+    """
     if isinstance(node, s.SourceShape):
-        return _resolve_shape(context, node)
-    if isinstance(node, s.SourceConnector):
-        return _resolve_connector(context, node)
-    if isinstance(node, s.SourceImage):
-        return _resolve_image(context, node)
-    if isinstance(node, s.SourceGroup):
-        return _resolve_group(context, node)
-    if isinstance(node, s.SourceTable):
-        return _resolve_table(context, node)
-    if isinstance(node, s.SourceUnsupported):
-        return _resolve_unsupported(context, node)
-    return None
+        element = _resolve_shape(context, node)
+    elif isinstance(node, s.SourceConnector):
+        element = _resolve_connector(context, node)
+    elif isinstance(node, s.SourceImage):
+        element = _resolve_image(context, node)
+    elif isinstance(node, s.SourceGroup):
+        element = _resolve_group(context, node, path)
+    elif isinstance(node, s.SourceTable):
+        element = _resolve_table(context, node)
+    elif isinstance(node, s.SourceUnsupported):
+        element = _resolve_unsupported(context, node)
+    else:
+        return None
+
+    if element is not None:
+        shape_id = getattr(node, "shape_id", None)
+        element.element_id = f"{context.id_prefix}{shape_id}" if shape_id else None
+        element.element_path = "-".join(str(step) for step in path) or None
+    return element
 
 
 def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElement:
@@ -336,7 +360,9 @@ def _resolve_connector(context: ResolveContext, connector: s.SourceConnector) ->
     )
 
 
-def _resolve_group(context: ResolveContext, group: s.SourceGroup) -> m.GroupElement:
+def _resolve_group(
+    context: ResolveContext, group: s.SourceGroup, path: tuple[int, ...] = ()
+) -> m.GroupElement:
     transform = _resolve_transform(context, group.transform)
     child_transform = (
         _resolve_transform(context, group.child_transform)
@@ -350,7 +376,10 @@ def _resolve_group(context: ResolveContext, group: s.SourceGroup) -> m.GroupElem
     try:
         children = [
             element
-            for element in (resolve_element(context, child) for child in group.children)
+            for element in (
+                resolve_element(context, child, path + (index,))
+                for index, child in enumerate(group.children)
+            )
             if element is not None
         ]
     finally:

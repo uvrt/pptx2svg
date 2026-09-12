@@ -36,9 +36,22 @@ after it needs a way to tell "better" from "different".
 | SmartArt | **Not rendered** |
 | EMF / WMF | **Not rendered** |
 | 3-D, bevel, reflection | **Not rendered** |
+| Shape identity on output (`data-pptx-id`) | Complete |
 
-254 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
+266 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
 independently testable, and every phase below slots into exactly one of them.
+
+### Shape identity
+
+Every rendered element carries `data-pptx-id` -- `"<sldId>.<cNvPr id>"` for slide shapes,
+`lay:`/`mst:` for shapes inherited from the layout or master -- plus `data-pptx-path`, the index
+path through the shape tree. Both are set in `resolve/view.py:resolve_element`, the single
+dispatch point, so every nesting depth is covered for free, and written out in
+`render/svg.py:render_element`.
+
+The path is not redundant: **`cNvPr@id` is not unique in real decks.** In
+`real-financial-report.pptx` slide 2 a `p:sp` and a `p:graphicFrame` both carry `id="3"`. The
+pair `(id, path)` is unique, and a downstream consumer needs both to address a shape.
 
 ### Measured baseline
 
@@ -92,10 +105,15 @@ image = page.render(scale=1280 / page.get_size()[0]).to_pil()
 
 | Constraint | Consequence |
 | --- | --- |
-| PowerPoint is sandboxed | Paths must be under the user's home. `/tmp` and `/private/tmp` fail with error **−9074**. This is the first thing to check when it "just doesn't work". |
+| PowerPoint is sandboxed | Paths must be under the user's home. `/tmp` and `/private/tmp` fail with error **−9074**. |
+| **−9074 has a second cause** | A file PowerPoint wants to repair raises an app-modal dialog, and *every* export then fails −9074 until it is cleared — including known-good files. Check for a dialog before suspecting the path; one bad input otherwise looks exactly like a broken environment. |
+| The export script cannot clear that dialog | It is blocked inside `open` and never regains control. Dismissal has to run in a separate process, and **Escape does not work** — only a real button click does, matched across localisations (`Annuleren` on a Dutch install). |
+| `count of presentations` is not a health check | A wedged PowerPoint answers `0` while still refusing every file. |
+| Restarting re-raises the dialog | PowerPoint reopens the document it was killed over. Dismiss rather than restart; and after any restart, poll until it answers — an `open` sent mid-launch is refused instantly with −9074. |
 | `save as PNG` is in the dictionary but **silently no-ops** | Returns success, writes nothing. PDF is the only export that works unattended. Do not spend time on it. |
 | Per-slide PNG needs VBA | PowerPoint's `Slide.Export` is VBA-only, requiring a macro-enabled `.pptm` host. **[pptx-renderer]** does this; PDF + `pypdfium2` avoids the complexity and the macro-security friction. |
-| First run prompts for automation permission | Fine interactively; in CI this must be pre-granted or the oracle skipped. |
+| First run prompts for automation permission | Fine interactively; in CI this must be pre-granted or the oracle skipped. Dismissing the repair dialog needs a *second* permission, Accessibility. |
+| The script wraps its work in `with timeout of 45 seconds` | Otherwise a modal dialog costs the 120-second AppleEvent default on every attempt. A timeout here means "PowerPoint would not open this file", which is the verdict the oracle exists to give. |
 | Must match the presentation by full path | Otherwise a concurrently open deck gets exported instead. The script does this. |
 
 **Deliverable:** `tests/oracle/` with a `generate_ground_truth.py` that walks the fixture
@@ -444,7 +462,10 @@ Explicitly out of scope, to save re-litigating them:
 
 - Animations, transitions, timing
 - Speaker notes, comments, revision history
-- Editing or writing `.pptx` (pptx-glimpse's `editor`/`writer` packages; deliberately not ported)
+- Editing or writing `.pptx`. This library reads and renders; editing lives in the separate
+  [`pptx-agent`](https://github.com/uvrt/pptx-agent) project, which depends on this one for
+  rendering. The only concession made here is the shape identity described above — enough for a
+  downstream editor to map a rendered group back to a shape, and nothing more.
 - Equations (OMML) — **[pptx-renderer]** excludes these too
 - Executing or editing embedded OLE objects (previews only)
 - Pixel-exact PowerPoint reproduction — the goal is accurate text, shapes and layout

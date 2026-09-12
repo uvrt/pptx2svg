@@ -234,6 +234,7 @@ def parse_graphic_frame(frame: Element) -> SourceShapeNode | None:
     return SourceUnsupported(
         what=what,
         name=attr(c_nv_pr, "name"),
+        shape_id=attr(c_nv_pr, "id"),
         alt_text=_alt_text(c_nv_pr),
         transform=transform,
         fallback_rel_id=fallback_rel_id,

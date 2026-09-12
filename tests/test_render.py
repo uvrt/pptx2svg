@@ -214,3 +214,29 @@ def test_slide_text_reaches_the_svg(product_page):
 
 def test_rendering_is_reproducible(product_page):
     assert convert_pptx_to_svg(product_page) == convert_pptx_to_svg(product_page)
+
+
+def test_shapes_carry_their_source_identity(pptx_path):
+    """Every drawn element is traceable back to the shape it came from.
+
+    Downstream editors need to map a rendered group to a shape in the deck; without an id on
+    the output the only correspondence is document order, which breaks as soon as template
+    shapes are flattened in or empty placeholders are dropped.
+    """
+    for document in convert_pptx_to_svg(pptx_path):
+        identifiers = re.findall(r'data-pptx-id="([^"]*)"', document)
+        assert identifiers, "no element carried an id"
+        for identifier in identifiers:
+            # "<sldId>.<cNvPr id>" for slide shapes, "lay:"/"mst:" for inherited ones.
+            assert re.fullmatch(r"(lay:|mst:|\d+\.)[^\s\"]+", identifier), identifier
+        # An id alone is not unique in real decks, so a path always accompanies it.
+        assert len(re.findall(r'data-pptx-path="[^"]*"', document)) == len(identifiers)
+
+
+def test_identity_is_unique_per_slide(pptx_path):
+    """The (id, path) pair addresses exactly one element."""
+    for document in convert_pptx_to_svg(pptx_path):
+        pairs = re.findall(
+            r'data-pptx-id="([^"]*)"\s+data-pptx-path="([^"]*)"', document
+        )
+        assert len(pairs) == len(set(pairs))

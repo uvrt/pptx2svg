@@ -16,6 +16,12 @@
 --   * `save as PNG` exists in the dictionary but silently produces nothing. PDF is the
 --     only export that works unattended; per-slide PNG needs a VBA macro host.
 --   * The first run triggers a macOS automation permission prompt.
+--   * A damaged file raises an app-modal repair dialog ("Herstellen" / "Repair").  While it
+--     is up PowerPoint stops servicing AppleEvents, so this script cannot dismiss it -- it is
+--     blocked inside `open`.  The timeout below turns a 120-second hang into a prompt
+--     failure; clearing the dialog afterwards needs a separate process (see the recovery
+--     helper in pptx-agent's tests/oracle.py).  A timeout here therefore means "PowerPoint
+--     would not open this file", which is exactly the verdict the oracle exists to give.
 
 on run argv
     if (count of argv) is not 2 then
@@ -27,6 +33,9 @@ on run argv
     set outPath to POSIX file (item 2 of argv)
 
     set openedPresentation to missing value
+    -- Fail fast instead of waiting out the 120-second default: a stall here means a modal
+    -- dialog, not slow work, and no amount of extra waiting clears one.
+    with timeout of 45 seconds
     tell application "Microsoft PowerPoint"
         activate
         try
@@ -53,4 +62,5 @@ on run argv
             error errorMessage number errorNumber
         end try
     end tell
+    end timeout
 end run

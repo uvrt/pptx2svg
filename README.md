@@ -176,6 +176,18 @@ portable across rasterisers. Element ids (`grad-1`, `patt-2`) come from a per-sl
 counter, so the same input always produces byte-identical output; SVGs are diffable and
 snapshot-testable.
 
+Every shape group also carries its source identity, so rendered output can be mapped back to
+the deck it came from:
+
+```xml
+<g data-pptx-id="256.3" data-pptx-path="1" transform="translate(46, 41)"> ... </g>
+```
+
+`data-pptx-id` is `"<sldId>.<cNvPr id>"` for slide shapes and `lay:`/`mst:` for shapes
+inherited from the layout or master. `data-pptx-path` is the index path through the shape
+tree, and it is **not** redundant — `cNvPr@id` is not unique in real decks, so the pair is
+what addresses a shape unambiguously. Alt text is still emitted as `aria-label` alongside.
+
 ## Development
 
 ```bash

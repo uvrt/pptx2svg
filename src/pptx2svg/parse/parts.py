@@ -84,8 +84,9 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         default_text_style=parse_text_style(child(root, "defaultTextStyle")),
     )
 
-    for number, slide_path in enumerate(_slide_paths(package, presentation_path, root), start=1):
-        slide = read_slide(package, slide_path, number)
+    entries = _slide_paths(package, presentation_path, root)
+    for number, (slide_id, slide_path) in enumerate(entries, start=1):
+        slide = read_slide(package, slide_path, number, slide_id)
         if slide is None:
             continue
         presentation.slides.append(slide)
@@ -94,19 +95,34 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
     return presentation
 
 
-def _slide_paths(package: OpcPackage, presentation_path: str, root: Element) -> list[str]:
-    """Slide parts in presentation order, from ``p:sldIdLst``."""
+def _slide_paths(
+    package: OpcPackage, presentation_path: str, root: Element
+) -> list[tuple[int | None, str]]:
+    """``(sldId, part path)`` in presentation order, from ``p:sldIdLst``.
+
+    ``p:sldId/@id`` is carried alongside the path because it is deck-unique and survives
+    reordering, which the slide's position does not -- making it the durable half of a
+    per-shape identity.
+    """
     relationships = package.relationships(presentation_path)
-    paths: list[str] = []
+    entries: list[tuple[int | None, str]] = []
     for sld_id in children(child(root, "sldIdLst"), "sldId"):
         rel_id = ns_attr(sld_id, "id")
         relationship = relationships.get(rel_id) if rel_id else None
-        if relationship is not None and relationship.target_part is not None:
-            paths.append(relationship.target_part)
-    if paths:
-        return paths
+        if relationship is None or relationship.target_part is None:
+            continue
+        raw_id = attr(sld_id, "id")
+        try:
+            identifier = int(raw_id) if raw_id is not None else None
+        except ValueError:
+            identifier = None
+        entries.append((identifier, relationship.target_part))
+    if entries:
+        return entries
     # Malformed decks without a slide id list: fall back to relationship order.
-    return package.related_parts_of_type(presentation_path, REL_SLIDE)
+    return [
+        (None, path) for path in package.related_parts_of_type(presentation_path, REL_SLIDE)
+    ]
 
 
 def _ensure_ancestry(
@@ -146,7 +162,12 @@ def _ensure_ancestry(
 # --------------------------------------------------------------------------------------
 
 
-def read_slide(package: OpcPackage, part_path: str, slide_number: int) -> SourceSlide | None:
+def read_slide(
+    package: OpcPackage,
+    part_path: str,
+    slide_number: int,
+    slide_id: int | None = None,
+) -> SourceSlide | None:
     root = package.read_xml(part_path)
     if root is None:
         return None
@@ -161,6 +182,7 @@ def read_slide(package: OpcPackage, part_path: str, slide_number: int) -> Source
         layout_part_path=package.first_related_part(part_path, REL_SLIDE_LAYOUT),
         show_master_shapes=True if show_master is None else is_true(show_master),
         slide_number=slide_number,
+        slide_id=slide_id,
     )
 
 

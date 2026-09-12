@@ -102,9 +102,25 @@ def render_element(element: m.SlideElement, context: RenderContext) -> str:
     else:
         return ""
 
-    alt_text = getattr(element, "alt_text", None)
-    if rendered and alt_text:
-        rendered = _add_aria_label(rendered, alt_text)
+    if rendered:
+        attributes: dict[str, str] = {}
+
+        alt_text = getattr(element, "alt_text", None)
+        if alt_text:
+            attributes["role"] = "img"
+            attributes["aria-label"] = alt_text
+
+        # Identity travels with the drawing so a caller can map what it sees back to the
+        # shape it came from -- which is what makes the SVG addressable by an editor.
+        element_id = getattr(element, "element_id", None)
+        if element_id:
+            attributes["data-pptx-id"] = element_id
+        element_path = getattr(element, "element_path", None)
+        if element_path:
+            attributes["data-pptx-path"] = element_path
+
+        if attributes:
+            rendered = _add_attrs(rendered, attributes)
 
     hyperlink = getattr(element, "hyperlink", None)
     if rendered and hyperlink is not None:
@@ -113,12 +129,18 @@ def render_element(element: m.SlideElement, context: RenderContext) -> str:
     return rendered
 
 
-def _add_aria_label(fragment: str, alt_text: str) -> str:
-    """Attach the shape's alt text to its outermost element, for screen readers."""
-    for tag in ("<g", "<image", "<path"):
-        if fragment.startswith(tag):
-            label = escape_xml_attr(alt_text)
-            return f'{tag} role="img" aria-label="{label}"{fragment[len(tag):]}'
+def _add_attrs(fragment: str, attributes: dict[str, str]) -> str:
+    """Splice attributes into a rendered fragment's outermost element.
+
+    Elements are emitted as strings rather than built as a tree, so this matches on the
+    opening tag.  Anything not in the list is returned untouched rather than corrupted.
+    """
+    for tag in ("<g", "<image", "<path", "<rect", "<text"):
+        if fragment.startswith(tag) and fragment[len(tag):len(tag) + 1] in (" ", ">", "/"):
+            written = "".join(
+                f' {name}="{escape_xml_attr(value)}"' for name, value in attributes.items()
+            )
+            return f"{tag}{written}{fragment[len(tag):]}"
     return fragment
 
 

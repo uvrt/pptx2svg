@@ -466,6 +466,7 @@ class SourceUnsupported:
 
     what: str
     name: str | None = None
+    shape_id: str | None = None
     alt_text: str | None = None
     transform: SourceTransform | None = None
     #: Relationship id of a rendered fallback, when the frame ships one.
@@ -555,6 +556,9 @@ class SourceSlide(SourceSlideBase):
     layout_part_path: str | None = None
     show_master_shapes: bool = True
     slide_number: int = 1
+    #: ``p:sldId/@id`` from the presentation's slide list -- deck-unique and, unlike
+    #: ``slide_number``, unaffected by reordering.
+    slide_id: int | None = None
 
 
 @dataclass

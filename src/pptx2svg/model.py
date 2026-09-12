@@ -403,6 +403,13 @@ class ShapeElement:
     placeholder_idx: int | None = None
     alt_text: str | None = None
     hyperlink: Hyperlink | None = None
+    #: Identity of the source shape, for cross-referencing rendered output back to the deck:
+    #: ``"<sldId>.<cNvPr id>"`` for slide shapes, ``"lay:<id>"``/``"mst:<id>"`` for shapes
+    #: inherited from the layout or master.  ``None`` when the source had no ``p:cNvPr``.
+    element_id: str | None = None
+    #: Index path through the shape tree, e.g. ``"3-1"`` for the second child of the fourth
+    #: shape.  Disambiguates the id, which is *not* guaranteed unique in real decks.
+    element_path: str | None = None
     type: Literal["shape"] = "shape"
 
 
@@ -413,6 +420,13 @@ class ConnectorElement:
     outline: Outline | None = None
     effects: EffectList | None = None
     alt_text: str | None = None
+    #: Identity of the source shape, for cross-referencing rendered output back to the deck:
+    #: ``"<sldId>.<cNvPr id>"`` for slide shapes, ``"lay:<id>"``/``"mst:<id>"`` for shapes
+    #: inherited from the layout or master.  ``None`` when the source had no ``p:cNvPr``.
+    element_id: str | None = None
+    #: Index path through the shape tree, e.g. ``"3-1"`` for the second child of the fourth
+    #: shape.  Disambiguates the id, which is *not* guaranteed unique in real decks.
+    element_path: str | None = None
     type: Literal["connector"] = "connector"
 
 
@@ -457,6 +471,13 @@ class ImageElement:
     #: Non-rectangular picture frames clip the bitmap to the shape's geometry.
     geometry: Geometry | None = None
     outline: Outline | None = None
+    #: Identity of the source shape, for cross-referencing rendered output back to the deck:
+    #: ``"<sldId>.<cNvPr id>"`` for slide shapes, ``"lay:<id>"``/``"mst:<id>"`` for shapes
+    #: inherited from the layout or master.  ``None`` when the source had no ``p:cNvPr``.
+    element_id: str | None = None
+    #: Index path through the shape tree, e.g. ``"3-1"`` for the second child of the fourth
+    #: shape.  Disambiguates the id, which is *not* guaranteed unique in real decks.
+    element_path: str | None = None
     type: Literal["image"] = "image"
 
 
@@ -473,6 +494,13 @@ class GroupElement:
     children: list["SlideElement"] = field(default_factory=list)
     effects: EffectList | None = None
     alt_text: str | None = None
+    #: Identity of the source shape, for cross-referencing rendered output back to the deck:
+    #: ``"<sldId>.<cNvPr id>"`` for slide shapes, ``"lay:<id>"``/``"mst:<id>"`` for shapes
+    #: inherited from the layout or master.  ``None`` when the source had no ``p:cNvPr``.
+    element_id: str | None = None
+    #: Index path through the shape tree, e.g. ``"3-1"`` for the second child of the fourth
+    #: shape.  Disambiguates the id, which is *not* guaranteed unique in real decks.
+    element_path: str | None = None
     type: Literal["group"] = "group"
 
 
@@ -517,6 +545,13 @@ class TableElement:
     transform: Transform
     table: TableData
     alt_text: str | None = None
+    #: Identity of the source shape, for cross-referencing rendered output back to the deck:
+    #: ``"<sldId>.<cNvPr id>"`` for slide shapes, ``"lay:<id>"``/``"mst:<id>"`` for shapes
+    #: inherited from the layout or master.  ``None`` when the source had no ``p:cNvPr``.
+    element_id: str | None = None
+    #: Index path through the shape tree, e.g. ``"3-1"`` for the second child of the fourth
+    #: shape.  Disambiguates the id, which is *not* guaranteed unique in real decks.
+    element_path: str | None = None
     type: Literal["table"] = "table"
 
 
