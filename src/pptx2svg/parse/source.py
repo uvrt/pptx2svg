@@ -270,6 +270,9 @@ class SourceRunProperties:
     bold: bool | None = None
     italic: bool | None = None
     underline: bool | None = None
+    #: ``a:rPr@u`` verbatim (``"dbl"``, ``"wavy"``, ``"dotDash"``...) when it is not
+    #: ``"sng"``; the bool above only says *whether* the run is underlined.
+    underline_style: str | None = None
     strikethrough: bool | None = None
     baseline: float | None = None
     #: points
@@ -340,6 +343,8 @@ class SourceTextBodyProperties:
     num_col: int | None = None
     vert: TextVerticalType | None = None
     rotation: float | None = None
+    #: ``a:bodyPr@defTabSz`` -- the interval of the implicit tab stops, in EMU.
+    default_tab_size: float | None = None
 
 
 @dataclass
@@ -373,6 +378,8 @@ class SourceShape:
     effects: SourceEffectList | None = None
     style: SourceShapeStyle | None = None
     text_body: SourceTextBody | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     hyperlink_rel_id: str | None = None
     kind: Literal["shape"] = "shape"
 
@@ -386,6 +393,8 @@ class SourceConnector:
     geometry: SourceGeometry | None = None
     outline: SourceOutline | None = None
     effects: SourceEffectList | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     style: SourceShapeStyle | None = None
     kind: Literal["connector"] = "connector"
 
@@ -405,6 +414,8 @@ class SourceImage:
     src_rect: tuple[float, float, float, float] | None = None
     stretch: tuple[float, float, float, float] | None = None
     tile: SourceImageFillTile | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     hyperlink_rel_id: str | None = None
     kind: Literal["image"] = "image"
 
@@ -442,9 +453,90 @@ class SourceTable:
     transform: SourceTransform | None = None
     columns: list[float] = field(default_factory=list)
     rows: list[SourceTableRow] = field(default_factory=list)
+    #: ``a:tblPr`` flags saying which conditional regions of the table style apply.
     first_row: bool = False
+    last_row: bool = False
+    first_col: bool = False
+    last_col: bool = False
     band_row: bool = False
+    band_col: bool = False
+    #: ``a:tableStyleId`` -- a GUID, resolved against ``tableStyles.xml`` or the built-in
+    #: catalogue.  ``None`` means "use the presentation's default table style".
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
+    style_id: str | None = None
     kind: Literal["table"] = "table"
+
+
+#: ``a:tblStyle`` conditional regions, lowest precedence first.  A cell takes its
+#: formatting from every region that covers it, with later entries winning -- so the
+#: header row beats the banding, and a corner cell beats the header row.  The element
+#: names are the OOXML ones; the attribute names are the Python ones.
+TABLE_STYLE_REGIONS: tuple[tuple[str, str], ...] = (
+    ("wholeTbl", "whole_table"),
+    ("band2V", "band2_v"),
+    ("band1V", "band1_v"),
+    ("band2H", "band2_h"),
+    ("band1H", "band1_h"),
+    ("lastCol", "last_col"),
+    ("firstCol", "first_col"),
+    ("lastRow", "last_row"),
+    ("firstRow", "first_row"),
+    ("swCell", "sw_cell"),
+    ("seCell", "se_cell"),
+    ("nwCell", "nw_cell"),
+    ("neCell", "ne_cell"),
+)
+
+
+@dataclass
+class SourceTableCellStyle:
+    """One conditional region of a table style.
+
+    ``border_inside_h`` / ``border_inside_v`` are the edges *within* the region; the four
+    named sides are the region's own outer boundary.  For ``wholeTbl`` that boundary is
+    the table's outline and the inside borders are every gridline; for ``firstRow`` the
+    boundary is the header row's four sides and ``insideV`` separates its cells.
+    """
+
+    fill: SourceFill | None = None
+    #: ``a:tcStyle/a:fillRef`` -- an index into the theme's fill style list.
+    fill_ref: SourceStyleReference | None = None
+    #: ``a:tcTxStyle`` as run properties, so it can join the text cascade unchanged.
+    text: SourceRunProperties | None = None
+    border_left: SourceOutline | None = None
+    border_right: SourceOutline | None = None
+    border_top: SourceOutline | None = None
+    border_bottom: SourceOutline | None = None
+    border_inside_h: SourceOutline | None = None
+    border_inside_v: SourceOutline | None = None
+
+
+@dataclass
+class SourceTableStyle:
+    style_id: str
+    name: str | None = None
+    whole_table: SourceTableCellStyle | None = None
+    band1_h: SourceTableCellStyle | None = None
+    band2_h: SourceTableCellStyle | None = None
+    band1_v: SourceTableCellStyle | None = None
+    band2_v: SourceTableCellStyle | None = None
+    first_row: SourceTableCellStyle | None = None
+    last_row: SourceTableCellStyle | None = None
+    first_col: SourceTableCellStyle | None = None
+    last_col: SourceTableCellStyle | None = None
+    nw_cell: SourceTableCellStyle | None = None
+    ne_cell: SourceTableCellStyle | None = None
+    sw_cell: SourceTableCellStyle | None = None
+    se_cell: SourceTableCellStyle | None = None
+
+
+@dataclass
+class SourceTableStyles:
+    """``ppt/tableStyles.xml`` -- the deck's custom styles and its default style id."""
+
+    default_style_id: str | None = None
+    styles: dict[str, SourceTableStyle] = field(default_factory=dict)
 
 
 @dataclass
@@ -456,6 +548,8 @@ class SourceGroup:
     child_transform: SourceTransform | None = None
     fill: SourceFill | None = None
     effects: SourceEffectList | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     children: list["SourceShapeNode"] = field(default_factory=list)
     kind: Literal["group"] = "group"
 
@@ -471,6 +565,8 @@ class SourceUnsupported:
     transform: SourceTransform | None = None
     #: Relationship id of a rendered fallback, when the frame ships one.
     fallback_rel_id: str | None = None
+    #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
+    hidden: bool = False
     fallback_part: str | None = None
     kind: Literal["unsupported"] = "unsupported"
 
@@ -567,6 +663,7 @@ class SourcePresentation:
     slide_width: float = 9144000
     slide_height: float = 6858000
     default_text_style: SourceTextStyle | None = None
+    table_styles: SourceTableStyles | None = None
     slides: list[SourceSlide] = field(default_factory=list)
     layouts: dict[str, SourceSlideLayout] = field(default_factory=dict)
     masters: dict[str, SourceSlideMaster] = field(default_factory=dict)

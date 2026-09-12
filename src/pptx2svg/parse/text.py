@@ -109,6 +109,7 @@ def parse_body_properties(body_pr: Element | None) -> SourceTextBodyProperties |
         num_col=max(1, num_col) if num_col is not None else None,
         vert=vert if vert in VERTICAL_VALUES else None,  # type: ignore[arg-type]
         rotation=num_attr(body_pr, "rot"),
+        default_tab_size=num_attr(body_pr, "defTabSz"),
     )
     return properties if _has_any(properties) else None
 
@@ -253,6 +254,7 @@ def parse_run_properties(r_pr: Element | None) -> SourceRunProperties | None:
         italic=is_true(italic) if italic is not None else None,
         # A hyperlink is underlined unless the run says otherwise.
         underline=(underline != "none") if underline is not None else (True if has_hyperlink else None),
+        underline_style=underline if underline not in (None, "none", "sng") else None,
         strikethrough=(strike != "noStrike") if strike is not None else None,
         # `a:rPr@baseline` is a 1/1000 percent of the font size.
         baseline=baseline / 1000 if baseline is not None else None,

@@ -76,13 +76,22 @@ def test_alpha_transform():
 
 
 def test_tint_blends_toward_white():
+    # tint 50% keeps half the colour and makes the rest up with white, blended in
+    # linear light -- so half-way between black and white is #bcbcbc, not #808080.
+    # Every value here was read off PowerPoint's own render of a swatch sheet.
     color = SrgbColor(hex="000000", transforms=[ColorTransform(kind="tint", value=50000)])
-    assert resolve_color(_context(), color).hex == "#808080"
+    assert resolve_color(_context(), color).hex == "#bcbcbc"
+
+    blue = SchemeColor(scheme="accent1", transforms=[ColorTransform(kind="tint", value=40000)])
+    assert resolve_color(_context(), blue).hex == "#cfd5ea"
 
 
 def test_shade_scales_toward_black():
     color = SrgbColor(hex="FFFFFF", transforms=[ColorTransform(kind="shade", value=50000)])
-    assert resolve_color(_context(), color).hex == "#808080"
+    assert resolve_color(_context(), color).hex == "#bcbcbc"
+
+    blue = SchemeColor(scheme="accent1", transforms=[ColorTransform(kind="shade", value=50000)])
+    assert resolve_color(_context(), blue).hex == "#2f528f"
 
 
 def test_lum_mod_and_lum_off_apply_together():

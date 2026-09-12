@@ -198,17 +198,45 @@ def _apply_saturation(value: str, sat_mod: float) -> str:
     return _rgb_to_hex(red * 255, green * 255, blue * 255)
 
 
+def _srgb_to_linear(channel: int) -> float:
+    value = channel / 255
+    if value <= 0.04045:
+        return value / 12.92
+    return ((value + 0.055) / 1.055) ** 2.4
+
+
+def _linear_to_srgb(value: float) -> float:
+    value = max(0.0, min(1.0, value))
+    if value <= 0.0031308:
+        return value * 12.92 * 255
+    return (1.055 * value ** (1 / 2.4) - 0.055) * 255
+
+
 def _apply_tint(value: str, amount: float) -> str:
-    """Blend toward white."""
-    r, g, b = _hex_to_rgb(value)
+    """Keep ``amount`` of the colour and make up the rest with white.
+
+    ECMA-376 defines tint as "a 10% tint is 10% of the input colour combined with 90%
+    white" -- so the value is how much of the *original* survives, not how far it moves.
+    PowerPoint does the blend in linear-light space, which is why a 40% tint of a mid
+    blue comes out visibly paler than a naive sRGB interpolation predicts; verified
+    swatch-by-swatch against PowerPoint's own PDF export.
+    """
     return _rgb_to_hex(
-        r + (255 - r) * amount,
-        g + (255 - g) * amount,
-        b + (255 - b) * amount,
+        *(
+            _linear_to_srgb(_srgb_to_linear(channel) * amount + (1 - amount))
+            for channel in _hex_to_rgb(value)
+        )
     )
 
 
 def _apply_shade(value: str, amount: float) -> str:
-    """Scale toward black."""
-    r, g, b = _hex_to_rgb(value)
-    return _rgb_to_hex(r * amount, g * amount, b * amount)
+    """Keep ``amount`` of the colour and make up the rest with black.
+
+    The linear-light note on :func:`_apply_tint` applies here too.
+    """
+    return _rgb_to_hex(
+        *(
+            _linear_to_srgb(_srgb_to_linear(channel) * amount)
+            for channel in _hex_to_rgb(value)
+        )
+    )

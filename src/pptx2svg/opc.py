@@ -32,6 +32,9 @@ REL_DIAGRAM_DRAWING = (
     "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
 )
 REL_HYPERLINK = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+REL_TABLE_STYLES = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles"
+)
 REL_OFFICE_DOCUMENT = (
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
 )

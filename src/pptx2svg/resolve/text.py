@@ -24,12 +24,16 @@ from typing import Sequence
 
 from .. import model as m
 from ..parse import source as s
+from ..units import ROTATION_UNIT
 from .color import resolve_color
 
 #: Properties inherited from every level of the chain.
 _ALWAYS_INHERITED = ("font_size", "typeface", "typeface_ea", "typeface_cs", "color")
 #: Properties inherited only from the shape's own paragraph/list style.
-_DECORATIONS = ("bold", "italic", "underline", "strikethrough", "baseline", "highlight")
+_DECORATIONS = (
+    "bold", "italic", "underline", "underline_style", "strikethrough", "baseline",
+    "highlight",
+)
 
 #: ``p:txStyles`` child chosen by placeholder type.
 _TITLE_PLACEHOLDERS = frozenset({"title", "ctrTitle"})
@@ -48,8 +52,11 @@ def resolve_text_body(
     text_body: s.SourceTextBody,
     inherited: Sequence[s.SourceTextBody | None],
     placeholder_type: str | None,
+    extra_defaults: s.SourceRunProperties | None = None,
 ) -> m.TextBody:
-    chain = _build_style_chain(context, text_body, inherited, placeholder_type)
+    chain = _build_style_chain(
+        context, text_body, inherited, placeholder_type, extra_defaults
+    )
 
     # Body properties layer outward-in: master placeholder, then layout, then the shape.
     properties: s.SourceTextBodyProperties | None = None
@@ -107,6 +114,8 @@ def _body_properties(properties: s.SourceTextBodyProperties | None) -> m.BodyPro
         ln_spc_reduction=_or(properties.ln_spc_reduction, 0.0),
         num_col=_or(properties.num_col, 1),
         vert=properties.vert or default.vert,
+        rotation=(properties.rotation or 0.0) / ROTATION_UNIT,
+        default_tab_size=_or(properties.default_tab_size, default.default_tab_size),
     )
 
 
@@ -115,6 +124,7 @@ def _build_style_chain(
     text_body: s.SourceTextBody,
     inherited: Sequence[s.SourceTextBody | None],
     placeholder_type: str | None,
+    extra_defaults: s.SourceRunProperties | None = None,
 ) -> list[_StyleEntry]:
     chain: list[_StyleEntry] = []
 
@@ -132,6 +142,21 @@ def _build_style_chain(
     default_style = context.presentation.default_text_style
     if default_style is not None:
         chain.append(_StyleEntry(default_style, include_decorations=False))
+
+    if extra_defaults is not None:
+        # A table style's `a:tcTxStyle`: the weakest layer of all, but unlike the other
+        # inherited layers its decorations *do* apply -- a header row styled bold really
+        # does bold the cell's text, which is the whole point of the region.
+        chain.append(
+            _StyleEntry(
+                s.SourceTextStyle(
+                    default_paragraph=s.SourceParagraphProperties(
+                        default_run_properties=extra_defaults
+                    )
+                ),
+                include_decorations=True,
+            )
+        )
 
     return chain
 
@@ -260,6 +285,7 @@ def _resolve_run_properties(
         bold=bool(merged.bold),
         italic=bool(merged.italic),
         underline=bool(merged.underline),
+        underline_style=merged.underline_style if merged.underline else None,
         strikethrough=bool(merged.strikethrough),
         color=resolve_color(context.colors, merged.color),
         baseline=merged.baseline or 0.0,

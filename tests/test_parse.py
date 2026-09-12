@@ -192,6 +192,123 @@ def test_body_properties_read_autofit_and_margins():
     assert properties.ln_spc_reduction == 0.2
 
 
+# -- Table styles ----------------------------------------------------------------------
+
+
+TABLE_STYLE_XML = f"""
+<a:tblStyleLst {A} def="{{AAAA0000-0000-0000-0000-000000000001}}">
+  <a:tblStyle styleId="{{AAAA0000-0000-0000-0000-000000000001}}" styleName="Example">
+    <a:wholeTbl>
+      <a:tcTxStyle b="on"><a:fontRef idx="minor"/><a:srgbClr val="112233"/></a:tcTxStyle>
+      <a:tcStyle>
+        <a:tcBdr>
+          <a:insideH><a:ln w="12700"><a:solidFill><a:srgbClr val="445566"/></a:solidFill></a:ln></a:insideH>
+          <a:left><a:ln w="25400"><a:noFill/></a:ln></a:left>
+        </a:tcBdr>
+        <a:fill><a:solidFill><a:schemeClr val="accent2"/></a:solidFill></a:fill>
+      </a:tcStyle>
+    </a:wholeTbl>
+    <a:firstRow>
+      <a:tcTxStyle b="def" i="on"/>
+      <a:tcStyle><a:tcBdr/></a:tcStyle>
+    </a:firstRow>
+  </a:tblStyle>
+</a:tblStyleLst>
+"""
+
+
+def test_table_style_reads_fills_borders_and_text():
+    from pptx2svg.parse.parts import parse_table_style
+
+    style = parse_table_style(xml(TABLE_STYLE_XML)[0])
+    assert style.name == "Example"
+
+    whole = style.whole_table
+    assert isinstance(whole.fill, s.SourceSolidFill)
+    assert whole.fill.color.scheme == "accent2"
+    assert whole.border_inside_h.width == 12700
+    # An explicit no-fill line is not the same as an absent one: it clears the border.
+    assert isinstance(whole.border_left.fill, s.SourceNoFill)
+    assert whole.border_top is None
+    assert whole.text.bold is True
+    assert whole.text.color.hex == "112233"
+    # `a:fontRef idx="minor"` is handed on as the placeholder the text resolver expands.
+    assert whole.text.typeface == "+mn-lt"
+
+    # `b="def"` means "inherit", which has to stay None rather than becoming False.
+    assert style.first_row.text.bold is None
+    assert style.first_row.text.italic is True
+
+
+def test_table_style_regions_absent_from_the_xml_stay_none():
+    from pptx2svg.parse.parts import parse_table_style
+
+    style = parse_table_style(xml(TABLE_STYLE_XML)[0])
+    assert style.band1_h is None and style.last_row is None and style.nw_cell is None
+
+
+def test_deck_table_styles_are_read_from_the_presentation_part(basic_theme):
+    package = OpcPackage.open(str(basic_theme))
+    styles = read_presentation(package).table_styles
+    assert styles is not None
+    # This deck is a Google Slides export, which writes a real custom style out.
+    style = styles.styles[styles.default_style_id]
+    assert style.name == "Table_0"
+    assert style.whole_table.border_inside_v.fill.color.hex == "9E9E9E"
+
+
+def test_table_reads_its_style_id_and_region_flags(authoring):
+    package = OpcPackage.open(str(authoring))
+    presentation = read_presentation(package)
+    tables = [
+        shape
+        for shape in presentation.slides[0].shapes
+        if isinstance(shape, s.SourceTable)
+    ]
+    assert len(tables) == 1
+    assert tables[0].style_id == "{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"
+    assert tables[0].first_row and tables[0].band_row
+    assert not tables[0].last_row and not tables[0].band_col
+
+
+# -- Built-in table style catalogue ----------------------------------------------------
+
+
+def test_builtin_catalogue_expands_into_the_same_shape_the_reader_produces():
+    from pptx2svg.parse.table_styles_builtin import builtin_table_style
+
+    style = builtin_table_style("{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}")
+    assert style.name == "Medium Style 2 - Accent 1"
+    # Measured from PowerPoint's own render: the body is a 20% tint of the accent, the
+    # banded rows a 40% tint, the header solid accent with white bold text, and every
+    # gridline a 1 pt white rule with a 3 pt one under the header.
+    assert style.whole_table.fill.color.scheme == "accent1"
+    assert style.whole_table.fill.color.transforms[0].value == 20000
+    assert style.band1_h.fill.color.transforms[0].value == 40000
+    assert style.band2_h is None
+    assert style.whole_table.border_inside_h.width == 12700
+    assert style.first_row.fill.color.transforms == []
+    assert style.first_row.border_bottom.width == 38100
+    assert style.first_row.text.bold is True
+    assert style.first_row.text.color.scheme == "lt1"
+
+
+def test_builtin_catalogue_is_keyed_by_upper_case_guid():
+    from pptx2svg.parse.table_styles_builtin import BUILTIN_TABLE_STYLES, builtin_table_style
+
+    assert BUILTIN_TABLE_STYLES
+    for guid, spec in BUILTIN_TABLE_STYLES.items():
+        assert guid == guid.upper(), guid
+        assert guid.startswith("{") and guid.endswith("}")
+        assert spec["name"]
+        # Every entry must expand without raising.
+        assert builtin_table_style(guid) is not None
+    # Lookup is case-insensitive, since decks do not agree on the case of a GUID.
+    lower = "{5c22544a-7ee6-4342-b048-85bdc9fd1c3a}"
+    assert builtin_table_style(lower).name == "Medium Style 2 - Accent 1"
+    assert builtin_table_style("{not-a-style}") is None
+
+
 # -- Whole packages --------------------------------------------------------------------
 
 

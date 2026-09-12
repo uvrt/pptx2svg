@@ -153,9 +153,43 @@ def render_image(image: m.ImageElement, context: RenderContext) -> str:
             + (f" {blip_attr}" if blip_attr else "")
             + "/></g>"
         )
-    else:
+    elif image.tile is not None:
+        # `a:tile` repeats the bitmap instead of stretching it.  The tile is sized as a
+        # fraction of the frame, matching how `render/fill.py` handles a tiled shape
+        # fill -- `sx`/`sy` are really percentages of the bitmap's own pixel size, which
+        # would mean decoding the image to find out, and the two paths agreeing with
+        # each other matters more than either being exact.
+        tile = image.tile
+        tile_width = max(1e-6, width * tile.sx)
+        tile_height = max(1e-6, height * tile.sy)
+        pattern_id = context.new_id("imgtile")
+        context.add_def(
+            f'<pattern id="{pattern_id}" patternUnits="userSpaceOnUse" '
+            f'x="{num(emu_to_px(tile.tx))}" y="{num(emu_to_px(tile.ty))}" '
+            f'width="{num(tile_width)}" height="{num(tile_height)}">'
+            f'<image href="{href}" width="{num(tile_width)}" height="{num(tile_height)}" '
+            'preserveAspectRatio="none"'
+            + (f" {blip_attr}" if blip_attr else "")
+            + "/></pattern>"
+        )
         inner.append(
-            f'<image href="{href}" width="{num(width)}" height="{num(height)}" '
+            f'<rect width="{num(width)}" height="{num(height)}" fill="url(#{pattern_id})"/>'
+        )
+    else:
+        # `a:stretch/a:fillRect` insets the bitmap from the frame's edges as a fraction
+        # of the frame; the usual all-zero rect means "fill it", and a negative inset
+        # pushes the bitmap outside, which the frame's clip then trims.
+        left = top = 0.0
+        draw_width, draw_height = width, height
+        stretch = image.stretch
+        if stretch is not None and _has_crop(stretch):
+            left = stretch.left * width
+            top = stretch.top * height
+            draw_width = max(1e-6, width * (1 - stretch.left - stretch.right))
+            draw_height = max(1e-6, height * (1 - stretch.top - stretch.bottom))
+        inner.append(
+            f'<image href="{href}" x="{num(left)}" y="{num(top)}" '
+            f'width="{num(draw_width)}" height="{num(draw_height)}" '
             'preserveAspectRatio="none"'
             + (f" {blip_attr}" if blip_attr else "")
             + "/>"
@@ -181,7 +215,8 @@ def _is_plain_rect(geometry: m.Geometry) -> bool:
     return isinstance(geometry, m.PresetGeometry) and geometry.preset in ("rect", "flowChartProcess")
 
 
-def _has_crop(rect: m.SrcRect) -> bool:
+def _has_crop(rect: m.SrcRect | m.StretchFillRect) -> bool:
+    """Does this relative rect actually inset anything?"""
     return any(value for value in (rect.left, rect.top, rect.right, rect.bottom))
 
 
@@ -198,9 +233,10 @@ def render_table(table: m.TableElement, context: RenderContext) -> str:
     for column in data.columns:
         column_offsets.append(column_offsets[-1] + emu_to_px(column.width))
 
+    row_heights = _row_heights(data, context)
     row_offsets: list[float] = [0.0]
-    for row in data.rows:
-        row_offsets.append(row_offsets[-1] + emu_to_px(row.height))
+    for height in row_heights:
+        row_offsets.append(row_offsets[-1] + emu_to_px(height))
 
     # Fills and text first, then every border on top, so a neighbour's fill cannot
     # paint over a shared edge.
@@ -235,7 +271,9 @@ def render_table(table: m.TableElement, context: RenderContext) -> str:
                     offset_x=0,
                     offset_y=0,
                     extent_width=table.table.columns[column_index].width * max(1, cell.grid_span),
-                    extent_height=data.rows[row_index].height * max(1, cell.row_span),
+                    extent_height=sum(
+                        row_heights[row_index: row_index + max(1, cell.row_span)]
+                    ),
                 )
                 text_svg = render_text_body(cell.text_body, cell_transform, context)
                 if text_svg:
@@ -246,6 +284,35 @@ def render_table(table: m.TableElement, context: RenderContext) -> str:
     parts.extend(borders)
     parts.append("</g>")
     return "".join(parts)
+
+
+def _row_heights(data: m.TableData, context: RenderContext) -> list[float]:
+    """Row heights in EMU, grown to fit their text.
+
+    ``a:tr@h`` is a *minimum*: PowerPoint makes a row taller when its text needs the
+    space, and everything below it moves down.  Taking the attribute as exact leaves the
+    gridlines of a text-heavy table drifting further out of place with every row.
+
+    Only cells that occupy a single row get a vote.  A cell spanning several rows has no
+    one row to grow, and guessing how to share its height between them would do more
+    harm than leaving it alone.
+    """
+    heights = [row.height for row in data.rows]
+    for row_index, row in enumerate(data.rows):
+        for column_index, cell in enumerate(row.cells):
+            if cell.text_body is None or cell.h_merge or cell.v_merge:
+                continue
+            if cell.row_span > 1 or column_index >= len(data.columns):
+                continue
+            width = data.columns[column_index].width * max(1, cell.grid_span)
+            required = compute_sp_autofit_height(
+                cell.text_body,
+                m.Transform(extent_width=width, extent_height=heights[row_index]),
+                context,
+            )
+            if required is not None:
+                heights[row_index] = required
+    return heights
 
 
 def _cell_borders(

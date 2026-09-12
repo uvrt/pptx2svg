@@ -14,7 +14,17 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import Element
 
-from ..xmlutil import attr, child, children, int_attr, is_true, local_name, ns_attr, num_attr
+from ..xmlutil import (
+    attr,
+    child,
+    child_text,
+    children,
+    int_attr,
+    is_true,
+    local_name,
+    ns_attr,
+    num_attr,
+)
 from .drawing import (
     parse_blip_effects,
     parse_effect_list,
@@ -116,6 +126,7 @@ def parse_shape(sp: Element) -> SourceShape:
         style=parse_shape_style(child(sp, "style")),
         text_body=parse_text_body(child(sp, "txBody")),
         hyperlink_rel_id=_hyperlink_rel_id(c_nv_pr),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -133,6 +144,7 @@ def parse_connector(cxn_sp: Element) -> SourceConnector:
         outline=parse_outline(sp_pr),
         effects=parse_effect_list(child(sp_pr, "effectLst")),
         style=parse_shape_style(child(cxn_sp, "style")),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -158,6 +170,7 @@ def parse_picture(pic: Element) -> SourceImage:
         stretch=parse_relative_rect(child(child(blip_fill, "stretch"), "fillRect")),
         tile=parse_image_fill_tile(child(blip_fill, "tile")),
         hyperlink_rel_id=_hyperlink_rel_id(c_nv_pr),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -176,6 +189,7 @@ def parse_group(grp_sp: Element) -> SourceGroup:
         fill=parse_fill(grp_sp_pr),
         effects=parse_effect_list(child(grp_sp_pr, "effectLst")),
         children=parse_shape_tree(grp_sp),
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -184,6 +198,11 @@ def parse_placeholder(nv_pr_parent: Element | None) -> SourcePlaceholder | None:
     if ph is None:
         return None
     return SourcePlaceholder(type=attr(ph, "type"), idx=int_attr(ph, "idx"))
+
+
+def _hidden(c_nv_pr: Element | None) -> bool:
+    """``p:cNvPr@hidden`` -- PowerPoint's "hide" in the selection pane."""
+    return is_true(attr(c_nv_pr, "hidden"))
 
 
 def _alt_text(c_nv_pr: Element | None) -> str | None:
@@ -216,6 +235,7 @@ def parse_graphic_frame(frame: Element) -> SourceShapeNode | None:
             shape_id=attr(c_nv_pr, "id"),
             alt_text=_alt_text(c_nv_pr),
             transform=transform,
+            hidden=_hidden(c_nv_pr),
         )
 
     if uri == GRAPHIC_DATA_CHART:
@@ -238,6 +258,7 @@ def parse_graphic_frame(frame: Element) -> SourceShapeNode | None:
         alt_text=_alt_text(c_nv_pr),
         transform=transform,
         fallback_rel_id=fallback_rel_id,
+        hidden=_hidden(c_nv_pr),
     )
 
 
@@ -279,6 +300,7 @@ def parse_table(
     shape_id: str | None,
     alt_text: str | None,
     transform,
+    hidden: bool = False,
 ) -> SourceTable:
     tbl_pr = child(tbl, "tblPr")
     columns = [num_attr(col, "w") or 0 for col in children(child(tbl, "tblGrid"), "gridCol")]
@@ -292,7 +314,13 @@ def parse_table(
         columns=columns,
         rows=rows,
         first_row=is_true(attr(tbl_pr, "firstRow")),
+        last_row=is_true(attr(tbl_pr, "lastRow")),
+        first_col=is_true(attr(tbl_pr, "firstCol")),
+        last_col=is_true(attr(tbl_pr, "lastCol")),
         band_row=is_true(attr(tbl_pr, "bandRow")),
+        band_col=is_true(attr(tbl_pr, "bandCol")),
+        style_id=(child_text(tbl_pr, "tableStyleId") or "").strip() or None,
+        hidden=hidden,
     )
 
 

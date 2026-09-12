@@ -289,6 +289,9 @@ class RunProperties:
     bold: bool = False
     italic: bool = False
     underline: bool = False
+    #: ``a:rPr@u`` when it names something other than a plain single rule -- ``"dbl"``,
+    #: ``"wavy"``, ``"dotted"``, ``"dotDash"`` and friends.
+    underline_style: str | None = None
     strikethrough: bool = False
     color: ResolvedColor | None = None
     #: >0 superscript, <0 subscript
@@ -341,6 +344,12 @@ class BodyProperties:
     ln_spc_reduction: float = 0.0
     num_col: int = 1
     vert: TextVerticalType = "horz"
+    #: ``a:bodyPr@rot`` in degrees -- the text rotates inside the shape, independently of
+    #: the shape's own rotation, about the text box's centre.
+    rotation: float = 0.0
+    #: ``a:bodyPr@defTabSz`` -- spacing of the implicit tab stops, EMU.  PowerPoint's
+    #: default is one inch.
+    default_tab_size: float = 914400
 
 
 @dataclass

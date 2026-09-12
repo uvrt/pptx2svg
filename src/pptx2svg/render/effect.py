@@ -153,7 +153,13 @@ def render_blip_effects(effects: m.BlipEffects | None, context: RenderContext) -
         )
 
     if effects.bi_level is not None:
-        # Threshold to pure black/white using a two-entry discrete transfer.
+        # Threshold to pure black/white.  A discrete transfer splits its input into
+        # equal buckets, so the split point is set by how many of them map to black:
+        # 20 buckets puts the threshold within 2.5% of wherever `a:biLevel@thresh` asks
+        # for, which is finer than the effect itself is ever authored to.
+        buckets = 20
+        black = max(1, min(buckets - 1, round(effects.bi_level.threshold * buckets)))
+        table = " ".join(["0"] * black + ["1"] * (buckets - black))
         primitives.append(
             '<feColorMatrix type="matrix" values="'
             "0.2126 0.7152 0.0722 0 0  "
@@ -161,9 +167,9 @@ def render_blip_effects(effects: m.BlipEffects | None, context: RenderContext) -
             "0.2126 0.7152 0.0722 0 0  "
             '0 0 0 1 0"/>'
             "<feComponentTransfer>"
-            '<feFuncR type="discrete" tableValues="0 1"/>'
-            '<feFuncG type="discrete" tableValues="0 1"/>'
-            '<feFuncB type="discrete" tableValues="0 1"/>'
+            f'<feFuncR type="discrete" tableValues="{table}"/>'
+            f'<feFuncG type="discrete" tableValues="{table}"/>'
+            f'<feFuncB type="discrete" tableValues="{table}"/>'
             "</feComponentTransfer>"
         )
 

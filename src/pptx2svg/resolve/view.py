@@ -30,6 +30,7 @@ from typing import Callable, Iterable, Sequence
 from .. import model as m
 from ..opc import OpcPackage
 from ..parse import source as s
+from ..parse.table_styles_builtin import builtin_table_style
 from ..units import ROTATION_UNIT
 from .color import ColorContext, build_effective_color_map, resolve_color
 
@@ -284,6 +285,10 @@ def resolve_element(
     where identity is attached -- doing it here rather than in each ``_resolve_*`` keeps groups
     and their descendants consistent for free.
     """
+    # `p:cNvPr@hidden` is PowerPoint's "hide" in the selection pane: the shape is still
+    # in the file, with all its formatting, and simply is not drawn.
+    if getattr(node, "hidden", False):
+        return None
     if isinstance(node, s.SourceShape):
         element = _resolve_shape(context, node)
     elif isinstance(node, s.SourceConnector):
@@ -440,12 +445,24 @@ def _resolve_image(context: ResolveContext, image: s.SourceImage) -> m.SlideElem
 
 
 def _resolve_table(context: ResolveContext, table: s.SourceTable) -> m.TableElement:
+    style = _table_style(context, table)
+    column_count = len(table.columns)
+    row_count = len(table.rows)
+
     rows = [
         m.TableRow(
             height=row.height,
-            cells=[_resolve_table_cell(context, cell) for cell in row.cells],
+            cells=[
+                _resolve_table_cell(
+                    context,
+                    cell,
+                    _cell_style(style, table, row_index, column_index, cell,
+                                row_count, column_count),
+                )
+                for column_index, cell in enumerate(row.cells)
+            ],
         )
-        for row in table.rows
+        for row_index, row in enumerate(table.rows)
     ]
     return m.TableElement(
         transform=_resolve_transform(context, table.transform),
@@ -456,10 +473,182 @@ def _resolve_table(context: ResolveContext, table: s.SourceTable) -> m.TableElem
     )
 
 
-def _resolve_table_cell(context: ResolveContext, cell: s.SourceTableCell) -> m.TableCell:
+def _table_style(context: ResolveContext, table: s.SourceTable) -> s.SourceTableStyle | None:
+    """Find the table's style: its own id, else the presentation's default.
+
+    A deck's ``tableStyles.xml`` is consulted first, since a custom style there may reuse
+    a built-in's GUID, and the built-in catalogue second.  Neither is guaranteed to have
+    it -- PowerPoint does not write built-in definitions into the file, and the catalogue
+    covers most but not all of them -- in which case the table simply renders unstyled,
+    which is what PowerPoint does with an id it does not recognise.
+    """
+    styles = context.presentation.table_styles
+    style_id = table.style_id or (styles.default_style_id if styles else None)
+    if not style_id:
+        return None
+    if styles is not None and style_id in styles.styles:
+        return styles.styles[style_id]
+    return builtin_table_style(style_id)
+
+
+def _band(index: int, first: bool, last: bool, count: int) -> int | None:
+    """Which banding stripe a row or column falls in, or ``None`` for neither.
+
+    The header and footer rows are outside the banding and do not advance it, so with
+    ``firstRow`` set the first body row is band 1, not band 2.  Verified against
+    PowerPoint's own render.
+    """
+    start = 1 if first else 0
+    end = count - (1 if last else 0)
+    if not start <= index < end:
+        return None
+    return (index - start) % 2
+
+
+def _cell_regions(
+    style: s.SourceTableStyle,
+    table: s.SourceTable,
+    row_index: int,
+    column_index: int,
+    cell: s.SourceTableCell,
+    row_count: int,
+    column_count: int,
+) -> list[tuple[s.SourceTableCellStyle, tuple[int, int], tuple[int, int]]]:
+    """Every style region covering this cell, lowest precedence first.
+
+    Each entry carries the region's own row and column extent, because a region's four
+    named borders apply at *its* boundary and its inside borders within it: ``firstRow``
+    puts its ``bottom`` under the header rather than under the table.
+    """
+    last_row = row_index + max(1, cell.row_span) >= row_count
+    last_col = column_index + max(1, cell.grid_span) >= column_count
+    is_first_row = table.first_row and row_index == 0
+    is_last_row = table.last_row and last_row
+    is_first_col = table.first_col and column_index == 0
+    is_last_col = table.last_col and last_col
+
+    all_rows = (0, row_count - 1)
+    all_cols = (0, column_count - 1)
+    regions: list[tuple[s.SourceTableCellStyle | None, tuple[int, int], tuple[int, int]]] = [
+        (style.whole_table, all_rows, all_cols)
+    ]
+
+    if table.band_col:
+        band = _band(column_index, table.first_col, table.last_col, column_count)
+        if band is not None:
+            region = style.band1_v if band == 0 else style.band2_v
+            regions.append((region, all_rows, (column_index, column_index)))
+    if table.band_row:
+        band = _band(row_index, table.first_row, table.last_row, row_count)
+        if band is not None:
+            region = style.band1_h if band == 0 else style.band2_h
+            regions.append((region, (row_index, row_index), all_cols))
+
+    if is_last_col:
+        regions.append((style.last_col, all_rows, (column_count - 1, column_count - 1)))
+    if is_first_col:
+        regions.append((style.first_col, all_rows, (0, 0)))
+    if is_last_row:
+        regions.append((style.last_row, (row_count - 1, row_count - 1), all_cols))
+    if is_first_row:
+        regions.append((style.first_row, (0, 0), all_cols))
+
+    corner = None
+    if is_first_row and is_first_col:
+        corner = style.nw_cell
+    elif is_first_row and is_last_col:
+        corner = style.ne_cell
+    elif is_last_row and is_first_col:
+        corner = style.sw_cell
+    elif is_last_row and is_last_col:
+        corner = style.se_cell
+    if corner is not None:
+        regions.append((corner, (row_index, row_index), (column_index, column_index)))
+
+    return [(region, rows, cols) for region, rows, cols in regions if region is not None]
+
+
+@dataclass
+class _CellStyle:
+    """A table style flattened onto one cell, ready to sit under its own formatting."""
+
+    fill: s.SourceFill | None = None
+    fill_ref: s.SourceStyleReference | None = None
+    text: s.SourceRunProperties | None = None
+    border_top: s.SourceOutline | None = None
+    border_bottom: s.SourceOutline | None = None
+    border_left: s.SourceOutline | None = None
+    border_right: s.SourceOutline | None = None
+
+
+def _cell_style(
+    style: s.SourceTableStyle | None,
+    table: s.SourceTable,
+    row_index: int,
+    column_index: int,
+    cell: s.SourceTableCell,
+    row_count: int,
+    column_count: int,
+) -> _CellStyle:
+    merged = _CellStyle()
+    if style is None or not column_count or not row_count:
+        return merged
+
+    row_end = row_index + max(1, cell.row_span) - 1
+    column_end = column_index + max(1, cell.grid_span) - 1
+
+    for region, (first_row, last_row), (first_col, last_col) in _cell_regions(
+        style, table, row_index, column_index, cell, row_count, column_count
+    ):
+        if region.fill is not None:
+            merged.fill = region.fill
+            merged.fill_ref = None
+        elif region.fill_ref is not None:
+            merged.fill_ref = region.fill_ref
+            merged.fill = None
+        if region.text is not None:
+            merged.text = _merge_run_properties(merged.text, region.text)
+
+        for edge, at_boundary, outer, inner in (
+            ("border_top", row_index == first_row, region.border_top, region.border_inside_h),
+            ("border_bottom", row_end == last_row, region.border_bottom, region.border_inside_h),
+            ("border_left", column_index == first_col, region.border_left, region.border_inside_v),
+            ("border_right", column_end == last_col, region.border_right, region.border_inside_v),
+        ):
+            outline = outer if at_boundary else inner
+            if outline is not None:
+                setattr(merged, edge, outline)
+
+    return merged
+
+
+def _merge_run_properties(
+    base: s.SourceRunProperties | None, over: s.SourceRunProperties
+) -> s.SourceRunProperties:
+    if base is None:
+        return replace(over)
+    merged = replace(base)
+    for name, value in vars(over).items():
+        if value is not None:
+            setattr(merged, name, value)
+    return merged
+
+
+def _resolve_table_cell(
+    context: ResolveContext,
+    cell: s.SourceTableCell,
+    style: _CellStyle | None = None,
+) -> m.TableCell:
+    style = style or _CellStyle()
     text_body = None
     if cell.text_body is not None:
-        text_body = _resolve_text_body(context, cell.text_body, inherited=[], placeholder_type=None)
+        text_body = _resolve_text_body(
+            context,
+            cell.text_body,
+            inherited=[],
+            placeholder_type=None,
+            extra_defaults=style.text,
+        )
         # Cell margins and anchor live on `a:tcPr`, not on the cell's `a:bodyPr`.
         body_properties = text_body.body_properties
         if cell.margin_left is not None:
@@ -473,16 +662,24 @@ def _resolve_table_cell(context: ResolveContext, cell: s.SourceTableCell) -> m.T
         if cell.anchor is not None:
             body_properties.anchor = cell.anchor
 
+    # The cell's own `a:lnL`/`a:lnR`/... win outright; the style only fills the gaps.
     borders = m.CellBorders(
-        top=_resolve_table_border(context, cell.border_top),
-        bottom=_resolve_table_border(context, cell.border_bottom),
-        left=_resolve_table_border(context, cell.border_left),
-        right=_resolve_table_border(context, cell.border_right),
+        top=_resolve_table_border(context, cell.border_top or style.border_top),
+        bottom=_resolve_table_border(context, cell.border_bottom or style.border_bottom),
+        left=_resolve_table_border(context, cell.border_left or style.border_left),
+        right=_resolve_table_border(context, cell.border_right or style.border_right),
     )
+
+    fill = cell.fill
+    if fill is None and style.fill is not None:
+        fill = style.fill
+    resolved_fill = _resolve_fill(context, fill) if fill is not None else None
+    if resolved_fill is None and cell.fill is None and style.fill_ref is not None:
+        resolved_fill = _resolve_fill_reference(context, style.fill_ref)
 
     return m.TableCell(
         text_body=text_body,
-        fill=_resolve_fill(context, cell.fill) if cell.fill is not None else None,
+        fill=resolved_fill,
         borders=borders,
         grid_span=cell.grid_span,
         row_span=cell.row_span,

@@ -28,17 +28,17 @@ after it needs a way to tell "better" from "different".
 | Theme colours, colour maps, transforms | Complete |
 | Placeholder / background / text inheritance | Complete |
 | Shapes: 134 presets + custom geometry with guide formulas | Common set done; **~53 presets missing** |
-| Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical | Complete for the common path |
+| Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
-| Pictures: crop, colour adjustments | Complete |
-| Tables: merged cells, per-cell borders and fills | Structure complete; **table styles missing** |
+| Pictures: crop, colour adjustments, tile, stretch | Complete |
+| Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried |
 | Charts | **Not rendered** |
 | SmartArt | **Not rendered** |
 | EMF / WMF | **Not rendered** |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
 
-266 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
+292 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
 independently testable, and every phase below slots into exactly one of them.
 
 ### Shape identity
@@ -55,18 +55,33 @@ pair `(id, path)` is unique, and a downstream consumer needs both to address a s
 
 ### Measured baseline
 
-Against real PowerPoint output for `real-product-page.pptx` (see Phase 0 for how this was
-produced):
+Against real PowerPoint output, per fixture, at 1280 px wide. "Before" is the tree as of
+commit 076a0f5, "after" is with Phase 1 landed.
 
-| Metric | Value |
-| --- | --- |
-| Pixels differing by >10/255 | **6.84%** |
-| Pixels differing by >64/255 | 4.88% |
-| Mean absolute difference | 8.87/255 |
+| Fixture | >10/255 before | after | >64/255 before | after | mean before | after |
+| --- | --- | --- | --- | --- | --- | --- |
+| `authoring-integration.pptx` | 11.84% | **6.72%** | 5.66% | 5.55% | 9.80 | **7.87** |
+| `real-basic-theme.pptx` | 1.84% | 2.07% | 0.98% | 1.12% | 1.72 | 1.86 |
+| `real-product-page.pptx` | 6.80% | 6.80% | 4.77% | 4.77% | 8.40 | 8.40 |
+| `real-financial-report.pptx` | 5.26% | 5.26% | 3.52% | 3.53% | 5.32 | 5.32 |
+| `sample.pptx` | 2.61% | 2.58% | 1.96% | 2.04% | 4.16 | 4.18 |
+| `sample-issue-387.pptx` | 1.91% | 1.91% | 1.44% | 1.44% | 2.80 | 2.80 |
 
 Layout, colour and text positions match; the residual is almost entirely glyph
-antialiasing and font substitution. **This is the number to drive down** — record it per
-fixture once Phase 0 lands, and treat a regression in it as a failing build.
+antialiasing and font substitution. **This is the number to drive down** — treat a
+regression in it as a failing build.
+
+Two entries need reading rather than scanning. `authoring-integration.pptx` is the only
+fixture whose table names a built-in style, and it is the one Phase 1 moved.
+`real-basic-theme.pptx` moved the *wrong* way, and the reason is worth keeping: its
+custom table style's gridlines are now drawn, correctly and in the right colour, but a
+couple of pixels lower than PowerPoint puts them, because our line height for its CJK
+text comes out about 7% short. Drawing nothing scored better than drawing something
+slightly misplaced. The next win on that fixture is font metrics, not tables.
+
+The remaining three fixtures are flat because none of them uses anything Phase 1 touched
+— checked, not assumed: `real-financial-report.pptx`'s tables carry explicit per-cell
+fills and borders on every cell, so no style could change them.
 
 ---
 
@@ -153,50 +168,104 @@ directly even though their generator does not.
 
 ---
 
-## Phase 1 — Parsed but not rendered
+## Phase 1 — Parsed but not rendered — **done**
 
 **Effort: M total. Highest fidelity-per-line in the whole plan.**
 
-Fields the parser already reads and the resolver already carries, which the renderer then
-ignores. The expensive half is done; each item is tens of lines.
+Fields the parser already read and the resolver already carried, which the renderer then
+ignored. All of them now render, with two deliberate exceptions noted at the end.
 
-Audited from the current tree:
+| Gap | State |
+| --- | --- |
+| **Table styles** (`tableStyles.xml`, `a:tblStyle`) | Done — custom styles read, 72 built-ins carried |
+| **Tab stops** (`a:tabLst`, `defTabSz`) | Done |
+| **Text highlight** (`a:highlight`) | Done — drawn as a rect behind the text |
+| **Underline styles** (`u="dbl"`, `"wavy"`, `"dotted"` …) | Done — `text-decoration-style` |
+| **Complex-script fonts** (`a:cs`) | Done — last in the `font-family` stack |
+| **Text body rotation** (`a:bodyPr@rot`) | Done |
+| **Hidden shapes** (`cNvPr@hidden`) | Done |
+| **Image tile / stretch** | Done |
+| **Multi-column text** (`a:bodyPr@numCol`) | Done, except mid-paragraph breaks |
+| **Justified text** (`algn="just"`) | **Deferred** — see below |
 
-| Gap | Parsed in | Dropped at | Effort |
-| --- | --- | --- | --- |
-| **Table styles** (`tableStyles.xml`, `a:tblStyle`) | not read at all | — | M |
-| **Tab stops** (`a:tabLst`) | `parse/text.py:parse_tab_stops` | `render/text.py` | S |
-| **Text highlight** (`a:highlight`) | `parse/text.py:parse_run_properties` | `render/text.py:_style_attrs` | S |
-| **Underline styles** (`u="dbl"`, `"wavy"`, `"dotted"` …) | collapsed to a bool | — | S |
-| **Complex-script fonts** (`a:cs`) | resolved to `font_family_cs` | never enters the font chain | S |
-| **Text body rotation** (`a:bodyPr@rot`) | `parse/text.py:111` | never reaches the model | S |
-| **Hidden shapes** (`cNvPr@hidden`) | not read | — | S |
-| **Image tile / stretch** | `parse/shapes.py:parse_picture` | `render/shape.py:render_image` | S |
-| **Multi-column text** (`a:bodyPr@numCol`) | divides the width only | no column flow | M |
-| **Justified text** (`algn="just"`) | resolved | renders as left | M |
+### Correction: built-in table styles are not in the file
 
-**Table styles** are the biggest visual gap here. A PowerPoint table using the default
-"Medium Style 2 – Accent 1" carries *no* per-cell fills in the slide XML; banding, header
-row and borders all come from `ppt/tableStyles.xml` keyed by GUID. We parse
-`first_row`/`band_row` and never use them, so real-deck tables render as unstyled grids.
-Needs a reader for `tableStyles.xml`, resolution of `wholeTbl` / `band1H` / `firstRow` /
-`lastRow` against row and column index, and merging *under* explicit cell formatting.
-**[pptx-renderer]** additionally handles conditional corner styles, merged-cell
-inside/outer border resolution, and explicit no-fill border clearing — worth copying the
-*rules*, which are the fiddly part.
+The earlier version of this section said banding, header row and borders "all come from
+`ppt/tableStyles.xml` keyed by GUID". That is wrong, and it is the single most important
+thing to know before touching tables.
 
-**Multi-column text** currently computes the per-column width and lays out one column into
-it, making text narrow rather than columnar. Correct behaviour needs the paragraph loop in
-`render/text.py:render_text_body` to break into a new column when accumulated height
-exceeds the body height, emitting one `<text>` per column.
+**PowerPoint never writes a built-in style's definition into the file** — not even for a
+style a table in the deck is actually using. Confirmed by round-tripping a deck through
+PowerPoint 16.x: it rewrote `tableStyles.xml` as an empty element carrying nothing but
+`def="{5C22544A-…}"`, the id of "Medium Style 2 - Accent 1". Three of the six fixtures
+have exactly that shape. A reader for the part is necessary — Google Slides and Keynote
+*do* write custom styles out — but it is nowhere near sufficient, and a catalogue of the
+built-ins has to be carried.
 
-**Justified text** requires distributing slack across word gaps. SVG has no
-`text-align: justify`, so it means per-word `x` positioning — a chunk of restructuring.
-Consider deferring behind the rest.
+The definitions are not on disk anywhere either; the application bundle was searched.
+They were therefore **measured from PowerPoint's own rendering**, by
+`tools/derive_table_styles.py`:
 
-Worth adding alongside this phase: a test that walks the model dataclasses and flags any
-field the renderer never reads. That is how the table above was produced; making it
-permanent stops the category from silently regrowing.
+1. a sheet of 546 swatches, each filled with a known OOXML colour expression, gives an
+   exact colour → expression dictionary — which is what turns a sampled `#cfd5ea` into
+   `accent1 tint 40%` rather than into a guess;
+2. a probe deck with one slide per candidate GUID and three tables per slide, laid out so
+   every conditional region lands at a known row and column;
+3. each probe rendered **twice, over a white background and over a black one**, so that
+   `observed = colour × alpha + backdrop × (1 − alpha)` becomes two equations in two
+   unknowns and alpha falls out. This matters: the whole Light Style family bands with
+   20%-alpha black, which over a single background is indistinguishable from an opaque
+   grey.
+
+Two cross-checks keep guesses out of the result. A GUID PowerPoint does not recognise
+renders exactly like "No Style, Table Grid" — that is its fallback — which caught three
+candidate GUIDs that were wrong. And within a family the six accent variants must agree
+once the accent number is factored out, which caught five stray colour matches. The
+catalogue is **deliberately incomplete** rather than padded: "Light Style 1 - Accent 4"
+and "Medium Style 1" are absent because their GUIDs are not known here, and a table
+naming an unknown GUID falls back to no style, exactly as PowerPoint does.
+
+### Also found on the way
+
+Two things turned up that were not in this plan:
+
+- **`tint` and `shade` were wrong in two independent ways** — the value was read as how
+  far the colour *moves* rather than how much of it *survives*, and the blend was done in
+  sRGB where PowerPoint does it in linear light. 284 of the 546 swatches differed from
+  PowerPoint by more than 2/255 before the fix, several by more than 150. None do now.
+  `lumMod`/`lumOff`, checked the same way, were already exact.
+- **`a:clrChange` is parsed, resolved, and has no renderer at all** — a gap this section
+  missed. It is now recorded in `UNRENDERED_FIELDS`, and is a Phase 5 item.
+
+### The audit is now a test
+
+`tests/test_render.py` walks the render model and fails on any field the renderer never
+reads — which is how the table above was produced in the first place. Fields that are
+deliberately not the renderer's business are listed with a reason each, and a second test
+fails if one of those entries stops naming a real field, so the list cannot rot into a
+place regressions hide.
+
+### Left undone, on purpose
+
+- **Justified text** (`algn="just"`). SVG has no `text-align: justify`, so it means
+  per-word `x` positioning: the wrapper would have to hand out word positions instead of
+  line segments, and every consumer of `LineSegment` would change with it. Deferred, as
+  this plan suggested.
+- **Mid-paragraph column breaks.** PowerPoint splits a paragraph across a column
+  boundary; we move the whole paragraph. Seen side by side on a probe deck: PowerPoint
+  starts paragraph 4 at the bottom of the left column and finishes it at the top of the
+  right one. Fixing it means making the wrapper's line list the unit of column layout,
+  and deciding what a continuation does about its bullet.
+- **Tile flip and alignment** (`a:tile@flip`, `@algn`). SVG patterns cannot mirror
+  alternate tiles.
+
+### Fixtures
+
+None of the six fixtures uses a tab stop, a highlight, `bodyPr@rot`, a hidden shape, a
+non-single underline or multiple columns — checked, not assumed. Those are validated
+against PowerPoint using the deck `tools/make_feature_probe.py` builds, which is also
+where the mid-paragraph column finding above comes from. A synthetic corpus of the kind
+Phase 0.4 describes would subsume it.
 
 ---
 
@@ -397,6 +466,10 @@ Callouts and action buttons are the common ones in real decks.
 
 - **Picture bullets** (`a:buBlip`) — bullets as images. We handle `buChar` and `buAutoNum`
   only, and silently drop `buBlip`.
+- **`a:clrChange` on a picture** — parsed and resolved onto `BlipEffects.clr_change`, and
+  never drawn. Replacing one colour with another needs more than `feComponentTransfer`
+  can express per channel; the usual trick is an `feColorMatrix` that isolates the source
+  colour followed by an `feComposite`. Found by the model-coverage test, not by reading.
 - **Compound lines** (`a:ln@cmpd`: `dbl`, `thickThin`, `thinThick`, `tri`) — currently render
   as a single stroke.
 - **Rectangular gradients** — we treat every `a:path` gradient as radial;
@@ -435,7 +508,7 @@ Callouts and action buttons are the common ones in real decks.
 ## Suggested order
 
 ```
-Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrendered)
+Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrendered)   DONE
                                       ├─▶ Phase 2  (SmartArt)
                                       ├─▶ Phase 4  (EMF previews — now cheap)
                                       ├─▶ Phase 5.1/5.2  (shapes + small gaps)
@@ -448,11 +521,15 @@ reference implementation is available locally.
 
 Revised quick wins, in order of payoff per day:
 
-1. **Phase 1 table styles** — unstyled tables affect nearly every business deck; an afternoon.
-2. **Phase 4 EMF previews** — dropped from L to S–M by the embedded-PDF finding, and
+1. ~~**Phase 1 table styles**~~ — done, though not in an afternoon: the built-in
+   definitions are not in the file and had to be measured out of PowerPoint.
+2. **Font metrics** — now the largest single component of the residual on every fixture,
+   and the thing standing between `real-basic-theme.pptx`'s gridlines and PowerPoint's.
+   Phase 5.3's embedded fonts attack one half of it.
+3. **Phase 4 EMF previews** — dropped from L to S–M by the embedded-PDF finding, and
    `pypdfium2` arrives with Phase 0 regardless.
-3. **Phase 2 SmartArt** — dropped from XL to S–M by the cached-drawing finding.
-4. **Phase 5.1 shapes** — additive, parallelisable, near-zero risk.
+4. **Phase 2 SmartArt** — dropped from XL to S–M by the cached-drawing finding.
+5. **Phase 5.1 shapes** — additive, parallelisable, near-zero risk.
 
 Phase 3 remains the long pole and should start in parallel rather than waiting.
 
