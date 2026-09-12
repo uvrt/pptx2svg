@@ -340,3 +340,153 @@ def test_an_all_zero_stretch_rect_still_fills_the_frame():
 def test_tile_repeats_the_bitmap_through_a_pattern():
     svg = image_svg(tile=m.TileInfo(sx=0.5, sy=0.25, tx=91440, ty=0))
     assert "<rect" in svg and 'fill="url(#' in svg
+
+
+# -- Multi-column text -------------------------------------------------------------------
+
+
+def many_paragraphs(count: int) -> list[m.Paragraph]:
+    return [
+        m.Paragraph(runs=[m.TextRun(
+            f"Paragraph number {i} with enough words in it to wrap at least once.",
+            m.RunProperties(font_size=12),
+        )])
+        for i in range(1, count + 1)
+    ]
+
+
+def test_columns_flow_into_one_text_element_each():
+    body = m.TextBody(
+        paragraphs=many_paragraphs(6),
+        body_properties=m.BodyProperties(num_col=2),
+    )
+    svg = text_svg(body, width=5000000, height=1400000)
+    assert svg.count("<text") == 2
+
+    first, second = svg.split("</text>")[:2]
+    # The second column sits a column-width to the right of the first...
+    left = sorted(set(re.findall(r'<tspan x="([\d.]+)"', first)))
+    right = sorted(set(re.findall(r'<tspan x="([\d.]+)"', second)))
+    assert float(right[0]) > float(left[0]) + 200
+    # ...and holds later paragraphs, rather than the same text twice.
+    assert "number 1" in first and "number 1" not in second
+
+
+def test_a_single_column_body_is_unchanged():
+    body = m.TextBody(
+        paragraphs=many_paragraphs(6),
+        body_properties=m.BodyProperties(num_col=1),
+    )
+    assert text_svg(body, width=5000000, height=1400000).count("<text") == 1
+
+
+def test_numbering_carries_on_across_a_column_break():
+    paragraphs = [
+        m.Paragraph(
+            runs=[m.TextRun(f"item {i} with enough words to take a whole line", m.RunProperties(font_size=12))],
+            properties=m.ParagraphProperties(bullet=m.AutoNumBullet(scheme="arabicPeriod")),
+        )
+        for i in range(1, 7)
+    ]
+    body = m.TextBody(
+        paragraphs=paragraphs, body_properties=m.BodyProperties(num_col=2)
+    )
+    svg = text_svg(body, width=5000000, height=700000)
+    numbers = [n for n in ("1.", "2.", "3.", "4.", "5.", "6.") if f">{n}<" in svg]
+    assert numbers == ["1.", "2.", "3.", "4.", "5.", "6."]
+
+
+# -- Model coverage ----------------------------------------------------------------------
+
+#: Render-model fields the renderer deliberately does not read, and why.  Everything
+#: else must be read somewhere under `render/` or `text/`: this test exists because the
+#: "parsed but not rendered" category grew silently once already, and an audit only
+#: catches it if the audit runs every time.
+#:
+#: Adding an entry here is a decision, not a formality -- it says "this field is not
+#: meant for the renderer", not "this is not implemented yet".  A genuinely missing
+#: feature belongs in the roadmap, not in this list.
+UNRENDERED_FIELDS = {
+    # Theme tables.  The resolver consumes these and hands the renderer concrete
+    # colours and typefaces; they are on the model for callers of
+    # `convert_pptx_to_model`, not for drawing.
+    **{f"ColorScheme.{name}": "resolved before the renderer sees it" for name in (
+        "dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3", "accent4",
+        "accent5", "accent6", "hlink", "folHlink",
+    )},
+    **{f"FontScheme.{name}": "resolved before the renderer sees it" for name in (
+        "major_font", "minor_font", "major_font_ea", "minor_font_ea",
+        "major_font_cs", "minor_font_cs", "major_font_jpan", "minor_font_jpan",
+    )},
+
+    # Metadata that describes a shape rather than drawing it.
+    "ShapeElement.alt_text": "accessibility metadata, not geometry",
+    "ImageElement.alt_text": "accessibility metadata, not geometry",
+    "ConnectorElement.alt_text": "accessibility metadata, not geometry",
+    "GroupElement.alt_text": "accessibility metadata, not geometry",
+    "TableElement.alt_text": "accessibility metadata, not geometry",
+    "Hyperlink.tooltip": "no SVG equivalent short of a <title> child",
+    "ShapeElement.placeholder_type": "used by the resolver's inheritance, not drawn",
+    "ShapeElement.placeholder_idx": "used by the resolver's inheritance, not drawn",
+    "Slide.slide_number": "identifies the slide; the caller decides what to do with it",
+    "Slide.show_master_sp": "the resolver has already applied it to the element list",
+
+    # Genuinely not implemented.  These are roadmap items, listed so the gap is
+    # visible rather than merely absent.
+    "BlipEffects.clr_change": "a:clrChange has no clean SVG filter equivalent",
+    "ClrChangeEffect.clr_from": "a:clrChange is not rendered",
+    "ClrChangeEffect.clr_to": "a:clrChange is not rendered",
+    "BlurEffect.grow": "we always let the blur grow past the shape's bounds",
+    "OuterShadow.rotate_with_shape": "shadows are emitted inside the shape's own transform",
+    "ImageFillTile.flip": "SVG patterns cannot mirror alternate tiles",
+    "ImageFillTile.align": "tile origin comes from tx/ty alone",
+    "TileInfo.flip": "SVG patterns cannot mirror alternate tiles",
+    "TileInfo.align": "tile origin comes from tx/ty alone",
+}
+
+
+def test_the_renderer_reads_every_field_the_model_carries():
+    import dataclasses
+    from pathlib import Path
+
+    from pptx2svg import model
+
+    root = Path(__file__).resolve().parent.parent / "src/pptx2svg"
+    sources = "".join(
+        path.read_text()
+        for directory in ("render", "text")
+        for path in sorted((root / directory).glob("*.py"))
+    )
+
+    unread = []
+    for name in sorted(dir(model)):
+        obj = getattr(model, name)
+        if not dataclasses.is_dataclass(obj):
+            continue
+        for field in dataclasses.fields(obj):
+            key = f"{name}.{field.name}"
+            if field.name == "type" or key in UNRENDERED_FIELDS:
+                continue
+            if not re.search(rf"\.{re.escape(field.name)}\b", sources):
+                unread.append(key)
+
+    assert not unread, (
+        "these render-model fields are never read by the renderer:\n  "
+        + "\n  ".join(unread)
+        + "\n\nEither render them, or add them to UNRENDERED_FIELDS with the reason."
+    )
+
+
+def test_the_unrendered_list_has_no_stale_entries():
+    """An entry that no longer names a real field hides a regression behind itself."""
+    import dataclasses
+
+    from pptx2svg import model
+
+    known = {
+        f"{name}.{field.name}"
+        for name in dir(model)
+        if dataclasses.is_dataclass(getattr(model, name))
+        for field in dataclasses.fields(getattr(model, name))
+    }
+    assert not (set(UNRENDERED_FIELDS) - known)

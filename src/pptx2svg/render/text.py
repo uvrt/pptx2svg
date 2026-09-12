@@ -20,7 +20,7 @@ tallest run on it, using the font's ``(ascender + |descender|) / unitsPerEm``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .. import model as m
 from ..text.fontmap import font_family_value
@@ -101,6 +101,104 @@ def _resolve_dimensions(
 def render_text_body(
     text_body: m.TextBody, transform: m.Transform, context: RenderContext
 ) -> str:
+    """Render a text body, flowing it into columns when ``a:bodyPr@numCol`` asks for them."""
+    body = text_body.body_properties
+    if body.num_col > 1 and body.vert == "horz":
+        return _render_columns(text_body, transform, context)
+    return _render_column(text_body, transform, context)
+
+
+def _render_columns(
+    text_body: m.TextBody, transform: m.Transform, context: RenderContext
+) -> str:
+    """Fill each column to the body's height before starting the next.
+
+    Columns are laid out by rendering the same body once per column with the side
+    margins widened to leave only that column's slice exposed, which keeps every bit of
+    wrapping, anchoring and bullet logic in one place instead of two.  Vertical text is
+    excluded: its columns run along the other axis, and the margin trick would move them
+    in the wrong direction.
+    """
+    body = text_body.body_properties
+    paragraphs = text_body.paragraphs
+    if not any(run.text for para in paragraphs for run in para.runs):
+        return ""
+
+    columns = max(1, body.num_col)
+    dims = _resolve_dimensions(
+        body, emu_to_px(transform.extent_width), emu_to_px(transform.extent_height)
+    )
+    column_width = (dims.width - dims.margin_left - dims.margin_right) / columns
+    available = dims.height - dims.margin_top - dims.margin_bottom
+
+    groups = _split_into_columns(
+        paragraphs, columns, column_width, available, body, context
+    )
+
+    # One shared counter dict, so a numbered list carries on across a column break
+    # rather than restarting.
+    counters: dict[str, int] = {}
+    parts: list[str] = []
+    for index, group in enumerate(groups):
+        if not group:
+            continue
+        column_body = m.TextBody(
+            paragraphs=group,
+            body_properties=replace(
+                body,
+                num_col=1,
+                margin_left=body.margin_left + px_to_emu(index * column_width),
+                margin_right=body.margin_right
+                + px_to_emu((columns - 1 - index) * column_width),
+            ),
+        )
+        parts.append(_render_column(column_body, transform, context, counters))
+    return "".join(parts)
+
+
+def _split_into_columns(
+    paragraphs: list[m.Paragraph],
+    columns: int,
+    column_width: float,
+    available_height: float,
+    body: m.BodyProperties,
+    context: RenderContext,
+) -> list[list[m.Paragraph]]:
+    """Assign whole paragraphs to columns, breaking when one would overflow.
+
+    PowerPoint breaks mid-paragraph; we do not, because a paragraph is the unit the
+    wrapper and the height estimator both work in.  For the body text that `numCol` is
+    normally used on -- several short paragraphs -- the two agree.
+    """
+    default_font_size = _default_font_size(paragraphs)
+    should_wrap = body.wrap != "none"
+    heights = [
+        _estimate_text_height(
+            [paragraph], default_font_size, should_wrap, column_width,
+            body.ln_spc_reduction, body.font_scale, context,
+        )
+        for paragraph in paragraphs
+    ]
+
+    groups: list[list[m.Paragraph]] = [[]]
+    used = 0.0
+    for paragraph, height in zip(paragraphs, heights):
+        if groups[-1] and used + height > available_height and len(groups) < columns:
+            groups.append([])
+            used = 0.0
+        groups[-1].append(paragraph)
+        used += height
+    while len(groups) < columns:
+        groups.append([])
+    return groups
+
+
+def _render_column(
+    text_body: m.TextBody,
+    transform: m.Transform,
+    context: RenderContext,
+    counters: dict[str, int] | None = None,
+) -> str:
     body = text_body.body_properties
     paragraphs = text_body.paragraphs
 
@@ -140,7 +238,7 @@ def render_text_body(
 
     tspans: list[str] = []
     is_first_line = True
-    auto_num_counters: dict[str, int] = {}
+    auto_num_counters: dict[str, int] = {} if counters is None else counters
     previous_space_after = 0.0
     # SVG has no text background, so `a:highlight` is drawn as rectangles behind the
     # <text> element.  Their vertical position is the running sum of the `dy` advances,
@@ -992,6 +1090,10 @@ def compute_sp_autofit_height(
         1.0,
         context,
     )
+    if num_col > 1 and body.vert == "horz":
+        # The text now flows into `num_col` columns, so it needs roughly that fraction
+        # of the height it would take in one.
+        height /= num_col
     required = height + dims.margin_top + dims.margin_bottom
     if required <= dims.height:
         return None
