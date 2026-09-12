@@ -27,30 +27,35 @@ on run argv
     set outPath to POSIX file (item 2 of argv)
 
     set openedPresentation to missing value
-    tell application "Microsoft PowerPoint"
-        activate
-        try
-            open inPath
-            -- Match by full path rather than trusting the active window.
-            set presentationPaths to (get full name of every presentation)
-            repeat with presentationIndex from 1 to count of presentationPaths
-                if (item presentationIndex of presentationPaths as text) is inputPosixPath then
-                    set openedPresentation to presentation presentationIndex
-                    exit repeat
+    -- A large deck can take well over AppleScript's default two-minute
+    -- AppleEvent timeout to open and export; without this the call fails with
+    -- -1712 even though PowerPoint is working normally.
+    with timeout of 600 seconds
+        tell application "Microsoft PowerPoint"
+            activate
+            try
+                open inPath
+                -- Match by full path rather than trusting the active window.
+                set presentationPaths to (get full name of every presentation)
+                repeat with presentationIndex from 1 to count of presentationPaths
+                    if (item presentationIndex of presentationPaths as text) is inputPosixPath then
+                        set openedPresentation to presentation presentationIndex
+                        exit repeat
+                    end if
+                end repeat
+                if openedPresentation is missing value then
+                    error "PowerPoint opened the input but no presentation matched: " & inputPosixPath
                 end if
-            end repeat
-            if openedPresentation is missing value then
-                error "PowerPoint opened the input but no presentation matched: " & inputPosixPath
-            end if
-            save openedPresentation in outPath as save as PDF
-            close openedPresentation saving no
-        on error errorMessage number errorNumber
-            if openedPresentation is not missing value then
-                try
-                    close openedPresentation saving no
-                end try
-            end if
-            error errorMessage number errorNumber
-        end try
-    end tell
+                save openedPresentation in outPath as save as PDF
+                close openedPresentation saving no
+            on error errorMessage number errorNumber
+                if openedPresentation is not missing value then
+                    try
+                        close openedPresentation saving no
+                    end try
+                end if
+                error errorMessage number errorNumber
+            end try
+        end tell
+    end timeout
 end run

@@ -15,6 +15,7 @@ from ..opc import (
     REL_SLIDE,
     REL_SLIDE_LAYOUT,
     REL_SLIDE_MASTER,
+    REL_TABLE_STYLES,
     REL_THEME,
 )
 from ..xmlutil import attr, child, children, is_true, ns_attr, num_attr
@@ -26,10 +27,15 @@ from .source import (
     SourceFontScheme,
     SourceFormatScheme,
     SourcePresentation,
+    SourceRunProperties,
     SourceSlide,
     SourceSlideLayout,
     SourceSlideMaster,
+    SourceTableCellStyle,
+    SourceTableStyle,
+    SourceTableStyles,
     SourceTheme,
+    TABLE_STYLE_REGIONS,
 )
 from .text import parse_text_style
 
@@ -82,6 +88,7 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         slide_width=num_attr(sld_sz, "cx") or 9144000,
         slide_height=num_attr(sld_sz, "cy") or 6858000,
         default_text_style=parse_text_style(child(root, "defaultTextStyle")),
+        table_styles=read_table_styles(package, presentation_path),
     )
 
     for number, slide_path in enumerate(_slide_paths(package, presentation_path, root), start=1):
@@ -232,6 +239,108 @@ def parse_color_map_override(clr_map_ovr: Element | None) -> SourceColorMap | No
     if clr_map_ovr is None:
         return None
     return parse_color_map(child(clr_map_ovr, "overrideClrMapping"))
+
+
+# --------------------------------------------------------------------------------------
+# Table styles
+# --------------------------------------------------------------------------------------
+
+
+def read_table_styles(package: OpcPackage, presentation_path: str) -> SourceTableStyles | None:
+    """Read ``ppt/tableStyles.xml``.
+
+    Note what this part does *not* contain: PowerPoint never writes out the definition
+    of a built-in style, not even for a style a table in the deck actually uses.  A
+    PowerPoint-authored deck typically has a ``tableStyles.xml`` holding nothing but the
+    ``def`` attribute naming "Medium Style 2 - Accent 1", and every table in it renders
+    from a catalogue that lives inside the application.  So this reader covers *custom*
+    styles -- the ones Google Slides, Keynote and PowerPoint's own style editor emit --
+    and :mod:`pptx2svg.parse.table_styles_builtin` covers the rest.
+    """
+    part_path = package.first_related_part(presentation_path, REL_TABLE_STYLES)
+    if part_path is None:
+        return None
+    root = package.read_xml(part_path)
+    if root is None:
+        return None
+
+    styles: dict[str, SourceTableStyle] = {}
+    for node in children(root, "tblStyle"):
+        style = parse_table_style(node)
+        if style is not None:
+            styles[style.style_id] = style
+    return SourceTableStyles(default_style_id=attr(root, "def"), styles=styles)
+
+
+def parse_table_style(node: Element) -> SourceTableStyle | None:
+    style_id = attr(node, "styleId")
+    if not style_id:
+        return None
+    style = SourceTableStyle(style_id=style_id, name=attr(node, "styleName"))
+    for element_name, attribute in TABLE_STYLE_REGIONS:
+        region = parse_table_cell_style(child(node, element_name))
+        if region is not None:
+            setattr(style, attribute, region)
+    return style
+
+
+def parse_table_cell_style(node: Element | None) -> SourceTableCellStyle | None:
+    """Read one conditional region (``a:wholeTbl``, ``a:band1H``, ``a:firstRow``...)."""
+    if node is None:
+        return None
+    tc_style = child(node, "tcStyle")
+    borders = child(tc_style, "tcBdr")
+
+    style = SourceTableCellStyle(
+        # `a:fill` wraps the fill element, exactly like `a:spPr` does.
+        fill=parse_fill(child(tc_style, "fill")),
+        fill_ref=parse_style_reference(child(tc_style, "fillRef")),
+        text=parse_table_text_style(child(node, "tcTxStyle")),
+        border_left=parse_line(child(child(borders, "left"), "ln")),
+        border_right=parse_line(child(child(borders, "right"), "ln")),
+        border_top=parse_line(child(child(borders, "top"), "ln")),
+        border_bottom=parse_line(child(child(borders, "bottom"), "ln")),
+        border_inside_h=parse_line(child(child(borders, "insideH"), "ln")),
+        border_inside_v=parse_line(child(child(borders, "insideV"), "ln")),
+    )
+    if all(value is None for value in vars(style).values()):
+        return None
+    return style
+
+
+def parse_table_text_style(node: Element | None) -> SourceRunProperties | None:
+    """``a:tcTxStyle`` -- bold/italic plus a colour and a typeface for the region.
+
+    ``b``/``i`` here are ``"on"``/``"off"``/``"def"``, not the booleans ``a:rPr`` uses;
+    ``"def"`` means "leave it to whatever the cell inherits", which is ``None``.
+    """
+    if node is None:
+        return None
+
+    font = child(node, "font")
+    # `a:fontRef idx="minor"` names a theme font rather than a typeface; hand it on as
+    # the placeholder the text resolver already expands.
+    font_ref = {"major": "+mj-lt", "minor": "+mn-lt"}.get(
+        attr(child(node, "fontRef"), "idx") or ""
+    )
+    properties = SourceRunProperties(
+        bold=_on_off(attr(node, "b")),
+        italic=_on_off(attr(node, "i")),
+        typeface=attr(child(font, "latin"), "typeface") or font_ref,
+        typeface_ea=attr(child(font, "ea"), "typeface"),
+        typeface_cs=attr(child(font, "cs"), "typeface"),
+        # The colour is a bare child rather than being wrapped in `a:solidFill`.
+        color=parse_color(node),
+    )
+    if all(value is None for value in vars(properties).values()):
+        return None
+    return properties
+
+
+def _on_off(value: str | None) -> bool | None:
+    if value is None or value == "def":
+        return None
+    return value == "on"
 
 
 # --------------------------------------------------------------------------------------

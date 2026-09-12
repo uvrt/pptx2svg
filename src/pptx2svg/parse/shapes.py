@@ -14,7 +14,17 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import Element
 
-from ..xmlutil import attr, child, children, int_attr, is_true, local_name, ns_attr, num_attr
+from ..xmlutil import (
+    attr,
+    child,
+    child_text,
+    children,
+    int_attr,
+    is_true,
+    local_name,
+    ns_attr,
+    num_attr,
+)
 from .drawing import (
     parse_blip_effects,
     parse_effect_list,
@@ -291,7 +301,12 @@ def parse_table(
         columns=columns,
         rows=rows,
         first_row=is_true(attr(tbl_pr, "firstRow")),
+        last_row=is_true(attr(tbl_pr, "lastRow")),
+        first_col=is_true(attr(tbl_pr, "firstCol")),
+        last_col=is_true(attr(tbl_pr, "lastCol")),
         band_row=is_true(attr(tbl_pr, "bandRow")),
+        band_col=is_true(attr(tbl_pr, "bandCol")),
+        style_id=(child_text(tbl_pr, "tableStyleId") or "").strip() or None,
     )
 
 

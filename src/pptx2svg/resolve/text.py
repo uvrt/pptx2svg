@@ -48,8 +48,11 @@ def resolve_text_body(
     text_body: s.SourceTextBody,
     inherited: Sequence[s.SourceTextBody | None],
     placeholder_type: str | None,
+    extra_defaults: s.SourceRunProperties | None = None,
 ) -> m.TextBody:
-    chain = _build_style_chain(context, text_body, inherited, placeholder_type)
+    chain = _build_style_chain(
+        context, text_body, inherited, placeholder_type, extra_defaults
+    )
 
     # Body properties layer outward-in: master placeholder, then layout, then the shape.
     properties: s.SourceTextBodyProperties | None = None
@@ -115,6 +118,7 @@ def _build_style_chain(
     text_body: s.SourceTextBody,
     inherited: Sequence[s.SourceTextBody | None],
     placeholder_type: str | None,
+    extra_defaults: s.SourceRunProperties | None = None,
 ) -> list[_StyleEntry]:
     chain: list[_StyleEntry] = []
 
@@ -132,6 +136,21 @@ def _build_style_chain(
     default_style = context.presentation.default_text_style
     if default_style is not None:
         chain.append(_StyleEntry(default_style, include_decorations=False))
+
+    if extra_defaults is not None:
+        # A table style's `a:tcTxStyle`: the weakest layer of all, but unlike the other
+        # inherited layers its decorations *do* apply -- a header row styled bold really
+        # does bold the cell's text, which is the whole point of the region.
+        chain.append(
+            _StyleEntry(
+                s.SourceTextStyle(
+                    default_paragraph=s.SourceParagraphProperties(
+                        default_run_properties=extra_defaults
+                    )
+                ),
+                include_decorations=True,
+            )
+        )
 
     return chain
 
