@@ -39,6 +39,44 @@ def numbers(data: str) -> list[float]:
     return [float(token) for token in re.findall(r"-?\d+(?:\.\d+)?", data)]
 
 
+def points(data: str) -> list[tuple[float, float]]:
+    """Every point an SVG ``d`` string visits.
+
+    Not the same as "every number in the string": an ``A`` command carries seven
+    numbers, of which only the last two are a coordinate, so pairing numbers off
+    blindly mixes radii and flags into the geometry.
+    """
+    tokens = re.findall(r"[MLAQCZ]|-?\d+(?:\.\d+)?", data)
+    result: list[tuple[float, float]] = []
+    index = 0
+    while index < len(tokens):
+        command = tokens[index]
+        index += 1
+        if command == "Z":
+            continue
+        count = {"M": 1, "L": 1, "A": 1, "Q": 2, "C": 3}[command]
+        if command == "A":
+            index += 5  # rx, ry, x-axis-rotation, large-arc-flag, sweep-flag
+        for _ in range(count):
+            result.append((float(tokens[index]), float(tokens[index + 1])))
+            index += 2
+    return result
+
+
+def shaded_paths(svg: str) -> list[str]:
+    """The ``d`` of every path drawn with a shading overlay.
+
+    For an action button those are exactly the pictogram's faces: the silhouette path
+    carries the full-box frame as a subpath and the stroked outline sometimes does too,
+    so neither can be used to measure the symbol.
+    """
+    return [
+        match.group(1)
+        for match in re.finditer(r'<path d="([^"]*)"([^/]*)/>', svg)
+        if "fill-opacity=" in match.group(2)
+    ]
+
+
 # --------------------------------------------------------------------------------------
 # Registration and general soundness
 # --------------------------------------------------------------------------------------
@@ -174,8 +212,7 @@ def test_accentCallout1_adds_an_accent_bar_at_x1():
 
 def test_upDownArrowCallout_is_symmetric_about_the_horizontal_centre():
     svg = preset_geometry_svg("upDownArrowCallout", 200.0, 100.0, {})
-    values = numbers(path_data(svg)[0])
-    xs = values[0::2]
+    xs = [x for x, _ in points(path_data(svg)[0])]
     # Every x has its mirror about w/2 somewhere in the outline.
     for x in xs:
         assert any(abs((200.0 - x) - other) < 1e-6 for other in xs)
@@ -183,12 +220,11 @@ def test_upDownArrowCallout_is_symmetric_about_the_horizontal_centre():
 
 def test_quadArrowCallout_has_four_arrow_tips_on_the_box_edges():
     svg = preset_geometry_svg("quadArrowCallout", 200.0, 100.0, {})
-    values = numbers(path_data(svg)[0])
-    points = list(zip(values[0::2], values[1::2]))
-    assert (0.0, 50.0) in points      # left tip
-    assert (200.0, 50.0) in points    # right tip
-    assert (100.0, 0.0) in points     # top tip
-    assert (100.0, 100.0) in points   # bottom tip
+    visited = points(path_data(svg)[0])
+    assert (0.0, 50.0) in visited      # left tip
+    assert (200.0, 50.0) in visited    # right tip
+    assert (100.0, 0.0) in visited     # top tip
+    assert (100.0, 100.0) in visited   # bottom tip
 
 
 @pytest.mark.parametrize(
@@ -201,8 +237,7 @@ def test_quadArrowCallout_has_four_arrow_tips_on_the_box_edges():
     ],
 )
 def test_each_arrow_callout_points_the_way_its_name_says(name, tip):
-    values = numbers(path_data(preset_geometry_svg(name, 200.0, 100.0, {}))[0])
-    assert tip in list(zip(values[0::2], values[1::2]))
+    assert tip in points(path_data(preset_geometry_svg(name, 200.0, 100.0, {}))[0])
 
 
 # --------------------------------------------------------------------------------------
@@ -222,3 +257,93 @@ def test_a_negative_adjustment_is_clamped_to_zero():
     svg = preset_geometry_svg("leftArrowCallout", 200.0, 100.0, {"adj1": -50000})
     values = numbers(path_data(svg)[0])
     assert all(math.isfinite(v) for v in values)
+
+
+# --------------------------------------------------------------------------------------
+# Action buttons
+# --------------------------------------------------------------------------------------
+
+ACTION_BUTTONS = [
+    "actionButtonBackPrevious", "actionButtonBeginning", "actionButtonBlank",
+    "actionButtonDocument", "actionButtonEnd", "actionButtonForwardNext",
+    "actionButtonHelp", "actionButtonHome", "actionButtonInformation",
+    "actionButtonMovie", "actionButtonReturn", "actionButtonSound",
+]
+
+
+@pytest.mark.parametrize("name", ACTION_BUTTONS)
+def test_the_action_button_is_registered(name):
+    assert name in PRESET_GEOMETRIES
+    assert name in SPEC_PRESETS
+
+
+@pytest.mark.parametrize("name", ACTION_BUTTONS)
+def test_every_action_button_fills_its_whole_box(name):
+    """The frame is the first path and is the full rectangle; a button that did not
+    cover its box would show the slide through it."""
+    first = path_data(preset_geometry_svg(name, 200.0, 100.0, {}))[0]
+    assert first.startswith("M 0 0 L 200 0 L 200 100 L 0 100 Z")
+
+
+def test_actionButtonBlank_is_only_the_frame():
+    """The blank button is the control case: one path, the frame, no pictogram.  It is
+    also the check that a single normally-painted path is emitted bare rather than
+    wrapped in a pointless <g>."""
+    svg = preset_geometry_svg("actionButtonBlank", 200.0, 100.0, {})
+    assert svg == '<path d="M 0 0 L 200 0 L 200 100 L 0 100 Z"/>'
+
+
+
+@pytest.mark.parametrize("name", [n for n in ACTION_BUTTONS if n != "actionButtonBlank"])
+def test_every_other_action_button_draws_a_pictogram(name):
+    svg = preset_geometry_svg(name, 200.0, 100.0, {})
+    assert len(path_data(svg)) > 2
+
+
+@pytest.mark.parametrize("name", [n for n in ACTION_BUTTONS if n != "actionButtonBlank"])
+def test_the_pictogram_is_shaded_so_it_shows_against_the_buttons_own_fill(name):
+    """The silhouette shares the button's fill colour, so without the darken/lighten
+    faces on top the symbol would be invisible.  Those become a neutral overlay here."""
+    svg = preset_geometry_svg(name, 200.0, 100.0, {})
+    assert "fill-opacity=" in svg
+
+
+@pytest.mark.parametrize("name", [n for n in ACTION_BUTTONS if n != "actionButtonBlank"])
+def test_the_symbol_box_is_square_however_the_button_is_stretched(name):
+    """The pictogram is sized from `ss`, the shortest side, so stretching the button
+    wide must not stretch the symbol with it.  Measured on the shaded faces, which are
+    pure pictogram -- the silhouette path also carries the full-box frame as a subpath,
+    and the stroked outline sometimes does too.
+
+    The symbol box is `dx2 = ss*3/8` either side of the centre, so it is `ss*3/4` on a
+    side whatever the aspect ratio."""
+    for width, height in ((200.0, 100.0), (100.0, 200.0), (400.0, 100.0)):
+        shortest = min(width, height)
+        visited = [
+            point
+            for data in shaded_paths(preset_geometry_svg(name, width, height, {}))
+            for point in points(data)
+        ]
+        assert visited, "every non-blank button has at least one shaded face"
+        xs = [x for x, _ in visited]
+        ys = [y for _, y in visited]
+        side = shortest * 3 / 4
+        assert max(xs) - min(xs) <= side + 1e-6
+        assert max(ys) - min(ys) <= side + 1e-6
+        # And it is centred on the button.
+        assert (max(xs) + min(xs)) / 2 == pytest.approx(width / 2, abs=side / 2)
+        assert (max(ys) + min(ys)) / 2 == pytest.approx(height / 2, abs=side / 2)
+
+
+def test_actionButtonHome_draws_a_house_in_the_symbol_box():
+    """The symbol box is `dx2 = ss*3/8` either side of the centre, so at 200x100
+    (ss = 100, dx2 = 37.5) it spans g11 = hc-dx2 = 62.5 to g12 = hc+dx2 = 137.5
+    horizontally and g9 = vc-dx2 = 12.5 to g10 = vc+dx2 = 87.5 vertically.
+
+    The roof apex sits at (hc, g9) and the eaves at (g11, vc) and (g12, vc)."""
+    svg = preset_geometry_svg("actionButtonHome", 200.0, 100.0, {})
+    visited = points(path_data(svg)[0])
+    assert (100.0, 12.5) in visited    # apex, at (hc, g9)
+    assert (62.5, 50.0) in visited     # left eave, at (g11, vc)
+    assert (137.5, 50.0) in visited    # right eave, at (g12, vc)
+    assert (71.875, 87.5) in visited   # wall foot, on g10
