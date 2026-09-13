@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Callable, Sequence
 
 from . import model
 from .model import Slide, SlideSize
@@ -86,6 +86,13 @@ class ConvertOptions:
     font_mapping: dict[str, str] | None = None
     #: Override text measurement (see :class:`~pptx2svg.text.measure.FontToolsTextMeasurer`).
     measurer: TextMeasurer | None = None
+    #: Convert an EMF/WMF metafile to something embeddable, as
+    #: ``(payload, mime_type) -> (payload, mime_type) | None``.  Opt-in: without it the
+    #: pure-Python path extracts the preview Office embedded in the metafile, which
+    #: covers most real files.  Supply one to shell out to Inkscape or ``libemf2svg``
+    #: for the rest -- returning ``image/svg+xml`` embeds the vectors directly.  Return
+    #: ``None`` to decline a particular file and fall back to the built-in path.
+    metafile_converter: Callable[[bytes, str], "tuple[bytes, str] | None"] | None = None
     #: Collects warnings for unsupported content; also returned by
     #: :func:`convert_pptx_to_model`.
     warnings: list[Warning] = field(default_factory=list)
@@ -115,7 +122,10 @@ def convert_pptx_to_model(
     package = _open_package(source)
     presentation = read_presentation(package)
     resolved = resolve_presentation(
-        package, presentation, slide_numbers=options.slide_numbers
+        package,
+        presentation,
+        slide_numbers=options.slide_numbers,
+        metafile_converter=options.metafile_converter,
     )
     options.warnings.extend(resolved.warnings)
     return resolved
