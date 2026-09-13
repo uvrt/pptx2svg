@@ -157,6 +157,28 @@ def resolve_value(token: str, variables: dict[str, float]) -> float:
         return variables.get(token, 0.0)
 
 
+def _parametric_angle(geometric: float, width_radius: float, height_radius: float) -> float:
+    """Geometric angle -> the ellipse's parametric angle, in radians.
+
+    This is the subtlety that makes elliptical arcs hard.  DrawingML's ``stAng`` is a
+    *geometric* angle: the direction of a ray from the ellipse centre, measured in the
+    shape's own coordinates.  The parametric angle ``t`` that generates a point --
+    ``(wR·cos t, hR·sin t)`` -- is a different number unless the ellipse is a circle,
+    related by ``tan t = (wR/hR)·tan θ``.
+
+    Treating one as the other is a silent error: it vanishes when ``wR == hR``, so
+    circles and every arc in a square shape look right, and it grows with the aspect
+    ratio until a stretched arc visibly fails to meet the segment it should join.
+
+    The revolution is preserved: ``atan2`` returns a value in (-pi, pi], so a sweep that
+    crosses the 12 o'clock mark would otherwise jump a full turn and flip the arc.
+    """
+    if width_radius == height_radius:
+        return geometric
+    t = math.atan2(width_radius * math.sin(geometric), height_radius * math.cos(geometric))
+    return t + math.tau * round((geometric - t) / math.tau)
+
+
 def arc_endpoint(
     current_x: float,
     current_y: float,
@@ -173,15 +195,26 @@ def arc_endpoint(
     centre is reconstructed from the current point and the start angle, and the end point
     projected from it.
 
-    Returns ``(end_x, end_y, large_arc_flag, sweep_flag)``.  Angles are in 1/60000 of a
-    degree, and y grows downwards in both models, so no sign flip is needed.
+    Both angles are geometric and must be converted to the ellipse's parametric angle
+    before they can generate a point -- see :func:`_parametric_angle`.
+
+    Returns ``(end_x, end_y, large_arc_flag, sweep_flag)``.  Angles arrive in 1/60000 of
+    a degree, and y grows downwards in both models, so no sign flip is needed.
     """
-    start_radians = math.radians(start_angle / DEGREE)
-    end_radians = math.radians((start_angle + sweep_angle) / DEGREE)
-    center_x = current_x - width_radius * math.cos(start_radians)
-    center_y = current_y - height_radius * math.sin(start_radians)
-    end_x = center_x + width_radius * math.cos(end_radians)
-    end_y = center_y + height_radius * math.sin(end_radians)
-    large_arc = 1 if abs(sweep_angle / DEGREE) > 180 else 0
-    sweep_flag = 1 if sweep_angle > 0 else 0
+    start_geometric = math.radians(start_angle / DEGREE)
+    end_geometric = math.radians((start_angle + sweep_angle) / DEGREE)
+    start_parametric = _parametric_angle(start_geometric, width_radius, height_radius)
+    end_parametric = _parametric_angle(end_geometric, width_radius, height_radius)
+
+    center_x = current_x - width_radius * math.cos(start_parametric)
+    center_y = current_y - height_radius * math.sin(start_parametric)
+    end_x = center_x + width_radius * math.cos(end_parametric)
+    end_y = center_y + height_radius * math.sin(end_parametric)
+
+    # The flags describe the arc actually swept, so they follow the parametric sweep --
+    # which for a very eccentric ellipse can straddle 180 degrees differently from the
+    # geometric one.
+    parametric_sweep = end_parametric - start_parametric
+    large_arc = 1 if abs(parametric_sweep) > math.pi else 0
+    sweep_flag = 1 if parametric_sweep > 0 else 0
     return end_x, end_y, large_arc, sweep_flag
