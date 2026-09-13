@@ -20,6 +20,7 @@ import math
 from typing import Callable
 
 from .. import model as m
+from ..guides import arc_endpoint, evaluate_guides, resolve_value
 
 Generator = Callable[[float, float, dict], str]
 
@@ -1150,6 +1151,814 @@ def _ribbon2(w, h, adj):
     )
 
 
+# --------------------------------------------------------------------------------------
+# Presets taken verbatim from the specification
+#
+# The generators above are hand-written approximations, which is the right trade for a
+# shape whose outline is a rounded rectangle or an ellipse.  It is the wrong trade for a
+# callout with nineteen guides and eleven vertices, or an action button whose symbol is a
+# dozen line segments: approximating those by eye produces something recognisably not the
+# shape PowerPoint draws, and offers no way to check it short of looking at a render.
+#
+# So these presets carry their ECMA-376 Appendix D definition as data -- the same
+# ``avLst`` / ``gdLst`` / ``pathLst`` the specification publishes -- and evaluate it with
+# :mod:`pptx2svg.guides`, the evaluator ``a:custGeom`` already uses.  The geometry is then
+# exact by construction rather than by judgement, and adding a preset becomes a
+# transcription that can be diffed against the spec instead of a drawing exercise.
+#
+# Evaluation happens in pixels, so ``precise=True`` keeps the fractional part of every
+# guide.  The spec's integer rounding assumes Office's EMU-sized coordinate space, where
+# it is invisible; at pixel scale it would be a visible half-pixel error per vertex.
+# --------------------------------------------------------------------------------------
+
+#: Path-level fill modes (ECMA-376 §20.1.10.36) that shade the *shape's own* fill rather
+#: than naming a colour.  Nothing at this layer knows what that fill is -- a generator
+#: sees only width, height and adjustments -- so they are approximated by a neutral
+#: overlay of comparable strength, which reads correctly over any base colour and is what
+#: makes an action button's bevel visible at all.
+_SHADE_ATTRIBUTES = {
+    "none": 'fill="none"',
+    "lighten": 'fill="#ffffff" fill-opacity="0.4"',
+    "lightenLess": 'fill="#ffffff" fill-opacity="0.2"',
+    "darken": 'fill="#000000" fill-opacity="0.4"',
+    "darkenLess": 'fill="#000000" fill-opacity="0.2"',
+}
+
+
+class _P:
+    """One ``a:path`` of a preset definition: its commands, and how it is painted."""
+
+    __slots__ = ("commands", "fill", "stroke")
+
+    def __init__(self, *commands, fill: str = "norm", stroke: bool = True):
+        self.commands = commands
+        self.fill = fill
+        self.stroke = stroke
+
+    def attributes(self) -> str:
+        """Presentation attributes that override what the caller splices onto the
+        wrapping ``<g>``.  A normally-painted path overrides nothing and inherits both."""
+        parts = []
+        shade = _SHADE_ATTRIBUTES.get(self.fill)
+        if shade:
+            parts.append(shade)
+        if not self.stroke:
+            parts.append('stroke="none"')
+        return " ".join(parts)
+
+
+class _Spec:
+    """A preset's specification: adjustment defaults, guides, and paths."""
+
+    __slots__ = ("adjustments", "guides", "paths")
+
+    def __init__(self, *, adjustments=(), guides=(), paths=()):
+        self.adjustments = adjustments
+        self.guides = guides
+        self.paths = paths
+
+
+def _spec_geometry(spec: "_Spec", w: float, h: float, adj: dict) -> str:
+    """Evaluate one spec-defined preset into SVG.
+
+    A shape's own ``a:avLst`` overrides the specification's defaults by name, and the
+    values pass through raw: the guides consume them in the spec's own 1/1000-percent
+    units (``*/ h adj1 100000``), so scaling them here would apply the division twice.
+    """
+    adjustments = [
+        (name, f"val {adj.get(name, default)}") for name, default in spec.adjustments
+    ]
+    variables = evaluate_guides([adjustments, list(spec.guides)], w, h, precise=True)
+
+    rendered = []
+    for path in spec.paths:
+        data = _spec_path_data(path.commands, variables)
+        if not data:
+            continue
+        attributes = path.attributes()
+        rendered.append(f'<path d="{data}"' + (f" {attributes}" if attributes else "") + "/>")
+
+    if not rendered:
+        return f'<rect width="{_n(w)}" height="{_n(h)}"/>'
+    if len(rendered) == 1 and not spec.paths[0].attributes():
+        return rendered[0]
+    # More than one path, or one painted differently from the shape: wrap them so the
+    # caller still has a single element to splice fill and stroke onto, and let the
+    # children inherit it or override it.
+    return f"<g>{''.join(rendered)}</g>"
+
+
+def _spec_path_data(commands, variables: dict) -> str:
+    """Build an SVG ``d`` string, tracking the pen so ``arcTo`` can be converted.
+
+    DrawingML's ``arcTo`` is relative to wherever the pen already is -- it names a sweep,
+    not an end point -- so the conversion needs the position the preceding command left.
+    """
+
+    def value(token) -> float:
+        return resolve_value(token, variables)
+
+    parts: list[str] = []
+    x = y = start_x = start_y = 0.0
+
+    for command in commands:
+        kind = command[0]
+        if kind in ("M", "L"):
+            x, y = value(command[1]), value(command[2])
+            parts.append(f"{kind} {_n(x)} {_n(y)}")
+            if kind == "M":
+                start_x, start_y = x, y
+        elif kind == "Z":
+            parts.append("Z")
+            x, y = start_x, start_y
+        elif kind == "A":
+            width_radius, height_radius = value(command[1]), value(command[2])
+            start_angle, sweep_angle = value(command[3]), value(command[4])
+            if sweep_angle == 0 or (width_radius == 0 and height_radius == 0):
+                continue
+            x, y, large, sweep = arc_endpoint(
+                x, y, width_radius, height_radius, start_angle, sweep_angle
+            )
+            parts.append(
+                f"A {_n(width_radius)} {_n(height_radius)} 0 {large} {sweep} {_n(x)} {_n(y)}"
+            )
+        elif kind in ("Q", "C"):
+            points = [
+                (value(command[i]), value(command[i + 1])) for i in range(1, len(command), 2)
+            ]
+            parts.append(f"{kind} " + ", ".join(f"{_n(px)} {_n(py)}" for px, py in points))
+            x, y = points[-1]
+
+    return " ".join(parts)
+
+
+def _spec_generator(name: str) -> Generator:
+    """Adapt a spec entry to the ``(w, h, adj) -> str`` shape of every other generator."""
+
+    def generate(w: float, h: float, adj: dict) -> str:
+        return _spec_geometry(SPEC_PRESETS[name], w, h, adj)
+
+    return generate
+
+
+#: Preset definitions transcribed from ECMA-376 Appendix D (``presetShapeDefinitions.xml``).
+#: Cross-checked against two independent copies -- a published dump of the spec file and
+#: OnlyOffice's C++ transcription -- which agree byte for byte, including the oddities
+#: (``accentCallout1`` really does close an empty subpath between its ``moveTo`` and its
+#: ``lnTo``, and really does place its accent bar at ``x1`` rather than at the left edge).
+SPEC_PRESETS: dict[str, "_Spec"] = {
+    "callout1": _Spec(
+        adjustments=(("adj1", 18750), ("adj2", -8333), ("adj3", 112500), ("adj4", -38333),),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+                stroke=False,
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                fill="none",
+            ),
+        ),
+    ),
+    "callout2": _Spec(
+        adjustments=(
+            ("adj1", 18750),
+            ("adj2", -8333),
+            ("adj3", 18750),
+            ("adj4", -16667),
+            ("adj5", 112500),
+            ("adj6", -46667),
+        ),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+            ("y3", "*/ h adj5 100000"),
+            ("x3", "*/ w adj6 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+                stroke=False,
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                ("L", "x3", "y3"),
+                fill="none",
+            ),
+        ),
+    ),
+    "callout3": _Spec(
+        adjustments=(
+            ("adj1", 18750),
+            ("adj2", -8333),
+            ("adj3", 18750),
+            ("adj4", -16667),
+            ("adj5", 100000),
+            ("adj6", -16667),
+            ("adj7", 112963),
+            ("adj8", -8333),
+        ),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+            ("y3", "*/ h adj5 100000"),
+            ("x3", "*/ w adj6 100000"),
+            ("y4", "*/ h adj7 100000"),
+            ("x4", "*/ w adj8 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+                stroke=False,
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                ("L", "x3", "y3"),
+                ("L", "x4", "y4"),
+                fill="none",
+            ),
+        ),
+    ),
+    "accentCallout1": _Spec(
+        adjustments=(("adj1", 18750), ("adj2", -8333), ("adj3", 112500), ("adj4", -38333),),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+                stroke=False,
+            ),
+            _P(
+                ("M", "x1", "t"),
+                ("Z",),
+                ("L", "x1", "b"),
+                fill="none",
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                fill="none",
+            ),
+        ),
+    ),
+    "accentCallout2": _Spec(
+        adjustments=(
+            ("adj1", 18750),
+            ("adj2", -8333),
+            ("adj3", 18750),
+            ("adj4", -16667),
+            ("adj5", 112500),
+            ("adj6", -46667),
+        ),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+            ("y3", "*/ h adj5 100000"),
+            ("x3", "*/ w adj6 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+                stroke=False,
+            ),
+            _P(
+                ("M", "x1", "t"),
+                ("Z",),
+                ("L", "x1", "b"),
+                fill="none",
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                ("L", "x3", "y3"),
+                fill="none",
+            ),
+        ),
+    ),
+    "accentCallout3": _Spec(
+        adjustments=(
+            ("adj1", 18750),
+            ("adj2", -8333),
+            ("adj3", 18750),
+            ("adj4", -16667),
+            ("adj5", 100000),
+            ("adj6", -16667),
+            ("adj7", 112963),
+            ("adj8", -8333),
+        ),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+            ("y3", "*/ h adj5 100000"),
+            ("x3", "*/ w adj6 100000"),
+            ("y4", "*/ h adj7 100000"),
+            ("x4", "*/ w adj8 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+                stroke=False,
+            ),
+            _P(
+                ("M", "x1", "t"),
+                ("Z",),
+                ("L", "x1", "b"),
+                fill="none",
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                ("L", "x3", "y3"),
+                ("L", "x4", "y4"),
+                fill="none",
+            ),
+        ),
+    ),
+    "accentBorderCallout1": _Spec(
+        adjustments=(("adj1", 18750), ("adj2", -8333), ("adj3", 112500), ("adj4", -38333),),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+            ),
+            _P(
+                ("M", "x1", "t"),
+                ("Z",),
+                ("L", "x1", "b"),
+                fill="none",
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                fill="none",
+            ),
+        ),
+    ),
+    "accentBorderCallout2": _Spec(
+        adjustments=(
+            ("adj1", 18750),
+            ("adj2", -8333),
+            ("adj3", 18750),
+            ("adj4", -16667),
+            ("adj5", 112500),
+            ("adj6", -46667),
+        ),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+            ("y3", "*/ h adj5 100000"),
+            ("x3", "*/ w adj6 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+            ),
+            _P(
+                ("M", "x1", "t"),
+                ("Z",),
+                ("L", "x1", "b"),
+                fill="none",
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                ("L", "x3", "y3"),
+                fill="none",
+            ),
+        ),
+    ),
+    "accentBorderCallout3": _Spec(
+        adjustments=(
+            ("adj1", 18750),
+            ("adj2", -8333),
+            ("adj3", 18750),
+            ("adj4", -16667),
+            ("adj5", 100000),
+            ("adj6", -16667),
+            ("adj7", 112963),
+            ("adj8", -8333),
+        ),
+        guides=(
+            ("y1", "*/ h adj1 100000"),
+            ("x1", "*/ w adj2 100000"),
+            ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"),
+            ("y3", "*/ h adj5 100000"),
+            ("x3", "*/ w adj6 100000"),
+            ("y4", "*/ h adj7 100000"),
+            ("x4", "*/ w adj8 100000"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+            ),
+            _P(
+                ("M", "x1", "t"),
+                ("Z",),
+                ("L", "x1", "b"),
+                fill="none",
+            ),
+            _P(
+                ("M", "x1", "y1"),
+                ("L", "x2", "y2"),
+                ("L", "x3", "y3"),
+                ("L", "x4", "y4"),
+                fill="none",
+            ),
+        ),
+    ),
+    "leftArrowCallout": _Spec(
+        adjustments=(("adj1", 25000), ("adj2", 25000), ("adj3", 25000), ("adj4", 64977),),
+        guides=(
+            ("maxAdj2", "*/ 50000 h ss"),
+            ("a2", "pin 0 adj2 maxAdj2"),
+            ("maxAdj1", "*/ a2 2 1"),
+            ("a1", "pin 0 adj1 maxAdj1"),
+            ("maxAdj3", "*/ 100000 w ss"),
+            ("a3", "pin 0 adj3 maxAdj3"),
+            ("q2", "*/ a3 ss w"),
+            ("maxAdj4", "+- 100000 0 q2"),
+            ("a4", "pin 0 adj4 maxAdj4"),
+            ("dy1", "*/ ss a2 100000"),
+            ("dy2", "*/ ss a1 200000"),
+            ("y1", "+- vc 0 dy1"),
+            ("y2", "+- vc 0 dy2"),
+            ("y3", "+- vc dy2 0"),
+            ("y4", "+- vc dy1 0"),
+            ("x1", "*/ ss a3 100000"),
+            ("dx2", "*/ w a4 100000"),
+            ("x2", "+- r 0 dx2"),
+            ("x3", "+/ x2 r 2"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "vc"),
+                ("L", "x1", "y1"),
+                ("L", "x1", "y2"),
+                ("L", "x2", "y2"),
+                ("L", "x2", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "b"),
+                ("L", "x2", "b"),
+                ("L", "x2", "y3"),
+                ("L", "x1", "y3"),
+                ("L", "x1", "y4"),
+                ("Z",),
+            ),
+        ),
+    ),
+    "rightArrowCallout": _Spec(
+        adjustments=(("adj1", 25000), ("adj2", 25000), ("adj3", 25000), ("adj4", 64977),),
+        guides=(
+            ("maxAdj2", "*/ 50000 h ss"),
+            ("a2", "pin 0 adj2 maxAdj2"),
+            ("maxAdj1", "*/ a2 2 1"),
+            ("a1", "pin 0 adj1 maxAdj1"),
+            ("maxAdj3", "*/ 100000 w ss"),
+            ("a3", "pin 0 adj3 maxAdj3"),
+            ("q2", "*/ a3 ss w"),
+            ("maxAdj4", "+- 100000 0 q2"),
+            ("a4", "pin 0 adj4 maxAdj4"),
+            ("dy1", "*/ ss a2 100000"),
+            ("dy2", "*/ ss a1 200000"),
+            ("y1", "+- vc 0 dy1"),
+            ("y2", "+- vc 0 dy2"),
+            ("y3", "+- vc dy2 0"),
+            ("y4", "+- vc dy1 0"),
+            ("dx3", "*/ ss a3 100000"),
+            ("x3", "+- r 0 dx3"),
+            ("x2", "*/ w a4 100000"),
+            ("x1", "*/ x2 1 2"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "x2", "t"),
+                ("L", "x2", "y2"),
+                ("L", "x3", "y2"),
+                ("L", "x3", "y1"),
+                ("L", "r", "vc"),
+                ("L", "x3", "y4"),
+                ("L", "x3", "y3"),
+                ("L", "x2", "y3"),
+                ("L", "x2", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+            ),
+        ),
+    ),
+    "upArrowCallout": _Spec(
+        adjustments=(("adj1", 25000), ("adj2", 25000), ("adj3", 25000), ("adj4", 64977),),
+        guides=(
+            ("maxAdj2", "*/ 50000 w ss"),
+            ("a2", "pin 0 adj2 maxAdj2"),
+            ("maxAdj1", "*/ a2 2 1"),
+            ("a1", "pin 0 adj1 maxAdj1"),
+            ("maxAdj3", "*/ 100000 h ss"),
+            ("a3", "pin 0 adj3 maxAdj3"),
+            ("q2", "*/ a3 ss h"),
+            ("maxAdj4", "+- 100000 0 q2"),
+            ("a4", "pin 0 adj4 maxAdj4"),
+            ("dx1", "*/ ss a2 100000"),
+            ("dx2", "*/ ss a1 200000"),
+            ("x1", "+- hc 0 dx1"),
+            ("x2", "+- hc 0 dx2"),
+            ("x3", "+- hc dx2 0"),
+            ("x4", "+- hc dx1 0"),
+            ("y1", "*/ ss a3 100000"),
+            ("dy2", "*/ h a4 100000"),
+            ("y2", "+- b 0 dy2"),
+            ("y3", "+/ y2 b 2"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "y2"),
+                ("L", "x2", "y2"),
+                ("L", "x2", "y1"),
+                ("L", "x1", "y1"),
+                ("L", "hc", "t"),
+                ("L", "x4", "y1"),
+                ("L", "x3", "y1"),
+                ("L", "x3", "y2"),
+                ("L", "r", "y2"),
+                ("L", "r", "b"),
+                ("L", "l", "b"),
+                ("Z",),
+            ),
+        ),
+    ),
+    "downArrowCallout": _Spec(
+        adjustments=(("adj1", 25000), ("adj2", 25000), ("adj3", 25000), ("adj4", 64977),),
+        guides=(
+            ("maxAdj2", "*/ 50000 w ss"),
+            ("a2", "pin 0 adj2 maxAdj2"),
+            ("maxAdj1", "*/ a2 2 1"),
+            ("a1", "pin 0 adj1 maxAdj1"),
+            ("maxAdj3", "*/ 100000 h ss"),
+            ("a3", "pin 0 adj3 maxAdj3"),
+            ("q2", "*/ a3 ss h"),
+            ("maxAdj4", "+- 100000 0 q2"),
+            ("a4", "pin 0 adj4 maxAdj4"),
+            ("dx1", "*/ ss a2 100000"),
+            ("dx2", "*/ ss a1 200000"),
+            ("x1", "+- hc 0 dx1"),
+            ("x2", "+- hc 0 dx2"),
+            ("x3", "+- hc dx2 0"),
+            ("x4", "+- hc dx1 0"),
+            ("dy3", "*/ ss a3 100000"),
+            ("y3", "+- b 0 dy3"),
+            ("y2", "*/ h a4 100000"),
+            ("y1", "*/ y2 1 2"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "t"),
+                ("L", "r", "t"),
+                ("L", "r", "y2"),
+                ("L", "x3", "y2"),
+                ("L", "x3", "y3"),
+                ("L", "x4", "y3"),
+                ("L", "hc", "b"),
+                ("L", "x1", "y3"),
+                ("L", "x2", "y3"),
+                ("L", "x2", "y2"),
+                ("L", "l", "y2"),
+                ("Z",),
+            ),
+        ),
+    ),
+    "leftRightArrowCallout": _Spec(
+        adjustments=(("adj1", 25000), ("adj2", 25000), ("adj3", 25000), ("adj4", 48123),),
+        guides=(
+            ("maxAdj2", "*/ 50000 h ss"),
+            ("a2", "pin 0 adj2 maxAdj2"),
+            ("maxAdj1", "*/ a2 2 1"),
+            ("a1", "pin 0 adj1 maxAdj1"),
+            ("maxAdj3", "*/ 50000 w ss"),
+            ("a3", "pin 0 adj3 maxAdj3"),
+            ("q2", "*/ a3 ss wd2"),
+            ("maxAdj4", "+- 100000 0 q2"),
+            ("a4", "pin 0 adj4 maxAdj4"),
+            ("dy1", "*/ ss a2 100000"),
+            ("dy2", "*/ ss a1 200000"),
+            ("y1", "+- vc 0 dy1"),
+            ("y2", "+- vc 0 dy2"),
+            ("y3", "+- vc dy2 0"),
+            ("y4", "+- vc dy1 0"),
+            ("x1", "*/ ss a3 100000"),
+            ("x4", "+- r 0 x1"),
+            ("dx2", "*/ w a4 200000"),
+            ("x2", "+- hc 0 dx2"),
+            ("x3", "+- hc dx2 0"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "vc"),
+                ("L", "x1", "y1"),
+                ("L", "x1", "y2"),
+                ("L", "x2", "y2"),
+                ("L", "x2", "t"),
+                ("L", "x3", "t"),
+                ("L", "x3", "y2"),
+                ("L", "x4", "y2"),
+                ("L", "x4", "y1"),
+                ("L", "r", "vc"),
+                ("L", "x4", "y4"),
+                ("L", "x4", "y3"),
+                ("L", "x3", "y3"),
+                ("L", "x3", "b"),
+                ("L", "x2", "b"),
+                ("L", "x2", "y3"),
+                ("L", "x1", "y3"),
+                ("L", "x1", "y4"),
+                ("Z",),
+            ),
+        ),
+    ),
+    "upDownArrowCallout": _Spec(
+        adjustments=(("adj1", 25000), ("adj2", 25000), ("adj3", 25000), ("adj4", 48123),),
+        guides=(
+            ("maxAdj2", "*/ 50000 w ss"),
+            ("a2", "pin 0 adj2 maxAdj2"),
+            ("maxAdj1", "*/ a2 2 1"),
+            ("a1", "pin 0 adj1 maxAdj1"),
+            ("maxAdj3", "*/ 50000 h ss"),
+            ("a3", "pin 0 adj3 maxAdj3"),
+            ("q2", "*/ a3 ss hd2"),
+            ("maxAdj4", "+- 100000 0 q2"),
+            ("a4", "pin 0 adj4 maxAdj4"),
+            ("dx1", "*/ ss a2 100000"),
+            ("dx2", "*/ ss a1 200000"),
+            ("x1", "+- hc 0 dx1"),
+            ("x2", "+- hc 0 dx2"),
+            ("x3", "+- hc dx2 0"),
+            ("x4", "+- hc dx1 0"),
+            ("y1", "*/ ss a3 100000"),
+            ("y4", "+- b 0 y1"),
+            ("dy2", "*/ h a4 200000"),
+            ("y2", "+- vc 0 dy2"),
+            ("y3", "+- vc dy2 0"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "y2"),
+                ("L", "x2", "y2"),
+                ("L", "x2", "y1"),
+                ("L", "x1", "y1"),
+                ("L", "hc", "t"),
+                ("L", "x4", "y1"),
+                ("L", "x3", "y1"),
+                ("L", "x3", "y2"),
+                ("L", "r", "y2"),
+                ("L", "r", "y3"),
+                ("L", "x3", "y3"),
+                ("L", "x3", "y4"),
+                ("L", "x4", "y4"),
+                ("L", "hc", "b"),
+                ("L", "x1", "y4"),
+                ("L", "x2", "y4"),
+                ("L", "x2", "y3"),
+                ("L", "l", "y3"),
+                ("Z",),
+            ),
+        ),
+    ),
+    "quadArrowCallout": _Spec(
+        adjustments=(("adj1", 18515), ("adj2", 18515), ("adj3", 18515), ("adj4", 48123),),
+        guides=(
+            ("a2", "pin 0 adj2 50000"),
+            ("maxAdj1", "*/ a2 2 1"),
+            ("a1", "pin 0 adj1 maxAdj1"),
+            ("maxAdj3", "+- 50000 0 a2"),
+            ("a3", "pin 0 adj3 maxAdj3"),
+            ("q2", "*/ a3 2 1"),
+            ("maxAdj4", "+- 100000 0 q2"),
+            ("a4", "pin a1 adj4 maxAdj4"),
+            ("dx2", "*/ ss a2 100000"),
+            ("dx3", "*/ ss a1 200000"),
+            ("ah", "*/ ss a3 100000"),
+            ("dx1", "*/ w a4 200000"),
+            ("dy1", "*/ h a4 200000"),
+            ("x8", "+- r 0 ah"),
+            ("x2", "+- hc 0 dx1"),
+            ("x7", "+- hc dx1 0"),
+            ("x3", "+- hc 0 dx2"),
+            ("x6", "+- hc dx2 0"),
+            ("x4", "+- hc 0 dx3"),
+            ("x5", "+- hc dx3 0"),
+            ("y8", "+- b 0 ah"),
+            ("y2", "+- vc 0 dy1"),
+            ("y7", "+- vc dy1 0"),
+            ("y3", "+- vc 0 dx2"),
+            ("y6", "+- vc dx2 0"),
+            ("y4", "+- vc 0 dx3"),
+            ("y5", "+- vc dx3 0"),
+        ),
+        paths=(
+            _P(
+                ("M", "l", "vc"),
+                ("L", "ah", "y3"),
+                ("L", "ah", "y4"),
+                ("L", "x2", "y4"),
+                ("L", "x2", "y2"),
+                ("L", "x4", "y2"),
+                ("L", "x4", "ah"),
+                ("L", "x3", "ah"),
+                ("L", "hc", "t"),
+                ("L", "x6", "ah"),
+                ("L", "x5", "ah"),
+                ("L", "x5", "y2"),
+                ("L", "x7", "y2"),
+                ("L", "x7", "y4"),
+                ("L", "x8", "y4"),
+                ("L", "x8", "y3"),
+                ("L", "r", "vc"),
+                ("L", "x8", "y6"),
+                ("L", "x8", "y5"),
+                ("L", "x7", "y5"),
+                ("L", "x7", "y7"),
+                ("L", "x5", "y7"),
+                ("L", "x5", "y8"),
+                ("L", "x6", "y8"),
+                ("L", "hc", "b"),
+                ("L", "x3", "y8"),
+                ("L", "x4", "y8"),
+                ("L", "x4", "y7"),
+                ("L", "x2", "y7"),
+                ("L", "x2", "y5"),
+                ("L", "ah", "y5"),
+                ("L", "ah", "y6"),
+                ("Z",),
+            ),
+        ),
+    ),
+}
+
+
 PRESET_GEOMETRIES: dict[str, Generator] = {
     # Basic
     "rect": _rect,
@@ -1245,6 +2054,22 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "borderCallout1": _border_callout1,
     "borderCallout2": _border_callout2,
     "borderCallout3": _border_callout3,
+    "callout1": _spec_generator("callout1"),
+    "callout2": _spec_generator("callout2"),
+    "callout3": _spec_generator("callout3"),
+    "accentCallout1": _spec_generator("accentCallout1"),
+    "accentCallout2": _spec_generator("accentCallout2"),
+    "accentCallout3": _spec_generator("accentCallout3"),
+    "accentBorderCallout1": _spec_generator("accentBorderCallout1"),
+    "accentBorderCallout2": _spec_generator("accentBorderCallout2"),
+    "accentBorderCallout3": _spec_generator("accentBorderCallout3"),
+    "leftArrowCallout": _spec_generator("leftArrowCallout"),
+    "rightArrowCallout": _spec_generator("rightArrowCallout"),
+    "upArrowCallout": _spec_generator("upArrowCallout"),
+    "downArrowCallout": _spec_generator("downArrowCallout"),
+    "leftRightArrowCallout": _spec_generator("leftRightArrowCallout"),
+    "upDownArrowCallout": _spec_generator("upDownArrowCallout"),
+    "quadArrowCallout": _spec_generator("quadArrowCallout"),
     # Arcs
     "arc": _arc,
     "chord": _chord,
