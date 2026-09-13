@@ -24,7 +24,23 @@ NORMAL_RATIO = 0.6
 WIDE_RATIO = 1.0
 
 BOLD_FACTOR = 1.05
+
+#: PowerPoint's line box for single spacing, as a multiple of the font size.
+#:
+#: This is a constant, not a property of the typeface, and that is genuinely surprising:
+#: a line box is normally the font's own ascent + descent (+ line gap).  PowerPoint
+#: ignores all three.  It was measured by exporting probe decks through PowerPoint and
+#: reading the rendered line advance back off the raster -- Arial, Calibri, Times New
+#: Roman, Courier New, Aptos, Aptos Display, Lato, Raleway, MS Gothic, Meiryo and Noto
+#: Sans JP, with Latin and with Japanese text, at 14 pt and 28 pt.  Every one came back
+#: at 1.2x the font size, although their real ascent+descent ranges from 1.00 em (MS
+#: Gothic) to 1.45 em (Noto Sans JP).
+#:
+#: ``a:lnSpc`` percentages multiply *this*, not the face's metrics: 150% measured 1.8 em
+#: and 90% measured 1.08 em.  ``a:spcPts`` is a literal point size and ignores it.
 DEFAULT_LINE_HEIGHT_RATIO = 1.2
+
+#: First-baseline offset when the font is unknown: the line box less a 0.2 em descent.
 DEFAULT_ASCENDER_RATIO = 1.0
 
 #: Characters noticeably narrower than the Latin average.
@@ -95,10 +111,9 @@ class DefaultTextMeasurer:
     def line_height_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
     ) -> float:
-        metrics = metrics_for(font_family) or metrics_for(font_family_ea)
-        if metrics is None:
-            return DEFAULT_LINE_HEIGHT_RATIO
-        return (metrics.ascender + abs(metrics.descender)) / metrics.units_per_em
+        # Deliberately ignores the font: see DEFAULT_LINE_HEIGHT_RATIO.  The arguments
+        # stay for the protocol's sake, and because a future rule may need them.
+        return DEFAULT_LINE_HEIGHT_RATIO
 
     def ascender_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
@@ -106,7 +121,26 @@ class DefaultTextMeasurer:
         metrics = metrics_for(font_family) or metrics_for(font_family_ea)
         if metrics is None:
             return DEFAULT_ASCENDER_RATIO
-        return metrics.ascender / metrics.units_per_em
+        return _first_baseline_ratio(abs(metrics.descender) / metrics.units_per_em)
+
+
+def _first_baseline_ratio(descender_ratio: float) -> float:
+    """Where the first baseline sits below the top of the text, in ems.
+
+    PowerPoint hangs the line box's *bottom* off the font's descent rather than its top
+    off the font's ascent: the baseline lands one descent up from the bottom of the
+    1.2 em box, and whatever is left over becomes leading above the text.  Measuring the
+    baseline of an "H" in a top-anchored box with zero inset gave 14 pt for 14 pt Arial
+    (descent 0.212 em -> 0.988 em), 14 pt for Times New Roman (0.216 -> 0.984) and 13 pt
+    for Calibri (0.269 -> 0.931); PowerPoint rounds the offset to whole points, and all
+    three round correctly.  Using the ascent instead -- the obvious reading -- puts Arial
+    and Times a full point too high.
+
+    Only single spacing is modelled.  Percentages above 100% measured close to
+    ``ascent * percentage`` instead, which does not meet this formula at 100%, so the
+    rule there is something else and is left alone rather than guessed at.
+    """
+    return max(0.0, DEFAULT_LINE_HEIGHT_RATIO - descender_ratio)
 
 
 def _measure_with_metrics(
@@ -195,12 +229,8 @@ class FontToolsTextMeasurer:
     def line_height_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
     ) -> float:
-        font = self._face(font_family) or self._face(font_family_ea)
-        if font is None:
-            return self._fallback.line_height_ratio(font_family, font_family_ea)
-        hhea = font["hhea"]  # type: ignore[index]
-        units_per_em = font["head"].unitsPerEm  # type: ignore[index]
-        return (hhea.ascender + abs(hhea.descender)) / units_per_em
+        # The line box is PowerPoint's, not the face's, even when the face is readable.
+        return DEFAULT_LINE_HEIGHT_RATIO
 
     def ascender_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
@@ -210,7 +240,7 @@ class FontToolsTextMeasurer:
             return self._fallback.ascender_ratio(font_family, font_family_ea)
         hhea = font["hhea"]  # type: ignore[index]
         units_per_em = font["head"].unitsPerEm  # type: ignore[index]
-        return hhea.ascender / units_per_em
+        return _first_baseline_ratio(abs(hhea.descender) / units_per_em)
 
 
 def _advance_width(font, char: str) -> float | None:

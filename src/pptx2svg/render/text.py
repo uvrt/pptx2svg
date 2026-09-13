@@ -411,7 +411,9 @@ def _render_column(
 
     # `y` on <text> is the baseline, not the top of the line box.
     first_font_size = _paragraph_font_size(paragraphs[0], default_font_size) * font_scale
-    y_start += first_font_size * default_ascender_ratio * PX_PER_PT
+    y_start += _first_baseline_px(
+        paragraphs[0], first_font_size, default_ascender_ratio, ln_spc_reduction, context
+    )
 
     element = f'<text x="0" y="{num(y_start)}" xml:space="preserve">{"".join(tspans)}</text>'
     if highlights:
@@ -886,6 +888,57 @@ def _alignment(
     if alignment == "r":
         return width - margin_right, "end"
     return margin_left, "start"
+
+
+def _first_baseline_px(
+    paragraph: m.Paragraph,
+    font_size_pt: float,
+    ascender_ratio: float,
+    ln_spc_reduction: float,
+    context: RenderContext,
+) -> float:
+    """How far below the top of the text the first baseline sits.
+
+    PowerPoint has two rules here and switches between them at exactly 100% line
+    spacing, which is odd enough to be worth spelling out.  Both were measured by
+    exporting a top-anchored, zero-inset box holding a single "H" -- whose ink bottom is
+    the baseline -- and reading the offset off the raster.
+
+    * **At or below 100%** the baseline hangs off the *bottom* of the line box: it sits
+      one font descent up from it, so the leftover space becomes leading above the text.
+      Measured 14 pt for 14 pt Arial (descent 0.212 em), 14 pt for Times New Roman
+      (0.216) and 13 pt for Calibri (0.269) -- and 12 pt for Arial at 90%, i.e. the same
+      figure scaled by the spacing.  That descent-derived offset is ``ascender_ratio``.
+
+    * **Above 100%** the font drops out entirely and the baseline lands at three
+      quarters of the line box, whatever the face.  Arial and Calibri both measured
+      19 pt at 150% despite differing descents, and 105/110/120/130/150/200% all fit
+      ``0.75 * line box`` to within the whole point PowerPoint rounds the offset to.
+
+    The two rules do not meet: going from 100% to 105% moves the baseline *up*, which
+    looked like a bad measurement until the second rule explained it.
+
+    ``a:spcPts`` needs no special case -- an absolute line height is just a ratio
+    against the natural one, and the same branch picks it up.
+    """
+    natural_pt = font_size_pt * context.measurer.line_height_ratio(
+        *_first_run_fonts(paragraph)
+    )
+    line_px = _line_height_px(paragraph, natural_pt, ln_spc_reduction)
+    natural_px = natural_pt * PX_PER_PT
+    if natural_px <= 0:
+        return font_size_pt * ascender_ratio * PX_PER_PT
+    factor = line_px / natural_px
+    if factor > 1.0:
+        return 0.75 * line_px
+    return font_size_pt * ascender_ratio * factor * PX_PER_PT
+
+
+def _first_run_fonts(paragraph: m.Paragraph) -> tuple[str | None, str | None]:
+    for run in paragraph.runs:
+        if run.properties.font_family or run.properties.font_family_ea:
+            return run.properties.font_family, run.properties.font_family_ea
+    return None, None
 
 
 def _line_height_px(

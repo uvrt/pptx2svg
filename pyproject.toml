@@ -36,7 +36,18 @@ png = ["resvg-py>=0.5"]
 cairo = ["cairosvg>=2.7"]
 # Measure with real installed fonts instead of the bundled metric tables.
 fonts = ["fonttools>=4.40"]
-dev = ["pytest>=7", "resvg-py>=0.5", "fonttools>=4.40"]
+# Scoring a render against PowerPoint's own PDF export (tools/fidelity.py).  Strictly a
+# development concern: none of this is imported from src/, which stays standard-library
+# only, and the harness itself also needs PowerPoint, which pip cannot supply.
+fidelity = ["numpy>=1.24", "pillow>=10", "pypdfium2>=4"]
+dev = [
+  "pytest>=7",
+  "resvg-py>=0.5",
+  "fonttools>=4.40",
+  "numpy>=1.24",
+  "pillow>=10",
+  "pypdfium2>=4",
+]
 
 [project.urls]
 Homepage = "https://github.com/uvrt/pptx2svg"

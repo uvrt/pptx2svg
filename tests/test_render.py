@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
+from pathlib import Path
 from xml.etree.ElementTree import fromstring
 
 import pytest
 
-from pptx2svg import convert_pptx_to_svg, model as m
+from pptx2svg import ConvertOptions, convert_pptx_to_svg, model as m
 from pptx2svg.render.context import RenderContext
 from pptx2svg.render.geometry import PRESET_GEOMETRIES, preset_geometry_svg, render_geometry
 from pptx2svg.render.shape import build_transform_attr
+from pptx2svg.render.text import _first_baseline_px
 from pptx2svg.render.svg import render_slide_to_svg
 from pptx2svg.text.measure import DefaultTextMeasurer
 from pptx2svg.text.wrap import wrap_paragraph
@@ -582,3 +585,93 @@ def test_rows_that_already_fit_keep_their_stated_height():
     svg = render_table(table, context)
     y = float(re.search(r'<line x1="0" y1="([\d.]+)"', svg).group(1))
     assert abs(y - 94.49) < 0.5
+
+
+# -- Built-in table styles -------------------------------------------------------------
+
+
+def test_builtin_table_style_medium_2_accent_1_matches_powerpoint():
+    """Lock in the one catalogue entry that has been checked against PowerPoint itself.
+
+    ``table test.pptx`` names ``{5C22544A-...}`` ("Medium Style 2 - Accent 1"), sets
+    ``firstRow`` and ``bandRow``, and gives no cell an explicit fill -- so every colour
+    below comes out of ``parse/table_styles_builtin.py`` and from nowhere else.  The
+    fixture was exported through PowerPoint and sampled cell by cell: all twenty-five
+    fills came back byte-identical to these, with white rules throughout and the only
+    differences anywhere in the table being sub-pixel anti-aliasing on the rules.
+
+    This covers exactly one GUID.  The rest of the catalogue came from the same
+    measurement process but no fixture exercises it end to end, so it stays unverified.
+    """
+    deck = Path(__file__).parent / "fixtures" / "table test.pptx"
+    svg = convert_pptx_to_svg(str(deck), ConvertOptions(width=1280))[0]
+    fills = Counter(re.findall(r'fill="(#[0-9A-Fa-f]{6})"', svg))
+
+    # Five header cells in accent1, then the four body rows banding between accent1 at
+    # tint 40% and at tint 20%, five cells each.
+    assert fills["#156082"] == 5
+    assert fills["#ccd2d8"] == 10
+    assert fills["#e7eaed"] == 10
+
+    # Every rule is lt1.  Two widths: the style's 1 pt grid, and the 3 pt rule under the
+    # header row -- 1.333 and 4 once scaled to a 1280 px render of a 10 in slide.
+    assert set(re.findall(r'stroke="(#[0-9A-Fa-f]{6})"', svg)) == {"#ffffff"}
+    assert set(re.findall(r'stroke-width="([0-9.]+)"', svg)) == {"1.333", "4"}
+
+
+# -- Line box and first baseline -------------------------------------------------------
+
+
+def test_line_height_is_1_2_em_whatever_the_face():
+    """PowerPoint's single-spaced line box ignores the font's own ascent and descent.
+
+    Measured by exporting probe decks and reading the line advance back: Arial, Calibri,
+    Times New Roman, Courier New, Aptos, Lato, Raleway, MS Gothic, Meiryo and Noto Sans
+    JP all came back at 1.2x the font size, at 14 pt and at 28 pt, for Latin and for
+    Japanese text -- although their real ascent+descent spans 1.00 em to 1.45 em.
+    """
+    measurer = DefaultTextMeasurer()
+    for family in ("Arial", "Calibri", "Times New Roman", "Noto Sans JP", "MS Gothic", None):
+        assert measurer.line_height_ratio(family) == 1.2
+    # A face with no metrics table at all lands on the same number, not a guess.
+    assert measurer.line_height_ratio("Nonexistent Face") == 1.2
+
+
+def test_first_baseline_hangs_off_the_descent_not_the_ascent():
+    """The baseline sits one font descent up from the bottom of the 1.2 em line box.
+
+    Reading the baseline of an "H" out of a PowerPoint export gave 14 pt for 14 pt
+    Arial, 14 pt for Times New Roman and 13 pt for Calibri.  Taking the ascent instead --
+    the obvious reading, and what this used to do -- puts Arial and Times a point high.
+    """
+    measurer = DefaultTextMeasurer()
+    # Liberation Sans stands in for Arial: descender 434/2048.
+    assert measurer.ascender_ratio("Arial") == pytest.approx(1.2 - 434 / 2048)
+    # Carlito stands in for Calibri: descender 550/2048.
+    assert measurer.ascender_ratio("Calibri") == pytest.approx(1.2 - 550 / 2048)
+    # Unknown faces keep the old default, which is the same rule with a 0.2 em descent.
+    assert measurer.ascender_ratio("Nonexistent Face") == 1.0
+
+
+def test_line_spacing_above_100_percent_moves_the_baseline_to_three_quarters():
+    """Above 100% PowerPoint switches rules and the font drops out of the answer.
+
+    Arial and Calibri both put the first baseline at 19 pt for 14 pt text at 150%,
+    despite different descents -- that is 0.75 of the 1.2 * 1.5 em line box.  The two
+    rules do not meet at 100%, so going from 100% to 105% moves the baseline *up*; that
+    looked like a bad measurement until the second rule explained it.
+    """
+    paragraph = m.Paragraph(
+        properties=m.ParagraphProperties(
+            line_spacing=m.PercentSpacing(value=150000, type="pct")
+        ),
+        runs=[
+            m.TextRun(
+                text="H",
+                properties=m.RunProperties(font_size=14.0, font_family="Arial"),
+            )
+        ],
+    )
+    baseline = _first_baseline_px(paragraph, 14.0, 1.2 - 434 / 2048, 0.0, RenderContext())
+    # 0.75 * (1.2 * 1.5 * 14 pt) = 18.9 pt, in CSS pixels.
+    assert baseline == pytest.approx(0.75 * 1.2 * 1.5 * 14.0 * (96 / 72), rel=1e-6)

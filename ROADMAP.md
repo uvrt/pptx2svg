@@ -31,14 +31,14 @@ after it needs a way to tell "better" from "different".
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
-| Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried |
+| Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
 | Charts | **Not rendered** |
 | SmartArt | **Not rendered** |
 | EMF / WMF | **Not rendered** |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
 
-292 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
+317 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
 independently testable, and every phase below slots into exactly one of them.
 
 ### Shape identity
@@ -55,33 +55,36 @@ pair `(id, path)` is unique, and a downstream consumer needs both to address a s
 
 ### Measured baseline
 
-Against real PowerPoint output, per fixture, at 1280 px wide. "Before" is the tree as of
-commit 076a0f5, "after" is with Phase 1 landed.
+Against real PowerPoint output, every slide of every fixture, at 1280 px wide. Produced
+by `tools/fidelity.py`; "pre" is commit 080962f, "P1" is Phase 1 as landed at c798524,
+"now" is with the font-metric fix below.
 
-| Fixture | >10/255 before | after | >64/255 before | after | mean before | after |
-| --- | --- | --- | --- | --- | --- | --- |
-| `authoring-integration.pptx` | 11.84% | **6.72%** | 5.66% | 5.55% | 9.80 | **7.87** |
-| `real-basic-theme.pptx` | 1.84% | 2.07% | 0.98% | 1.12% | 1.72 | 1.86 |
-| `real-product-page.pptx` | 6.80% | 6.80% | 4.77% | 4.77% | 8.40 | 8.40 |
-| `real-financial-report.pptx` | 5.26% | 5.26% | 3.52% | 3.53% | 5.32 | 5.32 |
-| `sample.pptx` | 2.61% | 2.58% | 1.96% | 2.04% | 4.16 | 4.18 |
-| `sample-issue-387.pptx` | 1.91% | 1.91% | 1.44% | 1.44% | 2.80 | 2.80 |
+| Fixture | SSIM pre / P1 / now | hist pre / P1 / now | >10/255 pre / P1 / now |
+| --- | --- | --- | --- |
+| `authoring-integration.pptx` | 0.732 / 0.767 / **0.767** | 0.451 / 0.800 / 0.800 | 12.27 / 6.80 / 6.80 |
+| `real-basic-theme.pptx` | 0.946 / 0.938 / **0.970** | 0.999 / 1.000 / 1.000 | 1.84 / 2.07 / **1.50** |
+| `real-financial-report.pptx` | 0.792 / 0.791 / **0.809** | 0.959 / 0.959 / 0.957 | 5.32 / 5.32 / **4.99** |
+| `real-product-page.pptx` | 0.715 / 0.715 / **0.735** | 0.998 / 0.998 / 0.998 | 6.84 / 6.84 / **6.50** |
+| `sample-issue-387.pptx` | 0.964 / 0.964 / **0.965** | 1.000 / 1.000 / 1.000 | 1.91 / 1.91 / **1.90** |
+| `sample.pptx` | 0.055 / 0.055 / 0.032 | 0.915 / 0.984 / 0.985 | 2.61 / 2.58 / 2.68 |
+| `table test.pptx` | 0.744 / 0.724 / **0.949** | −0.004 / 0.988 / **0.998** | 23.00 / 8.36 / **1.26** |
 
-Layout, colour and text positions match; the residual is almost entirely glyph
-antialiasing and font substitution. **This is the number to drive down** — treat a
-regression in it as a failing build.
+**Read the font column before reading the scores.** On the machine these were taken on,
+*not one fixture* can be compared honestly: none of Aptos, Calibri, Lato, Raleway or
+Noto Sans JP is installed where the rasteriser can see it, while PowerPoint carries its
+own copies and draws with them. Every glyph in five of these decks is therefore a
+different shape in a different place before the renderer has done anything wrong, and
+the score is dominated by how wide the substitute happens to be. `sample.pptx` is the
+extreme case: its slides are 2–4% ink on white, all of it Calibri, so once the face is
+substituted there is almost nothing left that *can* agree and SSIM collapses to noise.
+`tools/fidelity.py` prints the missing faces and refuses to apply the absolute gates to
+such a deck, which is the only honest thing to do with it.
 
-Two entries need reading rather than scanning. `authoring-integration.pptx` is the only
-fixture whose table names a built-in style, and it is the one Phase 1 moved.
-`real-basic-theme.pptx` moved the *wrong* way, and the reason is worth keeping: its
-custom table style's gridlines are now drawn, correctly and in the right colour, but a
-couple of pixels lower than PowerPoint puts them, because our line height for its CJK
-text comes out about 7% short. Drawing nothing scored better than drawing something
-slightly misplaced. The next win on that fixture is font metrics, not tables.
-
-The remaining three fixtures are flat because none of them uses anything Phase 1 touched
-— checked, not assumed: `real-financial-report.pptx`'s tables carry explicit per-cell
-fills and borders on every cell, so no style could change them.
+Two entries need reading rather than scanning. `table test.pptx` is the fixture that
+exists to exercise the built-in style catalogue, and Phase 1 plus the line-box fix took
+it from 23% of pixels wrong to 1.26%. `real-basic-theme.pptx` moved the *wrong* way in
+Phase 1 — 0.946 to 0.938 SSIM — and the cause turned out not to be the table code at
+all; see below.
 
 ---
 
@@ -150,13 +153,29 @@ PNGs and fail on drift.
 Two layers, two jobs: snapshot VRT runs everywhere and catches regressions; the PowerPoint
 oracle runs on this Mac and catches *being wrong in the first place*.
 
-### 0.3 Metrics
+### 0.3 Metrics — **done**
 
-Raw pixel-difference percentage is a blunt instrument — a 1 px text baseline shift lights
-up every glyph. **[pptx-renderer]** uses SSIM, colour histogram distance, and IoU of
-detected foreground regions, which separate "shifted slightly" from "structurally wrong".
-Worth adopting; SSIM is a few lines over NumPy, no new dependency beyond what Pillow
-already brings.
+`tools/fidelity.py`. Raw pixel-difference percentage is a blunt instrument — a 1 px text
+baseline shift lights up every glyph, which is exactly how a *correct* gridline fix
+scored as a regression below. Two gates replace it, both from **[pptx-renderer]**:
+
+- **SSIM ≥ 0.95**, for "is the same thing in the same place" — catches wrong geometry,
+  missing elements and layout shifts; ignores a hairline of antialiasing.
+- **Colour histogram correlation ≥ 0.80**, position-blind, for theme resolution,
+  gradients and tint/shade — the class of bug SSIM on greyscale barely sees.
+
+Both are taken over foreground pixels only (grey < 245), and a slide under 1.5%
+foreground is declared unscoreable rather than left to noise. Foreground IoU is
+deliberately *not* used: upstream dropped it because a thin stroke loses half its IoU to
+one pixel of antialiasing, and table gridlines are exactly that shape of problem.
+
+A stored baseline fails on a drop of more than 0.02 SSIM. It is only compared against a
+run with the same **font profile** — which faces the deck asks for, which of those the
+host can supply, hashed — because a score taken with different fonts is not a score of
+this library. That turned out to matter more than anything else in the file: see the
+font column in the table above.
+
+Pure NumPy, dev-only, behind the `fidelity` extra; the library stays standard-library.
 
 ### 0.4 Fixture corpus
 
@@ -237,6 +256,50 @@ Two things turned up that were not in this plan:
 - **`a:clrChange` is parsed, resolved, and has no renderer at all** — a gap this section
   missed. It is now recorded in `UNRENDERED_FIELDS`, and is a Phase 5 item.
 
+### Correction: the `real-basic-theme` regression was font metrics, not tables
+
+Phase 1 recorded that this fixture's gridlines were drawn "a couple of pixels lower than
+PowerPoint" because our CJK line height was "about 7% short". The regression was real
+and reproduced exactly (1.84% → 2.07%, SSIM 0.946 → 0.938, all of it on slide 2). The
+explanation was wrong in both direction and cause: the rules were drawn *higher*, not
+lower, and the deck's Japanese text had nothing to do with it.
+
+Measuring the rendered rules put them at y = 528/582/635.5/689 against PowerPoint's
+528.5/584/639/695 — rows 53.7 px where PowerPoint draws 55.5 px, short by the same
+amount every row and so cumulative. Working back through the cell margins, PowerPoint
+wanted a 1.2016 em line box where we computed 1.1172 em, which is Liberation Sans's
+`hhea` ascent + descent. The 7% was real; the reason was not.
+
+So the line box was measured directly, by exporting probe decks and reading the line
+advance off the raster:
+
+> **PowerPoint's single-spaced line box is 1.2 × the font size, and the typeface has
+> nothing to do with it.** Arial, Calibri, Times New Roman, Courier New, Aptos, Aptos
+> Display, Lato, Raleway, MS Gothic, Meiryo and Noto Sans JP all measured 1.2 em, at
+> 14 pt and 28 pt, with Latin text and with Japanese — although their real ascent +
+> descent ranges from 1.00 em (MS Gothic) to 1.45 em (Noto Sans JP). `a:lnSpc`
+> percentages multiply *that*: 150% measured 1.8 em, 90% measured 1.08 em. `a:spcPts` is
+> literal and ignores it.
+
+The first baseline has two rules, and they do not meet:
+
+> At or below 100% the baseline hangs off the **bottom** of the line box, one font
+> descent up, so the slack becomes leading above the text — 14 pt for 14 pt Arial,
+> 14 pt for Times New Roman, 13 pt for Calibri. Above 100% the face drops out entirely
+> and the baseline lands at **three quarters of the line box**: Arial and Calibri both
+> measured 19 pt at 150% despite different descents. Going from 100% to 105% therefore
+> moves the baseline *up*, which looked like a bad measurement until the second rule
+> explained it.
+
+Against the probe, our first baseline was out by up to 44 px (at 2560 px wide) and is
+now out by at most 3. The old model — ascent × font size, line box from the face's own
+metrics — was wrong for every font in the table, by −7% for Arial and +21% for Noto
+Sans JP.
+
+The corpus percentages *rejected* this fix at first, and that was the second lesson: on
+a host with none of the decks' fonts installed, the end-to-end score cannot adjudicate a
+layout change at all. The probe decks, which use only Arial and Times New Roman, could.
+
 ### The audit is now a test
 
 `tests/test_render.py` walks the render model and fails on any field the renderer never
@@ -261,7 +324,17 @@ place regressions hide.
 
 ### Fixtures
 
-None of the six fixtures uses a tab stop, a highlight, `bodyPr@rot`, a hidden shape, a
+`table test.pptx` was added to cover the built-in style catalogue, and it now does: it
+names `{5C22544A-...}` ("Medium Style 2 - Accent 1"), sets `firstRow` and `bandRow`, and
+gives no cell an explicit fill, so every colour it renders comes out of
+`parse/table_styles_builtin.py`. Exported through PowerPoint and sampled cell by cell,
+all twenty-five fills are byte-identical — header `#156082`, bands `#CCD2D8` and
+`#E7EAED` — with white rules throughout; the only differences anywhere in the table are
+sub-pixel antialiasing on the rules themselves. That is **one** GUID of the seventy-two
+carried. The rest came from the same measurement process but no fixture exercises them,
+and they should not be described as verified.
+
+None of the six other fixtures uses a tab stop, a highlight, `bodyPr@rot`, a hidden shape, a
 non-single underline or multiple columns — checked, not assumed. Those are validated
 against PowerPoint using the deck `tools/make_feature_probe.py` builds, which is also
 where the mid-paragraph column finding above comes from. A synthetic corpus of the kind

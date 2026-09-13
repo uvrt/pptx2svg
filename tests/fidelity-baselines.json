@@ -1,0 +1,246 @@
+{
+  "authoring-integration": {
+    "fonts": {
+      "available": [],
+      "hash": "da39a3ee5e6b",
+      "missing": [
+        "Aptos",
+        "Aptos Display"
+      ]
+    },
+    "histogram": 0.7995,
+    "slides": [
+      {
+        "coverage": 0.2228,
+        "histogram": 0.7995,
+        "mean_abs": 8.35,
+        "over10": 6.805,
+        "over64": 5.678,
+        "sparse": false,
+        "ssim": 0.7666
+      }
+    ],
+    "ssim": 0.7666
+  },
+  "real-basic-theme": {
+    "fonts": {
+      "available": [
+        "Arial"
+      ],
+      "hash": "dfee08fd8033",
+      "missing": [
+        "Lato",
+        "Raleway"
+      ]
+    },
+    "histogram": 0.9999,
+    "slides": [
+      {
+        "coverage": 0.9056,
+        "histogram": 1.0,
+        "mean_abs": 0.961,
+        "over10": 0.829,
+        "over64": 0.531,
+        "sparse": false,
+        "ssim": 0.9834
+      },
+      {
+        "coverage": 0.2547,
+        "histogram": 0.9997,
+        "mean_abs": 1.57,
+        "over10": 2.165,
+        "over64": 0.791,
+        "sparse": false,
+        "ssim": 0.9555
+      }
+    ],
+    "ssim": 0.9695
+  },
+  "real-financial-report": {
+    "fonts": {
+      "available": [],
+      "hash": "da39a3ee5e6b",
+      "missing": [
+        "Calibri Light",
+        "Noto Sans JP"
+      ]
+    },
+    "histogram": 0.9571,
+    "slides": [
+      {
+        "coverage": 0.9957,
+        "histogram": 1.0,
+        "mean_abs": 2.98,
+        "over10": 3.15,
+        "over64": 1.841,
+        "sparse": false,
+        "ssim": 0.9494
+      },
+      {
+        "coverage": 0.1755,
+        "histogram": 0.9663,
+        "mean_abs": 5.218,
+        "over10": 5.571,
+        "over64": 3.788,
+        "sparse": false,
+        "ssim": 0.7501
+      },
+      {
+        "coverage": 0.1685,
+        "histogram": 0.8782,
+        "mean_abs": 5.808,
+        "over10": 6.296,
+        "over64": 4.515,
+        "sparse": false,
+        "ssim": 0.7566
+      },
+      {
+        "coverage": 0.1723,
+        "histogram": 0.9839,
+        "mean_abs": 4.065,
+        "over10": 4.926,
+        "over64": 3.164,
+        "sparse": false,
+        "ssim": 0.7811
+      }
+    ],
+    "ssim": 0.8093
+  },
+  "real-product-page": {
+    "fonts": {
+      "available": [],
+      "hash": "da39a3ee5e6b",
+      "missing": [
+        "Calibri Light",
+        "Noto Sans JP"
+      ]
+    },
+    "histogram": 0.9981,
+    "slides": [
+      {
+        "coverage": 0.2798,
+        "histogram": 0.9981,
+        "mean_abs": 7.74,
+        "over10": 6.501,
+        "over64": 4.525,
+        "sparse": false,
+        "ssim": 0.7351
+      }
+    ],
+    "ssim": 0.7351
+  },
+  "sample": {
+    "fonts": {
+      "available": [
+        "Courier New"
+      ],
+      "hash": "b6a79df6c10d",
+      "missing": [
+        "Calibri"
+      ]
+    },
+    "histogram": 0.9851,
+    "slides": [
+      {
+        "coverage": 0.0175,
+        "histogram": 0.9837,
+        "mean_abs": 1.639,
+        "over10": 1.558,
+        "over64": 1.075,
+        "sparse": false,
+        "ssim": 0.0451
+      },
+      {
+        "coverage": 0.045,
+        "histogram": 0.9879,
+        "mean_abs": 7.759,
+        "over10": 4.196,
+        "over64": 3.506,
+        "sparse": false,
+        "ssim": -0.0001
+      },
+      {
+        "coverage": 0.036,
+        "histogram": 0.9901,
+        "mean_abs": 5.543,
+        "over10": 3.312,
+        "over64": 2.708,
+        "sparse": false,
+        "ssim": -0.001
+      },
+      {
+        "coverage": 0.034,
+        "histogram": 0.9844,
+        "mean_abs": 4.982,
+        "over10": 2.988,
+        "over64": 2.339,
+        "sparse": false,
+        "ssim": 0.0744
+      },
+      {
+        "coverage": 0.0212,
+        "histogram": 0.9722,
+        "mean_abs": 3.01,
+        "over10": 1.799,
+        "over64": 1.407,
+        "sparse": false,
+        "ssim": 0.095
+      },
+      {
+        "coverage": 0.0246,
+        "histogram": 0.9921,
+        "mean_abs": 2.824,
+        "over10": 2.239,
+        "over64": 1.73,
+        "sparse": false,
+        "ssim": -0.0202
+      }
+    ],
+    "ssim": 0.0322
+  },
+  "sample-issue-387": {
+    "fonts": {
+      "available": [],
+      "hash": "da39a3ee5e6b",
+      "missing": [
+        "Calibri Light",
+        "Noto Sans JP"
+      ]
+    },
+    "histogram": 1.0,
+    "slides": [
+      {
+        "coverage": 1.0,
+        "histogram": 1.0,
+        "mean_abs": 2.771,
+        "over10": 1.901,
+        "over64": 1.424,
+        "sparse": false,
+        "ssim": 0.965
+      }
+    ],
+    "ssim": 0.965
+  },
+  "table-test": {
+    "fonts": {
+      "available": [],
+      "hash": "da39a3ee5e6b",
+      "missing": [
+        "Aptos Display"
+      ]
+    },
+    "histogram": 0.9984,
+    "slides": [
+      {
+        "coverage": 0.2301,
+        "histogram": 0.9984,
+        "mean_abs": 1.425,
+        "over10": 1.264,
+        "over64": 0.621,
+        "sparse": false,
+        "ssim": 0.949
+      }
+    ],
+    "ssim": 0.949
+  }
+}
