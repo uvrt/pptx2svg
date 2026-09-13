@@ -33,6 +33,25 @@ def _numpy():
     return np
 
 
+def _profile():
+    """The local licensed-font profile, or skip.
+
+    The corpus is scored against PowerPoint's own export, and PowerPoint draws with
+    Microsoft's fonts.  Rendering our side with anything else measures font availability
+    rather than this library, so a machine without those fonts does not get a weaker
+    comparison -- it gets no comparison.  Write one with::
+
+        python3 tools/fidelity.py --write-profile
+    """
+    profile = fidelity.load_profile()
+    if profile is None:
+        pytest.skip(
+            "no tests/font-profile.local.json; run `python3 tools/fidelity.py "
+            "--write-profile` on a machine with Microsoft Office installed"
+        )
+    return profile
+
+
 # --------------------------------------------------------------------------------------
 # Deck inspection -- standard library only, so these always run
 # --------------------------------------------------------------------------------------
@@ -59,12 +78,50 @@ def test_slide_count_matches_the_package():
 
 
 def test_font_profile_partitions_faces_and_is_hashable():
-    profile = fidelity.font_profile(FIXTURES / "real-basic-theme.pptx")
+    local = _profile()
+    profile = fidelity.font_profile(FIXTURES / "real-basic-theme.pptx", local)
     assert set(profile) == {"available", "missing", "hash"}
     assert not set(profile["available"]) & set(profile["missing"])
     assert len(profile["hash"]) == 12
     # Stable across calls, or a baseline could never be matched to its inputs.
-    assert profile["hash"] == fidelity.font_profile(FIXTURES / "real-basic-theme.pptx")["hash"]
+    assert (
+        profile["hash"]
+        == fidelity.font_profile(FIXTURES / "real-basic-theme.pptx", local)["hash"]
+    )
+
+
+def test_font_profile_hash_changes_when_a_face_changes():
+    """The guard that stops a score from being compared across a font change."""
+    local = _profile()
+    deck = FIXTURES / "real-basic-theme.pptx"
+    before = fidelity.font_profile(deck, local)
+    if not before["available"]:
+        pytest.skip("this machine supplies none of this deck's faces")
+
+    tampered = {
+        "directories": local["directories"],
+        "faces": {
+            family: {
+                style: dict(entry, sha256="0" * 16)
+                for style, entry in styles.items()
+            }
+            for family, styles in local["faces"].items()
+        },
+    }
+    assert fidelity.font_profile(deck, tampered)["hash"] != before["hash"]
+
+
+def test_profile_finds_the_faces_the_corpus_actually_needs():
+    """Aptos Display in particular: it is a cloud font, not an installed one.
+
+    Two of the seven corpus decks use it, they are the two that scored worst, and the
+    profile reported it missing for as long as it only looked in font directories.
+    PowerPoint's own export embeds it, so it is there -- in Office's on-demand cache.
+    """
+    faces = _profile()["faces"]
+    for family in ("Calibri", "Calibri Light", "Cambria", "Aptos", "Aptos Display"):
+        assert family in faces, family
+        assert "regular" in faces[family], family
 
 
 # --------------------------------------------------------------------------------------
@@ -144,6 +201,11 @@ def test_baselines_file_is_readable_and_carries_font_provenance():
     baselines = json.loads(path.read_text())
     assert baselines
     for name, entry in baselines.items():
+        assert entry["fonts"]["hash"], name
+        if entry.get("skipped"):
+            # A deck the recording machine could not draw with PowerPoint's own faces.
+            # It carries its font profile so a machine that *can* is able to tell.
+            assert not entry["slides"], name
+            continue
         assert "ssim" in entry, name
         assert "histogram" in entry, name
-        assert entry["fonts"]["hash"], name
