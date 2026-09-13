@@ -96,21 +96,19 @@ mkdir -p "$FONTDIR" 2>/dev/null || $SUDO mkdir -p "$FONTDIR"
 # 2. Aptos, from Microsoft's own download
 # --------------------------------------------------------------------------------------
 
-# Microsoft publishes the Aptos family as a zip behind a short link.  The link is *not*
-# versioned, so what it serves can change under you; a mismatch is therefore a hard
-# failure rather than a warning, because silently installing a different file is exactly
-# the class of surprise this whole subsystem exists to remove.
-APTOS_URL="https://aka.ms/AptosFonts"
-# Left empty deliberately.  Microsoft ships this from a redirect whose payload has
-# changed at least once, and a hash we cannot verify from here is worse than none: it
-# would fail on every machine and teach people to pass --force.  Set it to the digest you
-# verified, in your own deployment, and this becomes a pinned install.
-APTOS_SHA256="${APTOS_SHA256:-}"
-# A size check is not a hash, but it is not nothing: the redirect currently serves
-# 2,979,784 bytes, verified against the download, and a payload of a different size is a
-# different payload.  It catches the failure mode that actually happens -- the redirect
-# moving to a newer bundle, or to an HTML error page -- without pretending to integrity
-# we cannot offer for an unversioned URL.
+# Microsoft's own download, taken from the versioned download.microsoft.com path rather
+# than the aka.ms short link.  The short link is not a stable source -- at the time of
+# writing https://aka.ms/AptosFonts redirects to Bing rather than to a font bundle -- and
+# an unversioned redirect is exactly what cannot be pinned.  This path can be, and is:
+# the digest below is of the 2,979,784-byte zip fetched from it, which unpacks to 34 flat
+# .ttf files (Aptos, Display, Narrow, Mono, Serif, each in its weights and italics).
+APTOS_URL="${APTOS_URL:-https://download.microsoft.com/download/8/6/0/860a94fa-7feb-44ef-ac79-c072d9113d69/Microsoft%20Aptos%20Fonts.zip}"
+# Pinned, so a changed payload is a hard failure rather than a silent substitution.
+# Override both of these together if Microsoft publishes a newer bundle and you have
+# verified it yourself; clearing APTOS_SHA256 downgrades to the size check below.
+APTOS_SHA256="${APTOS_SHA256:-6528fd120e719a9f985e94214eca6887d1653b88456916a792a630b02e95b025}"
+# The fallback when the hash is deliberately cleared.  Not integrity, but it still catches
+# the failure that actually happens: the URL serving an HTML error page instead of a zip.
 APTOS_EXPECTED_BYTES="${APTOS_EXPECTED_BYTES:-2979784}"
 
 if [ "$WANT_APTOS" = "1" ]; then
