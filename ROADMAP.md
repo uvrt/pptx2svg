@@ -33,7 +33,7 @@ after it needs a way to tell "better" from "different".
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
 | Charts | **Not rendered** |
-| SmartArt | **Not rendered** |
+| SmartArt | Cached drawing rendered (Phase 2); **no layout engine** |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
@@ -476,9 +476,10 @@ Phase 0.4 describes would subsume it.
 
 ---
 
-## Phase 2 — SmartArt
+## Phase 2 — SmartArt — **done**
 
-**Effort: S–M. Much cheaper than it looks.**
+**Effort: S–M. Much cheaper than it looks. Landed at the S end: ~120 lines in
+`resolve/view.py`, no new parser.**
 
 > **Correction to an earlier assessment.** I previously said SmartArt "needs a diagram
 > layout engine". For the common case it does not. PowerPoint caches a fully laid-out
@@ -499,26 +500,43 @@ p:graphicFrame
 That last shape tree is ordinary shapes, text and geometry — `parse/shapes.py:parse_shape_tree`
 handles it as-is.
 
-**Work:**
+**Work:** all four steps done in `resolve/view.py:_resolve_diagram`. Both relationship
+spellings (`schemas.microsoft.com/office/2007/…` and `purl.oclc.org/ooxml/…`) are accepted;
+children resolve with `part_path` pointed at the drawing part, so a diagram's own images
+are found; the warning and empty frame survive for a deck whose cached drawing is missing,
+empty or corrupt.
 
-1. `parse/shapes.py` — `_diagram_drawing_rel_id` already returns the `r:dm` id. Keep it.
-2. `resolve/view.py:_resolve_unsupported` — for `what == "diagram"`, hop: slide rels →
-   data-model part → its rels → drawing part. Parse its `spTree`, resolve children using
-   the *drawing part's* relationships (its images live there), return a `GroupElement`.
-3. Wrap in a group whose `child_transform` comes from `dsp:spTree/dsp:grpSpPr/a:xfrm`
-   `chOff`/`chExt`, so the diagram scales into the frame. The existing group renderer does
-   the rest.
-4. Keep the current warning + empty frame when no cached drawing exists.
+**Two things worth knowing that the plan did not mention:**
 
-Accept the relationship type under both `schemas.microsoft.com/office/2007/…` and
-`purl.oclc.org/ooxml/…` namespaces.
+- **Every cached shape has `cNvPr@id="0"`.** PowerPoint carries identity in `modelId`
+  (a GUID), not the DrawingML id, so taking the id at face value would have given every
+  node in a diagram the same `data-pptx-id`. Ids are rebuilt from the frame's id plus the
+  child's index (`256.7001/0/0`), which is unique, stable and still addressable.
+- **The `grpSpPr/a:xfrm` fallback is not `replace(transform)`.** A regular group with no
+  `chOff` has children in absolute slide coordinates, so mapping it to the outer transform
+  is right. A diagram's children are relative to the frame's own origin, so the fallback
+  has to be `chOff=(0,0)`, `chExt=` the frame extent. Using the group default here shifts
+  the whole diagram off the slide by the frame's offset.
 
 **[pptx-renderer]** notes that diagram groups need "diagram-specific compensation requiring
-matching layout provenance" — expect the child transform to need care. Their fallback when
-no drawing exists is an EMF preview, which Phase 4 unlocks for us too.
+matching layout provenance". Nothing beyond the above was needed for the cases tested —
+but see the caveat, and expect this to be where a real file diverges. Their fallback when
+no drawing exists is an EMF preview, which Phase 4 now unlocks for us too, though nothing
+wires the two together yet (a `dgm:relIds` frame has no blip to hand to `_resolve_image`).
 
-**Done when:** a SmartArt cycle/hierarchy renders its nodes and connectors; a deck with the
-drawing part deleted still renders and still warns.
+**Done when:** a SmartArt cycle/hierarchy renders its nodes and connectors ✅ (nodes, text,
+fills, geometry and embedded pictures; connectors are ordinary shapes in the cache and
+need no special handling); a deck with the drawing part deleted still renders and still
+warns ✅.
+
+**Not verified against real input.** The roadmap said no fixture contains SmartArt, and
+that is still true: `python-pptx` cannot author it and no permissively-licensed sample was
+available. `tests/test_diagram.py` therefore hand-builds the diagram parts from ECMA-376
+§21.4 and the `diagramDrawing` relationship definition, modelled on what PowerPoint emits.
+Those tests prove the lookup chain, the coordinate mapping and the fallbacks; they cannot
+prove the spec was read correctly. `tests/test_diagram.py` ends with a skipped test that
+activates the moment `tests/fixtures/real-smartart.pptx` appears — **adding that fixture
+and comparing against a PowerPoint export is the outstanding work for this phase.**
 
 ---
 
@@ -742,7 +760,7 @@ Callouts and action buttons are the common ones in real decks.
 
 ```
 Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrendered)   DONE
-                                      ├─▶ Phase 2  (SmartArt)
+                                      ├─▶ Phase 2  (SmartArt — DONE)
                                       ├─▶ Phase 4  (EMF previews — DONE)
                                       ├─▶ Phase 5.1/5.2  (shapes + small gaps)
                                       └─▶ Phase 3  (charts — longest pole, start early)
@@ -760,7 +778,7 @@ Revised quick wins, in order of payoff per day:
    and the thing standing between `real-basic-theme.pptx`'s gridlines and PowerPoint's.
    Phase 5.3's embedded fonts attack one half of it.
 3. ~~**Phase 4 EMF previews**~~ — done; the S estimate held.
-4. **Phase 2 SmartArt** — dropped from XL to S–M by the cached-drawing finding.
+4. ~~**Phase 2 SmartArt**~~ — done; the S estimate held.
 5. **Phase 5.1 shapes** — additive, parallelisable, near-zero risk.
 
 Phase 3 remains the long pole and should start in parallel rather than waiting.
