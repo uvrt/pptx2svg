@@ -1,246 +1,187 @@
 {
   "authoring-integration": {
     "fonts": {
-      "available": [],
-      "hash": "da39a3ee5e6b",
-      "missing": [
+      "available": [
         "Aptos",
         "Aptos Display"
-      ]
+      ],
+      "hash": "ae15a1311a30",
+      "missing": []
     },
-    "histogram": 0.7995,
+    "histogram": 0.7956,
     "slides": [
       {
-        "coverage": 0.2228,
-        "histogram": 0.7995,
-        "mean_abs": 8.35,
-        "over10": 6.805,
-        "over64": 5.678,
+        "coverage": 0.2223,
+        "histogram": 0.7956,
+        "mean_abs": 8.404,
+        "over10": 6.763,
+        "over64": 5.72,
         "sparse": false,
-        "ssim": 0.7666
+        "ssim": 0.7661
       }
     ],
-    "ssim": 0.7666
+    "ssim": 0.7661
   },
   "real-basic-theme": {
     "fonts": {
       "available": [
-        "Arial"
-      ],
-      "hash": "dfee08fd8033",
-      "missing": [
+        "Arial",
         "Lato",
         "Raleway"
-      ]
+      ],
+      "hash": "c6e32795015d",
+      "missing": []
     },
     "histogram": 0.9999,
     "slides": [
       {
         "coverage": 0.9056,
         "histogram": 1.0,
-        "mean_abs": 0.961,
-        "over10": 0.829,
-        "over64": 0.531,
+        "mean_abs": 0.974,
+        "over10": 0.814,
+        "over64": 0.523,
         "sparse": false,
-        "ssim": 0.9834
+        "ssim": 0.9842
       },
       {
-        "coverage": 0.2547,
+        "coverage": 0.2552,
         "histogram": 0.9997,
-        "mean_abs": 1.57,
-        "over10": 2.165,
-        "over64": 0.791,
+        "mean_abs": 1.633,
+        "over10": 2.229,
+        "over64": 0.851,
         "sparse": false,
-        "ssim": 0.9555
+        "ssim": 0.9506
       }
     ],
-    "ssim": 0.9695
+    "ssim": 0.9674
   },
   "real-financial-report": {
     "fonts": {
-      "available": [],
-      "hash": "da39a3ee5e6b",
+      "available": [
+        "Calibri Light"
+      ],
+      "hash": "9ac368b35211",
       "missing": [
-        "Calibri Light",
         "Noto Sans JP"
       ]
     },
-    "histogram": 0.9571,
-    "slides": [
-      {
-        "coverage": 0.9957,
-        "histogram": 1.0,
-        "mean_abs": 2.98,
-        "over10": 3.15,
-        "over64": 1.841,
-        "sparse": false,
-        "ssim": 0.9494
-      },
-      {
-        "coverage": 0.1755,
-        "histogram": 0.9663,
-        "mean_abs": 5.218,
-        "over10": 5.571,
-        "over64": 3.788,
-        "sparse": false,
-        "ssim": 0.7501
-      },
-      {
-        "coverage": 0.1685,
-        "histogram": 0.8782,
-        "mean_abs": 5.808,
-        "over10": 6.296,
-        "over64": 4.515,
-        "sparse": false,
-        "ssim": 0.7566
-      },
-      {
-        "coverage": 0.1723,
-        "histogram": 0.9839,
-        "mean_abs": 4.065,
-        "over10": 4.926,
-        "over64": 3.164,
-        "sparse": false,
-        "ssim": 0.7811
-      }
-    ],
-    "ssim": 0.8093
+    "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
+    "slides": []
   },
   "real-product-page": {
     "fonts": {
-      "available": [],
-      "hash": "da39a3ee5e6b",
+      "available": [
+        "Calibri Light"
+      ],
+      "hash": "9ac368b35211",
       "missing": [
-        "Calibri Light",
         "Noto Sans JP"
       ]
     },
-    "histogram": 0.9981,
-    "slides": [
-      {
-        "coverage": 0.2798,
-        "histogram": 0.9981,
-        "mean_abs": 7.74,
-        "over10": 6.501,
-        "over64": 4.525,
-        "sparse": false,
-        "ssim": 0.7351
-      }
-    ],
-    "ssim": 0.7351
+    "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
+    "slides": []
   },
   "sample": {
     "fonts": {
       "available": [
+        "Calibri",
         "Courier New"
       ],
-      "hash": "b6a79df6c10d",
-      "missing": [
-        "Calibri"
-      ]
+      "hash": "4faa2ec68b19",
+      "missing": []
     },
-    "histogram": 0.9851,
+    "histogram": 0.9738,
     "slides": [
       {
-        "coverage": 0.0175,
-        "histogram": 0.9837,
-        "mean_abs": 1.639,
-        "over10": 1.558,
-        "over64": 1.075,
+        "coverage": 0.0185,
+        "histogram": 0.9635,
+        "mean_abs": 1.874,
+        "over10": 1.639,
+        "over64": 1.179,
         "sparse": false,
-        "ssim": 0.0451
+        "ssim": 0.0294
       },
       {
-        "coverage": 0.045,
-        "histogram": 0.9879,
-        "mean_abs": 7.759,
-        "over10": 4.196,
-        "over64": 3.506,
+        "coverage": 0.0443,
+        "histogram": 0.9695,
+        "mean_abs": 7.293,
+        "over10": 4.027,
+        "over64": 3.302,
         "sparse": false,
-        "ssim": -0.0001
+        "ssim": 0.0253
       },
       {
-        "coverage": 0.036,
-        "histogram": 0.9901,
-        "mean_abs": 5.543,
-        "over10": 3.312,
-        "over64": 2.708,
+        "coverage": 0.0349,
+        "histogram": 0.9712,
+        "mean_abs": 4.752,
+        "over10": 2.98,
+        "over64": 2.362,
         "sparse": false,
-        "ssim": -0.001
+        "ssim": 0.1187
       },
       {
-        "coverage": 0.034,
-        "histogram": 0.9844,
-        "mean_abs": 4.982,
-        "over10": 2.988,
-        "over64": 2.339,
+        "coverage": 0.0328,
+        "histogram": 0.9694,
+        "mean_abs": 4.227,
+        "over10": 2.699,
+        "over64": 2.014,
         "sparse": false,
-        "ssim": 0.0744
+        "ssim": 0.1611
       },
       {
-        "coverage": 0.0212,
-        "histogram": 0.9722,
-        "mean_abs": 3.01,
-        "over10": 1.799,
-        "over64": 1.407,
+        "coverage": 0.0202,
+        "histogram": 0.9804,
+        "mean_abs": 2.319,
+        "over10": 1.529,
+        "over64": 1.12,
         "sparse": false,
-        "ssim": 0.095
+        "ssim": 0.2599
       },
       {
-        "coverage": 0.0246,
-        "histogram": 0.9921,
-        "mean_abs": 2.824,
-        "over10": 2.239,
-        "over64": 1.73,
+        "coverage": 0.024,
+        "histogram": 0.9891,
+        "mean_abs": 2.368,
+        "over10": 2.065,
+        "over64": 1.509,
         "sparse": false,
-        "ssim": -0.0202
+        "ssim": 0.1124
       }
     ],
-    "ssim": 0.0322
+    "ssim": 0.1178
   },
   "sample-issue-387": {
     "fonts": {
-      "available": [],
-      "hash": "da39a3ee5e6b",
+      "available": [
+        "Calibri Light"
+      ],
+      "hash": "9ac368b35211",
       "missing": [
-        "Calibri Light",
         "Noto Sans JP"
       ]
     },
-    "histogram": 1.0,
-    "slides": [
-      {
-        "coverage": 1.0,
-        "histogram": 1.0,
-        "mean_abs": 2.771,
-        "over10": 1.901,
-        "over64": 1.424,
-        "sparse": false,
-        "ssim": 0.965
-      }
-    ],
-    "ssim": 0.965
+    "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
+    "slides": []
   },
   "table-test": {
     "fonts": {
-      "available": [],
-      "hash": "da39a3ee5e6b",
-      "missing": [
+      "available": [
         "Aptos Display"
-      ]
+      ],
+      "hash": "af056106f360",
+      "missing": []
     },
     "histogram": 0.9984,
     "slides": [
       {
-        "coverage": 0.2301,
+        "coverage": 0.2296,
         "histogram": 0.9984,
-        "mean_abs": 1.425,
-        "over10": 1.264,
-        "over64": 0.621,
+        "mean_abs": 1.247,
+        "over10": 1.193,
+        "over64": 0.555,
         "sparse": false,
-        "ssim": 0.949
+        "ssim": 0.9531
       }
     ],
-    "ssim": 0.949
+    "ssim": 0.9531
   }
 }

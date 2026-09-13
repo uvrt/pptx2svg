@@ -30,20 +30,31 @@ because thin-stroke shapes lose about half their IoU to one pixel of anti-aliasi
 when the geometry is exactly right, and table gridlines -- the thing that started this --
 are exactly that shape of problem.
 
-**Font profiles.**  Comparing text metrics only means something when both renderers draw
-with the same outlines, and on this machine they largely do not: PowerPoint carries its
-own copies of Calibri, Aptos and MS Gothic, while the rasteriser sees neither those nor
-the Carlito/Arimo/Tinos substitutes, so it falls back to a generic sans that is much
-wider.  A score computed across that mismatch is measuring font availability, not this
-library.  :func:`font_profile` records which faces each deck asks for and which of them
-the host can actually supply, and hashes the result into the baseline, so a stored score
-is only ever compared against one taken with the same fonts.
+**Both sides draw with the real fonts.**  Comparing text metrics only means something
+when both renderers draw the same outlines.  PowerPoint always draws with Microsoft's own
+Calibri, Cambria and Aptos; if we draw with Carlito and Caladea instead, every score also
+contains a glyph-shape term that has nothing to do with this library, and the two decks
+that use Aptos -- for which no clone exists at all -- are not measurable at all.
 
-Dev-only.  This needs numpy, pillow, pypdfium2 and a rasteriser; the library itself
-stays standard-library-only, which is why this lives in ``tools/`` and not in ``src/``.
+So the harness renders *our* side with the same licensed faces PowerPoint used, read in
+place from wherever Office installed them.  Those fonts are not ours to redistribute, so
+their locations live in ``tests/font-profile.local.json``, which is written by
+``--write-profile``, is specific to the machine that wrote it, and is gitignored.  With no
+profile, or with a face the profile cannot supply, the deck is **skipped with a reason**
+rather than scored against substitutes: a baseline taken under one font profile compared
+against a run under another is exactly the apples-to-oranges number this file exists to
+stop, which is what the profile hash in every baseline entry guards.
+
+The bundled substitutes are what we *ship*; ``pptx2svg fonts --check`` and
+``tests/test_fonts.py`` cover those.  They are deliberately not the reference here.
+
+Dev-only.  This needs numpy, pillow, pypdfium2, fontTools and a rasteriser; the library
+itself stays standard-library-only, which is why this lives in ``tools/`` and not in
+``src/``.
 
 Usage::
 
+    python3 tools/fidelity.py --write-profile                        # once per machine
     python3 tools/fidelity.py --oracle ~/pptx2svg-oracle             # score and compare
     python3 tools/fidelity.py --oracle ~/pptx2svg-oracle --update    # rewrite baselines
 """
@@ -217,39 +228,167 @@ def score(ours_rgb, truth_rgb) -> dict:
 # Font profile
 # --------------------------------------------------------------------------------------
 
-#: Where a host keeps fonts a rasteriser will find.  Fonts bundled inside an application
-#: -- PowerPoint carries Calibri, Aptos and MS Gothic in its own Resources -- are
-#: deliberately not listed: PowerPoint can use them and nothing else can, which is the
-#: mismatch this profile exists to record.
-FONT_DIRECTORIES = (
-    "/System/Library/Fonts",
+#: Where the licensed Microsoft faces live on this machine.  Office keeps its own copies
+#: inside the application bundle -- that is the *point*: PowerPoint can use them and
+#: nothing else can, and rendering our side without them is what made every score here a
+#: measurement of font availability rather than of this library.
+#:
+#: Nothing is ever copied out of these directories.  ``--write-profile`` records paths and
+#: hashes into ``tests/font-profile.local.json``, which is gitignored because it names a
+#: particular machine, and because the fonts it points at are not ours to redistribute.
+LICENSED_FONT_DIRECTORIES = (
+    "/Applications/Microsoft PowerPoint.app/Contents/Resources/DFonts",
+    # Office downloads some faces on demand instead of installing them: Aptos Display,
+    # Lato, Raleway and Segoe UI live only here, under opaque numeric filenames.  Missing
+    # this directory is why "Aptos Display" looked unavailable while PowerPoint was
+    # happily embedding it in the exported PDF -- and why the two Aptos decks, the worst
+    # scoring in the corpus, could not be measured at all.
+    "~/Library/Group Containers/UBF8T346G9.Office/FontCache",
+    "/Applications/Microsoft Word.app/Contents/Resources/DFonts",
+    "/System/Library/Fonts/Supplemental",   # macOS ships Arial, Times New Roman, Courier
     "/Library/Fonts",
     "~/Library/Fonts",
-    "/usr/share/fonts",
+    "/usr/share/fonts/truetype/msttcorefonts",
+    "~/.local/share/fonts/ppviewer",        # tools/install-fonts-debian.sh puts them here
     "/usr/local/share/fonts",
-    "~/.fonts",
-    "~/.local/share/fonts",
 )
 
+PROFILE_PATH = ROOT / "tests" / "font-profile.local.json"
 
-def installed_faces() -> dict[str, str]:
-    """Font file stem -> sha1 of the file, for every font the host exposes."""
-    found: dict[str, str] = {}
-    for directory in FONT_DIRECTORIES:
-        base = os.path.expanduser(directory)
-        for path in glob.glob(os.path.join(base, "**", "*"), recursive=True):
-            if not path.lower().endswith((".ttf", ".otf", ".ttc", ".dfont")):
+
+def _faces_in(path: str) -> list[tuple[set[str], str, int]]:
+    """``(family names, style, weight)`` for every face in a font file.
+
+    Style is one of ``regular``/``bold``/``italic``/``bolditalic``, taken from the OS/2
+    selection flags rather than the subfamily string, which is localised and creative
+    ("Negrita", "Fett", "Semibold" where the file is really the bold cut).
+
+    Filenames lie -- ``calibril.ttf`` is "Calibri Light", ``YuGothR.ttc`` is "Yu Gothic"
+    -- and matching a deck's ``typeface="Calibri Light"`` against a filename stem is how
+    the old profile decided Calibri Light was missing while it sat right there.
+    """
+    from fontTools.ttLib import TTCollection, TTFont
+
+    try:
+        fonts = (
+            TTCollection(path, lazy=True).fonts
+            if path.lower().endswith((".ttc", ".otc"))
+            else [TTFont(path, lazy=True, fontNumber=0)]
+        )
+    except Exception:  # unreadable, bitmap-only, or a format fontTools declines
+        return []
+
+    result: list[tuple[set[str], str, int]] = []
+    for font in fonts:
+        try:
+            table = font["name"]
+        except Exception:
+            continue
+        names: set[str] = set()
+        # Every language record, not just the English one.  A Japanese deck asks for
+        # "游ゴシック"; the file calls itself "Yu Gothic" in English and
+        # "游ゴシック" in Japanese, and only reading both makes the two meet.
+        # getDebugName() returns the English record alone, which is why the profile used
+        # to report every Japanese face as missing while it sat in DFonts.
+        # nameID 1 (the legacy family) only, deliberately.  nameID 16 -- the
+        # typographic family -- groups every weight of a superfamily under one name, so
+        # Aptos-Light.ttf and Aptos-Black.ttf both answer to "Aptos" there and the first
+        # one scanned would become "Aptos regular".  nameID 1 keeps them apart as
+        # "Aptos Light" and "Aptos Black", which is also how PowerPoint and fontdb match
+        # a font-family string, so it is the name a deck is actually asking for.
+        for record in table.names:
+            if record.nameID != 1:
                 continue
-            stem = os.path.splitext(os.path.basename(path))[0]
-            key = re.sub(r"[^a-z0-9]", "", stem.lower())
-            if key and key not in found:
-                digest = hashlib.sha1()
-                with open(path, "rb") as handle:
-                    # The head of the file carries the tables that decide metrics; the
-                    # whole file would make this pass noticeably slower for no gain.
-                    digest.update(handle.read(65536))
-                found[key] = digest.hexdigest()[:12]
+            try:
+                value = record.toUnicode()
+            except Exception:
+                continue
+            if value:
+                names.add(value.strip())
+        if not names:
+            continue
+        try:
+            os2 = font["OS/2"]
+            selection, weight = os2.fsSelection, os2.usWeightClass
+        except Exception:
+            selection, weight = 0x40, 400
+        bold = bool(selection & 0x20)
+        italic = bool(selection & 0x01)
+        style = ("bold" if bold else "") + ("italic" if italic else "") or "regular"
+        result.append((names, style, weight))
+    return result
+
+
+def scan_licensed_fonts() -> dict[str, dict]:
+    """Family name -> ``{style: {path, sha256}}`` for every licensed face this machine has.
+
+    Styles are kept apart because ``tools/extract_font_metrics.py`` needs the *bold* file
+    of a measured-only face (Aptos, Cambria), and because a family whose bold cut is
+    missing is a different thing from one that is fully present.
+
+    The full file is hashed, not just its head: the baseline's whole purpose is to refuse
+    a comparison across a font change, and a 64 kB prefix would miss a hinting update
+    that moves glyphs.
+    """
+    found: dict[str, dict] = {}
+    for directory in LICENSED_FONT_DIRECTORIES:
+        base = os.path.expanduser(directory)
+        if not os.path.isdir(base):
+            continue
+        for path in sorted(glob.glob(os.path.join(base, "**", "*"), recursive=True)):
+            if not path.lower().endswith((".ttf", ".otf", ".ttc", ".otc")):
+                continue
+            faces = _faces_in(path)
+            if not faces:
+                continue
+            digest = hashlib.sha256()
+            with open(path, "rb") as handle:
+                digest.update(handle.read())
+            for families, style, weight in faces:
+                entry = {
+                    "path": path,
+                    "sha256": digest.hexdigest()[:16],
+                    "weight": weight,
+                }
+                for family in families:
+                    styles = found.setdefault(family, {})
+                    previous = styles.get(style)
+                    # First directory wins -- PowerPoint's own DFonts are listed first,
+                    # because they are the copies PowerPoint actually draws with -- but
+                    # within a directory prefer the canonical weight, so a family that
+                    # also ships Light and Black cuts does not hand us one of those as
+                    # its "regular".
+                    target = 700 if "bold" in style else 400
+                    if previous is None or abs(weight - target) < abs(
+                        previous["weight"] - target
+                    ):
+                        styles[style] = entry
     return found
+
+
+def write_profile() -> dict:
+    faces = scan_licensed_fonts()
+    profile = {
+        # resvg is pointed at whole directories rather than individual files: a face is
+        # four files (regular, bold, italic, bold-italic) and the deck decides at render
+        # time which it needs, so naming only the upright would silently drop bold.
+        "directories": sorted(
+            {
+                os.path.dirname(entry["path"])
+                for styles in faces.values()
+                for entry in styles.values()
+            }
+        ),
+        "faces": faces,
+    }
+    PROFILE_PATH.write_text(json.dumps(profile, indent=2, sort_keys=True) + "\n")
+    return profile
+
+
+def load_profile() -> dict | None:
+    if not PROFILE_PATH.exists():
+        return None
+    return json.loads(PROFILE_PATH.read_text())
 
 
 #: A theme's font scheme ends with a long ``<a:font script="Arab" typeface="..."/>`` list
@@ -281,24 +420,39 @@ def requested_faces(deck: Path) -> list[str]:
     return sorted(names)
 
 
-def font_profile(deck: Path) -> dict:
-    """Which of a deck's faces this host can actually draw, and a hash of that answer.
+#: Why there is no "PowerPoint fell back to X, so we will too" table here.
+#:
+#: It is tempting: read ``/BaseFont`` out of the exported PDF, see that PowerPoint drew
+#: Calibri where the deck asked for Noto Sans JP, and point our render at Calibri as
+#: well.  It would make three more decks scoreable.  It would also be measuring the wrong
+#: thing twice over -- our layout would still be computed from Noto Sans JP's advance
+#: widths while drawing Calibri's, so the comparison would contain a deliberate
+#: metrics/outline mismatch of our own making, and any conclusion drawn from it would be
+#: about the fudge rather than about the renderer.
+#:
+#: A deck naming a face PowerPoint does not have is simply not a deck this corpus can
+#: score.  The fix is to install the face where PowerPoint can see it and re-export, not
+#: to guess around it.
 
-    ``missing`` is the interesting field.  A deck whose faces are all missing is not
-    testing layout at all -- the rasteriser is substituting something arbitrary and the
-    score mostly reflects how wide that substitute happens to be.
+
+def font_profile(deck: Path, profile: dict | None) -> dict:
+    """Which of a deck's faces the licensed profile can supply, and a hash of that answer.
+
+    ``missing`` is the field that decides whether a deck gets scored at all.  A deck we
+    cannot draw with the same faces PowerPoint drew with is not a failing deck, it is an
+    unmeasurable one, and scoring it anyway is how a font-availability difference gets
+    recorded as a rendering regression.
     """
-    installed = installed_faces()
+    faces = (profile or {}).get("faces", {})
     available: list[str] = []
     missing: list[str] = []
     for face in requested_faces(deck):
-        key = re.sub(r"[^a-z0-9]", "", face.lower())
-        (available if key in installed else missing).append(face)
+        (available if face in faces else missing).append(face)
 
-    digest = hashlib.sha1()
+    digest = hashlib.sha256()
     for face in available:
-        key = re.sub(r"[^a-z0-9]", "", face.lower())
-        digest.update(f"{face}:{installed[key]}\n".encode())
+        for style, entry in sorted(faces[face].items()):
+            digest.update(f"{face}:{style}:{entry['sha256']}\n".encode())
     return {
         "available": available,
         "missing": missing,
@@ -310,8 +464,23 @@ def font_profile(deck: Path) -> dict:
 # Running a corpus
 # --------------------------------------------------------------------------------------
 
-def render_pair(deck: Path, pdf: Path, slide_index: int):
-    """Our PNG and PowerPoint's, as equally sized RGB arrays."""
+def _supported(target, **kwargs) -> dict:
+    """Drop keyword arguments ``target`` does not accept."""
+    import inspect
+
+    accepted = set(inspect.signature(target).parameters)
+    return {name: value for name, value in kwargs.items() if name in accepted}
+
+
+def render_pair(deck: Path, pdf: Path, slide_index: int, profile: dict):
+    """Our PNG and PowerPoint's, as equally sized RGB arrays.
+
+    Our side is rendered with the *licensed* faces from the profile and nothing else --
+    not the host's fonts, not the bundled substitutes.  That is the only configuration in
+    which a difference between the two images is attributable to this library: PowerPoint
+    drew with Microsoft's Calibri, so we draw with Microsoft's Calibri, and what is left
+    over is layout.
+    """
     import numpy as np
     import pypdfium2 as pdfium
     from PIL import Image
@@ -320,8 +489,23 @@ def render_pair(deck: Path, pdf: Path, slide_index: int):
     from pptx2svg import ConvertOptions, convert_pptx_to_svg
     from pptx2svg.png import svg_to_png
 
-    svg = convert_pptx_to_svg(str(deck), ConvertOptions(width=WIDTH))[slide_index]
-    ours = Image.open(io.BytesIO(svg_to_png(svg, backend="resvg"))).convert("RGB")
+    # --src can point this at an older checkout for a before/after table, and older
+    # checkouts do not have these keywords.  Filtering by signature keeps the comparison
+    # possible instead of making it a TypeError.
+    convert_kwargs = _supported(ConvertOptions, warn_on_font_substitution=False)
+    raster_kwargs = _supported(
+        svg_to_png,
+        font_dirs=profile["directories"],
+        skip_system_fonts=True,
+        use_bundled_fonts=False,
+    )
+
+    svg = convert_pptx_to_svg(str(deck), ConvertOptions(width=WIDTH, **convert_kwargs))[
+        slide_index
+    ]
+    ours = Image.open(
+        io.BytesIO(svg_to_png(svg, backend="resvg", **raster_kwargs))
+    ).convert("RGB")
 
     page = pdfium.PdfDocument(str(pdf))[slide_index]
     truth = page.render(scale=WIDTH / page.get_size()[0]).to_pil().convert("RGB")
@@ -339,16 +523,34 @@ def slide_count(deck: Path) -> int:
         )
 
 
-def run(oracle_dir: Path) -> dict:
-    """Score every deck in ``oracle_dir`` that has a matching exported PDF."""
+def run(oracle_dir: Path, profile: dict) -> dict:
+    """Score every deck in ``oracle_dir`` that has a matching exported PDF.
+
+    A deck whose faces the profile cannot supply is recorded as ``skipped`` rather than
+    scored.  Comparing it anyway would mean our render used substitute outlines while
+    PowerPoint used Microsoft's, and every glyph would differ for a reason that has
+    nothing to do with the renderer.
+    """
     results: dict[str, dict] = {}
     for deck in sorted(oracle_dir.glob("*.pptx")):
         pdf = deck.with_suffix(".pdf")
         if not pdf.exists():
             continue
-        entry: dict = {"fonts": font_profile(deck), "slides": []}
+        fonts = font_profile(deck, profile)
+        entry: dict = {"fonts": fonts, "slides": []}
+        if fonts["missing"]:
+            # PowerPoint did not have these faces either, so its PDF is already drawn
+            # with substitutes of its own choosing.  Scoring against it would compare
+            # our fallback to Microsoft's.
+            entry["skipped"] = (
+                "PowerPoint substituted too: no "
+                + ", ".join(fonts["missing"])
+                + " on this machine"
+            )
+            results[deck.stem] = entry
+            continue
         for index in range(slide_count(deck)):
-            ours, truth = render_pair(deck, pdf, index)
+            ours, truth = render_pair(deck, pdf, index, profile)
             entry["slides"].append(score(ours, truth))
         entry["ssim"] = round(
             sum(s["ssim"] for s in entry["slides"]) / len(entry["slides"]), 4
@@ -363,42 +565,36 @@ def run(oracle_dir: Path) -> dict:
 def report(results: dict, baselines: dict | None = None) -> int:
     """Print a table and return the number of failures."""
     failures = 0
-    print(f"{'deck':26} {'SSIM':>7} {'hist':>7} {'>10%':>7} {'fonts':>16}  verdict")
+    print(f"{'deck':26} {'SSIM':>7} {'hist':>7} {'>10%':>7} {'fonts':>7}  verdict")
     for name, entry in results.items():
         fonts = entry["fonts"]
         supply = f"{len(fonts['available'])}/{len(fonts['available']) + len(fonts['missing'])}"
+        if entry.get("skipped"):
+            print(f"{name:26} {'-':>7} {'-':>7} {'-':>7} {supply:>7}  SKIPPED: {entry['skipped']}")
+            continue
         over10 = sum(s["over10"] for s in entry["slides"]) / len(entry["slides"])
         notes = []
-        # A deck whose faces this host does not have is not a failing deck, it is an
-        # unmeasurable one: the rasteriser substitutes a face of its own choosing and
-        # every glyph lands somewhere else, which swamps whatever the renderer did.
-        comparable = bool(fonts["available"]) and not fonts["missing"]
-        if comparable:
-            if entry["ssim"] < MIN_SSIM:
-                notes.append(f"SSIM<{MIN_SSIM}")
-            if entry["histogram"] < MIN_HISTOGRAM:
-                notes.append(f"hist<{MIN_HISTOGRAM}")
-        else:
-            # The absolute gates are meaningless when the rasteriser is substituting
-            # faces PowerPoint did not use: every glyph is a different shape in a
-            # different place, and the score reflects the substitute, not the renderer.
-            # The regression gate below still applies -- a run with the same fonts
-            # missing is comparable to an earlier run with the same fonts missing.
-            missing = ", ".join(fonts["missing"]) or "all faces"
-            notes.append(f"no fonts: {missing}")
+        if entry["ssim"] < MIN_SSIM:
+            notes.append(f"SSIM<{MIN_SSIM}")
+        if entry["histogram"] < MIN_HISTOGRAM:
+            notes.append(f"hist<{MIN_HISTOGRAM}")
         if baselines and name in baselines:
             previous = baselines[name]
-            if previous["fonts"]["hash"] != fonts["hash"]:
+            if previous.get("skipped"):
+                notes.append("baseline was skipped; nothing to compare")
+            elif previous["fonts"]["hash"] != fonts["hash"]:
+                # Different faces on the two runs.  The scores are both valid and they
+                # are not comparable; saying so is the whole reason the hash is stored.
                 notes.append("font profile changed; baseline not comparable")
             elif entry["ssim"] < previous["ssim"] - MAX_SSIM_DROP:
                 notes.append(f"REGRESSED from {previous['ssim']}")
                 failures += 1
-        if comparable and len(notes) > 0 and any(n.startswith(("SSIM", "hist")) for n in notes):
+        if any(note.startswith(("SSIM", "hist")) for note in notes):
             failures += 1
         verdict = "; ".join(notes) if notes else "ok"
         print(
             f"{name:26} {entry['ssim']:7.4f} {entry['histogram']:7.4f} "
-            f"{over10:7.2f} {supply:>16}  {verdict}"
+            f"{over10:7.2f} {supply:>7}  {verdict}"
         )
 
     return failures
@@ -412,20 +608,51 @@ def main() -> int:
         help="directory of deck.pptx / deck.pdf pairs exported through PowerPoint",
     )
     parser.add_argument("--update", action="store_true", help="rewrite the stored baselines")
+    parser.add_argument(
+        "--write-profile",
+        action="store_true",
+        help="record this machine's licensed fonts into tests/font-profile.local.json",
+    )
     parser.add_argument("--json", action="store_true", help="dump raw scores instead of a table")
     parser.add_argument("--src", help="import pptx2svg from this tree instead of ./src")
     args = parser.parse_args()
 
+    if args.write_profile:
+        profile = write_profile()
+        print(
+            f"wrote {PROFILE_PATH.relative_to(ROOT)}: "
+            f"{len(profile['faces'])} families across {len(profile['directories'])} "
+            "directories"
+        )
+        for face in ("Calibri", "Calibri Light", "Cambria", "Aptos", "Arial",
+                     "Times New Roman", "Courier New"):
+            mark = "yes" if face in profile["faces"] else "NO"
+            print(f"  {face:18} {mark}")
+        return 0
+
     if args.src:
         global SOURCE_ROOT
         SOURCE_ROOT = os.path.abspath(os.path.expanduser(args.src))
+
+    profile = load_profile()
+    if profile is None:
+        print(
+            f"no font profile at {PROFILE_PATH}.\n"
+            "The corpus is scored against PowerPoint's own export, which draws with "
+            "Microsoft's fonts;\nrendering our side with anything else measures font "
+            "availability rather than this library.\n"
+            "On a machine with Office installed, run:\n"
+            "    python3 tools/fidelity.py --write-profile",
+            file=sys.stderr,
+        )
+        return 2
 
     oracle_dir = Path(os.path.expanduser(args.oracle))
     if not oracle_dir.is_dir():
         print(f"no such directory: {oracle_dir}", file=sys.stderr)
         return 2
 
-    results = run(oracle_dir)
+    results = run(oracle_dir, profile)
     if not results:
         print(f"no deck.pptx/deck.pdf pairs in {oracle_dir}", file=sys.stderr)
         return 2

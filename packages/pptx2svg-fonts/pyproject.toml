@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pptx2svg-fonts"
+version = "0.1.0"
+description = "The fonts pptx2svg draws with, for deterministic rendering"
+readme = "README.md"
+requires-python = ">=3.10"
+# The *code* here is MIT, like pptx2svg.  The font files are not: each one is SIL OFL
+# 1.1 and carries its own licence text in src/pptx2svg_fonts/licenses/.  A single
+# SPDX expression cannot say that, so the classifiers list both and README spells it out.
+license = { text = "MIT AND OFL-1.1" }
+authors = [{ name = "Evert Koks" }]
+keywords = ["pptx", "fonts", "noto", "cjk", "rendering"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "License :: OSI Approved :: SIL Open Font License 1.1 (OFL-1.1)",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/uvrt/pptx2svg"
+Repository = "https://github.com/uvrt/pptx2svg"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# Without this the wheel is 4 kB of docstring and the fonts are silently absent, which
+# is exactly the failure this distribution exists to prevent.  tests/test_fonts.py
+# asserts every declared family resolves to a readable file.
+pptx2svg_fonts = ["files/*.ttf", "licenses/*.txt"]

@@ -16,15 +16,21 @@ A Python port of [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse).
 ## Install
 
 ```bash
-pip install pptx2svg          # SVG only, zero dependencies
-pip install pptx2svg[png]     # + PNG output via resvg-py
+pip install pptx2svg                    # SVG only, zero dependencies
+pip install 'pptx2svg[png,fonts]'       # PNG output, rendered reproducibly
 ```
 
-| Extra    | Pulls in    | For                                                      |
-| -------- | ----------- | -------------------------------------------------------- |
-| `png`    | `resvg-py`  | PNG output. Prebuilt wheels; the recommended backend.     |
-| `cairo`  | `cairosvg`  | PNG via Cairo. Weaker SVG filter support (shadows, glows).|
-| `fonts`  | `fonttools` | Measure with real installed fonts instead of the built-in tables. |
+| Extra     | Pulls in         | For                                                        |
+| --------- | ---------------- | ---------------------------------------------------------- |
+| `png`     | `resvg-py`       | PNG output. Prebuilt wheels; the recommended backend.       |
+| `fonts`   | `pptx2svg-fonts` | The typefaces we draw with. **Install this for PNG output** — see [Fonts](#fonts). |
+| `cairo`   | `cairosvg`       | PNG via Cairo. Weaker SVG filter support (shadows, glows).  |
+| `measure` | `fonttools`      | Measure with real installed fonts instead of the built-in tables. |
+
+SVG output needs nothing but the standard library — an SVG names fonts, it does not
+embed them. PNG output *rasterises*, so it needs actual font files, and without them the
+rasteriser quietly substitutes whatever the host has. `[fonts]` is 11 MB and is what
+makes the same deck produce the same pixels on your laptop and on a build server.
 
 ## Use
 
@@ -89,6 +95,7 @@ expanded, and placeholder properties are merged down from layout and master.
 | `pptx2svg.resolve` | Theme colours + the placeholder/background/text inheritance cascades       |
 | `pptx2svg.render`  | Text measurement, line breaking, geometry, SVG output                     |
 | `pptx2svg.text`    | Font metrics, measurement, wrapping                                       |
+| `pptx2svg.fonts`   | Which faces we can draw, and what happens when we cannot                  |
 | `pptx2svg.png`     | Rasterisation via an external backend                                     |
 
 Each stage is usable on its own.
@@ -128,6 +135,21 @@ points.
 
 ### Checking fidelity against PowerPoint
 
+`tools/fidelity.py` scores our render against PowerPoint's own PDF export on SSIM and
+colour-histogram correlation. It renders **our** side with the same licensed Microsoft
+faces PowerPoint used, read in place from wherever Office installed them, so a difference
+between the two images is attributable to this library rather than to font availability:
+
+```bash
+python3 tools/fidelity.py --write-profile               # once, on a machine with Office
+python3 tools/fidelity.py --oracle ~/pptx2svg-oracle
+```
+
+The profile records paths and hashes only; no licensed font is ever copied into the
+repository, and `tests/font-profile.local.json` is gitignored. Without it the harness
+refuses to run, and a deck naming a face PowerPoint did not have either is skipped rather
+than scored against Microsoft's fallback.
+
 If Microsoft PowerPoint is installed, `tools/powerpoint_export_pdf.applescript` exports a
 deck through PowerPoint itself, giving authoritative ground truth to compare against:
 
@@ -140,33 +162,117 @@ python -c "import pypdfium2 as p; d=p.PdfDocument('$HOME/gt.pdf'); \
 Note that PowerPoint is sandboxed: both paths must be under your home directory, not
 `/tmp`.
 
-### Fonts
+## Fonts
 
-Text is measured against bundled metrics for four metric-compatible open fonts (Carlito
-for Calibri, Liberation Sans for Arial, Liberation Serif for Times New Roman, Noto Sans JP
-for Japanese), so layout is identical on every machine. The SVG asks for the original font
-first, then the substitutes, so a host that really has Calibri uses it.
+Office's typefaces are proprietary and cannot be redistributed. Layout is therefore
+computed from the advance widths of open fonts built to match them, and **those same
+files are what the rasteriser draws with** — measuring with one face and drawing with
+another is the failure this whole subsystem exists to prevent. resvg does not warn when
+it substitutes: rendering one string in Calibri, Carlito, Aptos, Noto Sans JP and Lato on
+a machine with none of them produces five byte-identical PNGs.
 
-For layout that matches a specific machine's fonts, pass a measurer backed by real files:
+| Office face        | Drawn with     | Debian package              | Licence     |
+| ------------------ | -------------- | --------------------------- | ----------- |
+| Calibri            | Carlito        | `fonts-crosextra-carlito`   | SIL OFL 1.1 |
+| Arial, Helvetica   | Arimo          | `fonts-croscore`            | SIL OFL 1.1 |
+| Times New Roman    | Tinos          | `fonts-croscore`            | SIL OFL 1.1 |
+| Courier New        | Cousine        | `fonts-croscore`            | SIL OFL 1.1 |
+| Cambria            | Caladea †      | `fonts-crosextra-caladea`   | SIL OFL 1.1 |
+| Aptos †            | Carlito †      | —                           | —           |
+| Japanese Gothic    | Noto Sans JP † | `fonts-noto-cjk`            | SIL OFL 1.1 |
+| Lato, Raleway      | themselves     | `fonts-lato`, — ‡           | SIL OFL 1.1 |
+
+The first four are exact: measured character by character against the copies Office
+installs, the advance widths match to the unit, so substituting them changes glyph shapes
+and nothing else — not one line break moves.
+
+† **Approximate, and reported as such.** Caladea is universally described as
+metric-compatible with Cambria; measured, it runs 4.5 % narrow. **Aptos**, Microsoft's
+Office default since 2023, has no open clone at all — we measure it with its own widths
+(so line breaks match PowerPoint) and draw it with Carlito, whose widths sit closest of
+anything shippable, −3.6 % on a representative sentence. Noto Sans JP is not
+metric-compatible with MS Gothic or Meiryo either; nothing is, and a Gothic standing in
+for a Gothic beats a Latin fallback.
+
+‡ Debian does not package Raleway. Use the pip bundle, or Google Fonts.
+
+### Will my deck render faithfully?
+
+```bash
+pptx2svg fonts                       # what the bundle covers
+pptx2svg fonts --check deck.pptx     # exit 1 if this deck cannot be drawn faithfully
+```
+
+```
+mode:   bundled from .../site-packages/pptx2svg_fonts/files
+        this machine's own fonts are ignored, so output is reproducible
+        families: Arimo, Caladea, Carlito, Cousine, Lato, Noto Sans JP, Raleway, Tinos
+
+face                       verdict      drawn with     note
+Noto Sans JP               exact        Noto Sans JP   drawn with the face the deck asked for
+Calibri                    compatible   Carlito        Carlito has Calibri's advance widths
+Aptos                      approximate  Carlito        measured as Aptos, drawn as Carlito; no metric-compatible clone exists
+```
+
+`exact` and `compatible` are faithful; `approximate` and `missing` are not, and `--check`
+exits non-zero on them so a deck that cannot be rendered faithfully fails a build instead
+of shipping wrong pixels. The same information reaches library callers as
+`font-substituted` warnings on `ConvertOptions.warnings`.
+
+### Without the bundle
+
+`pptx2svg` alone renders PNGs with the host's fonts and emits one
+`font-bundle-missing` warning saying so. That is a deliberate downgrade, not a silent
+one — output is then whatever the machine happens to have installed.
+
+### Escape hatches
 
 ```python
-from pptx2svg import ConvertOptions, FontToolsTextMeasurer, convert_pptx_to_svg
+# The host's fonts as well as the bundle, for a deck naming a face we do not carry
+convert_pptx_to_png("deck.pptx", skip_system_fonts=False)
 
+# Your own faces only
+convert_pptx_to_png("deck.pptx", font_dirs=["./corporate-fonts"], use_bundled_fonts=False)
+
+# Layout measured from specific files on this machine
+from pptx2svg import ConvertOptions, FontToolsTextMeasurer
 measurer = FontToolsTextMeasurer({"Calibri": "/path/to/Calibri.ttf"})
-svgs = convert_pptx_to_svg("deck.pptx", ConvertOptions(measurer=measurer))
-```
+convert_pptx_to_svg("deck.pptx", ConvertOptions(measurer=measurer))
 
-For reproducible PNGs regardless of installed fonts:
-
-```python
-convert_pptx_to_png("deck.pptx", font_dirs=["./fonts"], skip_system_fonts=True)
-```
-
-Or map fonts to substitutes you do have:
-
-```python
+# Map a face to a substitute you do have
 ConvertOptions(font_mapping={"Helvetica Neue": "Inter"})
 ```
+
+On the command line: `--system-fonts`, `--no-bundled-fonts`, `--font-dir DIR`.
+
+### Debian and other Linux hosts
+
+Two routes, and only one of them is reproducible.
+
+**The bundle (recommended).** `pip install 'pptx2svg[fonts]'` pins the exact font files.
+Two machines running the same version produce the same pixels, which is the only way to
+get that guarantee.
+
+**System packages.** `tools/install-fonts-debian.sh` installs the same designs from apt
+(`fonts-croscore`, `fonts-crosextra-carlito`, `fonts-crosextra-caladea`,
+`fonts-liberation2`, `fonts-noto-cjk`, `fonts-lato`) and verifies each family with
+`fc-list`. Render with `--system-fonts` to use them. This is fine for correct *layout* —
+Liberation Sans/Serif/Mono are derived from Arimo/Tinos/Cousine and measure identically,
+checked character by character — but apt gives you whatever version the distribution
+shipped, so two machines on different releases can still differ.
+
+The same script fetches the faces no bundle can legally contain, behind explicit flags:
+
+```bash
+tools/install-fonts-debian.sh                  # open substitutes from apt
+tools/install-fonts-debian.sh --aptos          # + Aptos, from Microsoft's own download
+tools/install-fonts-debian.sh --ppviewer       # + Calibri, Cambria and the ClearType set
+```
+
+`--ppviewer` extracts them from the PowerPoint Viewer installer, the route documented at
+[wiki.debian.org/ppviewerFonts](https://wiki.debian.org/ppviewerFonts) (hash-pinned;
+needs `cabextract`). **These are non-free Microsoft fonts — you must already hold a
+licence to use them.** Nothing extracted is ever committed or shipped.
 
 ## Output notes
 
@@ -192,13 +298,35 @@ what addresses a shape unambiguously. Alt text is still emitted as `aria-label` 
 
 ```bash
 pip install -e '.[dev]'
+pip install -e packages/pptx2svg-fonts
 pytest
 ```
 
 Tests run against real `.pptx` files in `tests/fixtures/` produced by PowerPoint, Google
 Slides and python-pptx (shared with pptx-glimpse — see `tests/fixtures/README.md`).
 
+The metrics table in `pptx2svg/text/metrics.py` is **generated** from the font files in
+`packages/pptx2svg-fonts`. Do not edit it by hand:
+
+```bash
+python3 tools/extract_font_metrics.py --check    # fails if the table has drifted
+python3 tools/extract_font_metrics.py --write    # regenerate
+```
+
+A test runs `--check`, so a font update that is not accompanied by a regenerated table
+fails the suite rather than silently making layout wrong.
+
 ## Licence
 
 MIT. Ported from [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse) (MIT,
 © Hiroki Sakabe).
+
+The `pptx2svg-fonts` distribution is a separate matter: its Python module is MIT, but the
+font files it carries are each **SIL Open Font License 1.1**, redistributed byte-for-byte
+as published on [Google Fonts](https://github.com/google/fonts) with their full licence
+texts alongside them in `src/pptx2svg_fonts/licenses/`. Carlito, Caladea, Arimo, Tinos and
+Cousine are © their respective Project Authors; Lato is © tyPoland Łukasz Dziedzic; Noto
+Sans JP is © Adobe; Raleway is © the Raleway Project Authors. None has been subsetted,
+renamed or otherwise modified, so the Reserved Font Name clauses are satisfied.
+
+No Microsoft font is bundled, vendored or committed anywhere in this repository.

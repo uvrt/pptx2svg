@@ -1,0 +1,8 @@
+# The whole point of this distribution is the font files, so the sdist must carry them --
+# and, because every one is SIL OFL 1.1, the licence text that the OFL requires to travel
+# with them.  An sdist of just __init__.py would build a wheel that claims eight families
+# and supplies none, which is the silent-substitution failure this package exists to stop.
+include README.md
+recursive-include src/pptx2svg_fonts *.ttf *.txt
+
+global-exclude __pycache__ *.py[cod] .DS_Store

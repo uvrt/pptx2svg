@@ -25,3 +25,16 @@ venv/
 /oracle-runtime/
 /tests/vrt/diffs/
 .claude/
+
+# Licensed fonts, and anything that points at them.
+#
+# The fidelity harness compares our render against PowerPoint's, and that comparison is
+# only meaningful when both sides draw with the *same* faces -- the real Calibri, Cambria
+# and Aptos that Office installs.  Those are licensed to Office and must never be copied
+# into this repository, so the harness reads them in place through a local profile that
+# names paths on the machine that wrote it.  The profile is per-machine by construction
+# and the fonts are not ours to redistribute; neither is committable.
+/tests/font-profile.local.json
+/tests/local-fonts/
+/oracle-fonts/
+*.ttf.local

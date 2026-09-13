@@ -37,8 +37,9 @@ after it needs a way to tell "better" from "different".
 | EMF / WMF | **Not rendered** |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
+| Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
 
-317 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
+356 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
 independently testable, and every phase below slots into exactly one of them.
 
 ### Shape identity
@@ -55,36 +56,170 @@ pair `(id, path)` is unique, and a downstream consumer needs both to address a s
 
 ### Measured baseline
 
-Against real PowerPoint output, every slide of every fixture, at 1280 px wide. Produced
-by `tools/fidelity.py`; "pre" is commit 080962f, "P1" is Phase 1 as landed at c798524,
-"now" is with the font-metric fix below.
+Against real PowerPoint output, every slide of every fixture, at 1280 px wide, produced
+by `tools/fidelity.py`.
 
-| Fixture | SSIM pre / P1 / now | hist pre / P1 / now | >10/255 pre / P1 / now |
+**These numbers mean something different from the ones they replace.** Every earlier
+table on this page was partly a measurement of font availability: PowerPoint drew with
+Microsoft's Calibri, Cambria and Aptos, our side drew with whatever resvg could find, and
+for five of the seven fixtures that was a generic sans. The difference between the two
+images was dominated by glyph shape before the renderer had done anything at all. The
+harness now renders our side with the *same licensed faces* PowerPoint used, read in
+place through a gitignored local profile, and a deck whose faces PowerPoint did not have
+either is skipped rather than scored against Microsoft's own fallback.
+
+So the columns below are not comparable with the "pre" and "P1" columns that used to be
+here; they were taken under a different and less honest configuration. What *is*
+comparable is before/after within this table, both measured with PowerPoint's faces on
+both sides.
+
+| Fixture | SSIM before / after | hist before / after | >10/255 before / after |
 | --- | --- | --- | --- |
-| `authoring-integration.pptx` | 0.732 / 0.767 / **0.767** | 0.451 / 0.800 / 0.800 | 12.27 / 6.80 / 6.80 |
-| `real-basic-theme.pptx` | 0.946 / 0.938 / **0.970** | 0.999 / 1.000 / 1.000 | 1.84 / 2.07 / **1.50** |
-| `real-financial-report.pptx` | 0.792 / 0.791 / **0.809** | 0.959 / 0.959 / 0.957 | 5.32 / 5.32 / **4.99** |
-| `real-product-page.pptx` | 0.715 / 0.715 / **0.735** | 0.998 / 0.998 / 0.998 | 6.84 / 6.84 / **6.50** |
-| `sample-issue-387.pptx` | 0.964 / 0.964 / **0.965** | 1.000 / 1.000 / 1.000 | 1.91 / 1.91 / **1.90** |
-| `sample.pptx` | 0.055 / 0.055 / 0.032 | 0.915 / 0.984 / 0.985 | 2.61 / 2.58 / 2.68 |
-| `table test.pptx` | 0.744 / 0.724 / **0.949** | −0.004 / 0.988 / **0.998** | 23.00 / 8.36 / **1.26** |
+| `authoring-integration.pptx` | 0.7666 / 0.7661 | 0.797 / 0.796 | 6.80 / 6.76 |
+| `real-basic-theme.pptx` | 0.9658 / **0.9674** | 1.000 / 1.000 | 1.58 / **1.52** |
+| `sample.pptx` | 0.1178 / 0.1178 | 0.974 / 0.974 | 2.49 / 2.49 |
+| `table test.pptx` | 0.9490 / **0.9531** | 0.998 / 0.998 | 1.26 / **1.19** |
+| `real-financial-report.pptx` | skipped | — | — |
+| `real-product-page.pptx` | skipped | — | — |
+| `sample-issue-387.pptx` | skipped | — | — |
 
-**Read the font column before reading the scores.** On the machine these were taken on,
-*not one fixture* can be compared honestly: none of Aptos, Calibri, Lato, Raleway or
-Noto Sans JP is installed where the rasteriser can see it, while PowerPoint carries its
-own copies and draws with them. Every glyph in five of these decks is therefore a
-different shape in a different place before the renderer has done anything wrong, and
-the score is dominated by how wide the substitute happens to be. `sample.pptx` is the
-extreme case: its slides are 2–4% ink on white, all of it Calibri, so once the face is
-substituted there is almost nothing left that *can* agree and SSIM collapses to noise.
-`tools/fidelity.py` prints the missing faces and refuses to apply the absolute gates to
-such a deck, which is the only honest thing to do with it.
+"before" is c57ca8f, "after" is the font work, both under the same font profile.
 
-Two entries need reading rather than scanning. `table test.pptx` is the fixture that
-exists to exercise the built-in style catalogue, and Phase 1 plus the line-box fix took
-it from 23% of pixels wrong to 1.26%. `real-basic-theme.pptx` moved the *wrong* way in
-Phase 1 — 0.946 to 0.938 SSIM — and the cause turned out not to be the table code at
-all; see below.
+Two honest observations about that table.
+
+**The gains are small, and that is the finding.** Bundling the right fonts and generating
+the metrics from them removes a whole class of wrongness, but on a corpus scored with
+PowerPoint's own faces on *both* sides there was never much font-related error left to
+remove — the errors that remain are geometric. `table test.pptx` crossing the 0.95 gate
+is the one visible win, and it comes from Aptos Display finally having a metrics table.
+
+**Three fixtures are skipped, and that is fixable.** They name `Noto Sans JP`, which
+PowerPoint does not have on this machine, so its export is already drawn with a
+substitute of its own choosing. Installing Noto Sans JP where PowerPoint can see it
+(`~/Library/Fonts`) and re-exporting would make all three comparable again. It was not
+done here because it changes the developer's machine, not the repository.
+
+### What the corpus says is wrong now
+
+With fonts eliminated as a variable, `sample.pptx` at 0.118 SSIM is the loudest remaining
+signal, and a side-by-side of slide 2 says plainly what it is:
+
+* **The text block sits about 110 px too high** in a 720 px render. Vertical anchoring or
+  the first-baseline rule, not fonts.
+* **Bold and italic runs are not distinguished.** PowerPoint draws `PPTX` bold on one line
+  and the whole of another in italic; ours renders both upright and uniform. The likely
+  cause is that `msgothic.ttc` is a collection and resvg's face matching does not reach
+  its bold member, but it has not been confirmed.
+* Line breaks then differ, which is a consequence of the first two rather than a third
+  bug.
+
+None of that is font *selection*; all of it is layout. It belongs to whoever picks up
+text positioning next, and it is now measurable, which it was not before.
+
+---
+
+## Fonts — **done**
+
+The problem, stated precisely: layout was computed from a table of advance widths, the
+SVG named a `font-family`, and **nothing made those two agree**. On a machine without
+Calibri the rasteriser substituted something else without a word — rendering one string
+in Calibri, Carlito, Aptos, Noto Sans JP and Lato produced five byte-identical PNGs. Text
+appeared, at widths nothing had computed.
+
+### The shape of the fix
+
+1. **Ship the faces**, in a separate `pptx2svg-fonts` distribution installed as
+   `pptx2svg[fonts]`.
+2. **Generate the metrics from them.** `tools/extract_font_metrics.py` reads the shipped
+   files and rewrites `text/metrics.py`; a test re-runs it and fails on drift.
+3. **Draw with them by default**, `skip_system_fonts=True`, so output does not depend on
+   the host.
+4. **Say so when we cannot** — `pptx2svg fonts --check`, and warnings on
+   `ConvertOptions.warnings`.
+
+### Why a separate distribution
+
+Extras cannot conditionally add package data, so the choice was "font files in every
+wheel" or "font files in a wheel you opt into". The main wheel is 150 kB; the fonts are
+11 MB compressed. **SVG output embeds no fonts at all** — an SVG names them — so every
+caller who only wants SVG, or who points `font_dirs` at their own corporate faces, would
+have paid 11 MB for bytes they can never use. PNG already requires an extra
+(`pptx2svg[png]`), so the audience that needs fonts is already typing an extra.
+
+The cost is a second distribution to release in lockstep, and a bare `pip install
+pptx2svg` that is *not* deterministic. That second cost is paid down by making the
+degraded mode loud rather than silent: `pptx2svg.fonts.bundle_mode()` is the single source
+of truth, `pptx2svg fonts` leads its report with it, and a render without the bundle emits
+one `font-bundle-missing` warning naming the fix.
+
+### What was found by measuring instead of trusting
+
+Every one of these was believed to be true beforehand, on good authority, and was not:
+
+* **Caladea is not metric-compatible with Cambria.** It is described that way
+  everywhere. Measured against the installed Cambria over four representative strings it
+  runs 4.5 % narrow (0.9555, 0.9384, 0.9525, 0.9542). Cambria therefore gets the Aptos
+  treatment: measured with its own widths, drawn with Caladea.
+* **The inherited Noto Sans JP table was wrong for 186 of 191 characters.** It came from
+  pptx-glimpse and had never been checked against the font it claimed to describe. This
+  is the single best argument for generating the table.
+* **Bold was a flat 1.05 multiplier.** The true ratio is 1.000 for Cousine — monospace
+  bold is the same width, and we were inflating every bold line of code by 5 % — 1.023 for
+  Carlito, 1.049 for Tinos, 1.056 for Arimo, 1.089 for Caladea, 1.119 for Noto Sans JP.
+  1.05 is the middle of that spread, which is another way of saying it was wrong for all
+  of them. Bold now has its own generated table.
+* **Aptos Display was not missing.** Office does not install it; it downloads it into a
+  cloud-font cache under a numeric filename. Reading `/BaseFont` out of PowerPoint's own
+  PDF export is what found it. Two of the seven fixtures use it, and they were the two
+  worst-scoring.
+* **resvg handles variable fonts correctly.** Arimo at `wght=700` renders pixel-identical
+  to static Liberation Sans Bold, which is why the bundle ships one 1 MB variable Arimo
+  instead of four static cuts.
+* **Debian does not package Raleway.** The obvious `fonts-raleway` does not exist.
+* **Five of seven fixtures resolved most runs to `font_family=None`.** Nothing in OOXML
+  obliges anyone to name a typeface, and plenty of decks name one nowhere. That meant no
+  `font-family` in the SVG *and* no metrics table, so strings were measured with a 0.6 em
+  per-character guess. It now falls back to the theme's body face, which is what
+  PowerPoint draws.
+
+### Aptos
+
+Microsoft's Office default since 2023 has no open metric-compatible clone, and pretending
+otherwise would be the same class of error as the Caladea claim above. The choice is
+therefore explicit and is not a compromise between the two options — it picks one:
+
+* **Measured** with Aptos's own advance widths, so line breaks, autofit and centring match
+  PowerPoint's.
+* **Drawn** with Carlito, whose widths are closest of anything shippable: −3.6 % on a
+  representative sentence, against Arimo's +5.2 % and Tinos's −2.8 % (Tinos is a serif, so
+  it loses on shape what it gains on width).
+
+That deliberately breaks the measure-equals-draw invariant, which is why
+`Substitution.metric_compatible` exists as a field rather than an assumption, why
+`pptx2svg fonts` grades it `approximate` rather than `compatible`, and why `--check` exits
+non-zero on it. A deck in Aptos can be rendered; it cannot be rendered *faithfully*, and
+the tooling says so rather than letting someone find out from a screenshot.
+
+Publishing measurements of a proprietary font is not redistributing it. Advance widths are
+facts about a design, which is the footing on which Carlito, Arimo and Liberation exist at
+all; no Aptos outline, table or file is in this repository.
+
+### Left undone
+
+* **Emoji.** `real-product-page.pptx` renders through PowerPoint with AppleColorEmoji.
+  Nothing open and redistributable is a drop-in for platform emoji, and colour emoji
+  fonts are large. Emoji render as the substitute's glyph or not at all.
+* **Complex scripts.** `a:cs` typefaces — Arabic, Hebrew, Thai, Devanagari — have no
+  entry in the substitution table, so they fall through to the generic family and the
+  per-category width guess. Adding them means shipping Noto for each script, which is
+  another CJK-sized decision.
+* **Italic is measured from the upright table.** Divergence is ≤2.5 % across the Office
+  substitutes (Carlito 0.4 %, Tinos 2.2 %, Caladea 2.5 %, Arimo and Cousine 0.0 %), which
+  is inside the noise of everything else. Lato is the outlier at 6 %.
+* **Approximate mappings for non-Office faces.** Segoe UI, Verdana, Georgia, Consolas and
+  friends are unmapped. Mapping them to a bundled family would be better than the 0.6 em
+  guess, but only if the mapping is measured first — guessing is how the Caladea claim got
+  in.
 
 ---
 
@@ -144,11 +279,10 @@ Ground truth needs PowerPoint; regression detection does not. Commit our *own* r
 PNGs and fail on drift.
 
 - `tests/vrt/` with committed snapshots and a `--update-snapshots` flag.
-- Rendering is already deterministic (counter-based ids, static font metrics), **provided
-  fonts are pinned**. Download Carlito / Liberation Sans / Liberation Serif / Noto Sans JP
-  to a cache, verify SHA-256, and pass via `font_dirs=[...], skip_system_fonts=True` —
-  `convert_pptx_to_png` already supports both. Without this, snapshots differ between
-  macOS and CI.
+- Rendering is already deterministic (counter-based ids, generated font metrics) **and
+  the fonts are now pinned**: `pip install 'pptx2svg[fonts]'` and the default render
+  ignores the host entirely, which is what makes a committed PNG snapshot meaningful
+  across macOS and CI. Before that, snapshots would have differed by machine.
 
 Two layers, two jobs: snapshot VRT runs everywhere and catches regressions; the PowerPoint
 oracle runs on this Mac and catches *being wrong in the first place*.

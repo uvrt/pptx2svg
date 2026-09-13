@@ -11,11 +11,26 @@ are supported and tried in this order:
   SVG filter support is weaker, so shadows and glows may differ.
 
 Install one with ``pip install pptx2svg[png]`` (resvg) or ``pip install pptx2svg[cairo]``.
+
+**Fonts default to the bundle when there is one.**  A rasteriser reading the host's font
+list makes the same deck rasterise differently on every machine, and worse, does it
+quietly: resvg substitutes a missing face without a word, so text appears at widths
+nothing computed.  So when ``pptx2svg-fonts`` is installed, :func:`svg_to_png` renders
+from it with ``skip_system_fonts`` on, and points the generic families at it as well --
+with system fonts off, a family resvg cannot resolve draws *nothing*, and the generic
+keyword at the end of every stack this library emits is what stops a blank slide.
+
+When it is not installed there is nothing to be deterministic with, so rendering falls
+back to the host's fonts.  That is a real downgrade and it is announced rather than
+inferred: :func:`pptx2svg.convert_pptx_to_svg` puts a ``font-bundle-missing`` warning in
+``ConvertOptions.warnings``, and ``pptx2svg fonts`` says so at the top of its report.
 """
 
 from __future__ import annotations
 
 from typing import Iterable, Literal, Sequence
+
+from .fonts import GENERIC_FAMILY_DEFAULTS, font_dirs as bundled_font_dirs
 
 Backend = Literal["resvg", "cairosvg", "auto"]
 
@@ -52,7 +67,8 @@ def svg_to_png(
     backend: Backend = "auto",
     font_dirs: Sequence[str] | None = None,
     font_files: Sequence[str] | None = None,
-    skip_system_fonts: bool = False,
+    skip_system_fonts: bool | None = None,
+    use_bundled_fonts: bool = True,
 ) -> bytes:
     """Rasterise an SVG document to PNG bytes.
 
@@ -61,9 +77,16 @@ def svg_to_png(
     ``scale=2`` for a 2x render.  ``background`` paints a CSS colour behind the image
     (slides already paint their own background, so this is rarely needed).
 
-    ``font_dirs``/``font_files`` add fonts for text rendering; combine them with
-    ``skip_system_fonts=True`` for output that does not depend on the host's font
-    inventory.
+    Fonts, in the order resvg searches them: ``font_dirs``/``font_files`` first, then the
+    bundled families unless ``use_bundled_fonts=False``, then the host's own fonts unless
+    ``skip_system_fonts`` is set.  ``skip_system_fonts`` defaults to *whether we have a
+    bundle to be reproducible with*: on with ``pptx2svg-fonts`` installed, off without it,
+    because skipping system fonts with no bundle would render every slide blank.  Set it
+    to ``False`` explicitly to let bundled and installed fonts both take part, which is
+    useful when a deck names a face the bundle does not carry.
+
+    Only the resvg backend takes any of this; cairosvg reads the host's fontconfig and
+    cannot be pointed at a directory, so it cannot render reproducibly.
     """
     chosen = backend
     if chosen == "auto":
@@ -76,15 +99,22 @@ def svg_to_png(
         chosen = backends[0]  # type: ignore[assignment]
 
     if chosen == "resvg":
+        bundled = bundled_font_dirs() if use_bundled_fonts else []
+        if skip_system_fonts is None:
+            # Reproducible by default, but only when we actually have fonts to be
+            # reproducible *with*: an installation whose package data went missing must
+            # fall back to the host rather than render every slide blank.
+            skip_system_fonts = bool(bundled)
         return _render_with_resvg(
             svg,
             width=width,
             height=height,
             scale=scale,
             background=background,
-            font_dirs=font_dirs,
+            font_dirs=list(font_dirs or ()) + bundled,
             font_files=font_files,
             skip_system_fonts=skip_system_fonts,
+            generic_families=GENERIC_FAMILY_DEFAULTS if bundled else None,
         )
     if chosen == "cairosvg":
         return _render_with_cairosvg(
@@ -103,6 +133,7 @@ def _render_with_resvg(
     font_dirs: Sequence[str] | None,
     font_files: Sequence[str] | None,
     skip_system_fonts: bool,
+    generic_families: dict[str, str] | None = None,
 ) -> bytes:
     try:
         import resvg_py
@@ -126,6 +157,13 @@ def _render_with_resvg(
         options["font_files"] = list(font_files)
     if skip_system_fonts:
         options["skip_system_fonts"] = True
+    if generic_families:
+        # `font-family="..., sans-serif"` is the end of every stack this library emits.
+        # resvg resolves those keywords against its own defaults -- "Arial", "Times New
+        # Roman", "Courier New" -- none of which we ship, so with system fonts off the
+        # keyword resolves to nothing and the text silently does not draw.  Pointing them
+        # at the bundle turns "invisible" into "approximately right".
+        options.update(generic_families)
 
     result = resvg_py.svg_to_bytes(**options)
     return _as_bytes(result)

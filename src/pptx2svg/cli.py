@@ -1,4 +1,16 @@
-"""Command-line interface: ``pptx2svg deck.pptx -o out/``."""
+"""Command-line interface.
+
+Two entry points share one executable::
+
+    pptx2svg deck.pptx -o out/        # render
+    pptx2svg fonts --check deck.pptx  # will it render faithfully?
+
+``fonts`` is spelled as a leading word rather than a real subparser because the render
+form takes its input file positionally and has done since the first release; turning it
+into ``pptx2svg render deck.pptx`` would break every existing caller.  So the first
+argument is peeked at, and only the literal word ``fonts`` diverts.  A file actually
+named ``fonts`` is still reachable as ``./fonts``.
+"""
 
 from __future__ import annotations
 
@@ -51,9 +63,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory of fonts for PNG rendering (repeatable)",
     )
     parser.add_argument(
-        "--skip-system-fonts",
+        "--system-fonts",
         action="store_true",
-        help="ignore installed fonts; use only --font-dir (reproducible output)",
+        help=(
+            "also use the host's installed fonts (default: bundled fonts only, so the "
+            "same deck rasterises to the same bytes everywhere)"
+        ),
+    )
+    parser.add_argument(
+        "--no-bundled-fonts",
+        action="store_true",
+        help="do not use the fonts shipped with pptx2svg",
     )
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="suppress warnings about unsupported content"
@@ -80,6 +100,9 @@ def parse_slide_selection(value: str | None) -> list[int] | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "fonts":
+        return fonts_main(argv[1:])
     args = build_parser().parse_args(argv)
 
     if not args.input.is_file():
@@ -127,7 +150,12 @@ def main(argv: list[str] | None = None) -> int:
                         document,
                         backend=args.backend,
                         font_dirs=args.font_dirs,
-                        skip_system_fonts=args.skip_system_fonts,
+                        # None means "decide from the bundle": skip system fonts
+                        # when there is a bundle to be deterministic with, keep them
+                        # when there is not, because skipping both renders blank
+                        # slides.  --system-fonts is explicit and overrides that.
+                        skip_system_fonts=False if args.system_fonts else None,
+                        use_bundled_fonts=not args.no_bundled_fonts,
                     )
                 )
             except RasterizerNotAvailable as error:
@@ -141,6 +169,113 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {warning}", file=sys.stderr)
 
     return 0
+
+
+# --------------------------------------------------------------------------------------
+# `pptx2svg fonts`
+# --------------------------------------------------------------------------------------
+
+
+def build_fonts_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="pptx2svg fonts",
+        description=(
+            "Report which faces a deck asks for, which the bundle can draw, and which "
+            "will be substituted.  Exits non-zero when a deck cannot be rendered "
+            "faithfully, so it can gate a build."
+        ),
+    )
+    parser.add_argument(
+        "input",
+        type=Path,
+        nargs="?",
+        help="a .pptx file; omit to report on the bundle itself",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="exit 1 when any face cannot be drawn at the widths it was measured at",
+    )
+    parser.add_argument(
+        "--system-fonts",
+        action="store_true",
+        help="note that rendering will also use the host's fonts, so verdicts are a floor",
+    )
+    return parser
+
+
+#: Column width for the face name.  Wide enough for "Hiragino Kaku Gothic ProN".
+_FACE_COLUMN = 26
+
+
+def fonts_main(argv: list[str]) -> int:
+    args = build_fonts_parser().parse_args(argv)
+    from .fonts import BUNDLED_FAMILIES, INSTALL_HINT, bundle_dir, bundle_mode
+    from .fonts.check import check_deck, check_families
+
+    mode = bundle_mode()
+    # Lead with the mode.  "Which faces are missing" is the second question; the first
+    # is "is this render reproducible at all", and in system mode the answer is no
+    # whatever the table below says.
+    if mode == "bundled":
+        print(f"mode:   bundled from {bundle_dir()}")
+        print("        this machine's own fonts are ignored, so output is reproducible")
+        print(f"        families: {', '.join(sorted(BUNDLED_FAMILIES))}")
+    else:
+        print("mode:   system; pptx2svg-fonts is NOT installed")
+        print("        rendering uses this machine's fonts and is NOT reproducible")
+        print(f"        fix: {INSTALL_HINT}")
+    print()
+
+    if args.input is None:
+        # No deck: report on the bundle.  Listing the Office faces we claim to cover is
+        # more useful than listing the families we ship, because the question people
+        # actually have is "will my deck work", not "what is in the wheel".
+        from .text.fontmap import SUBSTITUTIONS
+
+        report = check_families(sorted(SUBSTITUTIONS), system_fonts=args.system_fonts)
+    else:
+        if not args.input.is_file():
+            print(f"pptx2svg: no such file: {args.input}", file=sys.stderr)
+            return 1
+        try:
+            report = check_deck(args.input, system_fonts=args.system_fonts)
+        except Exception as error:  # malformed package, unreadable XML, ...
+            print(f"pptx2svg: {error}", file=sys.stderr)
+            return 1
+
+    print(f"{'face':{_FACE_COLUMN}} {'verdict':12} {'drawn with':14} note")
+    for face in report.faces:
+        drawn = face.substitute or "-"
+        print(f"{face.requested:{_FACE_COLUMN}} {face.verdict:12} {drawn:14} {face.reason}")
+    if not report.faces:
+        print("(no typefaces found)")
+
+    print()
+    if report.mode != "bundled":
+        print(
+            "every verdict above is provisional: without the bundle the rasteriser "
+            "picks faces from this machine, and it does so silently."
+        )
+    unfaithful = [face for face in report.faces if not face.faithful]
+    if unfaithful:
+        print(
+            f"{len(unfaithful)} of {len(report.faces)} faces will not be drawn at the "
+            "widths they were measured at."
+        )
+    else:
+        print(f"all {len(report.faces)} faces resolve to the metrics they were measured at.")
+    if args.system_fonts:
+        print(
+            "note: --system-fonts was given, so the host's own fonts may cover some of "
+            "the above -- and may differ from the next host's."
+        )
+
+    # Exit status is about the render being trustworthy, which needs both halves:
+    # every face drawn at the widths it was measured at, *and* a bundle so that the
+    # next machine gets the same answer.
+    failed = bool(unfaithful) or report.mode != "bundled"
+    return 1 if (args.check and failed) else 0
 
 
 if __name__ == "__main__":

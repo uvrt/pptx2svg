@@ -60,3 +60,59 @@ def test_rendered_slide_is_not_blank(product_page):
     image = convert_pptx_to_png(product_page, ConvertOptions(width=320))[0]
     # A blank fill compresses far smaller than a slide with glyphs on it.
     assert len(image) > 2000
+
+
+# --------------------------------------------------------------------------------------
+# Fonts: reproducible by default, and never silently degraded
+# --------------------------------------------------------------------------------------
+
+TEXT_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="60">'
+    '<rect width="400" height="60" fill="#fff"/>'
+    '<text x="10" y="40" font-family="Calibri, Carlito, sans-serif" font-size="28"'
+    ' fill="#000">Handgloves</text></svg>'
+)
+
+
+def test_bundled_fonts_are_used_and_the_host_is_ignored_by_default():
+    """The default render must not depend on what this machine happens to have.
+
+    Compared against an explicit system-fonts render rather than against a stored hash:
+    a hash would pin this test to one resvg build, while the property that matters is
+    that the two configurations are *different*, which is only true if the default is
+    really reading the bundle.
+    """
+    from pptx2svg.fonts import bundle_dir
+
+    if bundle_dir() is None:
+        pytest.skip("pptx2svg-fonts is not importable")
+    default = svg_to_png(TEXT_SVG, backend="resvg")
+    system = svg_to_png(
+        TEXT_SVG, backend="resvg", use_bundled_fonts=False, skip_system_fonts=False
+    )
+    assert default[:8] == PNG_MAGIC
+    # This machine has neither Calibri nor Carlito outside the bundle, so a default
+    # render that matched the system one would mean the bundle was never consulted.
+    assert default != system
+
+
+def test_without_a_bundle_the_host_fonts_are_used_rather_than_none(monkeypatch):
+    """Skipping system fonts with nothing to replace them renders blank slides."""
+    monkeypatch.setattr("pptx2svg.fonts.bundle_dir", lambda: None)
+    image = svg_to_png(TEXT_SVG, backend="resvg")
+    assert image[:8] == PNG_MAGIC
+    # Text drawn with *something* compresses larger than an empty white rectangle.
+    blank = svg_to_png(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="60">'
+        '<rect width="400" height="60" fill="#fff"/></svg>',
+        backend="resvg",
+    )
+    assert len(image) > len(blank)
+
+
+def test_caller_font_dirs_take_precedence_over_the_bundle(tmp_path):
+    """An empty directory must not knock out the bundle; order is dirs, then bundle."""
+    (tmp_path / "not-a-font.txt").write_text("x")
+    image = svg_to_png(TEXT_SVG, backend="resvg", font_dirs=[str(tmp_path)])
+    assert image[:8] == PNG_MAGIC
+    assert image == svg_to_png(TEXT_SVG, backend="resvg")
