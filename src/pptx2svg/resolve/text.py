@@ -279,7 +279,9 @@ def _resolve_run_properties(
 
     return m.RunProperties(
         font_size=merged.font_size,
-        font_family=_resolve_typeface(context, merged.typeface),
+        font_family=(
+            _resolve_typeface(context, merged.typeface) or _theme_body_latin(context)
+        ),
         font_family_ea=_resolve_typeface(context, merged.typeface_ea),
         font_family_cs=_resolve_typeface(context, merged.typeface_cs),
         bold=bool(merged.bold),
@@ -293,6 +295,32 @@ def _resolve_run_properties(
         outline=outline,
         highlight=resolve_color(context.colors, merged.highlight),
     )
+
+
+def _theme_body_latin(context) -> str | None:
+    """The theme's body face, for a run that named none anywhere in the cascade.
+
+    Nothing in OOXML obliges a run, a placeholder, a layout or a master to state a
+    typeface, and plenty of real decks state one nowhere: five of the seven corpus
+    fixtures reached the renderer with ``font_family=None`` on most of their runs.  That
+    is not "no font" -- PowerPoint draws those in the theme's minor (body) face, which is
+    exactly what ``+mn-lt`` points at.  Leaving it None had two costs, and the second is
+    the expensive one:
+
+    * the SVG carried no ``font-family``, so the rasteriser drew its own default;
+    * :func:`pptx2svg.text.fontmap.metrics_for` had nothing to look up, so every string
+      was measured with the crude per-category ratios in :mod:`pptx2svg.text.measure`
+      (0.6 em for a typical glyph) instead of real advance widths.
+
+    So wrapping, autofit and centring were computed for a font nobody named, and then
+    drawn in a font nobody chose.  The major (heading) face is deliberately not used
+    here: a master that wants it says ``+mj-lt`` in its ``titleStyle``, and guessing
+    "this looks like a title" would be a second, worse heuristic on top of this one.
+    """
+    scheme = context.theme.font_scheme if context.theme else None
+    if scheme is None:
+        return None
+    return _non_empty(scheme.minor_latin) or _non_empty(scheme.major_latin)
 
 
 def _resolve_typeface(context, typeface: str | None) -> str | None:

@@ -34,8 +34,17 @@ png = ["resvg-py>=0.5"]
 # Alternative backend for environments that already have Cairo. Its SVG filter support
 # is weaker, so shadows and glows differ from resvg.
 cairo = ["cairosvg>=2.7"]
-# Measure with real installed fonts instead of the bundled metric tables.
-fonts = ["fonttools>=4.40"]
+# The recommended install.  Carries the font files pptx2svg draws with, so PNG output
+# ignores the host's fonts entirely and the same deck rasterises to the same bytes
+# everywhere.  A separate distribution rather than package data: this wheel stays ~100 kB
+# and stdlib-only for the many callers who only want SVG (which embeds no fonts) or who
+# supply their own via `font_dirs`.  Without it, rendering falls back to system fonts and
+# says so through ConvertOptions.warnings -- see pptx2svg.fonts.
+fonts = ["pptx2svg-fonts>=0.1"]
+# Measure with real installed fonts instead of the bundled metric tables
+# (FontToolsTextMeasurer), and regenerate the tables with tools/extract_font_metrics.py.
+# Renamed from `fonts`, which now means the font files themselves.
+measure = ["fonttools>=4.40"]
 # Scoring a render against PowerPoint's own PDF export (tools/fidelity.py).  Strictly a
 # development concern: none of this is imported from src/, which stays standard-library
 # only, and the harness itself also needs PowerPoint, which pip cannot supply.
@@ -47,6 +56,7 @@ dev = [
   "numpy>=1.24",
   "pillow>=10",
   "pypdfium2>=4",
+  "pptx2svg-fonts>=0.1",
 ]
 
 [project.urls]
@@ -60,6 +70,7 @@ pptx2svg = "pptx2svg.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -4,7 +4,16 @@
 # them a suite that cannot run.
 include LICENSE README.md ROADMAP.md
 recursive-include tests *.py *.pptx *.md
-recursive-include tools *.applescript
+# tools/*.py as well: tests/test_fidelity.py imports tools/fidelity.py, so an sdist
+# without it ships a suite that cannot collect.
+recursive-include tools *.py *.applescript *.sh
+
+# No fonts, deliberately.  They live in the pptx2svg-fonts distribution, which builds
+# from packages/pptx2svg-fonts/pyproject.toml and ships its own sdist and wheel with the
+# OFL texts alongside the files they cover.  Putting 20 MB of typefaces in *this* sdist
+# would undo the whole reason for splitting them out, so packages/ is excluded outright
+# rather than filtered -- see pptx2svg/fonts/__init__.py.
+prune packages
 
 # Never ship build or editor droppings.
 global-exclude __pycache__ *.py[cod] .DS_Store
