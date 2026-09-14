@@ -237,29 +237,7 @@ def _flow_internal_storage(w, h, adj):
     )
 
 
-def _flow_document(w, h, adj):
-    bh = h * 0.83
-    return (
-        f'<path d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(bh)} '
-        f'C {_n(w*0.75)} {_n(h)}, {_n(w*0.25)} {_n(h*0.66)}, 0 {_n(bh)} Z"/>'
-    )
 
-
-def _flow_multidocument(w, h, adj):
-    dx, dy = w * 0.1, h * 0.1
-    bw = w - dx
-    bh = (h - dy) * 0.83
-    return (
-        f'<path d="M {_n(dx)} {_n(dy)} L {_n(w)} {_n(dy)} L {_n(w)} {_n(dy+bh)} '
-        f'C {_n(w - bw*0.25)} {_n(h)}, {_n(dx + bw*0.25)} {_n(dy + (h-dy)*0.66)}, {_n(dx)} {_n(dy+bh)} Z '
-        f'M {_n(dx/2)} {_n(dy/2)} L {_n(dx)} {_n(dy/2)} L {_n(dx)} {_n(dy)} '
-        f'M 0 0 L {_n(dx/2)} 0 L {_n(dx/2)} {_n(dy/2)}"/>'
-    )
-
-
-def _flow_terminator(w, h, adj):
-    r = h / 2
-    return f'<rect width="{_n(w)}" height="{_n(h)}" rx="{_n(r)}" ry="{_n(r)}"/>'
 
 
 def _flow_preparation(w, h, adj):
@@ -286,13 +264,6 @@ def _flow_punched_card(w, h, adj):
     return f'<polygon points="{_pts((cut, 0), (w, 0), (w, h), (0, h), (0, cut))}"/>'
 
 
-def _flow_punched_tape(w, h, adj):
-    wave = h * 0.1
-    return (
-        f'<path d="M 0 {_n(wave)} C {_n(w*0.25)} {_n(-wave)}, {_n(w*0.75)} {_n(wave*3)}, {_n(w)} {_n(wave)} '
-        f'L {_n(w)} {_n(h-wave)} C {_n(w*0.75)} {_n(h+wave)}, {_n(w*0.25)} {_n(h-wave*3)}, 0 {_n(h-wave)} Z"/>'
-    )
-
 
 def _flow_collate(w, h, adj):
     return f'<polygon points="{_pts((0, 0), (w, 0), (w/2, h/2), (w, h), (0, h), (w/2, h/2))}"/>'
@@ -314,13 +285,6 @@ def _flow_merge(w, h, adj):
     return f'<polygon points="{_pts((0, 0), (w, 0), (w/2, h))}"/>'
 
 
-def _flow_online_storage(w, h, adj):
-    arc_w = w * 0.15
-    return (
-        f'<path d="M {_n(arc_w)} 0 L {_n(w)} 0 L {_n(w)} {_n(h)} L {_n(arc_w)} {_n(h)} '
-        f'A {_n(arc_w)} {_n(h/2)} 0 0 1 {_n(arc_w)} 0 Z"/>'
-    )
-
 
 def _flow_delay(w, h, adj):
     arc_w = w * 0.35
@@ -340,42 +304,7 @@ def _flow_display(w, h, adj):
 
 
 
-def _flow_magnetic_disk(w, h, adj):
-    ry = h * 0.15
-    return (
-        f'<path d="M 0 {_n(ry)} A {_n(w/2)} {_n(ry)} 0 0 1 {_n(w)} {_n(ry)} L {_n(w)} {_n(h-ry)} '
-        f'A {_n(w/2)} {_n(ry)} 0 0 1 0 {_n(h-ry)} Z '
-        f'M 0 {_n(ry)} A {_n(w/2)} {_n(ry)} 0 0 0 {_n(w)} {_n(ry)}"/>'
-    )
 
-
-def _flow_magnetic_drum(w, h, adj):
-    rx = w * 0.15
-    return (
-        f'<path d="M {_n(rx)} 0 A {_n(rx)} {_n(h/2)} 0 0 0 {_n(rx)} {_n(h)} L {_n(w-rx)} {_n(h)} '
-        f'A {_n(rx)} {_n(h/2)} 0 0 0 {_n(w-rx)} 0 Z '
-        f'M {_n(w-rx)} 0 A {_n(rx)} {_n(h/2)} 0 0 1 {_n(w-rx)} {_n(h)}"/>'
-    )
-
-
-def _flow_summing_junction(w, h, adj):
-    cx, cy = w / 2, h / 2
-    rx, ry = w / 2, h / 2
-    d = 0.707
-    return (
-        f'<path d="M {_n(cx+rx)} {_n(cy)} A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx+rx-0.01)} {_n(cy-0.01)} Z '
-        f'M {_n(cx - rx*d)} {_n(cy - ry*d)} L {_n(cx + rx*d)} {_n(cy + ry*d)} '
-        f'M {_n(cx + rx*d)} {_n(cy - ry*d)} L {_n(cx - rx*d)} {_n(cy + ry*d)}"/>'
-    )
-
-
-def _flow_or(w, h, adj):
-    cx, cy = w / 2, h / 2
-    rx, ry = w / 2, h / 2
-    return (
-        f'<path d="M {_n(cx+rx)} {_n(cy)} A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx+rx-0.01)} {_n(cy-0.01)} Z '
-        f'M {_n(cx)} 0 L {_n(cx)} {_n(h)} M 0 {_n(cy)} L {_n(w)} {_n(cy)}"/>'
-    )
 
 
 # --------------------------------------------------------------------------------------
@@ -974,27 +903,18 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "flowChartInputOutput": _flow_input_output,
     "flowChartPredefinedProcess": _flow_predefined_process,
     "flowChartInternalStorage": _flow_internal_storage,
-    "flowChartDocument": _flow_document,
-    "flowChartMultidocument": _flow_multidocument,
-    "flowChartTerminator": _flow_terminator,
     "flowChartPreparation": _flow_preparation,
     "flowChartManualInput": _flow_manual_input,
     "flowChartManualOperation": _flow_manual_operation,
     "flowChartConnector": _ellipse,
     "flowChartOffpageConnector": _flow_offpage_connector,
     "flowChartPunchedCard": _flow_punched_card,
-    "flowChartPunchedTape": _flow_punched_tape,
     "flowChartCollate": _flow_collate,
     "flowChartSort": _flow_sort,
     "flowChartExtract": _flow_extract,
     "flowChartMerge": _flow_merge,
-    "flowChartOnlineStorage": _flow_online_storage,
     "flowChartDelay": _flow_delay,
     "flowChartDisplay": _flow_display,
-    "flowChartMagneticDisk": _flow_magnetic_disk,
-    "flowChartMagneticDrum": _flow_magnetic_drum,
-    "flowChartSummingJunction": _flow_summing_junction,
-    "flowChartOr": _flow_or,
     # Callouts
     "wedgeRectCallout": _wedge_rect_callout,
     "wedgeRoundRectCallout": _wedge_round_rect_callout,

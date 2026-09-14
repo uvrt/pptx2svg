@@ -569,8 +569,7 @@ def test_presets_with_a_path_space_stretch_linearly(name):
     square = numbers(" ".join(path_data(preset_geometry_svg(name, 400.0, 400.0, {}))))
     wide = numbers(" ".join(path_data(preset_geometry_svg(name, 800.0, 400.0, {}))))
     assert len(square) == len(wide) and square
-    # Every number is either an x, a y, or a flag; doubling the width may only change
-    # the x-like ones, so the multiset of unchanged values must stay large.
-    unchanged = sum(1 for a, b in zip(square, wide) if abs(a - b) < 0.01)
-    doubled = sum(1 for a, b in zip(square, wide) if abs(b - 2 * a) < 0.01)
-    assert unchanged + doubled == len(square)
+    # Every number is either x-like (doubles), or y-like or a flag (unchanged).  Zero
+    # satisfies both, so each position is judged once rather than counted twice.
+    for a, b in zip(square, wide):
+        assert abs(b - a) < 0.01 or abs(b - 2 * a) < 0.01, (a, b)

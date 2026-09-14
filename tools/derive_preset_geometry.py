@@ -147,6 +147,16 @@ SPEC_DRIVEN = [
     "rightArrow",
     "stripedRightArrow",
     "uturnArrow",
+    # Flowchart shapes: ours 0.54-0.90 against PowerPoint, the specification 0.998-1.000.
+    "flowChartDocument",
+    "flowChartMagneticDisk",
+    "flowChartMagneticDrum",
+    "flowChartMultidocument",
+    "flowChartOnlineStorage",
+    "flowChartOr",
+    "flowChartPunchedTape",
+    "flowChartSummingJunction",
+    "flowChartTerminator",
 ]
 
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
