@@ -118,9 +118,14 @@ solid/gradient/pattern/image fills, outlines with dashes and arrowheads, shadows
 soft edges, pictures with cropping and colour adjustments, tables with merged cells,
 groups with nested coordinate spaces, hyperlinks, and alt text as `aria-label`.
 
+**Bar charts** are read and drawn: `c:barChart` clustered, stacked and percent-stacked, in either direction,
+with its axis range, tick interval, gridlines, legend and labels laid out from constants
+measured out of PowerPoint's own PDF export rather than guessed. The chart's data comes
+back on the model as well as its drawing, so a caller of `convert_pptx_to_model` gets the
+numbers. Every other chart type warns and draws an empty frame.
+
 **Not rendered** (reported as a warning, drawn as an empty positioned frame):
 
-- **Charts** — the chart part holds data, not a drawing, so this needs a plotting engine
 - **SmartArt** — PowerPoint caches a laid-out drawing we could read; not wired up yet
 - **EMF/WMF images** — needs a metafile interpreter; a grey placeholder is drawn
 - **3-D effects, bevels, reflections**
