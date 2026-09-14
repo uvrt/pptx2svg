@@ -94,6 +94,11 @@ LEGEND_BAND_LINES = 2.0
 #: *not* the same as the horizontal band's height above, so the two are separate numbers.
 LEGEND_ROW_PITCH_EM = 1.8
 
+#: How much the pitch opens for each extra line once an entry wraps.  Measured once: the
+#: same deck's doughnut, whose one two-line entry takes every row from 1.8 em to 3.02 em.
+#: Three or more lines is **extrapolated, not measured**.
+LEGEND_WRAPPED_PITCH_EM = 1.22
+
 #: Where a horizontal legend's baseline sits, in ems from the frame edge it hugs.  Taken
 #: straight off the probes rather than derived from the band: 12.913 pt above the frame
 #: bottom for ``legendPos="b"`` and 17.133 pt below the frame top for ``"t"``, both at
@@ -105,6 +110,13 @@ LEGEND_TOP_BASELINE_EM = 1.713
 #: 10 pt.
 LEGEND_SWATCH_EM = 0.549
 LEGEND_SWATCH_GAP_EM = 0.237
+#: The most of the frame's width a side legend may take before its entries wrap.
+#: **One measurement**: `real-financial-report.pptx`'s doughnut legends an 11-character
+#: Japanese category whose natural band would be 143.96 pt, and PowerPoint reserved
+#: 113.98 pt -- 40.0% of the 285 pt frame -- wrapping the entry onto two lines instead.
+#: The same deck's bar chart, whose natural band is 29% of its frame, is untouched by it.
+LEGEND_SIDE_MAX_FRACTION = 0.40
+
 #: Padding either side of a side legend, and between entries in a horizontal one.
 LEGEND_SIDE_LEAD_EM = 1.60
 LEGEND_SIDE_TRAIL_EM = 1.01
@@ -1395,11 +1407,12 @@ class ChartBuilder:
                 if source.name is not None and index not in deleted
             ]
         widest = max((font.width(name) for name in names), default=0.0)
-        return (
+        natural = (
             widest
             + (LEGEND_SIDE_LEAD_EM + LEGEND_SWATCH_EM + LEGEND_SWATCH_GAP_EM + LEGEND_SIDE_TRAIL_EM)
             * font.size
         )
+        return min(natural, self.frame.width * LEGEND_SIDE_MAX_FRACTION)
 
     def _legend_overlays(self) -> bool:
         return self.chart.legend is not None and self.chart.legend.overlay
@@ -2186,11 +2199,29 @@ class ChartBuilder:
         # Measured against both bar charts in real-financial-report.pptx: baselines land
         # within 0.18 pt, where treating the row like the horizontal band's off-centre
         # line was 5.7 pt out.
-        pitch = LEGEND_ROW_PITCH_EM * box.size
+        # A wrapped entry takes every row with it: PowerPoint opens the pitch rather than
+        # letting two lines collide with the entry below.
+        lines = max(
+            (self._legend_entry_lines(item.name or "", font, x) for _, item in entries),
+            default=1,
+        )
+        pitch = (
+            LEGEND_ROW_PITCH_EM + LEGEND_WRAPPED_PITCH_EM * (lines - 1)
+        ) * box.size
         y = self.frame.top + (self.frame.height - pitch * len(entries)) / 2
         for _, item in entries:
             self._legend_entry(item, x, y + pitch / 2 + box.ink_centre, swatch, gap, font)
             y += pitch
+
+    def _legend_entry_lines(self, name: str, font: ChartFont, x: float) -> int:
+        """How many lines this entry needs once the band has capped its width."""
+        swatch = LEGEND_SWATCH_EM * font.size
+        gap = LEGEND_SWATCH_GAP_EM * font.size
+        available = self.frame.right - FRAME_PADDING_PT - (x + swatch + gap)
+        natural = font.width(name)
+        if available <= font.size or natural <= available:
+            return 1
+        return max(1, math.ceil(natural / max(available - font.size, 1.0)))
 
     def _legend_entry(
         self,
@@ -2208,11 +2239,21 @@ class ChartBuilder:
             fill=item.fill,
             outline=None,
         )
+        # An entry wider than the band it sits in wraps rather than running out of the
+        # frame.  PowerPoint wraps too -- `real-financial-report.pptx`'s doughnut legends
+        # an 11-character category on two lines -- but it also opens the row pitch from
+        # 1.8 em to 3.02 em to make room, which this does not; a wrapped entry therefore
+        # overlaps the one below it.  Measured numbers are in ROADMAP.md.
+        left = x + swatch + gap
+        natural = font.width(item.name or "") + box.size
+        available = self.frame.right - FRAME_PADDING_PT - left
         body = self._label_body(item.name or "", font, align="l")
+        if natural > available > box.size:
+            body = replace(body, body_properties=CHART_WRAPPED_TEXT_BODY)
         self._text(
             body,
-            left=x + swatch + gap,
-            width=font.width(item.name or "") + box.size,
+            left=left,
+            width=min(natural, max(available, box.size)),
             baseline=baseline,
             box=box,
         )
@@ -2385,6 +2426,10 @@ def _first_run_font(body: m.TextBody) -> tuple[str | None, float | None]:
         for run in paragraph.runs:
             return run.properties.font_family, run.properties.font_size
     return None, None
+
+
+#: The same box, but allowed to wrap -- for a legend entry too wide for its band.
+CHART_WRAPPED_TEXT_BODY = replace(CHART_TEXT_BODY, wrap="square")
 
 
 def _labels_shown(axis: c.SourceChartAxis | None) -> bool:
