@@ -321,12 +321,12 @@ def _render_column(
                         f"{escape_xml_text(bullet_text)}</tspan>"
                     )
                     # The bullet already advanced the line, so the text only sets x.
-                    leading = f'x="{num(x_pos)}" text-anchor="{anchor}" '
+                    line_dy = ""
                 else:
-                    leading = f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
+                    line_dy = dy
                 tspans.extend(
                     _render_line(
-                        line.segments, x_pos, anchor, leading, dims.margin_left,
+                        line.segments, x_pos, anchor, line_dy, dims.margin_left,
                         properties, body.default_tab_size, default_font_size,
                         font_scale, context,
                     )
@@ -368,14 +368,11 @@ def _render_column(
                     f"{escape_xml_text(bullet_text)}</tspan>"
                 )
 
-            if bullet_text:
-                leading = f'x="{num(x_pos)}" text-anchor="{anchor}" '
-            else:
-                leading = f'x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}" '
+            line_dy = "" if bullet_text else dy
             tspans.extend(
                 _render_line(
                     [LineSegment(run.text, run.properties) for run in paragraph.runs if run.text],
-                    x_pos, anchor, leading, dims.margin_left, properties,
+                    x_pos, anchor, line_dy, dims.margin_left, properties,
                     body.default_tab_size, default_font_size, font_scale, context,
                 )
             )
@@ -486,11 +483,16 @@ def _split_on_tabs(segments: list[LineSegment]) -> list[LineSegment | None]:
     return pieces
 
 
+def _leading(x: float, dy: str, anchor: str) -> str:
+    gap = f'dy="{dy}" ' if dy else ""
+    return f'x="{num(x)}" {gap}text-anchor="{anchor}" '
+
+
 def _render_line(
     segments: list[LineSegment],
     x_pos: float,
     anchor: str,
-    leading: str,
+    dy: str,
     origin: float,
     properties: m.ParagraphProperties,
     default_tab_size: float,
@@ -498,7 +500,7 @@ def _render_line(
     font_scale: float,
     context: RenderContext,
 ) -> list[str]:
-    """Emit one line's tspans, starting a new chunk at every tab stop.
+    """Emit one line's tspans, starting a new chunk at every tab stop and font change.
 
     A tab is not a character with a width -- it is a jump to the next stop -- so each
     piece after one gets its own absolute ``x``, which in SVG starts a fresh text chunk
@@ -508,38 +510,149 @@ def _render_line(
     one the line's own anchor already decides where the text sits, and a stop measured
     from the left inset would fight with it; PowerPoint effectively ignores them there
     too.
+
+    **A font change ends a chunk too, and that is not a nicety.**  ``font-family`` is a
+    per-character property in SVG, so a conforming renderer falls back per glyph; resvg
+    does not.  It picks one face for a whole chunk, and if the requested family cannot
+    cover every character in it, the chunk is drawn in resvg's *default* face -- not just
+    the characters the family was missing.  Measured: ``Markdown`` at 42.667 px renders
+    182 px wide under ``font-family="Calibri"``, matching PowerPoint's 181 px exactly;
+    put ``から`` in the same chunk and the Latin is redrawn 202 px wide, byte-identical to
+    the same string under ``sans-serif`` and under ``Noto Sans JP``.  One kana silently
+    cost Calibri for the entire line.
+
+    Every mixed-script line in ``sample.pptx`` was drawing that way, which is most of why
+    it scored 0.03 SSIM while the Latin-only decks scored 0.95+: the glyphs were the
+    wrong outlines at accumulating wrong offsets.  Giving the following tspan an explicit
+    ``x`` restores it -- the Latin chunk then rasterises byte-identically to drawing it
+    alone -- so the positions we already computed to wrap the line are also what places
+    each run.
+
+    A line that never changes face is left flowing, both because it costs nothing and
+    because letting the rasteriser accumulate advances with the real font is *better*
+    than trusting our tables when there is no reason not to.
     """
     pieces = _split_on_tabs(segments)
-    if anchor != "start" or not any(piece is None for piece in pieces):
+    honour_tabs = anchor == "start" and any(piece is None for piece in pieces)
+
+    # Plan the whole line before emitting any of it: a chunk boundary needs to know how
+    # far along the line it falls, and a centred line needs its total width first.
+    planned: list[tuple[LineSegment, list[tuple[str | None, str, str]]] | None] = [
+        None if piece is None else (piece, _segment_tspans(piece, font_scale, context))
+        for piece in pieces
+    ]
+    families = [
+        family
+        for entry in planned
+        if entry is not None
+        for family, _styles, _text in entry[1]
+    ]
+
+    if len(set(families)) <= 1 and not honour_tabs:
         out = []
         first = True
-        for piece in pieces:
-            if piece is None:
+        for entry in planned:
+            if entry is None:
                 continue
-            out.append(_render_segment(piece, font_scale, leading if first else "", context))
+            out.append(
+                _render_segment(
+                    entry[0], font_scale, _leading(x_pos, dy, anchor) if first else "", context
+                )
+            )
             first = False
         return out
 
+    if honour_tabs:
+        left = x_pos
+    else:
+        # Anchoring chunks absolutely means resolving the line's own anchor ourselves,
+        # the same way :func:`_line_highlights` has to.
+        total = sum(
+            _tspan_width(text, entry[0].properties, default_font_size, font_scale, context)
+            for entry in planned
+            if entry is not None
+            for _family, _styles, text in entry[1]
+        )
+        left = (
+            x_pos - total / 2 if anchor == "middle"
+            else x_pos - total if anchor == "end"
+            else x_pos
+        )
+
     stops = properties.tab_stops
-    out: list[str] = []
-    # `x` tracks where the next glyph would land; `chunk_*` remember where the current
-    # chunk began and how wide it has grown, because a right- or centre-anchored chunk
-    # does not end where it started plus its width.
-    x = chunk_start = x_pos
+    out = []
+    # `cursor` tracks where the next glyph would land; `chunk_*` remember where the
+    # current chunk began and how wide it has grown, because a right- or centre-anchored
+    # chunk does not end where it started plus its width.
+    cursor = chunk_start = left
     chunk_width = 0.0
     chunk_anchor = "start"
-    pending = leading
-    for piece in pieces:
-        if piece is None:
-            x = _chunk_end(chunk_start, chunk_width, chunk_anchor)
-            stop, chunk_anchor = _next_tab_stop(x, origin, stops, default_tab_size)
+    previous_family: object = _NO_FAMILY
+    # A tab stop owns the chunk it opens -- it is the thing that carries the stop's
+    # alignment -- so its prefix is held here until a tspan consumes it, rather than
+    # being rebuilt from the font-change rule below.
+    pending: str | None = _leading(left, dy, anchor)
+    for entry in planned:
+        if entry is None:
+            cursor = _chunk_end(chunk_start, chunk_width, chunk_anchor)
+            stop, chunk_anchor = _next_tab_stop(cursor, origin, stops, default_tab_size)
             pending = f'x="{num(stop)}" text-anchor="{chunk_anchor}" '
-            chunk_start, chunk_width = stop, 0.0
+            cursor = chunk_start = stop
+            chunk_width = 0.0
+            previous_family = _NO_FAMILY
             continue
-        out.append(_render_segment(piece, font_scale, pending, context))
-        pending = ""
-        chunk_width += _segment_width(piece, default_font_size, font_scale, context)
+
+        piece, tspans = entry
+        rendered: list[str] = []
+        for family, styles, text in tspans:
+            if pending is not None:
+                prefix, pending = pending, None
+                previous_family = family
+            elif family != previous_family:
+                previous_family = family
+                # A centre- or right-anchored tab chunk is positioned by its own total
+                # width, so a sub-chunk inside it has no absolute x to give.  Leave that
+                # one flowing and accept resvg's fallback rather than move the text.
+                prefix = (
+                    f'x="{num(cursor)}" text-anchor="start" '
+                    if chunk_anchor == "start" else ""
+                )
+            else:
+                prefix = ""
+            rendered.append(f"<tspan {prefix}{styles}>{escape_xml_text(text)}</tspan>")
+            width = _tspan_width(
+                text, piece.properties, default_font_size, font_scale, context
+            )
+            cursor += width
+            chunk_width += width
+
+        content = "".join(rendered)
+        if piece.properties.hyperlink is not None:
+            content = (
+                f'<a href="{escape_xml_attr(piece.properties.hyperlink.url)}">{content}</a>'
+            )
+        out.append(content)
     return out
+
+
+#: Sentinel for "no chunk open yet", distinct from a real ``font-family`` of ``None``.
+_NO_FAMILY = object()
+
+
+def _tspan_width(
+    text: str,
+    properties: m.RunProperties,
+    default_font_size: float,
+    font_scale: float,
+    context: RenderContext,
+) -> float:
+    return context.measurer.measure_text_width(
+        text,
+        (properties.font_size or default_font_size) * font_scale,
+        properties.bold,
+        properties.font_family,
+        properties.font_family_ea,
+    )
 
 
 def _chunk_end(start: float, width: float, anchor: str) -> float:
@@ -778,31 +891,50 @@ def _split_by_script(text: str) -> list[tuple[str, bool]]:
     return parts
 
 
-def _render_segment(
-    segment: LineSegment, font_scale: float, prefix: str, context: RenderContext
-) -> str:
-    properties = segment.properties
+def _segment_tspans(
+    segment: LineSegment, font_scale: float, context: RenderContext
+) -> list[tuple[str | None, str, str]]:
+    """``(font-family, style attributes, text)`` for every tspan this segment needs.
 
+    The family is returned alongside the attribute string it is already inside because
+    :func:`_render_line` has to compare it against the next tspan's: an SVG text chunk
+    that changes face part-way through is the one thing resvg cannot draw (see
+    :func:`_render_line`), so the family is what decides where a chunk ends.
+    """
+    properties = segment.properties
     if not _needs_script_split(properties):
-        styles = _style_attrs(properties, font_scale, None, context)
-        content = f"<tspan {prefix}{styles}>{escape_xml_text(segment.text)}</tspan>"
+        chains: list[tuple[list[str | None] | None, str]] = [(None, segment.text)]
     else:
-        pieces: list[str] = []
-        for index, (part_text, east_asian) in enumerate(_split_by_script(segment.text)):
+        chains = []
+        for part_text, east_asian in _split_by_script(segment.text):
             fonts = (
                 [properties.font_family_ea, context.jpan_fallback_font, properties.font_family]
                 if east_asian
                 else [properties.font_family, properties.font_family_ea]
             ) + [properties.font_family_cs]
-            styles = _style_attrs(properties, font_scale, fonts, context)
-            open_prefix = prefix if index == 0 else ""
-            pieces.append(
-                f"<tspan {open_prefix}{styles}>{escape_xml_text(part_text)}</tspan>"
-            )
-        content = "".join(pieces)
+            chains.append((fonts, part_text))
 
-    if properties.hyperlink is not None:
-        return f'<a href="{escape_xml_attr(properties.hyperlink.url)}">{content}</a>'
+    out: list[tuple[str | None, str, str]] = []
+    for fonts, part_text in chains:
+        styles = _style_attrs(properties, font_scale, fonts, context)
+        chain = fonts if fonts is not None else [
+            properties.font_family, properties.font_family_ea, properties.font_family_cs
+        ]
+        out.append((font_family_value(chain, context.font_mapping), styles, part_text))
+    return out
+
+
+def _render_segment(
+    segment: LineSegment, font_scale: float, prefix: str, context: RenderContext
+) -> str:
+    content = "".join(
+        f"<tspan {prefix if index == 0 else ''}{styles}>{escape_xml_text(text)}</tspan>"
+        for index, (_family, styles, text) in enumerate(
+            _segment_tspans(segment, font_scale, context)
+        )
+    )
+    if segment.properties.hyperlink is not None:
+        return f'<a href="{escape_xml_attr(segment.properties.hyperlink.url)}">{content}</a>'
     return content
 
 

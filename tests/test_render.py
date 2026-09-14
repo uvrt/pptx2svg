@@ -675,3 +675,45 @@ def test_line_spacing_above_100_percent_moves_the_baseline_to_three_quarters():
     baseline = _first_baseline_px(paragraph, 14.0, 1.2 - 434 / 2048, 0.0, RenderContext())
     # 0.75 * (1.2 * 1.5 * 14 pt) = 18.9 pt, in CSS pixels.
     assert baseline == pytest.approx(0.75 * 1.2 * 1.5 * 14.0 * (96 / 72), rel=1e-6)
+
+
+def test_a_font_change_starts_a_new_text_chunk():
+    """resvg picks one face per chunk, so a mixed-script chunk loses the Latin face.
+
+    ``font-family`` is per-character in SVG and a conforming renderer falls back per
+    glyph.  resvg does not: if the requested family cannot cover every character in the
+    chunk, the *whole* chunk is drawn in resvg's default face.  Measured, ``Markdown``
+    at 42.667 px inks 182 px under ``font-family="Calibri"`` and 202 px -- byte-identical
+    to ``sans-serif`` -- once ``から`` shares the chunk.  An explicit ``x`` on the
+    following tspan ends the chunk and restores the Latin face exactly.
+    """
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun(
+                        "Markdownから",
+                        m.RunProperties(
+                            font_size=18, font_family="Calibri", font_family_ea="ＭＳ Ｐゴシック"
+                        ),
+                    )
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body)
+    tspans = re.findall(r"<tspan([^>]*)>([^<]*)</tspan>", svg)
+    assert [text for _attrs, text in tspans] == ["Markdown", "から"]
+    assert 'x="' in tspans[1][0], tspans[1][0]
+
+
+def test_a_single_face_line_is_left_flowing():
+    """No font change, no absolute positions: let the rasteriser accumulate advances.
+
+    Our tables are good enough to wrap with and to start a chunk with; they are not
+    better than the real font, so a line that gives resvg no reason to fall back is
+    still laid out by resvg.
+    """
+    svg = text_svg(one_run("Markdown", font_size=18, font_family="Calibri"))
+    (attrs,) = re.findall(r"<tspan([^>]*)>", svg)
+    assert attrs.count('x="') == 1  # the line's own start, and nothing after it
