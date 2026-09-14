@@ -1127,3 +1127,44 @@ def test_an_explicit_axis_range_wins_over_the_computed_one():
         40.0,
         10.0,
     )
+
+
+def test_a_source_linked_axis_takes_the_cells_format():
+    """`sourceLinked="1"` means "whatever the cell says", and the cache records that."""
+    _, data = _build(
+        "<c:chart><c:plotArea>"
+        "<c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:formatCode>#,##0</c:formatCode>"
+        "<c:ptCount val='1'/><c:pt idx='0'><c:v>4285</c:v></c:pt>"
+        "</c:numCache></c:numRef></c:val></c:ser></c:barChart>"
+        "<c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:numFmt formatCode='General' sourceLinked='1'/>"
+        "</c:valAx></c:plotArea></c:chart>"
+    )
+    assert data.series[0].format_code == "#,##0"
+
+
+def test_an_axis_that_chose_general_does_not_inherit_the_cells_format():
+    """`sourceLinked="0"` is a choice, including when the choice is General.
+
+    `real-financial-report.pptx` writes exactly this and PowerPoint prints "1000", not
+    "1,000" -- even though the same chart's data labels ask for `#,##0`.
+    """
+    chart_xml = (
+        "<c:chart><c:plotArea>"
+        "<c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:formatCode>#,##0</c:formatCode>"
+        "<c:ptCount val='1'/><c:pt idx='0'><c:v>4285</c:v></c:pt>"
+        "</c:numCache></c:numRef></c:val></c:ser></c:barChart>"
+        "<c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:numFmt formatCode='General' sourceLinked='0'/>"
+        "</c:valAx></c:plotArea></c:chart>"
+    )
+    children, _ = _build(chart_xml)
+    printed = {
+        "".join(run.text for p in child.text_body.paragraphs for run in p.runs)
+        for child in children
+        if isinstance(child, m.ShapeElement) and child.text_body is not None
+    }
+    assert "5000" in printed
+    assert not any("," in label for label in printed)

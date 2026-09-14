@@ -731,11 +731,19 @@ class ChartBuilder:
         return out
 
     def _axis_format(self, axis: c.SourceChartAxis | None) -> str | None:
+        """The format code the value axis' labels are printed with.
+
+        ``c:numFmt@sourceLinked`` means "take the cell's format", and the cell's format is
+        what the value cache's own ``c:formatCode`` records -- so a source-linked axis
+        falls through to the series.  An axis that says ``sourceLinked="0"`` has *chosen*
+        its format, including when that choice is ``General``, and must not inherit.
+        """
         if axis is None:
             return None
         if axis.number_format and axis.number_format != "General":
             return axis.number_format
-        # `sourceLinked` means "use the cell's format"; the series cache carries it.
+        if axis.number_format_source_linked is False:
+            return None
         for source in self.plot.series:
             if source.format_code and source.format_code != "General":
                 return source.format_code
