@@ -824,11 +824,19 @@ stretched. `chevron` is the proof: pixel-identical to the specification in a squ
 **What the sweep cost, and what it was worth.** Three things went wrong that are worth
 knowing before repeating it:
 
-- `bendUpArrow` — our alias for a misspelling that appears in real files — is not a name
-  OOXML defines, and a deck containing it makes PowerPoint reject the whole file. It
-  opens the deck, closes it again, and leaves the export blocked with the process idle at
-  0% CPU, which reads as a hang rather than as invalid input. Probe decks must contain
-  only names the standard defines.
+- **Two different input defects present identically**, and the presentation is the problem:
+  PowerPoint opens the deck, closes it again, and leaves the export blocked with the
+  process idle at 0% CPU. That reads as a hung oracle, so it sends you to look at
+  PowerPoint when the fault is in the file you handed it. When an export hangs, suspect
+  the deck first and bisect it; the app is almost certainly fine. The two known causes:
+
+  1. **A preset name OOXML does not define.** `bendUpArrow` — our alias for a misspelling
+     that appears in real files — is one. Probe decks must contain only standard names.
+  2. **A partial `a:avLst`.** Naming only the handle you want to move and leaving
+     PowerPoint to fill in the rest is refused; the list must carry *every* handle the
+     preset declares, with one value changed. Single-handle shapes such as `roundRect`
+     never hit this, because for them a partial list is already complete — which is
+     exactly why it stays hidden until a multi-handle shape meets it.
 - Twenty shapes on one slide exports in three seconds; 120 across six slides silently
   produces nothing. Batch small.
 - The sweep found exactly two shapes where *neither* candidate matched, `cloud` and

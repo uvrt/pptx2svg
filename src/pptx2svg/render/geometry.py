@@ -64,10 +64,6 @@ def _round_rect(w, h, adj):
     return f'<rect width="{_n(w)}" height="{_n(h)}" rx="{_n(r)}" ry="{_n(r)}"/>'
 
 
-def _triangle(w, h, adj):
-    top_x = _adj(adj, "adj", 50000) * w
-    return f'<polygon points="{_pts((top_x, 0), (w, h), (0, h))}"/>'
-
 
 def _rt_triangle(w, h, adj):
     return f'<polygon points="{_pts((0, 0), (w, h), (0, h))}"/>'
@@ -86,14 +82,6 @@ def _up_arrow(w, h, adj):
     right = w - left
     return f'<polygon points="{_pts((left, head_l), (0, head_l), (w/2, 0), (w, head_l), (right, head_l), (right, h), (left, h))}"/>'
 
-
-def _down_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 50000) * w
-    head_l = _adj(adj, "adj2", 50000) * h
-    left = (w - head_w) / 2
-    right = w - left
-    shaft = h - head_l
-    return f'<polygon points="{_pts((left, 0), (right, 0), (right, shaft), (w, shaft), (w/2, h), (0, shaft), (left, shaft))}"/>'
 
 
 def _line(w, h, adj):
@@ -124,15 +112,6 @@ def _straight_connector1(w, h, adj):
 # --------------------------------------------------------------------------------------
 # Additional arrows
 # --------------------------------------------------------------------------------------
-
-
-
-def _up_down_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 50000) * w
-    head_l = _adj(adj, "adj2", 50000) * h
-    left = (w - head_w) / 2
-    right = w - left
-    return f'<polygon points="{_pts((left, head_l), (0, head_l), (w/2, 0), (w, head_l), (right, head_l), (right, h - head_l), (w, h - head_l), (w/2, h), (0, h - head_l), (left, h - head_l))}"/>'
 
 
 
@@ -339,53 +318,9 @@ def _border_callout3(w, h, adj):
 
 
 
-def _folded_corner(w, h, adj):
-    fold = _adj(adj, "adj", 16667) * min(w, h)
-    return (
-        f'<path d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(h-fold)} L {_n(w-fold)} {_n(h)} L 0 {_n(h)} Z '
-        f'M {_n(w-fold)} {_n(h)} L {_n(w-fold)} {_n(h-fold)} L {_n(w)} {_n(h-fold)}"/>'
-    )
 
 
 
-def _frame(w, h, adj):
-    t = _adj(adj, "adj1", 12500) * min(w, h)
-    return (
-        f'<path fill-rule="evenodd" d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(h)} L 0 {_n(h)} Z '
-        f'M {_n(t)} {_n(t)} L {_n(t)} {_n(h-t)} L {_n(w-t)} {_n(h-t)} L {_n(w-t)} {_n(t)} Z"/>'
-    )
-
-
-def _bevel(w, h, adj):
-    t = _adj(adj, "adj", 12500) * min(w, h)
-    return (
-        f'<path d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(h)} L 0 {_n(h)} Z '
-        f'M {_n(t)} {_n(t)} L {_n(w-t)} {_n(t)} L {_n(w-t)} {_n(h-t)} L {_n(t)} {_n(h-t)} Z '
-        f'M 0 0 L {_n(t)} {_n(t)} M {_n(w)} 0 L {_n(w-t)} {_n(t)} '
-        f'M {_n(w)} {_n(h)} L {_n(w-t)} {_n(h-t)} M 0 {_n(h)} L {_n(t)} {_n(h-t)}"/>'
-    )
-
-
-
-def _snip1_rect(w, h, adj):
-    d = _adj(adj, "adj", 16667) * min(w, h)
-    return f'<polygon points="{_pts((0, 0), (w - d, 0), (w, d), (w, h), (0, h))}"/>'
-
-
-def _snip2_same_rect(w, h, adj):
-    d1 = _adj(adj, "adj1", 16667) * min(w, h)
-    d2 = _adj(adj, "adj2", 0) * min(w, h)
-    return f'<polygon points="{_pts((d1, 0), (w - d1, 0), (w, d1), (w, h - d2), (w - d2, h), (d2, h), (0, h - d2), (0, d1))}"/>'
-
-
-
-def _snip_round_rect(w, h, adj):
-    r = _adj(adj, "adj1", 16667) * min(w, h)
-    d = _adj(adj, "adj2", 16667) * min(w, h)
-    return (
-        f'<path d="M {_n(r)} 0 L {_n(w-d)} 0 L {_n(w)} {_n(d)} L {_n(w)} {_n(h)} L 0 {_n(h)} '
-        f'L 0 {_n(r)} A {_n(r)} {_n(r)} 0 0 1 {_n(r)} 0 Z"/>'
-    )
 
 
 def _round1_rect(w, h, adj):
@@ -404,17 +339,6 @@ def _round2_same_rect(w, h, adj):
         f'L {_n(w)} {_n(h-r2)} A {_n(r2)} {_n(r2)} 0 0 1 {_n(w-r2)} {_n(h)} L {_n(r2)} {_n(h)} '
         f'A {_n(r2)} {_n(r2)} 0 0 1 0 {_n(h-r2)} L 0 {_n(r1)} A {_n(r1)} {_n(r1)} 0 0 1 {_n(r1)} 0 Z"/>'
     )
-
-
-def _round2_diag_rect(w, h, adj):
-    r1 = min(0.5, max(0.0, _adj(adj, "adj1", 16667))) * min(w, h)
-    r2 = min(0.5, max(0.0, _adj(adj, "adj2", 0))) * min(w, h)
-    return (
-        f'<path d="M {_n(r1)} 0 L {_n(w)} 0 L {_n(w)} {_n(h-r2)} '
-        f'A {_n(r2)} {_n(r2)} 0 0 1 {_n(w-r2)} {_n(h)} L 0 {_n(h)} L 0 {_n(r1)} '
-        f'A {_n(r1)} {_n(r1)} 0 0 1 {_n(r1)} 0 Z"/>'
-    )
-
 
 
 
@@ -677,15 +601,12 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "rect": _rect,
     "ellipse": _ellipse,
     "roundRect": _round_rect,
-    "triangle": _triangle,
     "rtTriangle": _rt_triangle,
     "diamond": _diamond,
     "line": _line,
     # Stars and seals
     # Arrows
     "upArrow": _up_arrow,
-    "downArrow": _down_arrow,
-    "upDownArrow": _up_down_arrow,
     "homePlate": _home_plate,
     # Connectors
     "straightConnector1": _straight_connector1,
@@ -716,15 +637,8 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     # Arcs
     # Math
     # Misc
-    "foldedCorner": _folded_corner,
-    "frame": _frame,
-    "bevel": _bevel,
-    "snip1Rect": _snip1_rect,
-    "snip2SameRect": _snip2_same_rect,
-    "snipRoundRect": _snip_round_rect,
     "round1Rect": _round1_rect,
     "round2SameRect": _round2_same_rect,
-    "round2DiagRect": _round2_diag_rect,
     "leftBrace": _left_brace,
     "rightBrace": _right_brace,
 }
