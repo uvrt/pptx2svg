@@ -558,14 +558,24 @@ def test_a_path_space_arc_scales_without_rotating():
     assert wide[-1] == pytest.approx(square[-1], abs=0.01)      # end y
 
 
-@pytest.mark.parametrize(
-    "name", ["cloud", "cloudCallout", "flowChartPunchedTape", "flowChartTerminator"]
-)
+def _wholly_path_space_presets():
+    """Presets whose every path is authored in its own coordinate space.
+
+    Only these are expected to stretch linearly.  A preset that mixes path-space paths
+    with guide-driven ones -- `cloudCallout`, whose bubble is on a 43200 grid but whose
+    tail is computed from `ss` -- is *correct* without being linear, because the guides
+    legitimately depend on the shorter side.
+    """
+    return sorted(
+        name
+        for name, (_, _, paths) in PRESET_SPECS.items()
+        if paths and all(space is not None for _, _, space, _ in paths)
+    )
+
+
+@pytest.mark.parametrize("name", _wholly_path_space_presets())
 def test_presets_with_a_path_space_stretch_linearly(name):
-    """The same invariant through the public entry point, for the presets that combine a
-    path-local space with arcs -- the only ones the bug could reach."""
-    if name not in SPEC_PRESETS:
-        pytest.skip(f"{name} is not compiled from the specification yet")
+    """The same invariant through the public entry point."""
     square = numbers(" ".join(path_data(preset_geometry_svg(name, 400.0, 400.0, {}))))
     wide = numbers(" ".join(path_data(preset_geometry_svg(name, 800.0, 400.0, {}))))
     assert len(square) == len(wide) and square

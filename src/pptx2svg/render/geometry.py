@@ -129,36 +129,8 @@ def _straight_connector1(w, h, adj):
 
 
 
-def _cloud(w, h, adj):
-    return f'<rect width="{_n(w)}" height="{_n(h)}" rx="{_n(min(w, h) * 0.15)}"/>'
 
 
-def _heart(w, h, adj):
-    cx = w / 2
-    return (
-        f'<path d="M {_n(cx)} {_n(h*0.35)} C {_n(cx)} {_n(h*0.1)}, 0 0, 0 {_n(h*0.35)} '
-        f'C 0 {_n(h*0.65)}, {_n(cx)} {_n(h*0.85)}, {_n(cx)} {_n(h)} '
-        f'C {_n(cx)} {_n(h*0.85)}, {_n(w)} {_n(h*0.65)}, {_n(w)} {_n(h*0.35)} '
-        f'C {_n(w)} 0, {_n(cx)} {_n(h*0.1)}, {_n(cx)} {_n(h*0.35)} Z"/>'
-    )
-
-
-def _irregular_seal1(w, h, adj):
-    ratios = [
-        (0.15, 0.35), (0.27, 0.03), (0.38, 0.28), (0.5, 0.0), (0.6, 0.23), (0.73, 0.08),
-        (0.72, 0.35), (1.0, 0.35), (0.78, 0.5), (0.95, 0.7), (0.73, 0.65), (0.65, 1.0),
-        (0.5, 0.72), (0.35, 0.95), (0.32, 0.65), (0.05, 0.7), (0.18, 0.5), (0.0, 0.35),
-    ]
-    return f'<polygon points="{_pts(*[(w*x, h*y) for x, y in ratios])}"/>'
-
-
-def _irregular_seal2(w, h, adj):
-    ratios = [
-        (0.1, 0.4), (0.18, 0.08), (0.32, 0.3), (0.45, 0.0), (0.55, 0.18), (0.72, 0.05),
-        (0.68, 0.32), (1.0, 0.3), (0.82, 0.5), (0.98, 0.68), (0.75, 0.65), (0.8, 0.92),
-        (0.55, 0.75), (0.42, 1.0), (0.38, 0.72), (0.12, 0.88), (0.22, 0.6), (0.0, 0.55),
-    ]
-    return f'<polygon points="{_pts(*[(w*x, h*y) for x, y in ratios])}"/>'
 
 
 # --------------------------------------------------------------------------------------
@@ -337,26 +309,6 @@ def _wedge_ellipse_callout(w, h, adj):
         f'A {_n(rx)} {_n(ry)} 0 1 1 {_n(x1)} {_n(y1)} Z"/>'
     )
 
-
-def _cloud_callout(w, h, adj):
-    tip_x = w / 2 + _adj(adj, "adj1", -20833) * w
-    tip_y = h / 2 + _adj(adj, "adj2", 62500) * h
-    r = min(w, h) * 0.15
-    bx, by = w / 2, h / 2
-    dx, dy = tip_x - bx, tip_y - by
-    d1x, d1y = bx + dx * 0.33, by + dy * 0.33
-    d2x, d2y = bx + dx * 0.66, by + dy * 0.66
-    return (
-        f'<path d="M {_n(r)} {_n(h)} A {_n(r)} {_n(r)} 0 0 1 0 {_n(h-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(r)} {_n(h - 2*r)} L {_n(r)} {_n(r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(2*r)} 0 L {_n(w - 2*r)} 0 '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(w-r)} {_n(r)} L {_n(w-r)} {_n(h - 2*r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(w - 2*r)} {_n(h-r)} A {_n(r)} {_n(r)} 0 0 1 {_n(w - 2*r)} {_n(h)} Z '
-        f'M {_n(d1x)} {_n(d1y)} m {_n(r*0.25)} 0 a {_n(r*0.25)} {_n(r*0.25)} 0 1 1 {_n(-r*0.5)} 0 '
-        f'a {_n(r*0.25)} {_n(r*0.25)} 0 1 1 {_n(r*0.5)} 0 Z '
-        f'M {_n(d2x)} {_n(d2y)} m {_n(r*0.15)} 0 a {_n(r*0.15)} {_n(r*0.15)} 0 1 1 {_n(-r*0.3)} 0 '
-        f'a {_n(r*0.15)} {_n(r*0.15)} 0 1 1 {_n(r*0.3)} 0 Z"/>'
-    )
 
 
 def _border_callout1(w, h, adj):
@@ -537,27 +489,6 @@ def _right_brace(w, h, adj):
 
 
 
-
-
-
-def _wave(w, h, adj):
-    dy = _adj(adj, "adj1", 12500) * h
-    dx = _adj(adj, "adj2", 0) * w
-    return (
-        f'<path d="M {_n(dx)} {_n(dy)} C {_n(dx + w*0.25)} 0, {_n(dx + w*0.5)} 0, {_n(w)} {_n(dy)} '
-        f'L {_n(w-dx)} {_n(h-dy)} C {_n(w - dx - w*0.25)} {_n(h)}, {_n(w - dx - w*0.5)} {_n(h)}, 0 {_n(h-dy)} Z"/>'
-    )
-
-
-def _double_wave(w, h, adj):
-    dy = _adj(adj, "adj1", 6250) * h
-    dx = _adj(adj, "adj2", 0) * w
-    return (
-        f'<path d="M {_n(dx)} {_n(dy)} C {_n(dx + w*0.167)} 0, {_n(dx + w*0.333)} {_n(dy*2)}, {_n(w/2)} {_n(dy)} '
-        f'C {_n(w/2 + w*0.167)} 0, {_n(w/2 + w*0.333)} {_n(dy*2)}, {_n(w)} {_n(dy)} '
-        f'L {_n(w-dx)} {_n(h-dy)} C {_n(w - dx - w*0.167)} {_n(h)}, {_n(w - dx - w*0.333)} {_n(h - dy*2)}, {_n(w/2)} {_n(h-dy)} '
-        f'C {_n(w/2 - w*0.167)} {_n(h)}, {_n(w/2 - w*0.333)} {_n(h - dy*2)}, 0 {_n(h-dy)} Z"/>'
-    )
 
 
 
@@ -803,8 +734,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "dodecagon": lambda w, h, adj: _regular_polygon(w, h, 12),
     "line": _line,
     # Stars and seals
-    "irregularSeal1": _irregular_seal1,
-    "irregularSeal2": _irregular_seal2,
     # Arrows
     "upArrow": _up_arrow,
     "downArrow": _down_arrow,
@@ -835,15 +764,12 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "wedgeRectCallout": _wedge_rect_callout,
     "wedgeRoundRectCallout": _wedge_round_rect_callout,
     "wedgeEllipseCallout": _wedge_ellipse_callout,
-    "cloudCallout": _cloud_callout,
     "borderCallout1": _border_callout1,
     "borderCallout2": _border_callout2,
     "borderCallout3": _border_callout3,
     # Arcs
     # Math
     # Misc
-    "cloud": _cloud,
-    "heart": _heart,
     "foldedCorner": _folded_corner,
     "frame": _frame,
     "bevel": _bevel,
@@ -858,8 +784,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "rightBracket": _right_bracket,
     "leftBrace": _left_brace,
     "rightBrace": _right_brace,
-    "wave": _wave,
-    "doubleWave": _double_wave,
 }
 
 

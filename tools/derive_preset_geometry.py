@@ -172,6 +172,14 @@ SPEC_DRIVEN = [
     "plus",
     "teardrop",
     "trapezoid",
+    # Clouds, waves, hearts and seals: ours 0.67-0.95 against PowerPoint, the specification 0.989-0.999.
+    "cloud",
+    "cloudCallout",
+    "doubleWave",
+    "heart",
+    "irregularSeal1",
+    "irregularSeal2",
+    "wave",
 ]
 
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
