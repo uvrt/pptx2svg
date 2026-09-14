@@ -592,8 +592,8 @@ class ChartBuilder:
     def _series(self) -> list[_Series]:
         out: list[_Series] = []
         for index, source in enumerate(self.plot.series):
-            color = self._series_color(source, index)
             fill = self._resolve_fill(source.fill)
+            color = self._series_color(fill, index)
             if fill is None:
                 fill = m.SolidFill(color=color)
             outline = self._resolve_outline(source.outline)
@@ -610,7 +610,7 @@ class ChartBuilder:
                     True if source.invert_if_negative is None else source.invert_if_negative
                 ),
             )
-            if self._vary_colors() and self._resolve_fill(source.fill) is None:
+            if self._vary_colors() and source.fill is None:
                 # Measured on the varyColors probe: points take accent1, accent2, accent3
                 # *exactly*.  pptx-renderer darkens them to 88%, which PowerPoint does not.
                 for point_index in range(len(item.values)):
@@ -628,8 +628,12 @@ class ChartBuilder:
             out.append(item)
         return out
 
-    def _series_color(self, source: c.SourceChartSeries, index: int) -> m.ResolvedColor:
-        fill = self._resolve_fill(source.fill)
+    def _series_color(self, fill: m.Fill | None, index: int) -> m.ResolvedColor:
+        """One flat colour for the series, for its legend swatch and its fallback fill.
+
+        A series that states no fill takes the next theme accent, cycling; Office's own
+        accent1 is the last resort when the theme has none.
+        """
         if isinstance(fill, m.SolidFill):
             return fill.color
         if self.style.accents:
