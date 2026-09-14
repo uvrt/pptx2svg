@@ -680,19 +680,13 @@ class ChartBuilder:
 
         numbers: list[float] = []
         if stacked:
+            # A stacked bar reaches the sum of its category, and the positive and negative
+            # halves of that category stack away from zero independently.
             length = max((len(item.values) for item in series), default=0)
             for index in range(length):
-                positive = sum(
-                    value for item in series
-                    for value in [item.values[index] if index < len(item.values) else None]
-                    if value is not None and value > 0
-                )
-                negative = sum(
-                    value for item in series
-                    for value in [item.values[index] if index < len(item.values) else None]
-                    if value is not None and value < 0
-                )
-                numbers.extend([positive, negative])
+                column = [_at(item.values, index) for item in series]
+                numbers.append(sum(value for value in column if value and value > 0))
+                numbers.append(sum(value for value in column if value and value < 0))
         else:
             numbers = [value for item in series for value in item.values if value is not None]
 
@@ -1030,7 +1024,7 @@ class ChartBuilder:
             positive_base = 0.0
             negative_base = 0.0
             for order, item in enumerate(series):
-                value = item.values[point] if point < len(item.values) else None
+                value = _at(item.values, point)
                 if value is None:
                     if self.chart.display_blanks_as == "zero":
                         value = 0.0
@@ -1469,13 +1463,18 @@ def _labels_shown(axis: c.SourceChartAxis | None) -> bool:
     return (axis.tick_label_position or "nextTo") != "none"
 
 
+def _at(values: list[float | None], index: int) -> float | None:
+    """One series' value at a category index; series need not be the same length."""
+    return values[index] if index < len(values) else None
+
+
 def _percent_totals(series: list[_Series]) -> list[float]:
     length = max((len(item.values) for item in series), default=0)
     totals: list[float] = []
     for index in range(length):
         total = 0.0
         for item in series:
-            value = item.values[index] if index < len(item.values) else None
+            value = _at(item.values, index)
             if value is not None:
                 total += abs(value)
         totals.append(total)
