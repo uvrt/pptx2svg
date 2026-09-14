@@ -51,7 +51,7 @@ from .. import model as m
 from ..parse import chart as c
 from ..parse import source as s
 from ..text.fontmap import metrics_for
-from ..text.measure import DEFAULT_LINE_HEIGHT_RATIO
+from ..text.measure import DEFAULT_LINE_HEIGHT_RATIO, is_cjk
 
 EMU_PER_POINT = 12700.0
 
@@ -296,6 +296,27 @@ def _decimals(section: str) -> int:
 
 
 @dataclass(frozen=True)
+class ChartFont:
+    """The face a piece of chart text is drawn in, plus its metrics at that size.
+
+    Three things in a chart can name a face and a size independently -- the chart's own
+    ``c:txPr``, an axis's, and the legend's -- and they routinely disagree.  Carrying the
+    pair together is what stops a label being *measured* in one face and *drawn* in
+    another, which is the mistake ``text/metrics.py`` exists to prevent.
+    """
+
+    family: str | None
+    box: "FontBox"
+
+    @property
+    def size(self) -> float:
+        return self.box.size
+
+    def width(self, text: str) -> float:
+        return text_width(text, self.family, self.box.size)
+
+
+@dataclass(frozen=True)
 class FontBox:
     """The vertical metrics of one face at one size, in points."""
 
@@ -357,12 +378,22 @@ def font_box(family: str | None, size: float) -> FontBox:
 
 
 def text_width(text: str, family: str | None, size: float) -> float:
+    """One line's advance width, in points.
+
+    The CJK branch is not decoration: ``real-financial-report.pptx`` legends its series
+    in Japanese, and measuring those with the Latin mean advance under-counted the legend
+    band by 32 pt -- a quarter of the chart's width.  The rule is the same one
+    :mod:`pptx2svg.text.measure` uses, so chart text is measured exactly as slide text is.
+    """
     metrics = metrics_for(family)
     if metrics is None:
         return 0.5 * size * len(text)
     total = 0.0
     for char in text:
-        total += metrics.widths.get(char, metrics.default_width)
+        width = metrics.widths.get(char)
+        if width is None:
+            width = metrics.cjk_width if is_cjk(ord(char)) else metrics.default_width
+        total += width
     return total / metrics.units_per_em * size
 
 
@@ -429,6 +460,7 @@ class ChartBuilder:
         resolve_fill,
         resolve_outline,
         resolve_text,
+        resolve_typeface=lambda typeface: typeface,
     ) -> None:
         self.chart = chart
         self.plot = plot
@@ -437,6 +469,7 @@ class ChartBuilder:
         self._resolve_fill = resolve_fill
         self._resolve_outline = resolve_outline
         self._resolve_text = resolve_text
+        self._resolve_typeface = resolve_typeface
         self.elements: list[m.SlideElement] = []
         self._title_cache: "tuple[m.TextBody, FontBox] | None | object" = _UNSET
         #: Set by _draw_background, consumed by _draw_gridlines: the plot rectangle is
@@ -452,18 +485,18 @@ class ChartBuilder:
         category_axis = self._axis_for(0) or self._axis_of_kind("catAx")
 
         scale = self._scale(series, value_axis)
-        label_size = self._label_size(value_axis)
+        label_font = self._label_font(value_axis)
         tick_texts = self._tick_texts(scale, value_axis)
 
-        plot_rect = self._plot_rect(tick_texts, categories, label_size)
+        plot_rect = self._plot_rect(tick_texts, categories, label_font)
 
         self._draw_background()
         self._draw_title()
         self._draw_gridlines(plot_rect, scale, value_axis)
         self._draw_bars(plot_rect, series, categories, scale)
         self._draw_axis_lines(plot_rect, value_axis, category_axis)
-        self._draw_value_labels(plot_rect, scale, tick_texts, value_axis, label_size)
-        self._draw_category_labels(plot_rect, categories, category_axis, label_size)
+        self._draw_value_labels(plot_rect, scale, tick_texts, value_axis, label_font)
+        self._draw_category_labels(plot_rect, categories, category_axis, label_font)
         self._draw_legend(plot_rect, series)
 
         data = m.ChartData(
@@ -630,17 +663,37 @@ class ChartBuilder:
 
     # -- layout -------------------------------------------------------------------------
 
-    def _label_size(self, axis: c.SourceChartAxis | None) -> FontBox:
-        size = self.style.font_size
-        if axis is not None and axis.text_properties is not None:
-            size = _text_size(axis.text_properties) or size
-        return font_box(self.style.font_family, size)
+    def _font(self, *sources: "s.SourceTextBody | None") -> ChartFont:
+        """The innermost ``c:txPr`` that names a size or a face wins, per property.
+
+        Sources are given innermost first.  A ``c:txPr`` may name only one of the two --
+        every axis in ``real-financial-report.pptx`` names ``Arial`` and a size while its
+        legend names neither -- so size and face resolve independently rather than as a
+        unit.
+        """
+        size = None
+        typeface = None
+        for source in (*sources, self.chart.text_properties):
+            if size is None:
+                size = _text_size(source)
+            if typeface is None:
+                typeface = _text_typeface(source)
+        family = self._resolve_typeface(typeface) if typeface else None
+        family = family or self.style.font_family
+        return ChartFont(family=family, box=font_box(family, size or self.style.font_size))
+
+    def _label_font(self, axis: c.SourceChartAxis | None) -> ChartFont:
+        return self._font(axis.text_properties if axis is not None else None)
+
+    def _legend_font(self) -> ChartFont:
+        legend = self.chart.legend
+        return self._font(legend.text_properties if legend is not None else None)
 
     def _plot_rect(
         self,
         tick_texts: list[tuple[float, str]],
         categories: list[str],
-        label: FontBox,
+        font: ChartFont,
     ) -> _Rect:
         frame = self.frame
         value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
@@ -651,22 +704,19 @@ class ChartBuilder:
 
         left = frame.left + EDGE_INSET_PT
         if show_values:
-            widest = max(
-                (text_width(text, self.style.font_family, label.size) for _, text in tick_texts),
-                default=0.0,
-            )
+            widest = max((font.width(text) for _, text in tick_texts), default=0.0)
             left = (
                 frame.left
                 + FRAME_PADDING_PT
                 + widest
-                + label.descent
-                + VALUE_LABEL_GAP_EM * label.size
+                + font.box.descent
+                + VALUE_LABEL_GAP_EM * font.size
             )
 
         right = frame.right - EDGE_INSET_PT
-        top = frame.top + self._top_inset(label)
+        top = frame.top + self._top_inset(font.box)
         bottom = frame.bottom - (
-            FRAME_PADDING_PT + label.line_height + CATEGORY_LABEL_GAP_EM * label.size
+            FRAME_PADDING_PT + font.box.line_height + CATEGORY_LABEL_GAP_EM * font.size
             if show_categories
             else EDGE_INSET_PT
         )
@@ -677,16 +727,25 @@ class ChartBuilder:
 
         legend = self._legend_position()
         if legend is not None:
-            legend_box = font_box(self.style.font_family, self._legend_size())
-            band = LEGEND_BAND_LINES * legend_box.line_height
+            legend_font = self._legend_font()
+            band = LEGEND_BAND_LINES * legend_font.box.line_height
             if legend in ("b",):
                 bottom -= band
             elif legend in ("t", "tr"):
                 top += band
             elif legend == "r":
-                right -= self._legend_side_width(legend_box)
+                # The side band *replaces* the plain edge inset rather than adding to it:
+                # it already ends in its own trailing pad.  Measured on
+                # real-financial-report's two bar charts, whose legends are Japanese and
+                # of different lengths -- both were over by exactly 11.0 pt, the inset.
+                right = frame.right - self._legend_side_width(legend_font)
             elif legend == "l":
-                left += self._legend_side_width(legend_box)
+                # On the left the value-label column follows the legend instead of the
+                # frame edge, so the band contributes one edge inset less.  Measured:
+                # the legend-l probe's left inset is 85.067 pt and the legend-r probe's
+                # right inset 74.994 pt for the same entry -- a difference of exactly the
+                # 11.0 pt inset, with the 21.07 pt label column on top.
+                left += self._legend_side_width(legend_font) - EDGE_INSET_PT
 
         if right - left < 1.0:
             right = left + 1.0
@@ -703,10 +762,10 @@ class ChartBuilder:
         """
         return max(EDGE_INSET_PT, TOP_INSET_BASE_PT + label.line_height / 2)
 
-    def _legend_side_width(self, box: FontBox) -> float:
+    def _legend_side_width(self, font: ChartFont) -> float:
         widest = max(
             (
-                text_width(source.name.plain or "", self.style.font_family, box.size)
+                font.width(source.name.plain or "")
                 for source in self.plot.series
                 if source.name is not None
             ),
@@ -715,7 +774,7 @@ class ChartBuilder:
         return (
             widest
             + (LEGEND_SIDE_LEAD_EM + LEGEND_SWATCH_EM + LEGEND_SWATCH_GAP_EM + LEGEND_SIDE_TRAIL_EM)
-            * box.size
+            * font.size
         )
 
     def _legend_position(self) -> str | None:
@@ -724,12 +783,6 @@ class ChartBuilder:
             return None
         position = legend.position or "r"
         return position if position in ("b", "t", "l", "r", "tr") else "r"
-
-    def _legend_size(self) -> float:
-        legend = self.chart.legend
-        if legend is not None and legend.text_properties is not None:
-            return _text_size(legend.text_properties) or self.style.font_size
-        return self.style.font_size
 
     def _title(self) -> tuple[m.TextBody, FontBox] | None:
         """The title's resolved text body and the metrics of the face it will be drawn in.
@@ -938,10 +991,11 @@ class ChartBuilder:
         scale: tuple[float, float, float],
         tick_texts: list[tuple[float, str]],
         axis: c.SourceChartAxis | None,
-        box: FontBox,
+        font: ChartFont,
     ) -> None:
         if not _labels_shown(axis):
             return
+        box = font.box
         for value, text in tick_texts:
             if not text:
                 continue
@@ -950,7 +1004,7 @@ class ChartBuilder:
             # their ink runs from the baseline to the cap height and half of that is the
             # offset.  Measured against PowerPoint this lands within 0.7 pt.
             baseline = y + box.ink_centre
-            body = self._label_body(text, box.size, align="r")
+            body = self._label_body(text, font, align="r")
             self._text(
                 body,
                 left=self.frame.left,
@@ -965,23 +1019,23 @@ class ChartBuilder:
         rect: _Rect,
         categories: list[str],
         axis: c.SourceChartAxis | None,
-        box: FontBox,
+        font: ChartFont,
     ) -> None:
         if not _labels_shown(axis) or not categories:
             return
+        box = font.box
         band = rect.width / len(categories)
         # The label line's descender bottom sits one frame padding above whatever is below
         # it -- the frame edge, or the legend band.  Measured to within 0.55 pt.
         region_bottom = self.frame.bottom - FRAME_PADDING_PT
         legend = self._legend_position()
         if legend == "b":
-            legend_box = font_box(self.style.font_family, self._legend_size())
-            region_bottom -= LEGEND_BAND_LINES * legend_box.line_height
+            region_bottom -= LEGEND_BAND_LINES * self._legend_font().box.line_height
         baseline = region_bottom - box.descent
         for index, text in enumerate(categories):
             if not text:
                 continue
-            body = self._label_body(text, box.size, align="ctr")
+            body = self._label_body(text, font, align="ctr")
             self._text(
                 body,
                 left=rect.left + index * band,
@@ -1004,16 +1058,14 @@ class ChartBuilder:
         if not entries:
             return
 
-        box = font_box(self.style.font_family, self._legend_size())
+        font = self._legend_font()
+        box = font.box
         swatch = LEGEND_SWATCH_EM * box.size
         gap = LEGEND_SWATCH_GAP_EM * box.size
         band = LEGEND_BAND_LINES * box.line_height
 
         if position in ("b", "t", "tr"):
-            widths = [
-                swatch + gap + text_width(item.name or "", self.style.font_family, box.size)
-                for _, item in entries
-            ]
+            widths = [swatch + gap + font.width(item.name or "") for _, item in entries]
             total = sum(widths) + LEGEND_ENTRY_GAP_EM * box.size * (len(entries) - 1)
             band_top = (
                 self.frame.bottom - FRAME_PADDING_PT - band
@@ -1023,7 +1075,7 @@ class ChartBuilder:
             baseline = band_top + LEGEND_BASELINE_LINES * box.line_height
             x = self.frame.left + (self.frame.width - total) / 2
             for (_, item), width in zip(entries, widths):
-                self._legend_entry(item, x, baseline, swatch, gap, box)
+                self._legend_entry(item, x, baseline, swatch, gap, font)
                 x += width + LEGEND_ENTRY_GAP_EM * box.size
             return
 
@@ -1031,14 +1083,16 @@ class ChartBuilder:
         # 10 pt with the legend on the right, and the band on the left came out exactly
         # the same width, so the left case mirrors it against the frame edge.
         if position == "l":
-            x = self.frame.left + FRAME_PADDING_PT
+            # Measured 10.996 pt from the frame's left edge in the legend-l probe, which
+            # is the plain edge inset and not the 6.5 pt the label column starts at.
+            x = self.frame.left + EDGE_INSET_PT
         else:
             x = rect.right + LEGEND_SIDE_LEAD_EM * box.size
         height = band * len(entries)
         y = self.frame.top + (self.frame.height - height) / 2
         for _, item in entries:
             baseline = y + LEGEND_BASELINE_LINES * box.line_height
-            self._legend_entry(item, x, baseline, swatch, gap, box)
+            self._legend_entry(item, x, baseline, swatch, gap, font)
             y += band
 
     def _legend_entry(
@@ -1048,19 +1102,20 @@ class ChartBuilder:
         baseline: float,
         swatch: float,
         gap: float,
-        box: FontBox,
+        font: ChartFont,
     ) -> None:
+        box = font.box
         centre = baseline - box.ink_centre
         self._rect(
             _Rect(x, centre - swatch / 2, x + swatch, centre + swatch / 2),
             fill=item.fill,
             outline=None,
         )
-        body = self._label_body(item.name or "", box.size, align="l")
+        body = self._label_body(item.name or "", font, align="l")
         self._text(
             body,
             left=x + swatch + gap,
-            width=text_width(item.name or "", self.style.font_family, box.size) + box.size,
+            width=font.width(item.name or "") + box.size,
             baseline=baseline,
             box=box,
         )
@@ -1119,7 +1174,7 @@ class ChartBuilder:
             )
         )
 
-    def _label_body(self, text: str, size: float, *, align: str) -> m.TextBody:
+    def _label_body(self, text: str, font: ChartFont, *, align: str) -> m.TextBody:
         return m.TextBody(
             paragraphs=[
                 m.Paragraph(
@@ -1127,8 +1182,8 @@ class ChartBuilder:
                         m.TextRun(
                             text=text,
                             properties=m.RunProperties(
-                                font_size=size,
-                                font_family=self.style.font_family,
+                                font_size=font.size,
+                                font_family=font.family,
                                 color=self.style.color,
                             ),
                         )
@@ -1208,18 +1263,37 @@ def _percent_totals(series: list[_Series]) -> list[float]:
     return totals
 
 
-def _text_size(body: s.SourceTextBody | None) -> float | None:
-    """``c:txPr``'s ``a:defRPr@sz``, in points."""
+def _default_run(body: s.SourceTextBody | None) -> s.SourceRunProperties | None:
+    """``c:txPr``'s first ``a:defRPr``.
+
+    A ``c:txPr`` is a one-paragraph text body whose only purpose is to carry defaults, so
+    the first ``a:pPr/a:defRPr`` is the whole of it.
+    """
     if body is None:
         return None
     for paragraph in body.paragraphs:
         properties = paragraph.properties
-        if properties is None or properties.default_run_properties is None:
-            continue
-        size = properties.default_run_properties.font_size
-        if size:
-            return size
+        if properties is not None and properties.default_run_properties is not None:
+            return properties.default_run_properties
     return None
+
+
+def _text_size(body: s.SourceTextBody | None) -> float | None:
+    """``c:txPr``'s ``a:defRPr@sz``, in points."""
+    run = _default_run(body)
+    return run.font_size if run is not None and run.font_size else None
+
+
+def _text_typeface(body: s.SourceTextBody | None) -> str | None:
+    """``c:txPr``'s ``a:defRPr/a:latin@typeface``, unexpanded.
+
+    Every axis in ``real-financial-report.pptx`` names ``Arial`` here while the theme's
+    minor face is something else, and measuring the labels in the theme face instead put
+    the plot area 1.7 pt off.  A ``+mn-lt``-style pointer comes back as-is; expanding it
+    needs the theme and happens in the resolver.
+    """
+    run = _default_run(body)
+    return run.typeface if run is not None else None
 
 
 def _title_size(title: c.SourceChartText | None) -> float:

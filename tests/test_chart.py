@@ -466,3 +466,251 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
     convert_pptx_to_model(deck_bytes, options)
     warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
     assert "pieChart" in warning.message
+
+
+# -- The probe sweep -------------------------------------------------------------------
+#
+# Twelve charts differing in exactly one input each, all in a 2800000 x 2300000 EMU frame
+# (220.4724 x 181.1024 pt), exported by PowerPoint 16.106 and measured out of the PDF as
+# exact vector coordinates.  The deck is rebuilt here from the same generator rather than
+# committed, so the inputs stay reviewable as XML.
+#
+# `insets` are points from the frame's four edges to the plot rectangle.  This is the
+# table every constant in `resolve/chart.py` was fitted to, and it is what would notice
+# if one of them drifted.
+
+PROBE_FRAME = (2800000, 2300000)
+
+PROBE_SWEEP = {
+    "bare": (
+        {},
+        {"left": 21.0725, "right": 10.9995, "top": 11.1025, "bottom": 24.9647},
+    ),
+    "title": (
+        {"title": "Chart contract"},
+        {"left": 21.0725, "right": 10.9995, "top": 40.8025, "bottom": 24.9647},
+    ),
+    "legend-b": (
+        {"legend": "b"},
+        {"left": 21.0725, "right": 10.9995, "top": 11.1025, "bottom": 49.0480},
+    ),
+    "legend-r": (
+        {"legend": "r"},
+        {"left": 21.0725, "right": 74.9942, "top": 11.1025, "bottom": 24.9647},
+    ),
+    "legend-t": (
+        {"legend": "t"},
+        {"left": 21.0725, "right": 10.9995, "top": 35.1858, "bottom": 24.9653},
+    ),
+    "legend-l": (
+        {"legend": "l"},
+        {"left": 85.0671, "right": 10.9996, "top": 11.1025, "bottom": 24.9647},
+    ),
+    "font14": (
+        {"text_size": 14},
+        {"left": 26.9067, "right": 10.9995, "top": 13.5451, "bottom": 32.3530},
+    ),
+    "font8": (
+        {"text_size": 8},
+        {"left": 18.1608, "right": 10.9996, "top": 11.0004, "bottom": 21.2719},
+    ),
+    "two-series": (
+        {"legend": "b", "series": 2},
+        {"left": 21.0725, "right": 10.9995, "top": 11.1025, "bottom": 49.0480},
+    ),
+    "gap50": (
+        {"gap_width": 50},
+        {"left": 21.0725, "right": 10.9995, "top": 11.1025, "bottom": 24.9647},
+    ),
+    # A drawn tick mark takes no layout space that an absent one does not: PowerPoint
+    # produced a byte-identical plot rectangle for this and for `bare`.
+    "ticks-out": (
+        {"tick_mark": "out"},
+        {"left": 21.0725, "right": 10.9995, "top": 11.1025, "bottom": 24.9647},
+    ),
+    "title-legend-b": (
+        {"title": "Both", "legend": "b"},
+        {"left": 21.0725, "right": 10.9995, "top": 40.8029, "bottom": 49.0480},
+    ),
+}
+
+#: Worst residual across the sweep is 0.47 pt; 0.6 pt is about one pixel at the 1280 px
+#: the fidelity harness scores at.
+SWEEP_TOLERANCE_PT = 0.6
+
+
+def probe_chart_xml(
+    *,
+    title=None,
+    legend=None,
+    series=1,
+    text_size=None,
+    gap_width=None,
+    tick_mark="none",
+):
+    """One probe chart, in the same shape the exported deck used."""
+    colours = ["F97316", "2563EB"]
+    values = [[3, 4, 5], [2, 1, 4]]
+    names = ["Coverage", "B"]
+    categories = ["Reader", "Writer", "Renderer"]
+
+    series_xml = ""
+    for index in range(series):
+        points = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(values[index])
+        )
+        cats = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(categories)
+        )
+        series_xml += (
+            f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+            f"<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>{names[index]}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+            f"<c:spPr><a:solidFill><a:srgbClr val='{colours[index]}'/></a:solidFill></c:spPr>"
+            f"<c:cat><c:strRef><c:strCache><c:ptCount val='3'/>{cats}"
+            "</c:strCache></c:strRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+            f"<c:ptCount val='3'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+        )
+
+    title_xml = (
+        "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r>"
+        f"<a:rPr lang='en-US'/><a:t>{title}</a:t></a:r></a:p></c:rich></c:tx>"
+        "<c:layout/><c:overlay val='0'/></c:title><c:autoTitleDeleted val='0'/>"
+        if title
+        else "<c:autoTitleDeleted val='1'/>"
+    )
+    legend_xml = (
+        f"<c:legend><c:legendPos val='{legend}'/><c:layout/><c:overlay val='0'/></c:legend>"
+        if legend
+        else ""
+    )
+    tx_pr = (
+        "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>"
+        f"<a:defRPr sz='{int(text_size * 100)}'/></a:pPr></a:p></c:txPr>"
+        if text_size
+        else ""
+    )
+    gap_xml = f"<c:gapWidth val='{gap_width}'/>" if gap_width is not None else ""
+
+    return (
+        "<?xml version='1.0'?>"
+        f"<c:chartSpace {C} {A} {R}>"
+        f"<c:chart>{title_xml}<c:plotArea><c:layout/>"
+        "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"
+        f"<c:varyColors val='0'/>{series_xml}{gap_xml}"
+        "<c:axId val='100002'/><c:axId val='100003'/></c:barChart>"
+        "<c:catAx><c:axId val='100002'/><c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='b'/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        f"<c:majorTickMark val='{tick_mark}'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100003'/>"
+        "<c:crosses val='autoZero'/><c:auto val='1'/><c:lblAlgn val='ctr'/>"
+        "<c:lblOffset val='100'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/><c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        f"<c:majorTickMark val='{tick_mark}'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        f"</c:plotArea>{legend_xml}"
+        f"<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>{tx_pr}"
+        "</c:chartSpace>"
+    ).encode()
+
+
+@pytest.fixture(scope="module")
+def probe_deck(authoring):
+    """`authoring-integration.pptx` with the twelve probe charts spliced in."""
+    from tests.deckbuilder import derive_deck
+
+    chart_type = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+    parts, relationships, overrides, shapes = {}, [], {}, ""
+    for index, (name, (kwargs, _)) in enumerate(PROBE_SWEEP.items()):
+        part = f"ppt/charts/probe{index}.xml"
+        parts[part] = probe_chart_xml(**kwargs)
+        overrides[f"/{part}"] = chart_type
+        relationships.append(
+            (
+                f"rIdProbe{index}",
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+                f"../charts/probe{index}.xml",
+            )
+        )
+        shapes += (
+            f"<p:graphicFrame><p:nvGraphicFramePr>"
+            f"<p:cNvPr id='{200 + index}' name='{name}'/>"
+            "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+            f"<p:xfrm><a:off x='0' y='0'/>"
+            f"<a:ext cx='{PROBE_FRAME[0]}' cy='{PROBE_FRAME[1]}'/></p:xfrm>"
+            "<a:graphic><a:graphicData "
+            "uri='http://schemas.openxmlformats.org/drawingml/2006/chart'>"
+            "<c:chart xmlns:c='http://schemas.openxmlformats.org/drawingml/2006/chart' "
+            "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships' "
+            f"r:id='rIdProbe{index}'/></a:graphicData></a:graphic></p:graphicFrame>"
+        )
+
+    deck = convert_pptx_to_model(
+        derive_deck(
+            authoring,
+            parts=parts,
+            shapes_xml=shapes,
+            slide_relationships=relationships,
+            overrides=overrides,
+        )
+    )
+    charts = [e for e in deck.slides[0].elements if isinstance(e, m.ChartElement)]
+    # The fixture's own chart comes first in z-order, then the twelve probes.
+    return dict(zip(PROBE_SWEEP, charts[1:]))
+
+
+@pytest.mark.parametrize("name", list(PROBE_SWEEP))
+def test_the_probe_sweep_reproduces_powerpoints_plot_rectangle(name, probe_deck):
+    chart = probe_deck[name]
+    expected = PROBE_SWEEP[name][1]
+    width = chart.transform.extent_width / 12700.0
+    height = chart.transform.extent_height / 12700.0
+    left, top, right, bottom = _plot_rect(chart)
+    ours = {
+        "left": left,
+        "right": width - right,
+        "top": top,
+        "bottom": height - bottom,
+    }
+    for edge, truth in expected.items():
+        assert ours[edge] == pytest.approx(truth, abs=SWEEP_TOLERANCE_PT), (
+            f"{name} {edge}: PowerPoint {truth:.4f}, ours {ours[edge]:.4f}"
+        )
+
+
+def test_gap_width_widens_the_bars(probe_deck):
+    """`c:gapWidth` is the gap between category groups as a percentage of one bar's width.
+
+    At the 150% default one bar fills 1/2.5 of its category band; at 50% it fills 1/1.5.
+    Measured in the probe export as 25.12 pt and 41.867 pt against a 62.80 pt band.
+    """
+    default = _bars(probe_deck["bare"])[0].transform.extent_width / 12700.0
+    widened = _bars(probe_deck["gap50"])[0].transform.extent_width / 12700.0
+    band = 220.4724 - 21.0725 - 10.9995  # the plot width, over three categories
+    assert default == pytest.approx(band / 3 / 2.5, abs=0.1)
+    assert widened == pytest.approx(band / 3 / 1.5, abs=0.1)
+
+
+def test_clustered_series_sit_side_by_side_inside_the_category_band(probe_deck):
+    chart = probe_deck["two-series"]
+    bars = [
+        child
+        for child in chart.children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.fill, m.SolidFill)
+        and child.text_body is None
+        and child.transform.extent_width > 10 * 12700
+    ]
+    assert len(bars) == 6
+    widths = {round(bar.transform.extent_width) for bar in bars}
+    assert len(widths) == 1, "clustered bars all share one width"
+    # Two series at gapWidth 150 means a band holds 2 bars plus 1.5 of one more.
+    band = (220.4724 - 21.0725 - 10.9995) / 3
+    assert bars[0].transform.extent_width / 12700.0 == pytest.approx(
+        band / 3.5, abs=0.1
+    )

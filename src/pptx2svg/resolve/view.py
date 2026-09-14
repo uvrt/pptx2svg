@@ -889,6 +889,8 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         resolve_text=lambda rich, text, size, align: _resolve_chart_title_text(
             chart_context, rich, text, size, align
         ),
+        # `c:txPr` may name `+mn-lt` rather than a face; expanding it needs the theme.
+        resolve_typeface=lambda typeface: _resolve_chart_typeface(chart_context, typeface),
     )
     children, data = builder.build()
 
@@ -962,6 +964,10 @@ def _chart_style(context: ResolveContext, source) -> ChartStyle:
         color=text_color,
         accents=accents,
     )
+
+
+def _resolve_chart_typeface(context: ResolveContext, typeface: str | None) -> str | None:
+    return _expand_theme_typeface(context, typeface)
 
 
 def _resolve_chart_title_text(
@@ -1699,4 +1705,5 @@ def _first(*values):
 
 
 # Text resolution lives in its own module to keep this one readable.
+from .text import _resolve_typeface as _expand_theme_typeface  # noqa: E402
 from .text import resolve_text_body as _resolve_text_body  # noqa: E402
