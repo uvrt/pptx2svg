@@ -812,6 +812,27 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
       CJK glyph a full em and MS PGothic is proportional, 0.648 em to 1.0 for katakana.
       Nothing our renderer does can close a gap that starts with different outlines at
       different widths, and reporting it as an SSIM failure says the opposite.
+
+      Measured, because "it resolved the name differently" invites the question of *how*,
+      and the answer decides whether there is a rule here worth reproducing.  Fitting a
+      least-squares em to the glyph origins -- origins, not ink boxes, which differ by the
+      side bearings and had me briefly believing the opposite -- every Japanese run in
+      both exports fits MS Gothic with a worst residual of 0.000 pt, at exactly the
+      nominal size.  MS PGothic and MS UI Gothic are out by 2 to 7 pt on the same runs.
+
+      And ``real-basic-theme``'s theme names ＭＳ Ｐゴシック as the ``Jpan`` face of *both*
+      the major and the minor scheme -- one name -- while the export draws the headings in
+      MS Mincho and the body in MS Gothic.  One name in, two faces out, split along the
+      major/minor axis.  That rules out a ``.ttc`` face-selection quirk, which would have
+      given the same face for both, and it rules out any resolution rule at all: it is
+      PowerPoint falling back to its own built-in Japanese defaults, serif for the heading
+      role and sans for the body role, having failed to resolve the name.  There is
+      therefore no behaviour here to reproduce -- only a font this copy of PowerPoint
+      cannot see.
+
+      What would make these two decks measurable is unchanged and is not something this
+      file can do: register MS PGothic where PowerPoint can find it -- on Windows it is a
+      separately addressable family and this does not arise -- and re-export the oracle.
     """
     faces = (profile or {}).get("faces", {})
     named = requested_faces(deck)
@@ -830,6 +851,7 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
     usable = available + [face for face in conditional if face in faces]
     uncovered = ""
     substituted: list[str] = []
+    instead: list[str] = []
     if not missing and profile:
         cmaps = _face_cmaps(faces, usable)
         wanted = {ord(char) for char in text if not char.isspace()}
@@ -862,6 +884,15 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
                 if postscript and not (postscript & drawn):
                     substituted.append(face)
             substituted.sort()
+            # What it drew *instead*, so the skip line says something a reader can act
+            # on.  Only the faces the deck never named: those are the substitutes.
+            if substituted:
+                named_ps = {
+                    entry.get("postscript")
+                    for face in usable
+                    for entry in faces[face].values()
+                }
+                instead = sorted(drawn - {p for p in named_ps if p})
 
     digest = hashlib.sha256()
     for face in available:
@@ -873,6 +904,7 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
         "conditional": conditional,
         "uncovered": uncovered,
         "substituted": substituted,
+        "instead": instead,
         "hash": digest.hexdigest()[:12],
     }
 
@@ -960,10 +992,13 @@ def skip_reason(fonts: dict) -> str | None:
             + "; both renderers invented a fallback"
         )
     if fonts["substituted"]:
+        drew = fonts.get("instead")
         return (
             "PowerPoint did not draw "
             + ", ".join(fonts["substituted"])
-            + ", which nothing else here covers; it resolved the name differently"
+            + ", which nothing else here covers; it drew "
+            + (", ".join(drew) if drew else "something else")
+            + " instead"
         )
     return None
 

@@ -7,6 +7,7 @@
       ],
       "conditional": [],
       "hash": "ae15a1311a30",
+      "instead": [],
       "missing": [],
       "substituted": [],
       "uncovered": ""
@@ -36,13 +37,17 @@
         "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
       ],
       "hash": "c6e32795015d",
+      "instead": [
+        "MS-Gothic",
+        "MS-Mincho"
+      ],
       "missing": [],
       "substituted": [
         "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
       ],
       "uncovered": ""
     },
-    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it resolved the name differently",
+    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
     "slides": []
   },
   "real-financial-report": {
@@ -56,6 +61,7 @@
         "\u6e38\u30b4\u30b7\u30c3\u30af Light"
       ],
       "hash": "b58c2bc56ca2",
+      "instead": [],
       "missing": [
         "Noto Sans JP"
       ],
@@ -74,6 +80,7 @@
       ],
       "conditional": [],
       "hash": "b58c2bc56ca2",
+      "instead": [],
       "missing": [
         "Noto Sans JP"
       ],
@@ -94,13 +101,17 @@
         "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
       ],
       "hash": "9e2876cadc09",
+      "instead": [
+        "MS-Gothic",
+        "MS-Mincho"
+      ],
       "missing": [],
       "substituted": [
         "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
       ],
       "uncovered": ""
     },
-    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it resolved the name differently",
+    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
     "slides": []
   },
   "sample-issue-387": {
@@ -112,6 +123,7 @@
       ],
       "conditional": [],
       "hash": "b58c2bc56ca2",
+      "instead": [],
       "missing": [
         "Noto Sans JP"
       ],
@@ -130,6 +142,7 @@
       ],
       "conditional": [],
       "hash": "14487c31b223",
+      "instead": [],
       "missing": [],
       "substituted": [],
       "uncovered": ""
