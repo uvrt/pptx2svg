@@ -1651,3 +1651,207 @@ def test_the_real_line_chart_renders():
     assert len(chart.chart.series) == 3
     assert len(_polylines(chart.children)) == 3
     assert len(_markers(chart.children)) == 9
+
+
+# -- Data labels -----------------------------------------------------------------------
+#
+# Positions measured on a six-chart probe exported by PowerPoint.  Values are
+# frame-relative points for the *first* bar's label, which is 25.2 pt wide and spans
+# y 72.607..145.035 in a 220.4724 x 181.1024 pt frame.
+
+#: (baseline, left edge of the glyph run), frame-relative points.
+DATA_LABEL_TRUTH = {
+    "outEnd": (76.029, 49.803),   # ours 76.007, 49.832
+    "inEnd": (97.149, 49.803),    # ours 97.114, 49.832
+    "ctr": (122.829, 49.802),     # ours 122.660, 49.832
+    "inBase": (148.413, 49.803),  # ours 148.578, 49.832
+}
+DATA_LABEL_TOLERANCE_PT = 0.4
+
+
+def dlbl_chart_xml(*, show=("Val",), pos=None, fmt=None, size=None, values=(3, 4, 5),
+                   name="A"):
+    flags = "".join(
+        f"<c:show{flag} val='{1 if flag in show else 0}'/>"
+        for flag in ("LegendKey", "Val", "CatName", "SerName", "Percent", "BubbleSize")
+    )
+    fmt_xml = f"<c:numFmt formatCode='{fmt}' sourceLinked='0'/>" if fmt else ""
+    tx = (
+        f"<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz='{size * 100}'/>"
+        "</a:pPr></a:p></c:txPr>"
+        if size
+        else ""
+    )
+    pos_xml = f"<c:dLblPos val='{pos}'/>" if pos else ""
+    points = "".join(f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(values))
+    cats = "".join(
+        f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>"
+        for i, v in enumerate(["Reader", "Writer", "Renderer"])
+    )
+    return (
+        "<c:chart><c:plotArea><c:layout/>"
+        "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"
+        "<c:varyColors val='0'/>"
+        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        f"<c:pt idx='0'><c:v>{name}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        "<c:spPr><a:solidFill><a:srgbClr val='F97316'/></a:solidFill></c:spPr>"
+        f"<c:dLbls>{fmt_xml}{tx}{pos_xml}{flags}</c:dLbls>"
+        f"<c:cat><c:strRef><c:strCache><c:ptCount val='3'/>{cats}"
+        "</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+        f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+        "<c:gapWidth val='150'/><c:overlap val='0'/>"
+        "<c:axId val='1'/><c:axId val='2'/></c:barChart>"
+        "<c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:majorGridlines/></c:valAx>"
+        "</c:plotArea></c:chart>"
+    )
+
+
+def _data_labels(children, frame_height=181.1024):
+    """Every text that is neither an axis label nor a category label.
+
+    Axis labels are laid out in a box starting at the frame's left edge; category labels
+    sit in the band under the plot.
+    """
+    out = []
+    for child in children:
+        if not isinstance(child, m.ShapeElement) or child.text_body is None:
+            continue
+        if child.transform.offset_x / 12700.0 < 1.0:
+            continue
+        if child.transform.offset_y / 12700.0 > frame_height - 30:
+            continue
+        out.append(child)
+    return sorted(out, key=lambda child: (child.transform.offset_x, child.transform.offset_y))
+
+
+def _label_baseline(shape):
+    size = shape.text_body.paragraphs[0].runs[0].properties.font_size
+    return shape.transform.offset_y / 12700.0 + (1.2 - APTOS_DESCENT) * size
+
+
+def _label_text_left(shape, font_family="Aptos"):
+    """Where the glyphs start: the box is wider than the run and the run is centred."""
+    from pptx2svg.resolve.chart import text_width
+
+    size = shape.text_body.paragraphs[0].runs[0].properties.font_size
+    text = "".join(r.text for p in shape.text_body.paragraphs for r in p.runs)
+    box = shape.transform.extent_width / 12700.0
+    run = text_width(text, font_family, size)
+    align = shape.text_body.paragraphs[0].properties.alignment
+    left = shape.transform.offset_x / 12700.0
+    if align == "ctr":
+        return left + (box - run) / 2
+    if align == "r":
+        return left + box - run
+    return left
+
+
+@pytest.mark.parametrize("position", list(DATA_LABEL_TRUTH))
+def test_each_data_label_position_matches_powerpoints(position):
+    children, _ = _build(
+        dlbl_chart_xml(pos=None if position == "outEnd" else position),
+        width=220.4724,
+        height=181.1024,
+    )
+    labels = _data_labels(children)
+    assert labels, f"{position} drew no data label"
+    first = labels[0]
+    baseline, left = DATA_LABEL_TRUTH[position]
+    assert _label_baseline(first) == pytest.approx(baseline, abs=DATA_LABEL_TOLERANCE_PT)
+    assert _label_text_left(first) == pytest.approx(left, abs=DATA_LABEL_TOLERANCE_PT)
+
+
+def test_outEnd_is_the_default_for_a_bar():
+    explicit, _ = _build(dlbl_chart_xml(pos="outEnd"), width=220.4724, height=181.1024)
+    implicit, _ = _build(dlbl_chart_xml(), width=220.4724, height=181.1024)
+    assert _label_baseline(_data_labels(explicit)[0]) == pytest.approx(
+        _label_baseline(_data_labels(implicit)[0])
+    )
+
+
+def test_a_label_at_a_larger_size_keeps_the_same_fixed_gap():
+    """The gap to the bar is a fixed 4.85 pt, not a multiple of the font size.
+
+    Measured 4.86 pt at 10 pt and 4.70 pt at 14 pt; an em-proportional gap would have
+    grown to 6.8 pt and put the 14 pt label two points too high.
+    """
+    children, _ = _build(
+        dlbl_chart_xml(fmt="#,##0", size=14, values=(3000, 4000, 5000)),
+        width=220.4724,
+        height=181.1024,
+    )
+    label = _data_labels(children)[0]
+    assert "".join(
+        r.text for p in label.text_body.paragraphs for r in p.runs
+    ) == "3,000"
+    assert _label_baseline(label) == pytest.approx(74.973, abs=DATA_LABEL_TOLERANCE_PT)
+
+
+def test_the_parts_of_a_multi_part_label_stack_on_separate_lines():
+    """Measured: series name, category name then value, top to bottom, one line each.
+
+    PowerPoint wraps a long category onto two lines; we do not, which is recorded in the
+    roadmap rather than asserted here.
+    """
+    children, _ = _build(
+        dlbl_chart_xml(show=("Val", "CatName", "SerName"), name="Coverage"),
+        width=220.4724,
+        height=181.1024,
+    )
+    first_bar = [
+        label
+        for label in _data_labels(children)
+        if abs(label.transform.offset_x / 12700.0 - 27.003) < 1.0
+    ]
+    texts = [
+        "".join(r.text for p in label.text_body.paragraphs for r in p.runs)
+        for label in sorted(first_bar, key=lambda label: label.transform.offset_y)
+    ]
+    assert texts == ["Coverage", "Reader", "3"]
+
+
+def test_dLbls_that_switch_everything_off_draw_nothing():
+    """Four of the five charts in `real-financial-report.pptx` do exactly this.
+
+    Every `c:show*` flag is stated as 0, so the correct output is no label at all -- the
+    presence of a `c:dLbls` block says nothing about whether anything is printed.
+    """
+    children, _ = _build(dlbl_chart_xml(show=()), width=220.4724, height=181.1024)
+    assert _data_labels(children) == []
+
+
+def test_a_point_can_delete_its_own_label():
+    body = dlbl_chart_xml().replace(
+        "<c:dLbls>",
+        "<c:dLbls><c:dLbl><c:idx val='1'/><c:delete val='1'/></c:dLbl>",
+        1,
+    )
+    children, _ = _build(body, width=220.4724, height=181.1024)
+    texts = {
+        "".join(r.text for p in label.text_body.paragraphs for r in p.runs)
+        for label in _data_labels(children)
+    }
+    assert texts == {"3", "5"}
+
+
+def test_a_line_chart_puts_its_labels_to_the_right_of_the_point():
+    """ECMA's default for a line series is `r`, which is what PowerPoint drew."""
+    body = line_chart_xml(
+        marker="<c:marker><c:symbol val='circle'/><c:size val='7'/></c:marker>"
+    ).replace(
+        "<c:cat>",
+        "<c:dLbls><c:showLegendKey val='0'/><c:showVal val='1'/>"
+        "<c:showCatName val='0'/><c:showSerName val='0'/>"
+        "<c:showPercent val='0'/><c:showBubbleSize val='0'/></c:dLbls><c:cat>",
+        1,
+    )
+    children, _ = _build(body, width=220.4724, height=181.1024)
+    labels = _data_labels(children)
+    assert len(labels) == 3
+    # The point is at x 52.473; the label starts one marker radius plus a gap right of it.
+    assert _label_text_left(labels[0]) == pytest.approx(
+        306.067 - 244.094, abs=DATA_LABEL_TOLERANCE_PT
+    )

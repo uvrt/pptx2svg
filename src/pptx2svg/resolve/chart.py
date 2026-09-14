@@ -150,6 +150,19 @@ DEFAULT_MARKER_CYCLE = ("diamond", "square", "triangle", "x", "star", "dot")
 #: Marker side when ``c:size`` is absent, in points (ECMA-376's default).
 DEFAULT_MARKER_SIZE_PT = 7.0
 
+#: Gap between a bar's edge and the *line box* of the data label beside it, in points.
+#: Measured 4.86 pt at 10 pt and 4.70 pt at 14 pt for ``outEnd``, and 4.91 pt at 10 pt for
+#: ``inBase`` -- so it is a fixed distance and **not** proportional to the font.
+DATA_LABEL_GAP_PT = 4.85
+
+#: The same for ``inEnd``, which sits closer to the bar's end.  One measurement, at 10 pt.
+DATA_LABEL_INNER_GAP_PT = 4.05
+
+#: Gap between a line chart's marker edge and its data label, in ems.  The label is
+#: centred on the point vertically and sits to its right -- ECMA's ``r`` default, which is
+#: what PowerPoint drew.  Measured once, with a 7 pt marker.
+DATA_LABEL_LINE_GAP_EM = 0.6
+
 #: The outline on a negative bar drawn hollow by ``c:invertIfNegative`` -- 0.75 pt.
 INVERTED_BAR_OUTLINE_EMU = 9525.0
 
@@ -524,6 +537,26 @@ class _Rect:
 
 
 @dataclass
+class _Labels:
+    """``c:dLbls`` resolved down to what actually gets printed."""
+
+    show_value: bool = False
+    show_category: bool = False
+    show_series: bool = False
+    show_percent: bool = False
+    position: str | None = None
+    number_format: str | None = None
+    font: "ChartFont | None" = None
+    color: m.ResolvedColor | None = None
+
+    @property
+    def anything(self) -> bool:
+        return (
+            self.show_value or self.show_category or self.show_series or self.show_percent
+        )
+
+
+@dataclass
 class _Series:
     name: str | None
     values: list[float | None]
@@ -545,6 +578,9 @@ class _Series:
     marker_fill: m.Fill | None = None
     marker_outline: m.Outline | None = None
     smooth: bool = False
+    labels: _Labels | None = None
+    #: ``c:dLbl`` overrides, keyed by point index.
+    point_labels: dict[int, _Labels] = field(default_factory=dict)
 
 
 class ChartBuilder:
@@ -615,6 +651,7 @@ class ChartBuilder:
             value_font,
             category_font,
         )
+        self._draw_data_labels(plot_rect, series, categories, scale)
         self._draw_legend(plot_rect, series)
 
         data = m.ChartData(
@@ -684,6 +721,12 @@ class ChartBuilder:
                 ]
             if self._is_line:
                 self._read_line_style(item, source, index)
+            item.labels = self._read_labels(source.data_labels, self.plot.data_labels)
+            if source.data_labels is not None:
+                for point_index, override in source.data_labels.overrides.items():
+                    item.point_labels[point_index] = self._read_labels(
+                        override, source.data_labels, self.plot.data_labels
+                    )
             for point in source.data_points:
                 point_fill = self._resolve_fill(point.fill)
                 if point_fill is not None:
@@ -693,6 +736,43 @@ class ChartBuilder:
                     item.point_outlines[point.index] = point_outline
             out.append(item)
         return out
+
+    def _read_labels(self, *sources: c.SourceChartDataLabels | None) -> _Labels:
+        """``c:dLbls`` innermost first: a point's, then its series', then the group's.
+
+        Every flag is optional at every level, so each is resolved separately rather than
+        taking the first block whole.  ``c:delete`` on a point silences it outright.
+        """
+        present = [source for source in sources if source is not None]
+        if any(source.delete for source in present):
+            return _Labels()
+
+        def flag(name: str) -> bool:
+            for source in present:
+                value = getattr(source, name)
+                if value is not None:
+                    return value
+            return False
+
+        def first(name: str):
+            for source in present:
+                value = getattr(source, name)
+                if value:
+                    return value
+            return None
+
+        labels = _Labels(
+            show_value=flag("show_value"),
+            show_category=flag("show_category_name"),
+            show_series=flag("show_series_name"),
+            show_percent=flag("show_percent"),
+            position=first("position"),
+            number_format=first("number_format"),
+        )
+        if labels.anything:
+            labels.font = self._font(*(source.text_properties for source in present))
+            labels.color = self.style.color
+        return labels
 
     @property
     def _is_line(self) -> bool:
@@ -1492,6 +1572,221 @@ class ChartBuilder:
                 baseline=baseline,
                 box=box,
             )
+
+    def _draw_data_labels(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """Print `c:dLbls` beside each point.
+
+        Positions are measured against a probe: ``outEnd`` (the bar default) puts the
+        label's line box one :data:`DATA_LABEL_GAP_PT` beyond the bar's end, ``inBase``
+        the same distance inside its base, ``inEnd`` just inside its end, and ``ctr`` on
+        the bar's middle.  A line chart's default is ECMA's ``r``: centred on the point
+        vertically, one marker radius plus a gap to its right.
+        """
+        if not categories:
+            return
+        horizontal = (self.plot.bar_direction or "col") == "bar"
+        percent_totals = _percent_totals(series)
+
+        for order, item in enumerate(series):
+            for point in range(len(categories)):
+                labels = item.point_labels.get(point, item.labels)
+                if labels is None or not labels.anything or labels.font is None:
+                    continue
+                value = _at(item.values, point)
+                if value is None:
+                    continue
+                text = self._label_text(
+                    labels, item, categories, point, value, percent_totals
+                )
+                if not text:
+                    continue
+                geometry = self._label_anchor(
+                    rect, series, order, item, point, value, scale, horizontal
+                )
+                if geometry is None:
+                    continue
+                self._place_label(text, labels, geometry, horizontal)
+
+    def _label_text(
+        self,
+        labels: _Labels,
+        item: _Series,
+        categories: list[str],
+        point: int,
+        value: float,
+        percent_totals: list[float],
+    ) -> str:
+        """The label's lines, top to bottom.
+
+        Measured on the multi-part probe: PowerPoint stacks series name, category name and
+        value on **separate lines**, in that order, rather than joining them with the
+        ``c:separator`` a single-line label would use.
+        """
+        parts: list[str] = []
+        if labels.show_series and item.name:
+            parts.append(item.name)
+        if labels.show_category and point < len(categories) and categories[point]:
+            parts.append(categories[point])
+        if labels.show_percent:
+            total = percent_totals[point] if point < len(percent_totals) else 0.0
+            parts.append(format_number(value / total if total else 0.0, "0%"))
+        if labels.show_value:
+            parts.append(
+                format_number(value, labels.number_format or item.format_code)
+            )
+        return "\n".join(parts)
+
+    def _label_anchor(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        order: int,
+        item: _Series,
+        point: int,
+        value: float,
+        scale: tuple[float, float, float],
+        horizontal: bool,
+    ) -> "tuple[float, float, str] | None":
+        """``(x, y, placement)`` for one label, in frame points."""
+        if self._is_line:
+            band = rect.width / max(len(item.values), 1)
+            x = rect.left + (point + 0.5) * band
+            return x + item.marker_size / 2, self._value_to_y(rect, value, scale), "right"
+
+        box = self._bar_box(rect, series, order, item, point, value, scale, horizontal)
+        if box is None:
+            return None
+        position = (item.labels.position if item.labels else None) or "outEnd"
+        centre_x = (box.left + box.right) / 2
+        centre_y = (box.top + box.bottom) / 2
+        if horizontal:
+            # The bar runs sideways, so "end" is its far edge in x.
+            end, base = (box.right, box.left) if value >= 0 else (box.left, box.right)
+            if position == "ctr":
+                return centre_x, centre_y, "centre"
+            if position == "inEnd":
+                return end, centre_y, "inside-x"
+            if position == "inBase":
+                return base, centre_y, "outside-x-flip"
+            return end, centre_y, "outside-x"
+        end, base = (box.top, box.bottom) if value >= 0 else (box.bottom, box.top)
+        if position == "ctr":
+            return centre_x, centre_y, "centre"
+        if position == "inEnd":
+            return centre_x, end, "inside-y"
+        if position == "inBase":
+            return centre_x, base, "inside-base-y"
+        return centre_x, end, "outside-y"
+
+    def _place_label(
+        self,
+        text: str,
+        labels: _Labels,
+        geometry: tuple[float, float, str],
+        horizontal: bool,
+    ) -> None:
+        x, y, placement = geometry
+        font = labels.font
+        assert font is not None
+        box = font.box
+        lines = text.split("\n")
+        width = max((font.width(line) for line in lines), default=0.0) + box.size
+        block = box.line_height * len(lines)
+
+        if placement == "centre":
+            baseline = y + box.ink_centre - block + box.line_height
+            left, align = x - width / 2, "ctr"
+        elif placement == "outside-y":
+            baseline = y - DATA_LABEL_GAP_PT - box.descent
+            left, align = x - width / 2, "ctr"
+        elif placement == "inside-y":
+            baseline = y + DATA_LABEL_INNER_GAP_PT + box.ascent
+            left, align = x - width / 2, "ctr"
+        elif placement == "inside-base-y":
+            baseline = y - DATA_LABEL_GAP_PT - box.descent
+            left, align = x - width / 2, "ctr"
+        elif placement == "right":
+            baseline = y + box.ink_centre
+            left = x + DATA_LABEL_LINE_GAP_EM * box.size
+            align = "l"
+        elif placement == "inside-x":
+            baseline = y + box.ink_centre
+            left = x - DATA_LABEL_INNER_GAP_PT - width
+            align = "r"
+        elif placement == "outside-x-flip":
+            baseline = y + box.ink_centre
+            left = x + DATA_LABEL_GAP_PT
+            align = "l"
+        else:  # outside-x
+            baseline = y + box.ink_centre
+            left = x + DATA_LABEL_GAP_PT
+            align = "l"
+
+        # Multi-line labels stack upwards from the anchor, so the *last* line is the one
+        # nearest the bar; walk them in order from the first baseline.
+        first = baseline - box.line_height * (len(lines) - 1)
+        for index, line in enumerate(lines):
+            self._text(
+                self._label_body(line, font, align=align),
+                left=left,
+                width=width,
+                baseline=first + index * box.line_height,
+                box=box,
+            )
+
+    def _bar_box(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        order: int,
+        item: _Series,
+        point: int,
+        value: float,
+        scale: tuple[float, float, float],
+        horizontal: bool,
+    ) -> "_Rect | None":
+        """The rectangle one bar occupies, recomputed for the label that sits on it."""
+        categories = max((len(other.values) for other in series), default=0)
+        if categories <= 0:
+            return None
+        grouping = self.plot.grouping or "clustered"
+        stacked = grouping in ("stacked", "percentStacked")
+        band = (rect.height if horizontal else rect.width) / categories
+        gap_width = self.plot.gap_width
+        if gap_width is None:
+            gap_width = DEFAULT_GAP_WIDTH
+        slots = 1 if stacked else len(series)
+        size = band / max(slots + gap_width / 100.0, MIN_BAR_SLOTS)
+        overlap = self.plot.overlap if self.plot.overlap is not None else 0.0
+        step = size * (1.0 - overlap / 100.0)
+        cluster = size + step * (slots - 1)
+        band_start = (rect.top if horizontal else rect.left) + (
+            (categories - 1 - point) if horizontal else point
+        ) * band
+        centre = band_start + band / 2
+        offset = centre - cluster / 2 + (0 if stacked else order) * step
+
+        start = 0.0
+        if stacked:
+            for earlier in series[:order]:
+                earlier_value = _at(earlier.values, point) or 0.0
+                if (earlier_value >= 0) == (value >= 0):
+                    start += earlier_value
+        end = start + value
+
+        if horizontal:
+            x0 = self._value_to_x(rect, start, scale)
+            x1 = self._value_to_x(rect, end, scale)
+            return _Rect(min(x0, x1), offset, max(x0, x1), offset + size)
+        y0 = self._value_to_y(rect, start, scale)
+        y1 = self._value_to_y(rect, end, scale)
+        return _Rect(offset, min(y0, y1), offset + size, max(y0, y1))
 
     def _draw_legend(self, rect: _Rect, series: list[_Series]) -> None:
         position = self._legend_position()
