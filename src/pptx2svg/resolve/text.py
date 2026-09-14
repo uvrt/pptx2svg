@@ -58,18 +58,30 @@ def resolve_text_body(
         context, text_body, inherited, placeholder_type, extra_defaults
     )
 
+    # Whether this body is a plain text box: no placeholder to inherit a face from, and
+    # no table style underneath it.  :func:`_theme_body_latin` needs it and is several
+    # calls down with only the context to go on.  Saved and restored rather than just
+    # set, because a table's cells resolve their bodies inside a shape that may itself
+    # be one.
+    outer_unstyled = getattr(context, "unstyled_text_box", False)
+    context.unstyled_text_box = placeholder_type is None and extra_defaults is None
+
     # Body properties layer outward-in: master placeholder, then layout, then the shape.
     properties: s.SourceTextBodyProperties | None = None
     for body in reversed(list(inherited)):
         properties = _merge_body_properties(properties, body.properties if body else None)
     properties = _merge_body_properties(properties, text_body.properties)
 
-    return m.TextBody(
-        paragraphs=[
-            _resolve_paragraph(context, paragraph, chain) for paragraph in text_body.paragraphs
-        ],
-        body_properties=_body_properties(properties),
-    )
+    try:
+        return m.TextBody(
+            paragraphs=[
+                _resolve_paragraph(context, paragraph, chain)
+                for paragraph in text_body.paragraphs
+            ],
+            body_properties=_body_properties(properties),
+        )
+    finally:
+        context.unstyled_text_box = outer_unstyled
 
 
 def _merge_body_properties(
@@ -316,7 +328,30 @@ def _theme_body_latin(context) -> str | None:
     drawn in a font nobody chose.  The major (heading) face is deliberately not used
     here: a master that wants it says ``+mj-lt`` in its ``titleStyle``, and guessing
     "this looks like a title" would be a second, worse heuristic on top of this one.
+
+    The theme is not the answer everywhere, though -- see the comment in the body for the
+    one place PowerPoint measurably does something else.
     """
+    if getattr(context, "unstyled_text_box", False):
+        # ...except in a plain text box, where PowerPoint does not consult the theme at
+        # all.  Measured on `authoring-integration`: every text box on its slide, its
+        # master and its layout is `txBox="1"` with no `rPr`, no `lstStyle`, an empty
+        # `p:txStyles` and an empty `defaultTextStyle`, and PowerPoint's export draws all
+        # of them in Arial -- /BaseFont says ArialMT, and the drawn advance for "MASTER
+        # CONTRACT" is 178.28 pt against Arial's 180.00 pt at 18 pt, ink against advance.
+        # In the same export that deck's table cells are Aptos-Bold and its chart labels
+        # Aptos, so this is not PowerPoint lacking the theme face: it is a text box with
+        # nothing specified anywhere falling back to the application default instead of
+        # to the theme.
+        #
+        # It costs more than two headings looking slightly wrong.  Arial is wider than
+        # Aptos, so PowerPoint wraps "LAYOUT CONTRACT" onto two lines in a box we fitted
+        # it into on one, and a wrap that disagrees moves every line under it.
+        #
+        # Placeholders and table cells are deliberately excluded: a placeholder takes its
+        # face from the master's `titleStyle`/`bodyStyle` and a cell from the table
+        # style's `a:tcTxStyle`, both of which normally do point at the theme.
+        return "Arial"
     scheme = context.theme.font_scheme if context.theme else None
     if scheme is None:
         return None

@@ -329,6 +329,25 @@ def test_typographic_family_strips_one_style_word_only():
     assert typographic_family("Hoefler Text Ornaments") is None
 
 
+def test_a_plain_text_box_falls_back_to_arial_not_the_theme(authoring):
+    """PowerPoint does not consult the theme for a text box with nothing specified.
+
+    Measured from PowerPoint's own export of this fixture: its text boxes are drawn in
+    Arial (/BaseFont ArialMT, "MASTER CONTRACT" inked 178.28 pt against Arial's 180.00 pt
+    advance at 18 pt) while its table cells in the same export are Aptos-Bold.  Getting
+    this wrong is not cosmetic -- Arial is wider, so PowerPoint wraps "LAYOUT CONTRACT"
+    onto two lines where the theme face fits it on one.
+    """
+    (svg,) = convert_pptx_to_svg(
+        authoring, ConvertOptions(warn_on_font_substitution=False)
+    )
+    assert 'font-family="Arial, Arimo, sans-serif">MASTER CONTRACT<' in svg
+    # ...and the wider face makes the layout's box wrap, as PowerPoint's does.
+    assert ">LAYOUT</tspan>" in svg and ">CONTRACT</tspan>" in svg
+    # The table is a table, not a text box: it keeps the theme face.
+    assert "Aptos" in svg
+
+
 def test_every_font_stack_ends_in_a_generic_family(pptx_path):
     generics = ("sans-serif", "serif", "monospace")
     documents = convert_pptx_to_svg(

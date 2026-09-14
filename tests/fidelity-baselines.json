@@ -12,19 +12,19 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8101,
+    "histogram": 0.8106,
     "slides": [
       {
-        "coverage": 0.2232,
-        "histogram": 0.8101,
-        "mean_abs": 8.476,
-        "over10": 6.835,
-        "over64": 5.802,
+        "coverage": 0.2191,
+        "histogram": 0.8106,
+        "mean_abs": 6.532,
+        "over10": 6.098,
+        "over64": 4.809,
         "sparse": false,
-        "ssim": 0.7776
+        "ssim": 0.8379
       }
     ],
-    "ssim": 0.7776
+    "ssim": 0.8379
   },
   "real-basic-theme": {
     "fonts": {
@@ -131,6 +131,30 @@
       "uncovered": ""
     },
     "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
+    "slides": []
+  },
+  "star-probe": {
+    "fonts": {
+      "available": [
+        "Arial",
+        "Calibri",
+        "Courier New"
+      ],
+      "conditional": [
+        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
+      ],
+      "hash": "9e2876cadc09",
+      "instead": [
+        "MS-Gothic",
+        "MS-Mincho"
+      ],
+      "missing": [],
+      "substituted": [
+        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
+      ],
+      "uncovered": ""
+    },
+    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
     "slides": []
   },
   "table-test": {
