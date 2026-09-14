@@ -568,8 +568,82 @@ class TableElement:
     type: Literal["table"] = "table"
 
 
+# --------------------------------------------------------------------------------------
+# Charts
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class ChartSeries:
+    """One plotted series, with its blanks preserved.
+
+    ``values`` carries ``None`` where the workbook cell was empty, which is a different
+    thing from a zero: ``c:dispBlanksAs`` draws a gap, a zero or an interpolated span,
+    and a caller reading the data back needs to be able to tell which it had.
+    """
+
+    name: str | None = None
+    values: list[float | None] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)
+    color: ResolvedColor | None = None
+    #: The series' own ``c:formatCode``, used for its data labels.
+    format_code: str | None = None
+
+
+@dataclass
+class ChartAxisScale:
+    """The value axis as *drawn*, not as authored.
+
+    OOXML usually leaves the range to the renderer, so these are the numbers this library
+    chose; they are exposed because a caller re-plotting the data needs to know what the
+    picture it is looking at actually shows.
+    """
+
+    minimum: float
+    maximum: float
+    major_unit: float
+
+
+@dataclass
+class ChartData:
+    """What a chart plots, independent of how it was drawn."""
+
+    #: The OOXML group element, with 3-D variants already mapped to their 2-D equivalent
+    #: (``bar3DChart`` -> ``barChart``).
+    kind: str
+    series: list[ChartSeries] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)
+    title: str | None = None
+    grouping: str | None = None
+    #: ``col`` or ``bar``; ``None`` for chart types that have no bar direction.
+    bar_direction: str | None = None
+    value_axis: ChartAxisScale | None = None
+    #: ``b`` / ``t`` / ``l`` / ``r`` / ``tr``, or ``None`` when there is no legend.
+    legend_position: str | None = None
+
+
+@dataclass
+class ChartElement:
+    """A chart, both as data and as the primitives it was drawn with.
+
+    ``children`` is an ordinary element list in the frame's own coordinate space, so a
+    renderer needs no chart-specific code: the chart is lowered to rectangles, lines and
+    text by the resolver, exactly as SmartArt is lowered to its cached shape tree.
+    """
+
+    transform: Transform
+    chart: ChartData
+    child_transform: Transform
+    children: list["SlideElement"] = field(default_factory=list)
+    alt_text: str | None = None
+    #: Identity of the source graphic frame; see :class:`ShapeElement`.
+    element_id: str | None = None
+    element_path: str | None = None
+    type: Literal["chart"] = "chart"
+
+
 SlideElement = Union[
-    ShapeElement, ImageElement, ConnectorElement, GroupElement, TableElement
+    ShapeElement, ImageElement, ConnectorElement, GroupElement, TableElement, ChartElement
 ]
 
 
