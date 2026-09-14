@@ -727,10 +727,28 @@ Each of these is known-missing rather than merely absent:
   `c:layout` for the plot area or the legend.
 * **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
   list, which is the hard part and is done; a second value axis is then mostly drawing.
-* **Log scales**, `c:tickLblSkip` / `c:tickMarkSkip`, `c:crossesAt` other than zero.
+* **Log scales** and `c:tickLblSkip` / `c:tickMarkSkip`. `c:crosses` and `c:crossesAt`
+  move the category axis but have only been measured at zero.
 * **`dispBlanksAs="span"`** is treated as `gap`, which is right for a bar chart and will
   not be for a line one.
 * The chart frame's rounded corners (`c:roundedCorners`) and effects.
+
+#### What the probe sweeps could not catch
+
+A review of the finished branch found ten defects, and the shape of them is worth keeping:
+**both sweeps assert the plot rectangle, and four of the ten got the rectangle right while
+drawing the wrong thing inside it.** A horizontal chart's gridlines ran across the bars
+instead of up the plot; `barDir` swapped which line each axis' `c:delete` and `c:spPr`
+applied to; `c:catAx/c:txPr` and `c:overlay` were parsed and then never read. Two more
+silently lost data — a series longer than the labelled one lost its tail, and a
+`c:multiLvlStrCache` without `c:ptCount` lost every label — and three were crashes on
+numbers a file controls (`c:gapWidth="-100"` divides by zero; a datum near the float
+ceiling overflows the axis rounding; a denormal span underflows the unit).
+
+The lesson is not that measuring was wrong — it is that a measurement pins the *frame* and
+says nothing about the *contents*, and that the four orientation bugs all lived in the one
+variant with no corpus deck behind it. Anything drawn, not just the box it is drawn in,
+needs its own assertion; a parsed field with no reader needs one too.
 
 ### 3.3 Combo charts (M)
 
