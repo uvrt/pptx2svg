@@ -33,7 +33,7 @@ after it needs a way to tell "better" from "different".
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
 | Charts | **Not rendered** |
-| SmartArt | Cached drawing rendered (Phase 2); **no layout engine** |
+| SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
@@ -476,10 +476,12 @@ Phase 0.4 describes would subsume it.
 
 ---
 
-## Phase 2 — SmartArt — **done**
+## Phase 2 — SmartArt — **done, and validated against 46 real decks**
 
-**Effort: S–M. Much cheaper than it looks. Landed at the S end: ~120 lines in
-`resolve/view.py`, no new parser.**
+**Effort: S–M. The code landed at the S end -- ~120 lines in `resolve/view.py`, no new
+parser -- but the estimate was only right about the code. Getting it to work on a file
+PowerPoint actually wrote took a second pass, because the first one was verified only
+against fixtures we built ourselves and those encoded our own misreading of the format.**
 
 > **Correction to an earlier assessment.** I previously said SmartArt "needs a diagram
 > layout engine". For the common case it does not. PowerPoint caches a fully laid-out
@@ -529,14 +531,64 @@ fills, geometry and embedded pictures; connectors are ordinary shapes in the cac
 need no special handling); a deck with the drawing part deleted still renders and still
 warns ✅.
 
-**Not verified against real input.** The roadmap said no fixture contains SmartArt, and
-that is still true: `python-pptx` cannot author it and no permissively-licensed sample was
-available. `tests/test_diagram.py` therefore hand-builds the diagram parts from ECMA-376
-§21.4 and the `diagramDrawing` relationship definition, modelled on what PowerPoint emits.
-Those tests prove the lookup chain, the coordinate mapping and the fallbacks; they cannot
-prove the spec was read correctly. `tests/test_diagram.py` ends with a skipped test that
-activates the moment `tests/fixtures/real-smartart.pptx` appears — **adding that fixture
-and comparing against a PowerPoint export is the outstanding work for this phase.**
+**Now verified against real input, and it was broken.** The earlier caveat here said the
+implementation was untested against genuine PowerPoint output. It was, and it rendered
+*nothing at all* on every real deck. LibreOffice's test corpus
+(`sd/qa/unit/data/pptx/smartart*`) has 46 SmartArt decks written by PowerPoint 12.0 to
+16.0; all 46 produced an empty frame.
+
+**The lookup was in the wrong place.** `dgm:relIds` names the data model, layout, quick
+style and colours — and not the drawing, because the cached drawing was added to the
+format after `relIds` was specified. Microsoft keyed it through an extension instead:
+
+```
+slide rels --r:dm--------------> ppt/diagrams/data1.xml
+    data1.xml dgm:extLst/dsp:dataModelExt@relId = "rId6"
+                                         |
+slide rels --rId6 (diagramDrawing)-------+--> ppt/diagrams/drawing1.xml
+```
+
+So the id is written in the *data* part and resolved against the *slide's*
+relationships. All 27 decks that carry a cached drawing do it this way, and exactly one
+has a `ppt/diagrams/_rels/data1.xml.rels` at all — which is what the original code, and
+the plan above, assumed was the only route. Two fallbacks remain for producers that do
+something else: the data part's own relationships, then a lone diagram-drawing
+relationship on the slide, used only when there is exactly one (two frames on a slide
+with nothing to key them by would be a coin toss).
+
+**Where the corpus stands now:**
+
+| | Decks | Outcome |
+| --- | --- | --- |
+| Cached drawing with shapes in it | 13 | Renders shapes, text, fills, geometry |
+| Cached drawing present but an empty `spTree` | 13 | Nothing to draw; warns `diagram-no-cached-drawing` |
+| No drawing part at all | 20 | Nothing to draw; warns `diagram-no-cached-drawing` |
+
+Every deck that carries usable cached content now renders it, and no frame comes out
+blank without saying why. `smartart-font-size.pptx` carries three diagram frames on one
+slide and warns three times, independently.
+
+**`dsp:txXfrm` was the other thing only a real deck could show.** A diagram shape places
+its text box separately from the shape — a Venn ring's label goes in the sliver that ring
+does not share. 13 of the 26 cached drawings use it, exactly the 13 that render. Ignoring
+it stacked every label at its shape's bounding-box corner.
+
+#### What is left
+
+Twenty decks have no cached drawing because Office 2007 did not always write one, and 13
+more have an empty one. Drawing them means implementing the layout algorithms in
+`dgm:layoutDef` — a diagram engine, a project in its own right, and **deliberately not
+attempted**. The honest interim answer is an empty frame plus a warning naming the
+reason, which is what happens now.
+
+**Fixtures are still not committed.** The 46 decks are validated against locally but not
+checked in: LibreOffice is MPL-2.0 / LGPLv3+ and redistribution with attribution is
+defensible, but many of these files began life as bug-report attachments and that is a
+call for the project to make, not for a contributor. The alternative that is unambiguously
+ours to ship is `sld.Shapes.AddSmartArt` in VBA — PowerPoint authors the diagram, we own
+the output — which needs a macro-enabled host `.pptm` built by hand. `tests/test_diagram.py`
+still ends with a skipped test that activates when `tests/fixtures/real-smartart.pptx`
+appears.
 
 ---
 
