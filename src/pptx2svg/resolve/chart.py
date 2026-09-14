@@ -249,41 +249,42 @@ def format_number(value: float, format_code: str | None) -> str:
     if format_code is None or format_code in ("General", "@"):
         return _general(value)
 
-    section = _format_section(format_code, value)
+    sections = _sections(format_code)
+    # Excel's sections are positive; negative; zero; text.  A negative value uses the
+    # second only when there *is* one -- with a single section it is formatted by that
+    # one and keeps its own minus sign.
+    negative_section = value < 0 and len(sections) > 1
+    section = sections[1] if negative_section else sections[0]
+
     if "%" in section:
         decimals = _decimals(section)
-        return f"{value * 100:.{decimals}f}%"
+        magnitude = abs(value) if negative_section else value
+        return _wrap_negative(f"{magnitude * 100:.{decimals}f}%", section, negative_section)
 
     if not any(ch in section for ch in "#0"):
         return _general(value)
 
     decimals = _decimals(section)
     grouped = "," in _strip_literals(section)
-    magnitude = abs(value) if section is not _first_section(format_code) else value
+    # The negative section states its own sign -- "(#,##0)" or "-#,##0" -- so the value
+    # goes in unsigned and the section's own decoration is put back around it.
+    magnitude = abs(value) if negative_section else value
     text = f"{magnitude:,.{decimals}f}" if grouped else f"{magnitude:.{decimals}f}"
+    return _wrap_negative(text, section, negative_section)
 
-    if section is not _first_section(format_code) and value < 0:
-        if "(" in section and ")" in section:
-            return f"({text})"
-        return f"-{text}" if "-" in section else text
-    return text
+
+def _wrap_negative(text: str, section: str, negative_section: bool) -> str:
+    if not negative_section:
+        return text
+    if "(" in section and ")" in section:
+        return f"({text})"
+    return f"-{text}" if "-" in section else text
 
 
 def _general(value: float) -> str:
     if value == int(value):
         return str(int(value))
     return f"{round(value, 10):g}"
-
-
-def _first_section(format_code: str) -> str:
-    return _sections(format_code)[0]
-
-
-def _format_section(format_code: str, value: float) -> str:
-    sections = _sections(format_code)
-    if value < 0 and len(sections) > 1:
-        return sections[1]
-    return sections[0]
 
 
 def _sections(format_code: str) -> list[str]:

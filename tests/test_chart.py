@@ -236,8 +236,15 @@ def test_a_flat_series_still_gets_a_usable_axis():
         (4285.0, "#,##0", "4,285"),
         (4285.0, "0", "4285"),
         (0.125, "0.0%", "12.5%"),
-        (-1234.0, "#,##0;(#,##0)", "(1,234)"),
+        (-0.125, "0.0%", "-12.5%"),
         (1.5, '"$"0.00', "1.50"),
+        # A negative value keeps its own sign when the code has no negative section, and
+        # takes that section's decoration -- brackets, or an explicit minus -- when it has.
+        (-1234.0, "#,##0", "-1,234"),
+        (-5.0, "0.0", "-5.0"),
+        (-1234.0, "#,##0;(#,##0)", "(1,234)"),
+        (-3.0, "#,##0;-#,##0", "-3"),
+        (-3.0, "#,##0;#,##0", "3"),
     ],
 )
 def test_number_formats(value, code, expected):
