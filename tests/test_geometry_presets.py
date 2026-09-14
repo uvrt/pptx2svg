@@ -347,3 +347,87 @@ def test_actionButtonHome_draws_a_house_in_the_symbol_box():
     assert (62.5, 50.0) in visited     # left eave, at (g11, vc)
     assert (137.5, 50.0) in visited    # right eave, at (g12, vc)
     assert (71.875, 87.5) in visited   # wall foot, on g10
+
+
+# --------------------------------------------------------------------------------------
+# The generated table
+#
+# `src/pptx2svg/render/preset_specs.py` is compiled from ECMA-376's own
+# `presetShapeDefinitions.xml` by `tools/derive_preset_geometry.py`.  The spec file is not
+# redistributed here, so these tests cannot recompile it; what they can do is hold the
+# generated data, the tool's manifest and the renderer's registry in agreement, so that a
+# hand-edit or a half-finished regeneration fails loudly.
+# --------------------------------------------------------------------------------------
+
+import importlib.util  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from pptx2svg.render.preset_specs import PRESET_SPECS  # noqa: E402
+
+KNOWN_FILL_MODES = {"norm", "none", "lighten", "lightenLess", "darken", "darkenLess"}
+COMMAND_ARITY = {"M": 2, "L": 2, "A": 4, "Q": 4, "C": 6, "Z": 0}
+
+
+def load_tool():
+    path = Path(__file__).resolve().parent.parent / "tools/derive_preset_geometry.py"
+    spec = importlib.util.spec_from_file_location("derive_preset_geometry", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_generated_table_holds_exactly_what_the_tool_was_asked_for():
+    tool = load_tool()
+    assert sorted(PRESET_SPECS) == sorted(tool.SPEC_DRIVEN)
+    assert len(tool.SPEC_DRIVEN) == len(set(tool.SPEC_DRIVEN)), "duplicate in SPEC_DRIVEN"
+
+
+def test_the_generated_table_records_the_source_it_was_compiled_from():
+    """A shape that looks wrong gets diffed against the spec, so the file has to say
+    which edition it came from -- and that has to be the edition the tool accepts."""
+    tool = load_tool()
+    source = Path(__file__).resolve().parent.parent / "src/pptx2svg/render/preset_specs.py"
+    assert tool.SOURCE_SHA256["presetShapeDefinitions.xml"] in source.read_text()
+
+
+def test_every_generated_preset_reaches_the_renderer():
+    assert set(PRESET_SPECS) <= set(PRESET_GEOMETRIES)
+    assert set(PRESET_SPECS) == set(SPEC_PRESETS)
+
+
+@pytest.mark.parametrize("name", sorted(PRESET_SPECS))
+def test_the_generated_data_is_structurally_sound(name):
+    adjustments, guides, paths = PRESET_SPECS[name]
+    assert all(isinstance(n, str) and isinstance(v, int) for n, v in adjustments)
+    assert all(isinstance(n, str) and isinstance(f, str) and f for n, f in guides)
+    assert paths, "a preset with no paths would silently fall back to a rectangle"
+    for fill, stroke, space, commands in paths:
+        assert fill in KNOWN_FILL_MODES, f"{name}: unhandled fill mode {fill!r}"
+        assert isinstance(stroke, bool)
+        assert space is None or (len(space) == 2 and all(v > 0 for v in space))
+        assert commands
+        for command in commands:
+            assert command[0] in COMMAND_ARITY, f"{name}: unknown command {command[0]!r}"
+            assert len(command) - 1 == COMMAND_ARITY[command[0]], f"{name}: {command!r}"
+
+
+@pytest.mark.parametrize("name", sorted(PRESET_SPECS))
+def test_guides_only_refer_to_names_already_defined(name):
+    """Guides are evaluated in document order, and an unknown name resolves to zero
+    rather than raising -- so a forward reference is a silently misdrawn shape."""
+    from pptx2svg.guides import builtin_variables
+
+    adjustments, guides, _ = PRESET_SPECS[name]
+    defined = set(builtin_variables(1.0, 1.0)) | {n for n, _ in adjustments}
+    for guide_name, formula in guides:
+        for token in formula.split()[1:]:
+            try:
+                float(token)
+            except ValueError:
+                assert token in defined, f"{name}: {guide_name!r} uses undefined {token!r}"
+        defined.add(guide_name)
+
+
+def test_lineInv_is_the_other_diagonal():
+    """The one preset ECMA-376 defines that we had no implementation for at all."""
+    assert path_data(preset_geometry_svg("lineInv", 200.0, 100.0, {})) == ["M 0 100 L 200 0"]
