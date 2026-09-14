@@ -32,7 +32,7 @@ after it needs a way to tell "better" from "different".
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
-| Charts | `barChart`, `lineChart`, `pieChart` and `doughnutChart` read and drawn with their data labels, **verified against PowerPoint** across 42 probe charts and 5 real ones; every other chart type warns and draws an empty frame |
+| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 60 probe charts and all 6 real ones; every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -261,6 +261,7 @@ image = page.render(scale=1280 / page.get_size()[0]).to_pil()
 | PowerPoint is sandboxed | Paths must be in a directory PowerPoint has **already been granted**. Under `$HOME` is *not* sufficient: a freshly created `~/pptx2svg-star/`, and a fresh directory under `~/Documents/`, both fail with **−9074** exactly as `/tmp` does, while the directory earlier exports used keeps working. The deck opens (a `~$` lock file appears) and only the save fails, so it reads as a broken deck rather than an unapproved path — which cost most of a session. Reuse the directory that already works. |
 | **−9074 has a second cause** | A file PowerPoint wants to repair raises an app-modal dialog, and *every* export then fails −9074 until it is cleared — including known-good files. Check for a dialog before suspecting the path; one bad input otherwise looks exactly like a broken environment. |
 | **−9074 has a third cause, and `pkill` is the fix** | After one export failed on a malformed deck, *every* subsequent export failed −9074 — including the corpus decks that had exported minutes earlier, so it reads as a revoked sandbox grant rather than a wedged app. AppleScript `quit saving no` returns `missing value` and does nothing, because PowerPoint is stuck on the half-open deck. `pkill -x "Microsoft PowerPoint"` clears it and the very next export succeeds. Before concluding the directory lost its grant, kill the app and retry — it turns a dead end into ten seconds. Remember to delete the `~$` lock the failed attempt left behind. |
+| A fifth input defect, and it **repairs** rather than hangs | A content-type `Override` whose `PartName` starts `//`. `tests/deckbuilder.py` prepends the leading slash itself, so a caller passing `f"/{part}"` produces one; the three chart probe fixtures did exactly that. Our reader never looks at `[Content_Types].xml`, so the suite passed, but PowerPoint opens such a deck as `<name> [Repaired]` -- and the export script then fails with −2700 "no presentation matched", because the repaired presentation's full name is no longer the path it was asked for. Fixed in `tests/test_chart.py`; check any new caller. |
 | **A third input defect with the hang signature** | Two series in one plot group both claiming `<c:idx val="0"/><c:order val="0"/>`. PowerPoint opens the deck and then never returns, exactly like the non-standard preset name and the partial `avLst` already listed. Out-of-order children of `c:ser` and `c:lineChart` (the schema's sequence is strict: `marker` before `dLbls`, the group-level `marker` *after* every `ser`) cost an earlier −9074 the same way. When a generated probe deck hangs, validate it against the schema sequence before suspecting the oracle. |
 | The export script cannot clear that dialog | It is blocked inside `open` and never regains control. Dismissal has to run in a separate process, and **Escape does not work** — only a real button click does, matched across localisations (`Annuleren` on a Dutch install). |
 | `count of presentations` is not a health check | A wedged PowerPoint answers `0` while still refusing every file. |
@@ -644,16 +645,20 @@ Three things the obvious reading gets wrong, each found in a fixture:
 mapping. Both **[pptx-renderer]** and this roadmap flagged it; it is invisible until a
 deck does both at once.
 
-### 3.2 Renderer — four types **done**, the rest not started
+### 3.2 Renderer — five types **done**, the rest not started
 
 1. ✅ `barChart` — clustered, stacked, percentStacked, `barDir` col and bar
 2. ✅ `lineChart` — markers, smoothing, blanks, the real fixture on slide 2
 3. ✅ `pieChart` / `doughnutChart` — hole, rings, explosion, the real fixture on slide 3
-4. `areaChart`
-5. `scatterChart` / `bubbleChart`
-6. `radarChart`, `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
+4. ✅ `radarChart` — standard, marker and filled, the real fixture on slide 4
+5. `areaChart`
+6. `scatterChart` / `bubbleChart`
+7. `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
 
-Data labels are drawn for all four, at every `c:dLblPos` each type accepts.
+**No chart in the corpus warns `chart-unsupported-type` any more.**
+
+Data labels are drawn for all five, at every `c:dLblPos` each type accepts — except
+the radar's, whose placement no export has ever shown; see below.
 
 #### Polar layout, measured
 
@@ -685,6 +690,138 @@ A twelve-chart probe adds the rest, and two of them contradict the obvious readi
   33%, where rounding each on its own gives 33% three times and totals 99.
 * A pie legends its **categories**, not its series.
 
+#### Radar, measured
+
+`radarChart` is done, and the corpus measured most of it. That is worth stating plainly
+because the brief for this work assumed it could not: `real-financial-report.pptx` is
+skipped by `tools/fidelity.py` for want of Noto Sans JP, but **vector geometry does not
+move when a font is substituted**, so its chart5 — the only radar in the corpus — is
+readable out of PowerPoint's own PDF at exact coordinates. A skipped *score* is not a
+skipped *measurement*. Three probe decks of six charts each pinned the rest.
+
+The polar conventions turn out to be the pie's, and that is a measurement rather than an
+assumption — the four-category probe puts its vertices due north, east, south and west:
+
+* **angle zero is twelve o'clock and categories run clockwise**, 360/n apart;
+* the centre is the centre of the **same plot region a pie computes**, to within 0.21 pt
+  on the legend probe and 0.1 pt on the corpus radar;
+* a point sits at `(value − minimum) / (maximum − minimum)` of the radius.
+
+Six things the schema does not say, each from a probe that contradicts the obvious
+reading:
+
+* **The web is polygonal and follows the category count** — 3, 5, 6 and 8 categories gave
+  triangles, pentagons, hexagons and octagons — and **it is drawn whether or not the file
+  asks for it**. A probe with no `c:majorGridlines` at all still drew every ring, and so
+  did one with `<c:delete val="1"/>` on the value axis. Only the *styling* comes from
+  `c:majorGridlines`.
+* **The spokes do not.** No probe without a `c:spPr` on its category axis drew any; the
+  corpus radar, whose category axis states `<a:ln w="12700">` in #888888, drew six in
+  exactly that. So the radial lines are the category axis' own line and **its default is
+  none** — the opposite of a bar chart, whose default axis line is black at 0.5 pt.
+* **`standard` and `marker` draw an identical picture**, markers included, though
+  ECMA-376 says a `standard` radar has none. Two probes, byte-identical output.
+* **`filled` draws only the fill.** No markers, and no outline unless the series states an
+  `a:ln` of its own: the probe, which states none, emits a bare `f`; the corpus radar,
+  which states `w="25400"`, is stroked at 2 pt. That pair is the whole rule.
+* **A radar's value axis stops at the data where a bar's goes a unit past it.** 0..5 of
+  data draws five rings with the outermost through the largest point, where the same data
+  on a bar gives 0..6. One discriminating observation, and it is the only difference —
+  the unit is chosen identically.
+* **Category labels wrap; they do not rotate.** Every `rot` in the long-label probe is
+  zero and "Category Three" came back split as "Category" / "Three".
+
+The value-axis labels sit up the twelve o'clock spoke, right-aligned, with their right
+edge **two widths of the digit zero** to the left of it. Six charts across two faces and
+three sizes plus the corpus radar's Arial 12 pt, worst residual 0.14 pt. Reading it as an
+em fraction does not work — it is 1.069 em in Aptos and 1.112 em in Arial, and the
+difference is exactly twice the difference between the two faces' digit widths.
+
+The radius is the fitted part. Two constraints, smaller wins:
+
+* **vertically**, it falls short of half the region by a reserve that is a function of the
+  category label's line box — `1.2578 × line_height − 5.2501`, fitted to five probes with
+  a worst residual of **0.089 pt**:
+
+  | face | size | line box | reserve |
+  | --- | --- | --- | --- |
+  | Aptos | 8 | 9.766 | 7.071 |
+  | Aptos | 10 | 12.207 | 10.081 |
+  | Aptos | 14 | 17.090 | 16.191 |
+  | Arial | 10 | 11.172 | 8.751 |
+  | Arial | 14 | 15.641 | 14.511 |
+
+  The slope is **not** 1, which is why no "leave one line of room" rule reproduces the
+  set; and a sixth probe pins the other end — with the category axis deleted and so no
+  labels at all the radius came out 79.44 pt against a half-region of 79.551, i.e. the
+  reserve goes to zero.
+
+* **horizontally**, the widest label must still fit the region, which for a spoke at angle
+  θ bounds the radius by `(half_width − 2.85 − label_width) / |sin θ|`. Three probes are
+  bound this way and land within 0.7 pt.
+
+Ten cases land within 0.14 pt of PowerPoint. **The reserve counts one line even when a
+label wraps**, and that is the measurement rather than an oversight: the one multi-line
+observation has a radius of 60.24 pt, which the horizontal constraint reproduces exactly
+and whose vertical reserve is therefore at most 19.31 pt — less than the 20.16 pt that two
+lines of the fitted per-line reserve would ask for. The per-line rule is contradicted by
+that probe, so it was not shipped.
+
+Two smaller measurements that belong to other chart types too:
+
+* **A line-style radar's legend key is a line with its marker on it**, not a swatch:
+  19.200 pt of rule then 2.025 pt before the text, at 10 pt — against the swatch's
+  5.492 + 2.371. That is 13.4 pt of band width, and it is almost certainly the same key
+  PowerPoint draws for a `lineChart`, which is still on the list below.
+* **A radar series stating no `c:size` gets a 6 pt marker**, not ECMA-376's 7. The probe's
+  second series measured 6.0 pt square; its first measured 5.76 pt across, which is the
+  same 6 pt box with a diamond's tips falling inside PowerPoint's 0.24 pt output grid.
+  `lineChart` still uses 7, which has never been measured either way.
+
+What is wrong or unmeasured in the radar path:
+
+* **The corpus radar's radius is 6.8 pt too large, and the cause is measured.** Its
+  category labels are Japanese; PowerPoint laid them out in a substituted CJK face whose
+  line box is about 1.57 em, while `font_box` reads the `<a:latin typeface="Arial"/>` the
+  axis names, whose line box is 1.117 em. Feeding the fitted reserve the CJK line height
+  reproduces PowerPoint's 18.44 pt exactly; feeding it Arial's gives 11.61. Fixing it
+  means `font_box` knowing which face a CJK run actually resolves to, which is a
+  `text/`-and-`fonts/` question, not a chart one.
+* **Radar data labels are not measured.** The corpus radar's `c:dLbls` sets every
+  `c:show*` to 0 and no probe turned one on, so where PowerPoint puts one is unknown. They
+  are drawn — pushed radially out from the point, one marker clear — because silently
+  dropping flags a file states is the worse failure, but that placement is a guess and the
+  code says so. It is the only thing in the radar path without a measurement behind it.
+* **`dispBlanksAs` on a radar is not measured.** A blank breaks the ring, mirroring the
+  line chart. A ring is a cycle, so the stretch running through index 0 is one run and not
+  two — that was a real defect the test caught, and `_rotate_past_blank` is why it is not
+  one now.
+* **The label's vertical anchoring is about 1.5 pt loose.** The four horizontal directions
+  land within 0.15 pt of the fitted 2.85 pt gap; the two vertical ones measured 4.49 pt
+  above the top vertex and 2.29 pt below the bottom one. The split is consistent with
+  PowerPoint's line box being about a point taller than our metrics give — a font
+  discrepancy rather than a second layout rule — so one constant is used for all four.
+* **The wrap threshold is one bracket.** 43.72 pt of label stayed on one line and 59.10 pt
+  wrapped, on a 198.47 pt region; 0.25 is the round number inside (0.2203, 0.2978].
+
+#### The tick-density question, with four more observations that refute one more rule
+
+The value-axis density rule is still unsolved, and radar adds four measurements that make
+the "no single rule" verdict firmer rather than softer. Same frame, same data, the only
+variable the label font:
+
+| face | size | radius | PowerPoint | spacing | in line boxes | in ems |
+| --- | --- | --- | --- | --- | --- | --- |
+| Aptos | 10 | 69.47 | 0..5 by 1 | 13.89 | 1.138 | 1.389 |
+| Arial | 10 | 70.80 | 0..5 by 1 | 14.16 | 1.267 | 1.416 |
+| Aptos | 14 | 63.36 | 0..6 by 2 | 21.12 | refused 12.67 | refused 0.905 |
+| Arial | 14 | 65.04 | 0..6 by 2 | 21.68 | refused 13.01 | refused 0.929 |
+
+So a radar accepts 1.389 em of spacing and refuses 0.929 em, bracketing its threshold to
+(0.929, 1.389). **The bar chart's bracket is (1.543, 1.610) em** — measured in the same
+way, on the same machine — and the two do not overlap. Whatever the rule is, it is not one
+number shared by both chart types. Today's behaviour is still "no density limit", which is
+right for the 10 pt radars and draws five rings where PowerPoint draws three at 14 pt.
 #### The corpus contains no drawn data label
 
 Worth stating once, because two separate readings of the same files got it wrong. Five of
@@ -797,7 +934,12 @@ Each of these is known-missing rather than merely absent:
 * **A line chart's legend key.** PowerPoint draws a line with its marker on it; we draw
   the bar chart's square swatch — worth about 11 pt of band width on
   `real-financial-report.pptx`'s line chart, which is the whole of that chart's residual
-  legend error.
+  legend error. **The radar work measured that key**: 19.200 pt of rule with the marker
+  at its midpoint, then 2.025 pt before the text, at 10 pt, against the swatch's
+  5.492 + 2.371. `_legend_key_size` already draws it for a line-style radar, so making
+  a `lineChart` use it is one condition — but it would be the radar's measurement
+  applied to a chart type that has not been measured, so confirm it on a line probe
+  first. This is the cheapest remaining item and the one with a number already in hand.
 * **Where a wrapped legend's rows sit.** The band cap and the opened row pitch are
   measured; how PowerPoint places the block vertically is not. Ours centres the rows and
   comes out about 5 pt high on chart4, whose measured baselines are 26.46, 43.50, 56.70,
@@ -811,7 +953,14 @@ Each of these is known-missing rather than merely absent:
 * **Rotated category labels.** PowerPoint rotates them 45° when they will not fit, which
   is what `real-financial-report.pptx` slide 3 does; we draw them horizontally and they
   overlap. That deck's chart3 is the one place our layout is badly wrong (bottom inset
-  27.3 pt against PowerPoint's 69.5 pt) and it is entirely this.
+  27.3 pt against PowerPoint's 69.5 pt) and it is entirely this. **Not attempted here,
+  and one fact from the radar work bears on it**: a radar facing the same problem
+  *wraps* rather than rotating — every `rot` in the long-label probe is zero and
+  "Category Three" came back as "Category" / "Three". So rotation is a category-axis
+  behaviour, not a general label one, and a probe sweep narrowing the category band on a
+  **bar** chart is what would expose its threshold and whether the angle snaps to 45° or
+  is continuous. Neither fixture carries an explicit `rot=` on `a:bodyPr`, so it is
+  PowerPoint's own decision throughout.
 * **Axis titles**, **minor gridlines and minor ticks**, **`c:dTable`**, and manual
   `c:layout` for the plot area or the legend.
 * **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
@@ -1145,7 +1294,7 @@ Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrende
                                       ├─▶ Phase 2  (SmartArt — DONE)
                                       ├─▶ Phase 4  (EMF previews — DONE)
                                       ├─▶ Phase 5.1 DONE / 5.2  (small gaps)
-                                      └─▶ Phase 3  (charts — reader + barChart done)
+                                      └─▶ Phase 3  (charts — reader + 5 types done)
                                                               Phase 5.3 last
 ```
 
@@ -1165,11 +1314,24 @@ Revised quick wins, in order of payoff per day:
    like: it turned up two arc-conversion bugs that had been silently misdrawing
    custom geometry, and it replaced hand-transcription with a spec compiler.
 
-Phase 3 is started: the reader and `barChart` are done and measured, and the shared
-infrastructure the other chart types need -- value domain, tick selection, number
-formatting, gridlines, legend layout, plot-area rectangle -- is built. `lineChart` is
-the next one worth having and should be cheap now; data labels and rotated category
-labels are the two gaps inside `barChart` itself.
+Phase 3 is well along: the reader and five chart types -- `barChart`, `lineChart`,
+`pieChart`, `doughnutChart` and `radarChart` -- are done and measured, and no chart in
+the corpus warns `chart-unsupported-type` any more. The shared infrastructure the rest
+need -- value domain, tick selection, number formatting, gridlines, legend layout,
+plot-area rectangle, polar region -- is built. What is left, cheapest first:
+
+1. **A line chart's legend key**, whose number is already measured (19.200 pt of rule
+   plus 2.025 pt of gap, off the radar legend probe) and whose code already exists in
+   `_legend_key_size`. Confirm on a line probe rather than assuming the radar's
+   measurement transfers.
+2. **Rotated category labels** -- the single worst-looking failure on a corpus deck
+   (`real-financial-report.pptx` slide 3, bottom inset 27.3 pt against 69.5 pt). Needs
+   its own probe sweep narrowing the category band; the radar work established that a
+   radar *wraps* instead, so this is specifically a category-axis behaviour.
+3. **Data-label wrapping**, **`bestFit` actually moving a label**, and **three-or-more
+   line legend entries** -- each a known-missing detail with a named symptom above.
+4. **Combo charts** and **`areaChart` / `scatterChart`** -- new drawing rather than
+   corrections, and the largest of what remains.
 
 ## Non-goals
 
