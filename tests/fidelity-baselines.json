@@ -12,19 +12,19 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.998,
+    "histogram": 0.9984,
     "slides": [
       {
-        "coverage": 0.2202,
-        "histogram": 0.998,
-        "mean_abs": 1.952,
-        "over10": 2.768,
-        "over64": 1.186,
+        "coverage": 0.221,
+        "histogram": 0.9984,
+        "mean_abs": 1.48,
+        "over10": 2.654,
+        "over64": 0.827,
         "sparse": false,
-        "ssim": 0.9186
+        "ssim": 0.9327
       }
     ],
-    "ssim": 0.9186
+    "ssim": 0.9327
   },
   "real-basic-theme": {
     "fonts": {

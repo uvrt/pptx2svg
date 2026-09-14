@@ -88,10 +88,17 @@ TOP_INSET_BASE_PT = 5.0
 #: the same band was measured for ``legendPos`` ``t`` and ``b``.
 LEGEND_BAND_LINES = 2.0
 
-#: Where the legend text's baseline sits inside that band, from its top.  Measured
-#: 1.448 line heights with the legend at the bottom and 1.403 at the top; 1.43 splits them
-#: to within 0.35 pt.
-LEGEND_BASELINE_LINES = 1.43
+#: The vertical pitch between stacked legend entries, in ems.  Measured 18.0 pt for a
+#: 10 pt legend on all three right-hand legends in real-financial-report.pptx -- which is
+#: *not* the same as the horizontal band's height above, so the two are separate numbers.
+LEGEND_ROW_PITCH_EM = 1.8
+
+#: Where a horizontal legend's baseline sits, in ems from the frame edge it hugs.  Taken
+#: straight off the probes rather than derived from the band: 12.913 pt above the frame
+#: bottom for ``legendPos="b"`` and 17.133 pt below the frame top for ``"t"``, both at
+#: 10 pt.  The two are not symmetric and no rule was found that makes them so.
+LEGEND_BOTTOM_BASELINE_EM = 1.291
+LEGEND_TOP_BASELINE_EM = 1.713
 
 #: Legend swatch side and the gap after it, in ems.  Measured 5.4923 pt and 2.3711 pt at
 #: 10 pt.
@@ -102,14 +109,21 @@ LEGEND_SIDE_LEAD_EM = 1.60
 LEGEND_SIDE_TRAIL_EM = 1.01
 LEGEND_ENTRY_GAP_EM = 0.5
 
+#: A horizontal legend's run of entries is centred on the frame with this much lead-in
+#: counted as part of it, which shifts the visible entries half of it to the right.
+#: Measured at 1.93 pt of shift for a 10 pt legend, identically on the legend-b and
+#: legend-t probes.
+LEGEND_HORIZONTAL_LEAD_EM = 0.386
+
 #: The title band, and its baseline inside it, as multiples of the line height and the
 #: ascent.  Only one title was measurable (18 pt Arial, in two probes and the fixture, all
-#: agreeing): band 29.70 pt against a 20.11 pt line height, baseline 24.50 pt below the
-#: frame top against a 16.30 pt ascent.  The two coefficients below reproduce those to
-#: 0.46 pt and 0.06 pt, but they are a one-font fit and should be re-measured if a chart
-#: with a differently sized title ever disagrees.
-TITLE_BAND_LINES = 1.5
-TITLE_BASELINE_ASCENTS = 1.5
+#: agreeing): the band is 29.70 pt against a 20.109 pt line height, and the baseline sits
+#: 24.52 pt below the frame top against a 16.295 pt ascent.  These are the measured
+#: ratios rather than the tidy 1.5 both are close to -- rounding the band cost 0.46 pt of
+#: plot height, which moved every gridline by a pixel.  They are a one-font fit and should
+#: be re-measured if a chart with a differently sized title ever disagrees.
+TITLE_BAND_LINES = 1.4769
+TITLE_BASELINE_ASCENTS = 1.5046
 
 #: Default chart text size, in points.  ECMA-376's chart default and what PowerPoint drew
 #: for every axis label and legend entry with no ``c:txPr``.
@@ -1062,18 +1076,24 @@ class ChartBuilder:
         box = font.box
         swatch = LEGEND_SWATCH_EM * box.size
         gap = LEGEND_SWATCH_GAP_EM * box.size
-        band = LEGEND_BAND_LINES * box.line_height
 
         if position in ("b", "t", "tr"):
             widths = [swatch + gap + font.width(item.name or "") for _, item in entries]
-            total = sum(widths) + LEGEND_ENTRY_GAP_EM * box.size * (len(entries) - 1)
-            band_top = (
-                self.frame.bottom - FRAME_PADDING_PT - band
-                if position == "b"
-                else self.frame.top
+            total = (
+                sum(widths)
+                + LEGEND_ENTRY_GAP_EM * box.size * (len(entries) - 1)
+                + LEGEND_HORIZONTAL_LEAD_EM * box.size
             )
-            baseline = band_top + LEGEND_BASELINE_LINES * box.line_height
-            x = self.frame.left + (self.frame.width - total) / 2
+            baseline = (
+                self.frame.bottom - LEGEND_BOTTOM_BASELINE_EM * box.size
+                if position == "b"
+                else self.frame.top + LEGEND_TOP_BASELINE_EM * box.size
+            )
+            x = (
+                self.frame.left
+                + (self.frame.width - total) / 2
+                + LEGEND_HORIZONTAL_LEAD_EM * box.size
+            )
             for (_, item), width in zip(entries, widths):
                 self._legend_entry(item, x, baseline, swatch, gap, font)
                 x += width + LEGEND_ENTRY_GAP_EM * box.size
@@ -1088,12 +1108,15 @@ class ChartBuilder:
             x = self.frame.left + EDGE_INSET_PT
         else:
             x = rect.right + LEGEND_SIDE_LEAD_EM * box.size
-        height = band * len(entries)
-        y = self.frame.top + (self.frame.height - height) / 2
+        # A stacked legend is centred on the frame and each entry is centred in its row.
+        # Measured against both bar charts in real-financial-report.pptx: baselines land
+        # within 0.18 pt, where treating the row like the horizontal band's off-centre
+        # line was 5.7 pt out.
+        pitch = LEGEND_ROW_PITCH_EM * box.size
+        y = self.frame.top + (self.frame.height - pitch * len(entries)) / 2
         for _, item in entries:
-            baseline = y + LEGEND_BASELINE_LINES * box.line_height
-            self._legend_entry(item, x, baseline, swatch, gap, font)
-            y += band
+            self._legend_entry(item, x, y + pitch / 2 + box.ink_centre, swatch, gap, font)
+            y += pitch
 
     def _legend_entry(
         self,

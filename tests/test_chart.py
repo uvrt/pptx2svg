@@ -253,12 +253,12 @@ def test_number_formats(value, code, expected):
 POWERPOINT = {
     "plot_left": 21.0725,           # ours 21.1092
     "plot_right": 288.2131,         # ours 288.2126
-    "plot_top": 40.8025,            # ours 41.2676
+    "plot_top": 40.8025,            # ours 40.8031
     "plot_bottom": 179.2985,        # ours 179.0754
     "bar1_left": 47.7625,           # ours 47.8195
     "bar_width": 35.6187,           # ours 35.6138
-    "bar1_top": 109.9918,           # ours 110.1715
-    "title_baseline": 24.5518,      # ours 24.4432
+    "bar1_top": 109.9918,           # ours 109.9392
+    "title_baseline": 24.5518,      # ours 24.5261
     "category_baseline": 194.4718,  # ours 194.6152
 }
 TOLERANCE_PT = 0.6
