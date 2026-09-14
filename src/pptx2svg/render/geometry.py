@@ -1002,8 +1002,15 @@ def _spec_path_data(commands, variables: dict, scale: tuple[float, float] = (1.0
     not an end point -- so the conversion needs the position the preceding command left.
 
     ``scale`` maps a path-local coordinate space onto the shape; see :func:`_path_scale`.
-    Arc radii scale with it, which is exact here because the ellipse axes are always
-    axis-aligned -- DrawingML has no rotated ``arcTo``.
+    The pen is tracked in the path's *own* coordinates and only scaled on the way out,
+    which matters for arcs: ``stAng`` is a geometric angle measured in the space the path
+    was authored in, so converting it to the ellipse's parametric angle has to use the
+    unscaled radii.  Scaling them first silently rotates every arc that does not start on
+    an axis -- invisible in a square box, where the two radii scale equally, and worth
+    0.19 of silhouette overlap against PowerPoint on a stretched `cloud`.
+
+    Scaling afterwards is exact: the scale is axis-aligned and so are the ellipse axes,
+    DrawingML having no rotated ``arcTo``.
     """
     scale_x, scale_y = scale
 
@@ -1016,16 +1023,15 @@ def _spec_path_data(commands, variables: dict, scale: tuple[float, float] = (1.0
     for command in commands:
         kind = command[0]
         if kind in ("M", "L"):
-            x, y = value(command[1]) * scale_x, value(command[2]) * scale_y
-            parts.append(f"{kind} {_n(x)} {_n(y)}")
+            x, y = value(command[1]), value(command[2])
+            parts.append(f"{kind} {_n(x * scale_x)} {_n(y * scale_y)}")
             if kind == "M":
                 start_x, start_y = x, y
         elif kind == "Z":
             parts.append("Z")
             x, y = start_x, start_y
         elif kind == "A":
-            width_radius = value(command[1]) * scale_x
-            height_radius = value(command[2]) * scale_y
+            width_radius, height_radius = value(command[1]), value(command[2])
             start_angle, sweep_angle = value(command[3]), value(command[4])
             if sweep_angle == 0 or (width_radius == 0 and height_radius == 0):
                 continue
@@ -1033,15 +1039,18 @@ def _spec_path_data(commands, variables: dict, scale: tuple[float, float] = (1.0
                 x, y, width_radius, height_radius, start_angle, sweep_angle
             ):
                 parts.append(
-                    f"A {_n(width_radius)} {_n(height_radius)} 0 {large} {sweep} "
-                    f"{_n(x)} {_n(y)}"
+                    f"A {_n(width_radius * scale_x)} {_n(height_radius * scale_y)} 0 "
+                    f"{large} {sweep} {_n(x * scale_x)} {_n(y * scale_y)}"
                 )
         elif kind in ("Q", "C"):
             points = [
-                (value(command[i]) * scale_x, value(command[i + 1]) * scale_y)
+                (value(command[i]), value(command[i + 1]))
                 for i in range(1, len(command), 2)
             ]
-            parts.append(f"{kind} " + ", ".join(f"{_n(px)} {_n(py)}" for px, py in points))
+            parts.append(
+                f"{kind} "
+                + ", ".join(f"{_n(px * scale_x)} {_n(py * scale_y)}" for px, py in points)
+            )
             x, y = points[-1]
 
     return " ".join(parts)

@@ -512,3 +512,65 @@ def test_stars_get_shallower_as_they_gain_points():
     ratios = [STARS[f"star{n}"][1] for n in (4, 5, 6, 7, 8)]
     assert ratios == sorted(ratios)
     assert {STARS[f"star{n}"][1] for n in (8, 12, 16, 24, 32)} == {0.75}
+
+
+# --------------------------------------------------------------------------------------
+# Path-local coordinate spaces and arcs
+# --------------------------------------------------------------------------------------
+
+
+def test_a_path_space_arc_scales_without_rotating():
+    """A path authored in its own coordinate space must scale linearly onto the shape.
+
+    `stAng` is a *geometric* angle measured in the space the path was authored in, so
+    turning it into the ellipse's parametric angle has to use the unscaled radii.
+    Scaling them first quietly rotates every arc that does not begin on an axis --
+    invisible in a square box, where both radii scale alike, and worth 0.19 of silhouette
+    overlap against PowerPoint on a stretched `cloud`.
+
+    The invariant: stretching the box by (2, 1) moves every point by (2, 1).
+    """
+    from pptx2svg.render.geometry import _P, _Spec, _spec_geometry
+
+    spec = _Spec(
+        paths=(
+            _P(
+                ("M", "100", "50"),
+                # A 45-degree start, which is where the two conversions disagree.
+                ("A", "50", "50", "2700000", "5400000"),
+                space=(100, 100),
+            ),
+        )
+    )
+    square = numbers(re.search(r'd="([^"]*)"', _spec_geometry(spec, 400.0, 400.0, {})).group(1))
+    wide = numbers(re.search(r'd="([^"]*)"', _spec_geometry(spec, 800.0, 400.0, {})).group(1))
+    assert len(square) == len(wide)
+
+    # "M x y" then "A rx ry rot large sweep x y": every x-ish number doubles, every
+    # y-ish one is unchanged.  Positions of each within the command are fixed.
+    # Coordinates are written to three decimals, so doubling a rounded value can drift
+    # by a thousandth; the tolerance allows for the formatting, not for the geometry.
+    assert wide[0] == pytest.approx(square[0] * 2, abs=0.01)   # move-to x
+    assert wide[1] == pytest.approx(square[1], abs=0.01)       # move-to y
+    assert wide[2] == pytest.approx(square[2] * 2, abs=0.01)   # rx
+    assert wide[3] == pytest.approx(square[3], abs=0.01)       # ry
+    assert wide[-2] == pytest.approx(square[-2] * 2, abs=0.01)  # end x
+    assert wide[-1] == pytest.approx(square[-1], abs=0.01)      # end y
+
+
+@pytest.mark.parametrize(
+    "name", ["cloud", "cloudCallout", "flowChartPunchedTape", "flowChartTerminator"]
+)
+def test_presets_with_a_path_space_stretch_linearly(name):
+    """The same invariant through the public entry point, for the presets that combine a
+    path-local space with arcs -- the only ones the bug could reach."""
+    if name not in SPEC_PRESETS:
+        pytest.skip(f"{name} is not compiled from the specification yet")
+    square = numbers(" ".join(path_data(preset_geometry_svg(name, 400.0, 400.0, {}))))
+    wide = numbers(" ".join(path_data(preset_geometry_svg(name, 800.0, 400.0, {}))))
+    assert len(square) == len(wide) and square
+    # Every number is either an x, a y, or a flag; doubling the width may only change
+    # the x-like ones, so the multiset of unchanged values must stay large.
+    unchanged = sum(1 for a, b in zip(square, wide) if abs(a - b) < 0.01)
+    doubled = sum(1 for a, b in zip(square, wide) if abs(b - 2 * a) < 0.01)
+    assert unchanged + doubled == len(square)
