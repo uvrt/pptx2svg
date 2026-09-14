@@ -8,9 +8,9 @@ recorded but not applied.
 
 from __future__ import annotations
 
-import math
 from xml.etree.ElementTree import Element
 
+from ..guides import arc_segments, evaluate_guides, resolve_value
 from ..model import ArrowEndpoint, CustomGeometryPath
 from ..xmlutil import (
     attr,
@@ -638,7 +638,7 @@ def parse_custom_geometry(cust_geom: Element | None) -> list[CustomGeometryPath]
         height = num_attr(path, "h") or 0
         if width == 0 and height == 0:
             continue
-        variables = _evaluate_guides(av_guides, gd_guides, width, height)
+        variables = evaluate_guides([av_guides, gd_guides], width, height)
         commands = _build_path_commands(path, variables)
         if commands:
             result.append(CustomGeometryPath(width=width, height=height, commands=commands))
@@ -702,8 +702,8 @@ def _first_point(node: Element, variables: dict[str, float]) -> tuple[float, flo
 def _all_points(node: Element, variables: dict[str, float]) -> list[tuple[float, float]]:
     return [
         (
-            _resolve_value(attr(point, "x") or "0", variables),
-            _resolve_value(attr(point, "y") or "0", variables),
+            resolve_value(attr(point, "x") or "0", variables),
+            resolve_value(attr(point, "y") or "0", variables),
         )
         for point in children(node, "pt")
     ]
@@ -712,117 +712,26 @@ def _all_points(node: Element, variables: dict[str, float]) -> list[tuple[float,
 def _convert_arc_to(
     arc: Element, current_x: float, current_y: float, variables: dict[str, float]
 ) -> tuple[str, float, float] | None:
-    width_radius = _resolve_value(attr(arc, "wR") or "0", variables)
-    height_radius = _resolve_value(attr(arc, "hR") or "0", variables)
-    start_angle = _resolve_value(attr(arc, "stAng") or "0", variables)
-    sweep_angle = _resolve_value(attr(arc, "swAng") or "0", variables)
+    width_radius = resolve_value(attr(arc, "wR") or "0", variables)
+    height_radius = resolve_value(attr(arc, "hR") or "0", variables)
+    start_angle = resolve_value(attr(arc, "stAng") or "0", variables)
+    sweep_angle = resolve_value(attr(arc, "swAng") or "0", variables)
     if (width_radius == 0 and height_radius == 0) or sweep_angle == 0:
         return None
 
-    start_radians = math.radians(start_angle / 60000)
-    end_radians = math.radians((start_angle + sweep_angle) / 60000)
-    center_x = current_x - width_radius * math.cos(start_radians)
-    center_y = current_y - height_radius * math.sin(start_radians)
-    end_x = center_x + width_radius * math.cos(end_radians)
-    end_y = center_y + height_radius * math.sin(end_radians)
-    large_arc = 1 if abs(sweep_angle / 60000) > 180 else 0
-    sweep_flag = 1 if sweep_angle > 0 else 0
+    segments = arc_segments(
+        current_x, current_y, width_radius, height_radius, start_angle, sweep_angle
+    )
+    if not segments:
+        return None
 
-    command = (
+    command = " ".join(
         f"A {_round(width_radius)} {_round(height_radius)} 0 "
         f"{large_arc} {sweep_flag} {_round(end_x)} {_round(end_y)}"
+        for end_x, end_y, large_arc, sweep_flag in segments
     )
+    end_x, end_y = segments[-1][0], segments[-1][1]
     return command, end_x, end_y
-
-
-def _evaluate_guides(
-    av_guides: list[tuple[str, str]],
-    gd_guides: list[tuple[str, str]],
-    width: float,
-    height: float,
-) -> dict[str, float]:
-    variables = _builtin_variables(width, height)
-    for name, formula in av_guides:
-        variables[name] = _evaluate_formula(formula, variables)
-    for name, formula in gd_guides:
-        variables[name] = _evaluate_formula(formula, variables)
-    return variables
-
-
-def _builtin_variables(width: float, height: float) -> dict[str, float]:
-    return {
-        "w": width,
-        "h": height,
-        "l": 0.0,
-        "t": 0.0,
-        "r": width,
-        "b": height,
-        "wd2": width / 2,
-        "hd2": height / 2,
-        "wd4": width / 4,
-        "hd4": height / 4,
-        "ss": min(width, height),
-        "ls": max(width, height),
-        # Angle constants in 1/60000 degrees: cd2 == 180deg, cd4 == 90deg ...
-        "cd2": 10800000.0,
-        "cd4": 5400000.0,
-        "cd8": 2700000.0,
-        "3cd4": 16200000.0,
-    }
-
-
-def _evaluate_formula(formula: str, variables: dict[str, float]) -> float:
-    """Evaluate one ``a:gd`` formula (ECMA-376 §20.1.9.11 guide formula grammar)."""
-    tokens = formula.strip().split()
-    if not tokens:
-        return 0.0
-    op = tokens[0]
-
-    def value(index: int) -> float:
-        return _resolve_value(tokens[index], variables) if index < len(tokens) else 0.0
-
-    if op == "val":
-        return value(1)
-    if op == "+-":
-        return value(1) + value(2) - value(3)
-    if op == "*/":
-        return round((value(1) * value(2)) / (value(3) or 1))
-    if op == "+/":
-        return round((value(1) + value(2)) / (value(3) or 1))
-    if op == "pin":
-        return max(value(1), min(value(2), value(3)))
-    if op == "min":
-        return min(value(1), value(2))
-    if op == "max":
-        return max(value(1), value(2))
-    if op == "abs":
-        return abs(value(1))
-    if op == "sqrt":
-        return round(math.sqrt(max(0.0, value(1))))
-    if op == "sin":
-        return round(value(1) * math.sin(math.radians(value(2) / 60000)))
-    if op == "cos":
-        return round(value(1) * math.cos(math.radians(value(2) / 60000)))
-    if op == "tan":
-        return round(value(1) * math.tan(math.radians(value(2) / 60000)))
-    if op == "at2":
-        return round(math.degrees(math.atan2(value(2), value(1))) * 60000)
-    if op == "mod":
-        return round(math.sqrt(value(1) ** 2 + value(2) ** 2 + value(3) ** 2))
-    if op == "cat2":
-        return round(value(1) * math.cos(math.atan2(value(3), value(2))))
-    if op == "sat2":
-        return round(value(1) * math.sin(math.atan2(value(3), value(2))))
-    if op == "?:":
-        return value(2) if value(1) > 0 else value(3)
-    return 0.0
-
-
-def _resolve_value(token: str, variables: dict[str, float]) -> float:
-    try:
-        return float(token)
-    except ValueError:
-        return variables.get(token, 0.0)
 
 
 def _round(value: float) -> str:

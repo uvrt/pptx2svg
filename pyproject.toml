@@ -45,6 +45,10 @@ fonts = ["pptx2svg-fonts>=0.1"]
 # (FontToolsTextMeasurer), and regenerate the tables with tools/extract_font_metrics.py.
 # Renamed from `fonts`, which now means the font files themselves.
 measure = ["fonttools>=4.40"]
+# Render the PDF preview Office embeds inside an EMF. Extracting the preview and the DIB
+# variant of it are standard-library only; rasterising a PDF page is the one thing the
+# stdlib cannot do, so it lives behind this extra and degrades to a placeholder without it.
+metafile = ["pypdfium2>=4"]
 # Scoring a render against PowerPoint's own PDF export (tools/fidelity.py).  Strictly a
 # development concern: none of this is imported from src/, which stays standard-library
 # only, and the harness itself also needs PowerPoint, which pip cannot supply.

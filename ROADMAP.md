@@ -27,14 +27,14 @@ after it needs a way to tell "better" from "different".
 | Package, relationships, parts | Complete |
 | Theme colours, colour maps, transforms | Complete |
 | Placeholder / background / text inheritance | Complete |
-| Shapes: 134 presets + custom geometry with guide formulas | Common set done; **~53 presets missing** |
+| Shapes: all 186 ECMA-376 presets + custom geometry | Complete; 81 compiled from the spec, the rest still hand-approximated |
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
 | Charts | **Not rendered** |
-| SmartArt | **Not rendered** |
-| EMF / WMF | **Not rendered** |
+| SmartArt | Cached drawing rendered (Phase 2); **no layout engine** |
+| EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
 | Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
@@ -476,9 +476,10 @@ Phase 0.4 describes would subsume it.
 
 ---
 
-## Phase 2 — SmartArt
+## Phase 2 — SmartArt — **done**
 
-**Effort: S–M. Much cheaper than it looks.**
+**Effort: S–M. Much cheaper than it looks. Landed at the S end: ~120 lines in
+`resolve/view.py`, no new parser.**
 
 > **Correction to an earlier assessment.** I previously said SmartArt "needs a diagram
 > layout engine". For the common case it does not. PowerPoint caches a fully laid-out
@@ -499,26 +500,43 @@ p:graphicFrame
 That last shape tree is ordinary shapes, text and geometry — `parse/shapes.py:parse_shape_tree`
 handles it as-is.
 
-**Work:**
+**Work:** all four steps done in `resolve/view.py:_resolve_diagram`. Both relationship
+spellings (`schemas.microsoft.com/office/2007/…` and `purl.oclc.org/ooxml/…`) are accepted;
+children resolve with `part_path` pointed at the drawing part, so a diagram's own images
+are found; the warning and empty frame survive for a deck whose cached drawing is missing,
+empty or corrupt.
 
-1. `parse/shapes.py` — `_diagram_drawing_rel_id` already returns the `r:dm` id. Keep it.
-2. `resolve/view.py:_resolve_unsupported` — for `what == "diagram"`, hop: slide rels →
-   data-model part → its rels → drawing part. Parse its `spTree`, resolve children using
-   the *drawing part's* relationships (its images live there), return a `GroupElement`.
-3. Wrap in a group whose `child_transform` comes from `dsp:spTree/dsp:grpSpPr/a:xfrm`
-   `chOff`/`chExt`, so the diagram scales into the frame. The existing group renderer does
-   the rest.
-4. Keep the current warning + empty frame when no cached drawing exists.
+**Two things worth knowing that the plan did not mention:**
 
-Accept the relationship type under both `schemas.microsoft.com/office/2007/…` and
-`purl.oclc.org/ooxml/…` namespaces.
+- **Every cached shape has `cNvPr@id="0"`.** PowerPoint carries identity in `modelId`
+  (a GUID), not the DrawingML id, so taking the id at face value would have given every
+  node in a diagram the same `data-pptx-id`. Ids are rebuilt from the frame's id plus the
+  child's index (`256.7001/0/0`), which is unique, stable and still addressable.
+- **The `grpSpPr/a:xfrm` fallback is not `replace(transform)`.** A regular group with no
+  `chOff` has children in absolute slide coordinates, so mapping it to the outer transform
+  is right. A diagram's children are relative to the frame's own origin, so the fallback
+  has to be `chOff=(0,0)`, `chExt=` the frame extent. Using the group default here shifts
+  the whole diagram off the slide by the frame's offset.
 
 **[pptx-renderer]** notes that diagram groups need "diagram-specific compensation requiring
-matching layout provenance" — expect the child transform to need care. Their fallback when
-no drawing exists is an EMF preview, which Phase 4 unlocks for us too.
+matching layout provenance". Nothing beyond the above was needed for the cases tested —
+but see the caveat, and expect this to be where a real file diverges. Their fallback when
+no drawing exists is an EMF preview, which Phase 4 now unlocks for us too, though nothing
+wires the two together yet (a `dgm:relIds` frame has no blip to hand to `_resolve_image`).
 
-**Done when:** a SmartArt cycle/hierarchy renders its nodes and connectors; a deck with the
-drawing part deleted still renders and still warns.
+**Done when:** a SmartArt cycle/hierarchy renders its nodes and connectors ✅ (nodes, text,
+fills, geometry and embedded pictures; connectors are ordinary shapes in the cache and
+need no special handling); a deck with the drawing part deleted still renders and still
+warns ✅.
+
+**Not verified against real input.** The roadmap said no fixture contains SmartArt, and
+that is still true: `python-pptx` cannot author it and no permissively-licensed sample was
+available. `tests/test_diagram.py` therefore hand-builds the diagram parts from ECMA-376
+§21.4 and the `diagramDrawing` relationship definition, modelled on what PowerPoint emits.
+Those tests prove the lookup chain, the coordinate mapping and the fallbacks; they cannot
+prove the spec was read correctly. `tests/test_diagram.py` ends with a skipped test that
+activates the moment `tests/fixtures/real-smartart.pptx` appears — **adding that fixture
+and comparing against a PowerPoint export is the outstanding work for this phase.**
 
 ---
 
@@ -598,9 +616,9 @@ callers the chart *data* before anything is drawn.
 
 ---
 
-## Phase 4 — EMF / WMF
+## Phase 4 — EMF / WMF — **done (steps 1–3)**
 
-**Effort: revised down from L to S–M for the cases that matter.**
+**Effort: revised down from L to S–M for the cases that matter. Landed at the S end.**
 
 > **Correction to an earlier assessment.** I previously scoped this as "write a subset EMF
 > record interpreter" and flagged it as the riskiest phase. Reviewing **[pptx-renderer]**
@@ -624,26 +642,52 @@ so embedded-PDF EMFs cost nothing extra.
 
 ### Plan
 
-1. **`pptx2svg/metafile/emf_preview.py`** (S) — port the extractor: validate the EMF
-   signature at offset 40 (`0x464d4520`), walk records to `EMR_EOF` (14), pull out embedded
-   PDF or DIB. Keep pptx-glimpse's hard limits verbatim — metafiles are attacker-controlled
-   binary: 8 MB input, 4 MB per record, 50,000 records, 200,000 geometry points.
-2. **Wire into `resolve/view.py:_resolve_image`** (S) — replace the current grey placeholder:
-   embedded PDF → rasterise with `pypdfium2` → `ImageElement`; DIB → encode PNG → `ImageElement`;
-   neither → keep the placeholder and the warning.
-3. **Pluggable converter hook** (S) — a `metafile_converter` callable on `ConvertOptions` so
-   users can plug in Inkscape / `libemf2svg` for the remainder. Opt-in, so the pure-Python
-   default holds.
-4. **Full vector interpreter** (L) — *only if* the corpus shows EMFs without previews.
-   Measure before building. There is no maintained pure-Python EMF→SVG library (`pyemf`
-   writes rather than reads and has been dead since 2006), so this would be from scratch —
-   but steps 1–3 may make it unnecessary.
+1. ✅ **`pptx2svg/metafile/emf_preview.py`** — record walk, embedded PDF and DIB
+   extraction. `metafile/dib.py` decodes 1/4/8/16/24/32 bpp DIBs and writes PNG with
+   nothing but `zlib` and `struct`; `metafile/pdf.py` rasterises the PDF case.
+2. ✅ **Wired into `resolve/view.py`** — and into the image *fill* and OLE-preview paths
+   as well, which take metafiles just as legally as `p:pic` does.
+3. ✅ **`metafile_converter` on `ConvertOptions`** — `(bytes, mime) -> (bytes, mime) | None`.
+   It takes precedence over the built-in extraction, may return SVG, and a hook that
+   raises warns instead of aborting the deck.
+4. **Full vector interpreter** (L) — still not built, and the measurement that would
+   justify it has not been possible: see below.
 
-WMF has no equivalent preview convention; it is rarer in modern decks, so defer it behind
-the same measurement.
+WMF has no equivalent preview convention. `extract_metafile_preview` accepts WMF bytes and
+returns `None` for them, which costs nothing and correctly handles the real case of a
+`.wmf` part that actually contains EMF bytes.
 
-**Done when:** a deck with pasted vector art renders it; a truncated or malformed EMF warns
-and falls back rather than raising or hanging; adversarial inputs are covered by tests.
+**Notes from the implementation:**
+
+- **The corpus measurement could not be made.** No fixture contains an EMF or WMF at all,
+  so there is no local evidence about how many real EMFs carry a preview. The "measure
+  before building a vector interpreter" instruction stands, unexecuted; it needs a corpus
+  of decks with pasted vector art, which this repo does not have.
+- **Hard limits, with one substitution.** Input 8 MB, record 4 MB, 50,000 records are kept
+  verbatim. The 200,000-geometry-point limit has no meaning here because no geometry is
+  interpreted; the bound that does the equivalent job is a 64-megapixel cap on a decoded
+  DIB, since a 40-byte header can otherwise demand a gigapixel allocation.
+- **Only `EMR_STRETCHDIBITS` (81) is read for bitmaps.** `EMR_SETDIBITSTODEVICE` (79) and
+  the `BitBlt`/`StretchBlt` records carry DIBs too, with different field offsets. Adding
+  them is cheap but untestable against real output right now, so they were left out.
+- **`EmrFormat` descriptors inside `MULTIFORMATS` are deliberately not trusted** —
+  implementations disagree on whether `offData` is relative to the record or to the comment
+  data. Accumulating the comment payloads and scanning for `%PDF` … `%%EOF` is immune to
+  that, and also handles a PDF split across several `BEGINGROUP` records.
+- **`pypdfium2` is an optional extra** (`pip install pptx2svg[metafile]`). Without it the
+  PDF case warns `metafile-rasterizer-missing` and keeps the placeholder; DIB extraction
+  and PNG encoding stay standard-library only.
+
+**Done when:** a deck with pasted vector art renders it ✅ (against synthetic EMFs — see
+the caveat below); a truncated or malformed EMF warns and falls back rather than raising
+or hanging ✅; adversarial inputs are covered by tests ✅ (`tests/test_metafile.py`).
+
+**Not yet verified against real input.** Every EMF in the test suite is built by
+`tests/test_metafile.py` from the MS-EMF record layouts. That exercises the code paths and
+the failure modes, but it cannot catch a misreading of the *specification* — if Office
+writes a field somewhere other than where MS-EMF says, these tests will not notice. The
+first real EMF-bearing deck should be run through
+`convert_pptx_to_model` and checked for a `metafile-image` warning.
 
 ---
 
@@ -652,22 +696,71 @@ and falls back rather than raising or hanging; adversarial inputs are covered by
 **Effort: M–L total.** Individually small, collectively the difference between "renders
 most decks" and "renders decks".
 
-### 5.1 The missing preset shapes (M)
+### 5.1 The missing preset shapes — **done, and then some**
 
-We implement 134 presets; **[pptx-renderer]** implements 187+. Probing well-known OOXML
-names found **53 we lack**, 48 of which they implement:
+**Effort: M. Came in under it, because the shapes stopped being transcribed by hand.**
 
-| Family | Missing |
+All 53 are implemented, plus `lineInv`, which the original probe missed. The spec's 186
+presets are now fully covered. (ECMA-376 itself omits `upArrow` — a known erratum — and we
+keep our own; `bendUpArrow` stays registered as an alias for the `bentUpArrow` misspelling.)
+
+**The approach changed partway through, and that is the part worth keeping.** The first
+16 callouts and 12 action buttons were transcribed by hand from two third-party copies of
+the spec that happened to agree. That works but cannot be checked. ECMA-376 publishes the
+geometry as a data file — an electronic addendum to Part 1 — and
+`tools/derive_preset_geometry.py` now compiles it directly into
+`src/pptx2svg/render/preset_specs.py`, following `tools/extract_font_metrics.py`'s
+pattern: pinned source SHA-256, generated output, `--check` that fails on drift.
+Re-compiling the hand-transcribed 53 from the official file reproduced them exactly, so
+the transcriptions were right — but they are now generated rather than merely lucky.
+`render/geometry.py` went from 5426 lines to 1246.
+
+The source file is **not vendored**: ECMA's text copyright policy governs it, so `--source`
+points at a copy you obtain yourself. Vendoring it (as pptx-renderer does, with a notice)
+is a reasonable alternative and would let `--check` run in CI; that is a project decision,
+not a tooling one.
+
+**Two real bugs fell out of doing it properly**, both of which predate this phase and both
+of which affect `a:custGeom` as much as presets:
+
+- `stAng`/`swAng` in an `arcTo` are **geometric** angles, not the ellipse's parametric
+  angle. They coincide only when `wR == hR`, so every circular arc looked fine and every
+  stretched one was wrong. `curvedUpArrow` made it visible: the band missed its own
+  arrowhead. Confirmed by the spec's own named guides — after the fix the arcs land on
+  `iy` and `x5` exactly.
+- SVG draws **nothing** when an arc's endpoints coincide, and DrawingML writes a circle as
+  one `arcTo` sweeping 360°. Every circle in the catalogue was being erased —
+  `smileyFace` rendered as a bare mouth curve. Sweeps are now cut into half-turn pieces.
+
+Neither changed any fixture's output: the corpus has no elliptical or full-circle custom
+geometry. Both would bite on a real deck.
+
+#### What is left here
+
+The 134 hand-written presets are *approximations*, and 85 of them differ from the
+specification by more than 2% of their silhouette. 27 were promoted after checking each
+side by side; the rest are ranked and waiting. Regenerate the ranking with the harness
+described in the Phase 5.1 commits, or just add a name to `SPEC_DRIVEN` and re-run the
+tool — promotion is one line plus a visual check.
+
+Worst offenders still hand-drawn, by silhouette divergence:
+
+| Divergence | Presets |
 | --- | --- |
-| Action buttons | `actionButtonHome`, `actionButtonBackPrevious`, `actionButtonBeginning`, `actionButtonBlank`, `actionButtonDocument`, `actionButtonEnd`, `actionButtonForwardNext`, `actionButtonHelp`, `actionButtonInformation`, `actionButtonMovie`, `actionButtonReturn`, `actionButtonSound` |
-| Callouts | `callout1‑3`, `accentCallout1‑3`, `accentBorderCallout1‑3`, `leftArrowCallout`, `rightArrowCallout`, `upArrowCallout`, `downArrowCallout`, `leftRightArrowCallout`, `upDownArrowCallout`, `quadArrowCallout` |
-| Curved & circular arrows | `curvedUpArrow`, `curvedDownArrow`, `curvedLeftArrow`, `curvedRightArrow`, `circularArrow`, `leftCircularArrow`, `leftRightCircularArrow`, `swooshArrow` |
-| Banners & scrolls | `verticalScroll`, `horizontalScroll`, `ellipseRibbon`, `ellipseRibbon2`, `leftRightRibbon` |
-| Gears, tabs, misc | `gear6`, `gear9`, `funnel`, `pieWedge`, `cornerTabs`, `squareTabs`, `plaqueTabs`, `nonIsoscelesTrapezoid`, `chartPlus`, `chartStar`, `chartX`, `flowChartOfflineStorage` |
+| 0.6–0.7 | `bentUpArrow`, `uturnArrow`, `leftUpArrow`, `bentArrow` |
+| 0.3–0.5 | `star4`–`star32`, `quadArrow`, `leftRightUpArrow`, `leftRightArrow`, `irregularSeal1/2`, `flowChartOr`, `flowChartSummingJunction`, `chevron`, `halfFrame` |
+| 0.2–0.3 | `cloud`, `notchedRightArrow`, `stripedRightArrow`, `ribbon`, `ribbon2`, `flowChartMultidocument`, `flowChartPunchedTape`, `leftArrow`, `rightArrow`, `cloudCallout`, `octagon` |
+| 0.1–0.2 | `heart`, `wave`, `corner`, `pentagon`, `trapezoid`, `parallelogram`, `plus`, `hexagon`, `diagStripe`, four more flowchart shapes, `cube`, `can` |
 
-Purely additive to `render/geometry.py` — each is an independent function plus a registry
-entry, so this parallelises across people or sessions and carries near-zero regression risk.
-Callouts and action buttons are the common ones in real decks.
+**The stars are held back deliberately.** ECMA-376's `star10` defaults to an inner radius
+85% of the outer, which renders as a barely-pointed decagon and does not look like
+PowerPoint's. Either the spec, our approximation, or my memory is wrong, and without the
+oracle there is no way to tell. **This is the single most useful thing to put in front of
+PowerPoint.**
+
+Shapes that should *stay* hand-written regardless: `rect`, `ellipse`, `line`, `roundRect`
+and friends emit a native `<rect>`/`<ellipse>`/`<line>`, which is smaller and strokes
+correctly under a transform. All of them measured 0.000 divergence anyway.
 
 ### 5.2 Other gaps (S–M each)
 
@@ -716,9 +809,9 @@ Callouts and action buttons are the common ones in real decks.
 
 ```
 Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrendered)   DONE
-                                      ├─▶ Phase 2  (SmartArt)
-                                      ├─▶ Phase 4  (EMF previews — now cheap)
-                                      ├─▶ Phase 5.1/5.2  (shapes + small gaps)
+                                      ├─▶ Phase 2  (SmartArt — DONE)
+                                      ├─▶ Phase 4  (EMF previews — DONE)
+                                      ├─▶ Phase 5.1 DONE / 5.2  (small gaps)
                                       └─▶ Phase 3  (charts — longest pole, start early)
                                                               Phase 5.3 last
 ```
@@ -733,10 +826,11 @@ Revised quick wins, in order of payoff per day:
 2. **Font metrics** — now the largest single component of the residual on every fixture,
    and the thing standing between `real-basic-theme.pptx`'s gridlines and PowerPoint's.
    Phase 5.3's embedded fonts attack one half of it.
-3. **Phase 4 EMF previews** — dropped from L to S–M by the embedded-PDF finding, and
-   `pypdfium2` arrives with Phase 0 regardless.
-4. **Phase 2 SmartArt** — dropped from XL to S–M by the cached-drawing finding.
-5. **Phase 5.1 shapes** — additive, parallelisable, near-zero risk.
+3. ~~**Phase 4 EMF previews**~~ — done; the S estimate held.
+4. ~~**Phase 2 SmartArt**~~ — done; the S estimate held.
+5. ~~**Phase 5.1 shapes**~~ — done. Not the additive, near-zero-risk job it looked
+   like: it turned up two arc-conversion bugs that had been silently misdrawing
+   custom geometry, and it replaced hand-transcription with a spec compiler.
 
 Phase 3 remains the long pole and should start in parallel rather than waiting.
 

@@ -17,7 +17,10 @@ here, and they are independent of each other:
   ``txStyles`` for the placeholder's type, and finally the presentation's
   ``defaultTextStyle``.
 
-Charts, SmartArt and EMF/WMF metafiles are out of scope: they resolve to a positioned
+SmartArt and EMF/WMF metafiles are handled here too, in both cases by finding the
+pre-rendered copy PowerPoint already stored rather than reimplementing what made it: a
+diagram's cached DrawingML shape tree, and a metafile's embedded PDF or bitmap preview.
+Charts have no such cache and remain out of scope: they resolve to a positioned
 placeholder and a warning rather than being dropped silently.
 """
 
@@ -28,10 +31,15 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable, Sequence
 
 from .. import model as m
+from ..metafile import extract_metafile_preview
+from ..metafile.pdf import PdfRasterizerNotAvailable, rasterise_pdf
 from ..opc import OpcPackage
 from ..parse import source as s
+from ..parse.drawing import parse_group_transforms
+from ..parse.shapes import parse_shape_tree
 from ..parse.table_styles_builtin import builtin_table_style
 from ..units import ROTATION_UNIT
+from ..xmlutil import child
 from .color import ColorContext, build_effective_color_map, resolve_color
 
 #: Placeholder types that inherit from the master's ``body`` placeholder.
@@ -69,6 +77,22 @@ SUPPORTED_IMAGE_MIME_TYPES = frozenset(
     }
 )
 
+METAFILE_MIME_TYPES = frozenset({"image/emf", "image/wmf", "image/x-emf", "image/x-wmf"})
+
+#: Relationship type from a SmartArt data-model part to its cached DrawingML rendering.
+#: Two spellings exist for the same relationship -- Microsoft's own and the ISO/IEC
+#: transitional one that ``purl.oclc.org`` hosts -- and which one appears depends on
+#: which Office version and which save format wrote the file, so both are accepted.
+DIAGRAM_DRAWING_REL_TYPES = (
+    "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/diagramDrawing",
+)
+
+#: A user-supplied EMF/WMF converter: ``(bytes, mime_type) -> (bytes, mime_type) | None``.
+#: Returning ``None`` means "I cannot convert this", and resolution falls through to the
+#: built-in preview extraction.
+MetafileConverter = Callable[[bytes, str], "tuple[bytes, str] | None"]
+
 
 @dataclass
 class Warning:
@@ -102,6 +126,8 @@ class ResolveContext:
     #: addressable and editable; layout and master shapes are inherited decoration, and the
     #: prefix says so rather than leaving a caller to guess from the id alone.
     id_prefix: str = ""
+    #: Optional external EMF/WMF converter; see :data:`MetafileConverter`.
+    metafile_converter: MetafileConverter | None = None
 
     def warn(self, code: str, message: str) -> None:
         self.warnings.append(
@@ -127,6 +153,7 @@ def resolve_presentation(
     presentation: s.SourcePresentation,
     *,
     slide_numbers: Iterable[int] | None = None,
+    metafile_converter: MetafileConverter | None = None,
 ) -> ResolvedPresentation:
     wanted = set(slide_numbers) if slide_numbers is not None else None
     slide_size = m.SlideSize(width=presentation.slide_width, height=presentation.slide_height)
@@ -137,7 +164,9 @@ def resolve_presentation(
     for source_slide in presentation.slides:
         if wanted is not None and source_slide.slide_number not in wanted:
             continue
-        context = _build_context(package, presentation, source_slide)
+        context = _build_context(
+            package, presentation, source_slide, metafile_converter=metafile_converter
+        )
         slides.append(resolve_slide(context))
         warnings.extend(context.warnings)
         if context.theme is not None:
@@ -149,7 +178,11 @@ def resolve_presentation(
 
 
 def _build_context(
-    package: OpcPackage, presentation: s.SourcePresentation, slide: s.SourceSlide
+    package: OpcPackage,
+    presentation: s.SourcePresentation,
+    slide: s.SourceSlide,
+    *,
+    metafile_converter: MetafileConverter | None = None,
 ) -> ResolveContext:
     layout = presentation.layouts.get(slide.layout_part_path or "")
     master = presentation.masters.get(layout.master_part_path or "") if layout else None
@@ -168,6 +201,7 @@ def _build_context(
         theme=theme,
         colors=ColorContext(theme, color_map),
         part_path=slide.part_path,
+        metafile_converter=metafile_converter,
     )
 
 
@@ -300,7 +334,7 @@ def resolve_element(
     elif isinstance(node, s.SourceTable):
         element = _resolve_table(context, node)
     elif isinstance(node, s.SourceUnsupported):
-        element = _resolve_unsupported(context, node)
+        element = _resolve_unsupported(context, node, path)
     else:
         return None
 
@@ -406,7 +440,7 @@ def _resolve_image(context: ResolveContext, image: s.SourceImage) -> m.SlideElem
         image.transform, _node_transform(layout_node), _node_transform(master_node)
     )
 
-    media = _load_media(context, image.blip_relationship_id)
+    media = _load_media_bytes(context, image.blip_relationship_id)
     if media is None:
         context.warn(
             "unresolved-image",
@@ -414,20 +448,25 @@ def _resolve_image(context: ResolveContext, image: s.SourceImage) -> m.SlideElem
         )
         return None
 
-    data, mime_type = media
-    if mime_type in ("image/emf", "image/wmf"):
-        context.warn(
-            "metafile-image",
-            f"picture {image.name or image.shape_id!r} is an EMF/WMF metafile, "
-            "which is not rasterised; drawing a placeholder",
+    payload, mime_type = media
+    if mime_type in METAFILE_MIME_TYPES:
+        preview = _metafile_preview(
+            context,
+            payload,
+            mime_type,
+            width_emu=transform.width if transform is not None else None,
+            described_as=f"picture {image.name or image.shape_id!r}",
         )
-        return m.ShapeElement(
-            transform=_resolve_transform(context, transform),
-            geometry=m.PresetGeometry(preset="rect"),
-            fill=m.SolidFill(color=m.ResolvedColor(hex="#e0e0e0")),
-            alt_text=image.alt_text or image.name,
-        )
+        if preview is None:
+            return m.ShapeElement(
+                transform=_resolve_transform(context, transform),
+                geometry=m.PresetGeometry(preset="rect"),
+                fill=m.SolidFill(color=m.ResolvedColor(hex="#e0e0e0")),
+                alt_text=image.alt_text or image.name,
+            )
+        payload, mime_type = preview
 
+    data = base64.b64encode(payload).decode("ascii")
     return m.ImageElement(
         transform=_resolve_transform(context, transform),
         image_data=data,
@@ -700,18 +739,34 @@ def _resolve_table_border(
 
 
 def _resolve_unsupported(
-    context: ResolveContext, node: s.SourceUnsupported
+    context: ResolveContext, node: s.SourceUnsupported, path: tuple[int, ...] = ()
 ) -> m.SlideElement | None:
     """Charts / SmartArt / OLE: draw the embedded preview when there is one."""
     if node.fallback_rel_id is not None and node.what == "ole":
-        media = _load_media(context, node.fallback_rel_id)
-        if media is not None and media[1] in SUPPORTED_IMAGE_MIME_TYPES:
-            return m.ImageElement(
-                transform=_resolve_transform(context, node.transform),
-                image_data=media[0],
-                mime_type=media[1],
-                alt_text=node.alt_text or node.name,
-            )
+        media = _load_media_bytes(context, node.fallback_rel_id)
+        if media is not None:
+            payload, mime_type = media
+            if mime_type in METAFILE_MIME_TYPES:
+                preview = _metafile_preview(
+                    context,
+                    payload,
+                    mime_type,
+                    width_emu=node.transform.width if node.transform else None,
+                    described_as=f"OLE preview {node.name or ''!r}",
+                )
+                payload, mime_type = preview if preview is not None else (b"", "")
+            if mime_type in SUPPORTED_IMAGE_MIME_TYPES:
+                return m.ImageElement(
+                    transform=_resolve_transform(context, node.transform),
+                    image_data=base64.b64encode(payload).decode("ascii"),
+                    mime_type=mime_type,
+                    alt_text=node.alt_text or node.name,
+                )
+
+    if node.what == "diagram":
+        diagram = _resolve_diagram(context, node, path)
+        if diagram is not None:
+            return diagram
 
     context.warn(
         "unsupported-graphic-frame",
@@ -723,6 +778,118 @@ def _resolve_unsupported(
         fill=None,
         outline=None,
         alt_text=node.alt_text or node.name,
+    )
+
+
+# --------------------------------------------------------------------------------------
+# SmartArt
+# --------------------------------------------------------------------------------------
+
+
+def _resolve_diagram(
+    context: ResolveContext, node: s.SourceUnsupported, path: tuple[int, ...]
+) -> m.SlideElement | None:
+    """Render SmartArt from the DrawingML rendering PowerPoint already cached.
+
+    A SmartArt diagram is authored as *data* -- a node tree plus a layout algorithm --
+    and laying it out is a large piece of work.  It is also work PowerPoint has already
+    done: every time it saves, it writes the fully-positioned result into a separate
+    drawing part, so that other consumers do not have to run the layout engine.  That
+    part is plain DrawingML, the same vocabulary as a slide's own shape tree, which is
+    why this is forty lines and not a diagram engine.
+
+    The hop is two relationships deep, and neither is from the slide::
+
+        slide rels --r:dm--> ppt/diagrams/data1.xml
+            data1.xml rels --diagramDrawing--> ppt/diagrams/drawing1.xml
+                dsp:drawing/dsp:spTree
+
+    Children are resolved with ``part_path`` pointed at the *drawing* part, because the
+    pictures inside a diagram are related to it and not to the slide; resolving them
+    against the slide would silently find the wrong image or none at all.
+
+    Returns ``None`` when any link in the chain is missing, so the caller falls back to
+    its warning and empty frame.
+    """
+    data_part = context.package.related_part(context.part_path, node.fallback_rel_id)
+    if data_part is None:
+        return None
+
+    drawing_part = None
+    for rel_type in DIAGRAM_DRAWING_REL_TYPES:
+        drawing_part = context.package.first_related_part(data_part, rel_type)
+        if drawing_part is not None:
+            break
+    if drawing_part is None:
+        return None
+
+    try:
+        drawing = context.package.read_xml(drawing_part)
+    except Exception:
+        return None
+    if drawing is None:
+        return None
+
+    sp_tree = child(drawing, "spTree")
+    if sp_tree is None:
+        return None
+
+    frame_transform = _resolve_transform(context, node.transform)
+    child_transform = _diagram_child_transform(sp_tree, frame_transform)
+
+    # PowerPoint writes `id="0" name=""` on *every* shape in a cached diagram drawing --
+    # identity there is carried by `modelId`, not by the DrawingML id.  So the ids are
+    # rebuilt from the frame's id and the child's position, which is unique, stable
+    # across runs, and keeps `data-pptx-id` addressable.
+    outer_part, outer_prefix = context.part_path, context.id_prefix
+    context.part_path = drawing_part
+    children: list[m.SlideElement] = []
+    try:
+        for index, shape in enumerate(parse_shape_tree(sp_tree)):
+            context.id_prefix = f"{outer_prefix}{node.shape_id or 'dgm'}/{index}/"
+            element = resolve_element(context, shape, path + (index,))
+            if element is not None:
+                children.append(element)
+    finally:
+        context.part_path, context.id_prefix = outer_part, outer_prefix
+
+    if not children:
+        # An empty cached drawing is indistinguishable from a missing one as far as the
+        # output goes, and the caller's warning is the more useful outcome.
+        return None
+
+    return m.GroupElement(
+        transform=frame_transform,
+        child_transform=child_transform,
+        children=children,
+        alt_text=node.alt_text or node.name,
+    )
+
+
+def _diagram_child_transform(sp_tree, frame: m.Transform) -> m.Transform:
+    """The coordinate space the cached diagram shapes were laid out in.
+
+    PowerPoint writes ``dsp:spTree/dsp:grpSpPr/a:xfrm`` with ``chOff``/``chExt`` matching
+    the graphic frame, so the normal group mapping scales the diagram into the frame.
+    When the ``xfrm`` is absent -- some writers omit it -- the shapes are in a space whose
+    origin is the frame's top-left and whose extent is the frame's, which is what this
+    falls back to.  Note that it is *not* ``replace(frame)``: a group with no ``chOff``
+    has children in absolute slide coordinates, whereas a diagram's are always relative
+    to its own origin.
+    """
+    _, inner = parse_group_transforms(child(sp_tree, "grpSpPr"))
+    if inner is None or not inner.width or not inner.height:
+        return m.Transform(
+            offset_x=0,
+            offset_y=0,
+            extent_width=frame.extent_width,
+            extent_height=frame.extent_height,
+        )
+    return m.Transform(
+        offset_x=inner.offset_x,
+        offset_y=inner.offset_y,
+        extent_width=inner.width,
+        extent_height=inner.height,
     )
 
 
@@ -918,13 +1085,24 @@ def _resolve_fill(context: ResolveContext, fill: s.SourceFill | None) -> m.Fill 
         )
 
     if isinstance(fill, s.SourceImageFill):
-        media = _load_media(context, fill.blip_relationship_id)
+        media = _load_media_bytes(context, fill.blip_relationship_id)
         if media is None:
             return None
-        data, mime_type = media
+        payload, mime_type = media
+        if mime_type in METAFILE_MIME_TYPES:
+            # A metafile is as legal a fill as it is a picture.  There is no on-slide
+            # extent to size the raster by here -- the fill is scaled by whatever shape
+            # it lands in -- so the preview is rendered at its own natural size.
+            preview = _metafile_preview(
+                context, payload, mime_type, width_emu=None, described_as="image fill"
+            )
+            if preview is None:
+                return None
+            payload, mime_type = preview
         if mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
             context.warn("unsupported-fill-image", f"image fill of type {mime_type} not rendered")
             return None
+        data = base64.b64encode(payload).decode("ascii")
         return m.ImageFill(image_data=data, mime_type=mime_type, tile=_tile(fill.tile))
 
     if isinstance(fill, s.SourceGroupFill):
@@ -1109,8 +1287,8 @@ def _resolve_blip_effects(
 # --------------------------------------------------------------------------------------
 
 
-def _load_media(context: ResolveContext, rel_id: str | None) -> tuple[str, str] | None:
-    """Relationship id -> (base64 payload, MIME type)."""
+def _load_media_bytes(context: ResolveContext, rel_id: str | None) -> tuple[bytes, str] | None:
+    """Relationship id -> (raw payload, MIME type)."""
     if rel_id is None:
         return None
     target = context.package.related_part(context.part_path, rel_id)
@@ -1123,7 +1301,82 @@ def _load_media(context: ResolveContext, rel_id: str | None) -> tuple[str, str] 
     if mime_type is None:
         extension = target.rsplit(".", 1)[-1].lower()
         mime_type = MIME_BY_EXTENSION.get(extension, "image/png")
+    return payload, mime_type
+
+
+def _load_media(context: ResolveContext, rel_id: str | None) -> tuple[str, str] | None:
+    """Relationship id -> (base64 payload, MIME type)."""
+    media = _load_media_bytes(context, rel_id)
+    if media is None:
+        return None
+    payload, mime_type = media
     return base64.b64encode(payload).decode("ascii"), mime_type
+
+
+def _metafile_preview(
+    context: ResolveContext,
+    payload: bytes,
+    mime_type: str,
+    *,
+    width_emu: float | None,
+    described_as: str,
+) -> tuple[bytes, str] | None:
+    """Turn EMF/WMF bytes into something renderable, or ``None`` to draw a placeholder.
+
+    Three routes, in descending order of the caller's authority over the result:
+
+    1. A ``metafile_converter`` the caller installed.  It was configured deliberately, so
+       it wins outright; it can return SVG, PNG, anything the renderer can embed.
+    2. The preview Office already embedded -- a PDF, which still needs rasterising, or a
+       DIB, which :mod:`pptx2svg.metafile.dib` turns into a PNG with no dependencies.
+    3. Nothing, which keeps the historical grey rectangle and a warning.
+
+    The distinction between "no preview in the file" and "preview found but no rasteriser
+    installed" is kept in the warning text, because the fix differs: the first needs an
+    external converter, the second needs ``pip install pptx2svg[metafile]``.
+    """
+    if context.metafile_converter is not None:
+        try:
+            converted = context.metafile_converter(payload, mime_type)
+        except Exception as error:  # a user hook must not abort the whole conversion
+            context.warn(
+                "metafile-converter-failed",
+                f"{described_as}: the configured metafile_converter raised {error!r}; "
+                "falling back to the embedded preview",
+            )
+            converted = None
+        if converted is not None:
+            return converted
+
+    preview = extract_metafile_preview(payload)
+    if preview is None:
+        context.warn(
+            "metafile-image",
+            f"{described_as} is an EMF/WMF metafile with no embedded preview, and "
+            "vector metafile records are not interpreted; drawing a placeholder",
+        )
+        return None
+
+    if preview.mime_type != "application/pdf":
+        return preview.data, preview.mime_type
+
+    try:
+        png = rasterise_pdf(preview.data, width_emu=width_emu)
+    except PdfRasterizerNotAvailable:
+        context.warn(
+            "metafile-rasterizer-missing",
+            f"{described_as} carries an embedded PDF preview, but rendering it needs "
+            "pypdfium2 (pip install pptx2svg[metafile]); drawing a placeholder",
+        )
+        return None
+    if png is None:
+        context.warn(
+            "metafile-image",
+            f"{described_as} carries an embedded PDF preview that could not be "
+            "rendered; drawing a placeholder",
+        )
+        return None
+    return png, "image/png"
 
 
 def _resolve_hyperlink(context: ResolveContext, rel_id: str | None) -> m.Hyperlink | None:
