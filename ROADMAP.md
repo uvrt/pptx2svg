@@ -27,7 +27,7 @@ after it needs a way to tell "better" from "different".
 | Package, relationships, parts | Complete |
 | Theme colours, colour maps, transforms | Complete |
 | Placeholder / background / text inheritance | Complete |
-| Shapes: 134 presets + custom geometry with guide formulas | Common set done; **~53 presets missing** |
+| Shapes: all 186 ECMA-376 presets + custom geometry | Complete; 81 compiled from the spec, the rest still hand-approximated |
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
@@ -696,22 +696,71 @@ first real EMF-bearing deck should be run through
 **Effort: M–L total.** Individually small, collectively the difference between "renders
 most decks" and "renders decks".
 
-### 5.1 The missing preset shapes (M)
+### 5.1 The missing preset shapes — **done, and then some**
 
-We implement 134 presets; **[pptx-renderer]** implements 187+. Probing well-known OOXML
-names found **53 we lack**, 48 of which they implement:
+**Effort: M. Came in under it, because the shapes stopped being transcribed by hand.**
 
-| Family | Missing |
+All 53 are implemented, plus `lineInv`, which the original probe missed. The spec's 186
+presets are now fully covered. (ECMA-376 itself omits `upArrow` — a known erratum — and we
+keep our own; `bendUpArrow` stays registered as an alias for the `bentUpArrow` misspelling.)
+
+**The approach changed partway through, and that is the part worth keeping.** The first
+16 callouts and 12 action buttons were transcribed by hand from two third-party copies of
+the spec that happened to agree. That works but cannot be checked. ECMA-376 publishes the
+geometry as a data file — an electronic addendum to Part 1 — and
+`tools/derive_preset_geometry.py` now compiles it directly into
+`src/pptx2svg/render/preset_specs.py`, following `tools/extract_font_metrics.py`'s
+pattern: pinned source SHA-256, generated output, `--check` that fails on drift.
+Re-compiling the hand-transcribed 53 from the official file reproduced them exactly, so
+the transcriptions were right — but they are now generated rather than merely lucky.
+`render/geometry.py` went from 5426 lines to 1246.
+
+The source file is **not vendored**: ECMA's text copyright policy governs it, so `--source`
+points at a copy you obtain yourself. Vendoring it (as pptx-renderer does, with a notice)
+is a reasonable alternative and would let `--check` run in CI; that is a project decision,
+not a tooling one.
+
+**Two real bugs fell out of doing it properly**, both of which predate this phase and both
+of which affect `a:custGeom` as much as presets:
+
+- `stAng`/`swAng` in an `arcTo` are **geometric** angles, not the ellipse's parametric
+  angle. They coincide only when `wR == hR`, so every circular arc looked fine and every
+  stretched one was wrong. `curvedUpArrow` made it visible: the band missed its own
+  arrowhead. Confirmed by the spec's own named guides — after the fix the arcs land on
+  `iy` and `x5` exactly.
+- SVG draws **nothing** when an arc's endpoints coincide, and DrawingML writes a circle as
+  one `arcTo` sweeping 360°. Every circle in the catalogue was being erased —
+  `smileyFace` rendered as a bare mouth curve. Sweeps are now cut into half-turn pieces.
+
+Neither changed any fixture's output: the corpus has no elliptical or full-circle custom
+geometry. Both would bite on a real deck.
+
+#### What is left here
+
+The 134 hand-written presets are *approximations*, and 85 of them differ from the
+specification by more than 2% of their silhouette. 27 were promoted after checking each
+side by side; the rest are ranked and waiting. Regenerate the ranking with the harness
+described in the Phase 5.1 commits, or just add a name to `SPEC_DRIVEN` and re-run the
+tool — promotion is one line plus a visual check.
+
+Worst offenders still hand-drawn, by silhouette divergence:
+
+| Divergence | Presets |
 | --- | --- |
-| Action buttons | `actionButtonHome`, `actionButtonBackPrevious`, `actionButtonBeginning`, `actionButtonBlank`, `actionButtonDocument`, `actionButtonEnd`, `actionButtonForwardNext`, `actionButtonHelp`, `actionButtonInformation`, `actionButtonMovie`, `actionButtonReturn`, `actionButtonSound` |
-| Callouts | `callout1‑3`, `accentCallout1‑3`, `accentBorderCallout1‑3`, `leftArrowCallout`, `rightArrowCallout`, `upArrowCallout`, `downArrowCallout`, `leftRightArrowCallout`, `upDownArrowCallout`, `quadArrowCallout` |
-| Curved & circular arrows | `curvedUpArrow`, `curvedDownArrow`, `curvedLeftArrow`, `curvedRightArrow`, `circularArrow`, `leftCircularArrow`, `leftRightCircularArrow`, `swooshArrow` |
-| Banners & scrolls | `verticalScroll`, `horizontalScroll`, `ellipseRibbon`, `ellipseRibbon2`, `leftRightRibbon` |
-| Gears, tabs, misc | `gear6`, `gear9`, `funnel`, `pieWedge`, `cornerTabs`, `squareTabs`, `plaqueTabs`, `nonIsoscelesTrapezoid`, `chartPlus`, `chartStar`, `chartX`, `flowChartOfflineStorage` |
+| 0.6–0.7 | `bentUpArrow`, `uturnArrow`, `leftUpArrow`, `bentArrow` |
+| 0.3–0.5 | `star4`–`star32`, `quadArrow`, `leftRightUpArrow`, `leftRightArrow`, `irregularSeal1/2`, `flowChartOr`, `flowChartSummingJunction`, `chevron`, `halfFrame` |
+| 0.2–0.3 | `cloud`, `notchedRightArrow`, `stripedRightArrow`, `ribbon`, `ribbon2`, `flowChartMultidocument`, `flowChartPunchedTape`, `leftArrow`, `rightArrow`, `cloudCallout`, `octagon` |
+| 0.1–0.2 | `heart`, `wave`, `corner`, `pentagon`, `trapezoid`, `parallelogram`, `plus`, `hexagon`, `diagStripe`, four more flowchart shapes, `cube`, `can` |
 
-Purely additive to `render/geometry.py` — each is an independent function plus a registry
-entry, so this parallelises across people or sessions and carries near-zero regression risk.
-Callouts and action buttons are the common ones in real decks.
+**The stars are held back deliberately.** ECMA-376's `star10` defaults to an inner radius
+85% of the outer, which renders as a barely-pointed decagon and does not look like
+PowerPoint's. Either the spec, our approximation, or my memory is wrong, and without the
+oracle there is no way to tell. **This is the single most useful thing to put in front of
+PowerPoint.**
+
+Shapes that should *stay* hand-written regardless: `rect`, `ellipse`, `line`, `roundRect`
+and friends emit a native `<rect>`/`<ellipse>`/`<line>`, which is smaller and strokes
+correctly under a transform. All of them measured 0.000 divergence anyway.
 
 ### 5.2 Other gaps (S–M each)
 
@@ -762,7 +811,7 @@ Callouts and action buttons are the common ones in real decks.
 Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrendered)   DONE
                                       ├─▶ Phase 2  (SmartArt — DONE)
                                       ├─▶ Phase 4  (EMF previews — DONE)
-                                      ├─▶ Phase 5.1/5.2  (shapes + small gaps)
+                                      ├─▶ Phase 5.1 DONE / 5.2  (small gaps)
                                       └─▶ Phase 3  (charts — longest pole, start early)
                                                               Phase 5.3 last
 ```
@@ -779,7 +828,9 @@ Revised quick wins, in order of payoff per day:
    Phase 5.3's embedded fonts attack one half of it.
 3. ~~**Phase 4 EMF previews**~~ — done; the S estimate held.
 4. ~~**Phase 2 SmartArt**~~ — done; the S estimate held.
-5. **Phase 5.1 shapes** — additive, parallelisable, near-zero risk.
+5. ~~**Phase 5.1 shapes**~~ — done. Not the additive, near-zero-risk job it looked
+   like: it turned up two arc-conversion bugs that had been silently misdrawing
+   custom geometry, and it replaced hand-transcription with a spec compiler.
 
 Phase 3 remains the long pole and should start in parallel rather than waiting.
 
