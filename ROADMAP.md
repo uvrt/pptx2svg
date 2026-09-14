@@ -27,7 +27,7 @@ after it needs a way to tell "better" from "different".
 | Package, relationships, parts | Complete |
 | Theme colours, colour maps, transforms | Complete |
 | Placeholder / background / text inheritance | Complete |
-| Shapes: all 186 ECMA-376 presets + custom geometry | Complete; 81 compiled from the spec, the rest still hand-approximated |
+| Shapes: all 186 ECMA-376 presets + custom geometry | Complete and **verified against PowerPoint**: every preset matches its own PDF export at two aspect ratios, median 0.999 silhouette overlap |
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
@@ -787,60 +787,64 @@ of which affect `a:custGeom` as much as presets:
 Neither changed any fixture's output: the corpus has no elliptical or full-circle custom
 geometry. Both would bite on a real deck.
 
-#### What is left here
+#### Every preset has now been measured against PowerPoint
 
-The hand-written presets are *approximations*, and 85 of them differed from the
-specification by more than 2% of their silhouette. 37 have been promoted — 27 after
-checking each side by side, then the ten stars after asking PowerPoint directly; the rest
-are ranked and waiting. Regenerate the ranking with the harness
-described in the Phase 5.1 commits, or just add a name to `SPEC_DRIVEN` and re-run the
-tool — promotion is one line plus a visual check.
+The judgement-based ranking that used to live here is gone, replaced by a measurement.
+All 187 presets PowerPoint accepts were laid out at their default adjustments in probe
+decks, exported to PDF by PowerPoint 16.106, and scored by silhouette overlap against
+both candidates — our generator and the compiled specification.
 
-Worst offenders still hand-drawn, by silhouette divergence:
+**The headline: PowerPoint never contradicts ECMA-376.** Across 187 shapes there was not
+one case where our approximation beat the specification, and not one where the
+specification failed to match PowerPoint. The standard is simply what PowerPoint draws,
+which retires the question the stars raised.
 
-| Divergence | Presets |
+| Outcome | Count |
 | --- | --- |
-| 0.6–0.7 | `bentUpArrow`, `uturnArrow`, `leftUpArrow`, `bentArrow` |
-| 0.3–0.5 | `quadArrow`, `leftRightUpArrow`, `leftRightArrow`, `irregularSeal1/2`, `flowChartOr`, `flowChartSummingJunction`, `chevron`, `halfFrame` |
-| 0.2–0.3 | `cloud`, `notchedRightArrow`, `stripedRightArrow`, `ribbon`, `ribbon2`, `flowChartMultidocument`, `flowChartPunchedTape`, `leftArrow`, `rightArrow`, `cloudCallout`, `octagon` |
-| 0.1–0.2 | `heart`, `wave`, `corner`, `pentagon`, `trapezoid`, `parallelogram`, `plus`, `hexagon`, `diagStripe`, four more flowchart shapes, `cube`, `can` |
+| Specification matched, ours did not → promoted | **51** |
+| Both matched (mostly shapes already compiled from the spec) | 135 |
+| `upArrow`, which ECMA-376 omits as a known erratum — ours matches at 0.996 | 1 |
+| Ours matched and the specification did not | **0** |
+| Neither matched | **0** |
 
-**The stars were held back, and asking PowerPoint settled it against me.** The doubt was
-that ECMA-376 gives `star10` an inner radius 85% of the outer, which renders as a
-barely-pointed decagon and did not look like PowerPoint's. It is exactly PowerPoint's. A
-probe deck of all ten at their default adjustments, exported to PDF by PowerPoint 16.106
-and scored by silhouette overlap:
+After promotion: **median 0.999, mean 0.997, minimum 0.962** across all 187. The seven
+still below 0.98 are antialiasing-limited rather than wrong — `line` and `lineInv` both
+score 0.962, and they are the same diagonal drawn by different code, one ours and one the
+specification's.
 
-| star | hand-written | specification |
-| --- | --- | --- |
-| `star4` | 0.466 | **0.992** |
-| `star5` | 0.686 | **0.984** |
-| `star6` | 0.750 | **0.994** |
-| `star7` | 0.508 | **0.991** |
-| `star8` | 0.507 | **0.989** |
-| `star10` | 0.424 | **0.999** |
-| `star12` | 0.505 | **0.995** |
-| `star16` | 0.506 | **0.991** |
-| `star24` | 0.505 | **0.985** |
-| `star32` | 0.507 | **0.975** |
+142 presets are now compiled from the specification and 45 remain hand-written; the
+specification does not beat any of the 45 by more than 0.01, and they are the shapes where
+a native `<rect>`/`<ellipse>`/`<line>` is the better output anyway.
 
-The specification wins in all ten; the residual is antialiasing along the silhouette
-edge. All ten are now compiled from it.
+**Two aspect ratios, not one.** Every shape was measured in a square box *and* a 2:1 one,
+because a generator can be exactly right when the box is square and wrong the moment it is
+stretched. `chevron` is the proof: pixel-identical to the specification in a square box,
+0.716 against PowerPoint when stretched. A single-aspect sweep would have passed it.
 
-The hand-written generator used a single inner ratio of 0.38 for every star but `star6`,
-a value only correct for `star5`, so every star above five points came out far too spiky.
-What it missed is that a star gets *shallower* as it gains points — 0.25, 0.284, 0.537,
-0.619, then 0.75 from `star8` upward, with `star10` an outlier at 0.817. A test pins that
-pattern, so a regression to any fixed ratio moves nine of the ten and fails.
+**What the sweep cost, and what it was worth.** Three things went wrong that are worth
+knowing before repeating it:
 
-**The wider lesson is about the doubt, not the stars.** "That does not look like what
-PowerPoint draws" was, on this occasion, worth nothing against a measurement — and the
-remaining 48 entries in the table above were ranked by the same kind of eye. Measure them
-against the oracle before promoting or rejecting any of them.
+- `bendUpArrow` — our alias for a misspelling that appears in real files — is not a name
+  OOXML defines, and a deck containing it makes PowerPoint reject the whole file. It
+  opens the deck, closes it again, and leaves the export blocked with the process idle at
+  0% CPU, which reads as a hang rather than as invalid input. Probe decks must contain
+  only names the standard defines.
+- Twenty shapes on one slide exports in three seconds; 120 across six slides silently
+  produces nothing. Batch small.
+- The sweep found exactly two shapes where *neither* candidate matched, `cloud` and
+  `cloudCallout`, and both turned out to be our bug rather than PowerPoint's divergence:
+  a path authored in its own coordinate space had its arc radii scaled before the start
+  angle was converted, which rotates any arc not beginning on an axis. Invisible in a
+  square box. That bug would not have been found any other way.
 
-Shapes that should *stay* hand-written regardless: `rect`, `ellipse`, `line`, `roundRect`
-and friends emit a native `<rect>`/`<ellipse>`/`<line>`, which is smaller and strokes
-correctly under a transform. All of them measured 0.000 divergence anyway.
+**The lesson that generalises.** The ranking this replaced was produced by eye and was
+wrong in both directions: it listed `chevron` at 0.31 divergence (a square-box artefact of
+measuring at 2:1) while calling `decagon` and `dodecagon` fine at a glance, when both were
+systematically wrong. Shapes at 0.86–0.94 are exactly the ones a screenshot calls correct.
+
+Shapes that should *stay* hand-written: `rect`, `ellipse`, `line`, `roundRect` and
+friends emit a native `<rect>`/`<ellipse>`/`<line>`, which is smaller and strokes correctly
+under a transform. All of them match PowerPoint already.
 
 ### 5.2 Other gaps (S–M each)
 
