@@ -287,19 +287,24 @@ def _pt(emu):
 
 
 def _plot_rect(chart):
-    """The plot rectangle, read back off the two axis lines, in points."""
+    """The plot rectangle, read back off the drawn lines, in points.
+
+    Which line is the value axis and which the category axis depends on `barDir`, and a
+    category axis floats away from the plot's edge once values go negative -- so the rect
+    is taken from the *longest* line each way instead, which spans the plot whichever axis
+    or gridline it happens to be.
+    """
     lines = [c for c in chart.children if isinstance(c, m.ConnectorElement)]
     vertical = [line for line in lines if line.transform.extent_width == 0]
     horizontal = [line for line in lines if line.transform.extent_height == 0]
     assert vertical and horizontal
-    value = vertical[0].transform
-    # The category axis is the lowest horizontal line; the rest are gridlines.
-    category = max(horizontal, key=lambda line: line.transform.offset_y).transform
+    down = max(vertical, key=lambda line: line.transform.extent_height).transform
+    across = max(horizontal, key=lambda line: line.transform.extent_width).transform
     return (
-        _pt(value.offset_x),
-        _pt(value.offset_y),
-        _pt(category.offset_x + category.extent_width),
-        _pt(category.offset_y),
+        _pt(across.offset_x),
+        _pt(down.offset_y),
+        _pt(across.offset_x + across.extent_width),
+        _pt(down.offset_y + down.extent_height),
     )
 
 
@@ -681,12 +686,7 @@ def test_the_probe_sweep_reproduces_powerpoints_plot_rectangle(name, probe_deck)
     width = chart.transform.extent_width / 12700.0
     height = chart.transform.extent_height / 12700.0
     left, top, right, bottom = _plot_rect(chart)
-    ours = {
-        "left": left,
-        "right": width - right,
-        "top": top,
-        "bottom": height - bottom,
-    }
+    ours = {"left": left, "right": width - right, "top": top, "bottom": height - bottom}
     for edge, truth in expected.items():
         assert ours[edge] == pytest.approx(truth, abs=SWEEP_TOLERANCE_PT), (
             f"{name} {edge}: PowerPoint {truth:.4f}, ours {ours[edge]:.4f}"
@@ -886,16 +886,8 @@ def test_the_variant_sweep_reproduces_powerpoints_plot_rectangle(name, variant_d
     _, expected, _ = VARIANT_SWEEP[name]
     width = chart.transform.extent_width / 12700.0
     height = chart.transform.extent_height / 12700.0
-    lines = [c for c in chart.children if isinstance(c, m.ConnectorElement)]
-    value = [line for line in lines if line.transform.extent_width == 0][0].transform
-    horizontal = [line for line in lines if line.transform.extent_height == 0]
-    category = max(horizontal, key=lambda line: line.transform.offset_y).transform
-    ours = {
-        "left": value.offset_x / 12700.0,
-        "right": width - (category.offset_x + category.extent_width) / 12700.0,
-        "top": value.offset_y / 12700.0,
-        "bottom": height - (value.offset_y + value.extent_height) / 12700.0,
-    }
+    left, top, right, bottom = _plot_rect(chart)
+    ours = {"left": left, "right": width - right, "top": top, "bottom": height - bottom}
     for edge, truth in expected.items():
         assert ours[edge] == pytest.approx(truth, abs=SWEEP_TOLERANCE_PT), (
             f"{name} {edge}: PowerPoint {truth:.4f}, ours {ours[edge]:.4f}"
@@ -997,7 +989,11 @@ def _build(body: str):
             font_family="Aptos",
             font_size=10.0,
             color=m.ResolvedColor(hex="#000000"),
-            accents=[m.ResolvedColor(hex="#4472C4")],
+            accents=[
+                m.ResolvedColor(hex="#4472C4"),
+                m.ResolvedColor(hex="#ED7D31"),
+                m.ResolvedColor(hex="#A5A5A5"),
+            ],
         ),
         resolve_fill=lambda fill: None,
         resolve_outline=lambda outline: None,
@@ -1168,3 +1164,256 @@ def test_an_axis_that_chose_general_does_not_inherit_the_cells_format():
     }
     assert "5000" in printed
     assert not any("," in label for label in printed)
+
+
+# -- Findings from review ---------------------------------------------------------------
+#
+# Each of these reproduced a real defect before its fix.  Several are orientation bugs the
+# probe sweep could not see, because it checks the plot *rectangle* and these get the
+# rectangle right while drawing the wrong thing inside it.
+
+
+def _lines(children):
+    return [c for c in children if isinstance(c, m.ConnectorElement)]
+
+
+def test_a_horizontal_charts_gridlines_are_vertical():
+    """The value axis runs along the bottom, so its gridlines run up the plot.
+
+    Measured on the horizontal probe: three vertical lines, at the ticks for 2, 4 and 6.
+    The one for 0 is left out because the category axis already draws it -- the same
+    rule a column chart applies to its zero gridline.
+    """
+    children, _ = _build(
+        "<c:chart><c:plotArea><c:barChart><c:barDir val='bar'/>"
+        "<c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='3'/>"
+        "<c:pt idx='0'><c:v>3</c:v></c:pt><c:pt idx='1'><c:v>4</c:v></c:pt>"
+        "<c:pt idx='2'><c:v>5</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:majorGridlines/></c:valAx></c:plotArea></c:chart>"
+    )
+    lines = _lines(children)
+    gridlines = [line for line in lines if line.transform.extent_width == 0]
+    # Three gridlines plus the category axis, all vertical; one horizontal value axis.
+    assert len(gridlines) == 4
+    assert len([line for line in lines if line.transform.extent_height == 0]) == 1
+
+
+def test_barDir_decides_which_axis_line_is_which():
+    """`c:delete` and `c:spPr` have to follow their own axis, not a fixed side."""
+    body = (
+        "<c:chart><c:plotArea><c:barChart><c:barDir val='bar'/>"
+        "<c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>3</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/>{deleted}</c:valAx></c:plotArea></c:chart>"
+    )
+    both = _lines(_build(body.format(deleted=""))[0])
+    assert {line.transform.extent_height == 0 for line in both} == {True, False}
+
+    # Deleting the *value* axis must drop the horizontal line, not the vertical one.
+    remaining = _lines(_build(body.format(deleted="<c:delete val='1'/>"))[0])
+    assert len(remaining) == 1
+    assert remaining[0].transform.extent_width == 0
+
+
+def test_a_negative_gap_width_does_not_divide_by_zero():
+    """`c:gapWidth` is schema-bounded to 0..500 and a file need not obey.
+
+    At -100 on a single series the bar-width divisor is exactly zero, which used to abort
+    the whole conversion rather than the one chart.
+    """
+    children, _ = _build(
+        bar(
+            "<c:gapWidth val='-100'/><c:ser><c:val><c:numRef><c:numCache>"
+            "<c:ptCount val='1'/><c:pt idx='0'><c:v>3</c:v></c:pt>"
+            "</c:numCache></c:numRef></c:val></c:ser>"
+        )
+    )
+    assert children
+
+
+@pytest.mark.parametrize("value", ["1.5e308", "-1.5e308"])
+def test_a_datum_near_the_float_ceiling_does_not_overflow(value):
+    """The axis maximum is rounded strictly outwards, which takes 1.5e308 to infinity."""
+    _, data = _build(
+        bar(
+            "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>{value}</c:v></c:pt>"
+            "</c:numCache></c:numRef></c:val></c:ser>"
+        )
+    )
+    assert data.value_axis.maximum > data.value_axis.minimum
+
+
+def test_a_denormal_span_does_not_underflow_the_unit_to_zero():
+    minimum, maximum, unit = nice_axis_scale(0.0, 5e-324)
+    assert unit > 0 and maximum > minimum
+
+
+def test_each_axis_styles_its_own_labels():
+    """`c:catAx/c:txPr` was parsed and then never consulted; both axes have one."""
+    children, _ = _build(
+        "<c:chart><c:plotArea><c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:cat><c:strRef><c:strCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>Reader</c:v></c:pt></c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>3</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart>"
+        "<c:catAx><c:axId val='1'/><c:txPr><a:bodyPr/><a:p><a:pPr>"
+        "<a:defRPr sz='2400'/></a:pPr></a:p></c:txPr></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:txPr><a:bodyPr/><a:p><a:pPr>"
+        "<a:defRPr sz='800'/></a:pPr></a:p></c:txPr></c:valAx></c:plotArea></c:chart>"
+    )
+    sizes = {
+        "".join(r.text for p in child.text_body.paragraphs for r in p.runs): (
+            child.text_body.paragraphs[0].runs[0].properties.font_size
+        )
+        for child in children
+        if isinstance(child, m.ShapeElement) and child.text_body is not None
+    }
+    assert sizes["Reader"] == 24
+    assert sizes["0"] == 8
+
+
+def test_an_overlaid_legend_does_not_shrink_the_plot():
+    """`c:overlay` draws the legend *over* the plot, so it takes no space away."""
+    body = (
+        "<c:chart><c:plotArea><c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>Coverage</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        "<c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>3</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/></c:valAx></c:plotArea>"
+        "<c:legend><c:legendPos val='b'/><c:overlay val='{overlay}'/></c:legend></c:chart>"
+    )
+    beside = _build(body.format(overlay="0"))[0]
+    over = _build(body.format(overlay="1"))[0]
+    assert _plot_bottom(over) > _plot_bottom(beside)
+
+
+def _plot_bottom(children):
+    lines = [c for c in children if isinstance(c, m.ConnectorElement)]
+    down = max(lines, key=lambda line: line.transform.extent_height).transform
+    return down.offset_y + down.extent_height
+
+
+def test_a_series_longer_than_the_labelled_one_still_draws_every_bar():
+    """Bars are indexed by the category list, so a short list used to lose their tails."""
+    children, data = _build(
+        bar(
+            "<c:ser><c:idx val='0'/><c:order val='0'/>"
+            "<c:cat><c:strRef><c:strCache><c:ptCount val='2'/>"
+            "<c:pt idx='0'><c:v>a</c:v></c:pt><c:pt idx='1'><c:v>b</c:v></c:pt>"
+            "</c:strCache></c:strRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:ptCount val='2'/>"
+            "<c:pt idx='0'><c:v>1</c:v></c:pt><c:pt idx='1'><c:v>2</c:v></c:pt>"
+            "</c:numCache></c:numRef></c:val></c:ser>"
+            "<c:ser><c:idx val='1'/><c:order val='1'/>"
+            "<c:val><c:numRef><c:numCache><c:ptCount val='4'/>"
+            "<c:pt idx='0'><c:v>3</c:v></c:pt><c:pt idx='1'><c:v>4</c:v></c:pt>"
+            "<c:pt idx='2'><c:v>5</c:v></c:pt><c:pt idx='3'><c:v>6</c:v></c:pt>"
+            "</c:numCache></c:numRef></c:val></c:ser>"
+        )
+    )
+    assert data.categories == ["a", "b", "3", "4"]
+    bars = [
+        child
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.fill, m.SolidFill)
+        and child.text_body is None
+    ]
+    assert len(bars) == 6
+
+
+def test_vary_colors_does_not_suppress_the_negative_bar_inversion():
+    """A varyColors fill is not a `c:dPt`, so `c:invertIfNegative` still applies to it."""
+    children, _ = _build(
+        bar(
+            "<c:varyColors val='1'/><c:ser><c:val><c:numRef><c:numCache>"
+            "<c:ptCount val='3'/><c:pt idx='0'><c:v>3</c:v></c:pt>"
+            "<c:pt idx='1'><c:v>-2</c:v></c:pt><c:pt idx='2'><c:v>5</c:v></c:pt>"
+            "</c:numCache></c:numRef></c:val></c:ser>"
+        )
+    )
+    bars = sorted(
+        (
+            child
+            for child in children
+            if isinstance(child, m.ShapeElement)
+            and isinstance(child.fill, m.SolidFill)
+            and child.text_body is None
+        ),
+        key=lambda bar: bar.transform.offset_x,
+    )
+    assert [bar.fill.color.hex.upper() for bar in bars] == [
+        "#4472C4",
+        "#FFFFFF",
+        "#A5A5A5",
+    ]
+
+
+def test_a_deleted_legend_entry_reserves_no_band_width():
+    """`c:legendEntry`/`c:delete` removes the label, so it must not shift the plot."""
+    body = (
+        "<c:chart><c:plotArea><c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>ab</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        "<c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>3</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "<c:ser><c:idx val='1'/><c:order val='1'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>a very long series name indeed</c:v></c:pt>"
+        "</c:strCache></c:strRef></c:tx>"
+        "<c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>2</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/></c:valAx></c:plotArea>"
+        "<c:legend><c:legendPos val='r'/>{entry}</c:legend></c:chart>"
+    )
+    kept = _build(body.format(entry=""))[0]
+    struck = _build(
+        body.format(
+            entry="<c:legendEntry><c:idx val='1'/><c:delete val='1'/></c:legendEntry>"
+        )
+    )[0]
+
+    def plot_width(children):
+        lines = [c for c in children if isinstance(c, m.ConnectorElement)]
+        across = max(lines, key=lambda line: line.transform.extent_width)
+        return across.transform.extent_width
+
+    assert plot_width(struck) > plot_width(kept)
+
+
+def test_a_multi_level_category_cache_without_ptCount_keeps_its_labels():
+    """`c:ptCount` is minOccurs=0, and a multi-level cache has no direct `c:pt` children."""
+    parsed = chart(
+        bar(
+            "<c:ser><c:cat><c:multiLvlStrRef><c:multiLvlStrCache><c:lvl>"
+            "<c:pt idx='0'><c:v>Q1</c:v></c:pt><c:pt idx='1'><c:v>Q2</c:v></c:pt>"
+            "</c:lvl></c:multiLvlStrCache></c:multiLvlStrRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:ptCount val='2'/>"
+            "<c:pt idx='0'><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        )
+    )
+    assert parsed.plots[0].series[0].categories == ["Q1", "Q2"]
+
+
+def test_the_metrics_less_fallback_line_box_matches_the_renderers():
+    """A face with no metrics table still has to lay out in the 1.2 em the renderer uses.
+
+    A shorter fallback box made an unmetricked title's band come out short of its own
+    text, which is the one thing `FontBox` exists to keep in step.
+    """
+    from pptx2svg.resolve.chart import font_box
+    from pptx2svg.text.measure import DEFAULT_LINE_HEIGHT_RATIO
+
+    box = font_box("a face nothing has metrics for", 18.0)
+    assert box.line_height == pytest.approx(DEFAULT_LINE_HEIGHT_RATIO * 18.0)
+    assert box.first_baseline < box.line_height

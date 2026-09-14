@@ -575,15 +575,19 @@ def _cache(reference: Element | None, kind: str) -> Element | None:
     return None
 
 
-def _point_count(cache: Element) -> int:
+def _point_count(cache: Element, points: list[Element] | None = None) -> int:
     """How long the series is.
 
-    ``c:ptCount`` is authoritative but not always present or sane, and the ``c:pt``
-    indices can run past it in files written by other tools, so the length is the larger
-    of the two -- clamped, because ``ptCount`` is attacker-controlled.
+    ``c:ptCount`` is authoritative but is ``minOccurs="0"`` and not always sane, and the
+    ``c:pt`` indices can run past it in files written by other tools, so the length is the
+    larger of the two -- clamped, because ``ptCount`` is attacker-controlled.
+
+    ``points`` names where the ``c:pt`` children actually are.  A ``c:multiLvlStrCache``
+    holds none directly -- they sit one level down inside ``c:lvl`` -- so without it a
+    cache that omits ``c:ptCount`` measures as empty and every category label is lost.
     """
     highest = -1
-    for point in children(cache, "pt"):
+    for point in children(cache, "pt") if points is None else points:
         index = int_attr(point, "idx")
         if index is not None and 0 <= index < MAX_CACHE_POINTS:
             highest = max(highest, index)
@@ -639,7 +643,7 @@ def _string_points(reference: Element | None) -> tuple[list[str], str | None]:
         if multi is not None:
             levels = children(multi, "lvl")
             if levels:
-                count = _point_count(multi)
+                count = _point_count(multi, children(levels[0], "pt"))
                 return _level_strings(levels[0], count), None
 
     if cache is None:
