@@ -66,25 +66,61 @@ def test_every_substitution_points_at_a_metrics_table_that_exists():
         assert substitution.metrics in METRICS, substitution.office
 
 
-def test_measuring_and_drawing_diverge_only_where_it_is_declared():
-    """Aptos, Aptos Display, Aptos Narrow and Cambria, by name.
+#: Faces measured from one font and drawn with another, listed by name so that adding a
+#: ninth is a deliberate act with a test to update rather than a quiet slide.
+#:
+#: Every one of them is proprietary with no metric-compatible clone, so there is nothing
+#: we could ship that draws them correctly -- and measuring them with whatever we *can*
+#: draw is worse than measuring them properly, because PowerPoint laid the deck out with
+#: the real advances.  The four MS Japanese faces joined the list when ``sample.pptx``
+#: showed what the alternative costs: MS PGothic is proportional (katakana 0.648-1.0 em)
+#: and Noto Sans JP is not (uniformly 1.0), so its lines were measured up to a third too
+#: wide and wrapped early.
+DIVERGENT = {
+    "Aptos", "Aptos Display", "Aptos Narrow", "Cambria",
+    "MS Gothic", "MS ゴシック", "MS PGothic", "MS Pゴシック",
+    "MS Mincho", "MS 明朝", "MS PMincho", "MS P明朝",
+}
 
-    Listing them explicitly rather than counting them means adding a fifth is a
-    deliberate act with a test to update, not a quiet slide.
-    """
+#: Tables with no font behind them.  See the note on :data:`DIVERGENT`.
+MEASURED_ONLY = {
+    "Aptos", "Aptos Display", "Cambria",
+    "ＭＳ ゴシック", "ＭＳ Ｐゴシック", "ＭＳ 明朝", "ＭＳ Ｐ明朝",
+}
+
+
+def test_measuring_and_drawing_diverge_only_where_it_is_declared():
     divergent = {
         substitution.office
         for substitution in SUBSTITUTIONS.values()
         if substitution.metrics != substitution.substitute
     }
-    # Japanese faces all measure and draw as Noto Sans JP; only these measure one face
-    # while drawing another, because no open font reproduces their advance widths.
-    assert divergent == {"Aptos", "Aptos Display", "Aptos Narrow", "Cambria"}
+    assert divergent == DIVERGENT
 
 
 def test_metrics_tables_exist_only_for_families_we_ship_or_deliberately_measure():
-    measured_only = {"Aptos", "Aptos Display", "Cambria"}
-    assert set(METRICS) == set(BUNDLED_FAMILIES) | measured_only
+    assert set(METRICS) == set(BUNDLED_FAMILIES) | MEASURED_ONLY
+
+
+def test_the_proportional_japanese_faces_are_measured_as_proportional():
+    """The bug this catches: every kana measured at one em because the face is CJK.
+
+    ``ＭＳ Ｐゴシック`` is proportional and ``ＭＳ ゴシック`` is not, from the same file --
+    they are two faces inside ``msgothic.ttc``.  A generator that took face 0 for both
+    would produce two identical tables and look perfectly healthy.
+    """
+    proportional = METRICS["ＭＳ Ｐゴシック"]
+    monospaced = METRICS["ＭＳ ゴシック"]
+
+    # A kanji is a full em in both; the katakana that gave the bug away are not.
+    assert proportional.cjk_width == proportional.units_per_em
+    assert proportional.widths["ト"] < 0.7 * proportional.units_per_em
+    assert proportional.widths["、"] < 0.7 * proportional.units_per_em
+
+    # The monospaced cut keeps every full-width kana at one em, so it stores no row for
+    # them at all and falls through to cjk_width.
+    assert "ト" not in monospaced.widths
+    assert monospaced.cjk_width == monospaced.units_per_em
 
 
 # --------------------------------------------------------------------------------------

@@ -126,35 +126,47 @@ def _entries() -> list[Substitution]:
     rows.append(Substitution("Aptos Narrow", "Carlito", "Aptos", metric_compatible=False))
 
     # -- Japanese.  Noto Sans JP is not metric-compatible with any of these (nothing is;
-    #    the MS faces are proprietary and were never cloned), but every one of them is
-    #    full-width for CJK, which is what dominates the measurement, and a Gothic stands
-    #    in for a Gothic far better than a Latin fallback does.
+    #    the MS faces are proprietary and were never cloned), and it is the only Japanese
+    #    face we ship, so it is what every one of them is *drawn* with.
+    #
+    #    What they are *measured* with is a separate question, and for the four MS faces
+    #    the answer is their own table.  The "P" in MS PGothic means proportional: its
+    #    katakana run from 0.648 em to 1.0 while Noto Sans JP's are uniformly 1.0, so
+    #    measuring a line of katakana with Noto Sans JP's widths overstates it by up to a
+    #    third and wraps it early.  This is the Aptos arrangement -- measured as one face,
+    #    drawn as another -- and it is right for the same reason: PowerPoint laid the deck
+    #    out with MS PGothic's advances, so matching those is what matches PowerPoint.
     japanese_gothic = (
-        "MS Gothic", "MS ゴシック", "MS PGothic", "MS Pゴシック",
-        "Meiryo", "メイリオ", "Meiryo UI",
-        "Yu Gothic", "游ゴシック", "Yu Gothic UI",
-        "Hiragino Sans", "Hiragino Kaku Gothic ProN",
-        "Noto Sans JP", "Noto Sans CJK JP",
+        ("MS Gothic", "ＭＳ ゴシック"), ("MS ゴシック", "ＭＳ ゴシック"),
+        ("MS PGothic", "ＭＳ Ｐゴシック"), ("MS Pゴシック", "ＭＳ Ｐゴシック"),
+        ("Meiryo", "Noto Sans JP"), ("メイリオ", "Noto Sans JP"),
+        ("Meiryo UI", "Noto Sans JP"),
+        ("Yu Gothic", "Noto Sans JP"), ("游ゴシック", "Noto Sans JP"),
+        ("Yu Gothic UI", "Noto Sans JP"),
+        ("Hiragino Sans", "Noto Sans JP"),
+        ("Hiragino Kaku Gothic ProN", "Noto Sans JP"),
+        ("Noto Sans JP", "Noto Sans JP"), ("Noto Sans CJK JP", "Noto Sans JP"),
     )
-    for office in japanese_gothic:
+    for office, table in japanese_gothic:
         rows.append(
             Substitution(
-                office, "Noto Sans JP", "Noto Sans JP",
+                office, "Noto Sans JP", table,
                 metric_compatible=(office in ("Noto Sans JP", "Noto Sans CJK JP")),
             )
         )
     # Mincho is a serif; Noto Sans JP is not, and we ship no Japanese serif.  Mapping it
-    # anyway is still right: the alternative is no Japanese glyphs at all.
+    # anyway is still right: the alternative is no Japanese glyphs at all.  The MS cuts
+    # measure from their own tables for the reason given above.
     japanese_mincho = (
-        "MS Mincho", "MS 明朝", "MS PMincho", "MS P明朝",
-        "Yu Mincho", "游明朝", "Hiragino Mincho ProN",
-        "Noto Serif CJK JP", "Noto Serif JP",
+        ("MS Mincho", "ＭＳ 明朝"), ("MS 明朝", "ＭＳ 明朝"),
+        ("MS PMincho", "ＭＳ Ｐ明朝"), ("MS P明朝", "ＭＳ Ｐ明朝"),
+        ("Yu Mincho", "Noto Sans JP"), ("游明朝", "Noto Sans JP"),
+        ("Hiragino Mincho ProN", "Noto Sans JP"),
+        ("Noto Serif CJK JP", "Noto Sans JP"), ("Noto Serif JP", "Noto Sans JP"),
     )
-    for office in japanese_mincho:
+    for office, table in japanese_mincho:
         rows.append(
-            Substitution(
-                office, "Noto Sans JP", "Noto Sans JP", metric_compatible=False,
-            )
+            Substitution(office, "Noto Sans JP", table, metric_compatible=False)
         )
     return rows
 

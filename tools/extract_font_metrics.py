@@ -92,32 +92,84 @@ def _sample_characters() -> list[str]:
 
 SAMPLE = _sample_characters()
 
-#: Used for ``cjk_width`` and to check a CJK face really is full-width.
-CJK_PROBE = "あ"  # HIRAGANA LETTER A
+#: The advance ``cjk_width`` stands for: every CJK character with no row of its own.
+#:
+#: A kanji, deliberately, not the hiragana this used to probe with.  Kana are enumerated
+#: below and ideographs are not, so what is left for this fallback to cover is almost
+#: entirely ideographs -- and in a proportional face the two disagree.  ＭＳ Ｐゴシック
+#: draws 編 at a full em and あ at 0.941, so probing with あ quietly measured every kanji
+#: in the corpus 6% narrow.  For a monospaced face the choice makes no difference.
+CJK_PROBE = "編"  # CJK UNIFIED IDEOGRAPH-7DE8
+
+
+def _cjk_sample_characters() -> list[str]:
+    """Japanese characters whose advance is worth storing individually.
+
+    ``cjk_width`` assumes every CJK character is one em wide, which is true of the
+    monospaced faces (MS Gothic, Noto Sans JP) and false of the proportional ones.  The
+    "P" in ``ＭＳ Ｐゴシック`` *means* proportional: measured from the file Office ships,
+    its katakana run from 0.648 em (ト) to 1.0, and its ideographic comma and full stop
+    are 0.664.  Measuring those at 1.0 overstates a line of katakana by up to a third,
+    which wraps it early and then draws the wrapped text with the correct outlines -- the
+    layout is wrong while every glyph is right, which is the hardest kind of error to see.
+
+    Kanji are deliberately not enumerated: they are full-width in every Japanese face in
+    practice, and there are tens of thousands of them.  ``cjk_width`` remains their rule.
+    """
+    ranges = (
+        (0x3000, 0x303F),  # CJK symbols and punctuation: 、。「」〜
+        (0x3041, 0x309F),  # hiragana
+        (0x30A0, 0x30FF),  # katakana, including the long-vowel mark ー
+        (0xFF01, 0xFF60),  # fullwidth ASCII forms
+        (0xFF61, 0xFF9F),  # halfwidth katakana
+    )
+    return [chr(c) for start, end in ranges for c in range(start, end + 1)]
+
+
+CJK_SAMPLE = _cjk_sample_characters()
 
 
 # --------------------------------------------------------------------------------------
 # Reading one face
 # --------------------------------------------------------------------------------------
 
-def _open(path: Path, weight: int | None):
+def _open(path: Path, weight: int | None, index: int = 0):
     """Open a face, instancing a variable font at ``weight`` when one is asked for.
 
     Arimo, Raleway and Noto Sans JP ship as single variable files.  resvg reads the
     weight axis correctly -- Arimo at ``wght=700`` renders pixel-for-pixel like static
     Liberation Sans Bold -- so the bold table has to be taken from the same instance the
     rasteriser will produce, not from the file's default instance.
+
+    ``index`` selects a face inside a TrueType collection.  It matters for exactly the
+    faces this was extended for: ``msgothic.ttc`` holds ＭＳ ゴシック, MS UI Gothic and
+    ＭＳ Ｐゴシック at indices 0, 1 and 2, and only the last of the three is proportional.
+    Taking index 0 for all of them would have measured the proportional face as
+    monospaced and hidden the bug this is here to fix.
     """
     from fontTools.ttLib import TTFont
 
-    font = TTFont(os.fspath(path), fontNumber=0, lazy=True)
+    font = TTFont(os.fspath(path), fontNumber=index, lazy=True)
     if weight is None or "fvar" not in font:
         return font
     from fontTools.varLib.instancer import instantiateVariableFont
 
     return instantiateVariableFont(
-        TTFont(os.fspath(path), fontNumber=0), {"wght": weight}, inplace=False
+        TTFont(os.fspath(path), fontNumber=index), {"wght": weight}, inplace=False
     )
+
+
+def collection_index(path: Path, family: str) -> int:
+    """Which face inside a ``.ttc`` carries ``family``; 0 for a plain font file."""
+    if path.suffix.lower() != ".ttc":
+        return 0
+    from fontTools.ttLib import TTCollection
+
+    for index, font in enumerate(TTCollection(os.fspath(path), lazy=True).fonts):
+        for record in font["name"].names:
+            if record.nameID == 1 and record.toUnicode() == family:
+                return index
+    return 0
 
 
 def _widths(font) -> tuple[int, dict[str, int], int]:
@@ -133,6 +185,15 @@ def _widths(font) -> tuple[int, dict[str, int], int]:
 
     cjk_glyph = cmap.get(ord(CJK_PROBE))
     cjk_width = hmtx[cjk_glyph][0] if cjk_glyph is not None else units_per_em
+
+    # Only the characters that disagree with cjk_width earn a row.  A monospaced face
+    # adds nothing here; a proportional one adds the hundred-odd entries that make it
+    # proportional, and the table stays readable either way.
+    for char in CJK_SAMPLE:
+        glyph = cmap.get(ord(char))
+        if glyph is not None and hmtx[glyph][0] != cjk_width:
+            widths[char] = hmtx[glyph][0]
+
     return units_per_em, widths, cjk_width
 
 
@@ -147,13 +208,15 @@ def _default_width(widths: dict[str, int], units_per_em: int) -> int:
     return round(sum(alphabet) / len(alphabet)) if alphabet else units_per_em // 2
 
 
-def read_face(regular: Path, bold: Path, bold_weight: int | None) -> dict:
+def read_face(
+    regular: Path, bold: Path, bold_weight: int | None, index: int = 0
+) -> dict:
     """Everything one entry of the table needs, from the regular and bold files."""
-    font = _open(regular, None)
+    font = _open(regular, None, index)
     units_per_em, widths, cjk_width = _widths(font)
     hhea = font["hhea"]
 
-    bold_font = _open(bold, bold_weight)
+    bold_font = _open(bold, bold_weight, index)
     bold_upm, bold_widths, bold_cjk = _widths(bold_font)
     if bold_upm != units_per_em:  # pragma: no cover - would mean a mismatched pair
         raise SystemExit(f"{regular.name} and {bold.name} disagree on unitsPerEm")
@@ -218,10 +281,24 @@ def source_faces() -> dict[str, tuple[Path, Path, int | None]]:
 #: export embeds "AptosDisplay", so PowerPoint had it even while every font directory
 #: said otherwise.  Two of the corpus's seven decks use it, and they are the two that
 #: scored worst.
-MEASURED_ONLY = ("Cambria", "Aptos", "Aptos Display")
+#: The Japanese faces are here because a deck can need one without ever naming it.
+#: ``sample.pptx`` declares ``<a:ea typeface=""/>`` -- no East-Asian face at all -- and
+#: then sets Japanese body text, so both renderers fall back: PowerPoint to MS Gothic,
+#: MS PGothic and MS Mincho (they are embedded in its PDF export), and we to the same
+#: family, which Office installs.  We drew the right outlines and measured them with
+#: Noto Sans JP's widths, because the table had no entry for the face we were drawing.
+MEASURED_ONLY = (
+    "Cambria",
+    "Aptos",
+    "Aptos Display",
+    "ＭＳ Ｐゴシック",
+    "ＭＳ ゴシック",
+    "ＭＳ Ｐ明朝",
+    "ＭＳ 明朝",
+)
 
 
-def measured_only_faces() -> dict[str, tuple[Path, Path, int | None]]:
+def measured_only_faces() -> dict[str, tuple[Path, Path, int | None, int]]:
     """Resolve :data:`MEASURED_ONLY` against the local profile, skipping what is absent."""
     sys.path.insert(0, str(HERE))
     import fidelity
@@ -230,7 +307,7 @@ def measured_only_faces() -> dict[str, tuple[Path, Path, int | None]]:
     if profile is None:
         return {}
     faces = profile.get("faces", {})
-    resolved: dict[str, tuple[Path, Path, int | None]] = {}
+    resolved: dict[str, tuple[Path, Path, int | None, int]] = {}
     for family in MEASURED_ONLY:
         styles = faces.get(family)
         if not styles or "regular" not in styles:
@@ -240,7 +317,9 @@ def measured_only_faces() -> dict[str, tuple[Path, Path, int | None]]:
         # table then reports as a 1.0 ratio.  That is a real property of the font, not a
         # gap: it is what a rasteriser will draw too.
         bold = Path(styles.get("bold", styles["regular"])["path"])
-        resolved[family] = (regular, bold, None)
+        # The profile keys a collection's families to one shared path, so the face has to
+        # be picked out by name here rather than trusted to be first.
+        resolved[family] = (regular, bold, None, collection_index(regular, family))
     return resolved
 
 
@@ -304,6 +383,10 @@ NOTES = {
     "Cambria": "MEASURED ONLY -- proprietary; Caladea is 4.5% narrower, so it is not it",
     "Aptos": "MEASURED ONLY -- proprietary, no clone exists, drawn with a substitute",
     "Aptos Display": "MEASURED ONLY -- Office cloud font, no clone exists",
+    "ＭＳ Ｐゴシック": "MEASURED ONLY -- proportional: kana run 0.648-1.0 em, not full-width",
+    "ＭＳ ゴシック": "MEASURED ONLY -- monospaced full-width, the non-proportional cut",
+    "ＭＳ Ｐ明朝": "MEASURED ONLY -- proportional serif; PowerPoint falls back to it too",
+    "ＭＳ 明朝": "MEASURED ONLY -- monospaced full-width serif",
 }
 
 
