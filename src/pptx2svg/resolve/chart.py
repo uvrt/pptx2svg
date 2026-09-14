@@ -45,6 +45,7 @@ Three things that look like bugs and are not:
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field, replace
 
 from .. import model as m
@@ -162,6 +163,26 @@ DATA_LABEL_INNER_GAP_PT = 4.05
 #: centred on the point vertically and sits to its right -- ECMA's ``r`` default, which is
 #: what PowerPoint drew.  Measured once, with a 7 pt marker.
 DATA_LABEL_LINE_GAP_EM = 0.6
+
+#: Chart kinds laid out around a centre rather than on a pair of axes.
+POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart"})
+
+#: ``c:holeSize`` when the element is absent.  ECMA-376 documents a default of 10; what
+#: PowerPoint *draws* for a `c:doughnutChart` stating no `c:holeSize` is a **solid pie**,
+#: measured on the probe -- the wedge closes through the centre with no inner arc.
+DEFAULT_HOLE_SIZE = 0.0
+
+#: Where a slice's data label sits, as a fraction of the outer radius along the slice's
+#: bisector.  All four measured on one probe pie whose labels all fit comfortably:
+#: ``ctr`` is exactly half the radius, the rest are means over four slices.  PowerPoint's
+#: real ``bestFit`` moves a label out of the way when it does not fit, which this does not
+#: reproduce and which was **not** measured.
+PIE_LABEL_RADIUS = {
+    "ctr": 0.500,
+    "inEnd": 0.856,
+    "outEnd": 1.020,
+    "bestFit": 0.710,
+}
 
 #: The outline on a negative bar drawn hollow by ``c:invertIfNegative`` -- 0.75 pt.
 INVERTED_BAR_OUTLINE_EMU = 9525.0
@@ -617,7 +638,45 @@ class ChartBuilder:
 
     # -- public -------------------------------------------------------------------------
 
+    @property
+    def _is_polar(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in POLAR_CHART_KINDS
+
     def build(self) -> tuple[list[m.SlideElement], m.ChartData]:
+        if self._is_polar:
+            return self._build_polar()
+        return self._build_cartesian()
+
+    def _build_polar(self) -> tuple[list[m.SlideElement], m.ChartData]:
+        """A pie or doughnut: no axes, so none of the Cartesian layout applies."""
+        series = self._series()
+        categories = self._categories(series)
+        region = self._polar_region()
+        self._draw_background(region)
+        self._draw_title()
+        self._draw_pie(region, series, categories)
+        self._draw_legend(region, series, per_point=True, categories=categories)
+        return self.elements, m.ChartData(
+            kind=c.flat_chart_kind(self.plot.kind),
+            series=[
+                m.ChartSeries(
+                    name=item.name,
+                    values=list(item.values),
+                    categories=list(categories),
+                    color=item.color,
+                    format_code=item.format_code,
+                )
+                for item in series
+            ],
+            categories=list(categories),
+            title=self._title_text(),
+            grouping=self.plot.grouping,
+            bar_direction=None,
+            value_axis=None,
+            legend_position=self._legend_position(),
+        )
+
+    def _build_cartesian(self) -> tuple[list[m.SlideElement], m.ChartData]:
         series = self._series()
         categories = self._categories(series)
         value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
@@ -682,9 +741,17 @@ class ChartBuilder:
     def _vary_colors(self) -> bool:
         """Whether each *point* takes its own colour rather than the series' one.
 
-        Only meaningful for a single unstacked series; with several series the colours
-        already vary by series.
+        **A pie varies by default and a bar does not.**  Measured: probe pies stating no
+        ``c:varyColors`` at all came out accent1, accent2, accent3, accent4 across their
+        four slices, and a two-ring doughnut cycled the same four in *both* rings -- so it
+        is per point, not per series.  A bar chart with no ``c:varyColors`` draws one
+        colour for the whole series, which is why the default cannot simply be true.
+
+        For a bar it is also only meaningful on a single unstacked series; with several,
+        the colours already vary by series.
         """
+        if self._is_polar:
+            return self.plot.vary_colors is not False
         if not self.plot.vary_colors or len(self.plot.series) != 1:
             return False
         return (self.plot.grouping or "clustered") not in ("stacked", "percentStacked")
@@ -1072,6 +1139,239 @@ class ChartBuilder:
             bottom = top + 1.0
         return _Rect(left, top, right, bottom)
 
+    def _polar_region(self) -> _Rect:
+        """The square-ish box a pie is drawn in.
+
+        The same edge insets and legend band a bar chart uses -- measured on
+        ``real-financial-report.pptx``'s doughnut, whose legend band came out 113.98 pt,
+        the identical number that deck's bar charts reserve, and on a probe pie whose band
+        matched the formula to 0.03 pt.
+        """
+        frame = self.frame
+        left, right = frame.left + EDGE_INSET_PT, frame.right - EDGE_INSET_PT
+        top, bottom = frame.top + EDGE_INSET_PT, frame.bottom - EDGE_INSET_PT
+
+        title = self._title_box()
+        if title is not None:
+            top = frame.top + TITLE_BAND_LINES * title.line_height + EDGE_INSET_PT
+
+        legend = self._legend_position()
+        if legend is not None and not self._legend_overlays():
+            font = self._legend_font()
+            band = LEGEND_BAND_LINES * font.box.line_height
+            if legend == "b":
+                bottom -= band
+            elif legend in ("t", "tr"):
+                top += band
+            elif legend == "r":
+                right = frame.right - self._legend_side_width(font, per_point=True)
+            elif legend == "l":
+                left += self._legend_side_width(font, per_point=True) - EDGE_INSET_PT
+        if right - left < 1.0:
+            right = left + 1.0
+        if bottom - top < 1.0:
+            bottom = top + 1.0
+        return _Rect(left, top, right, bottom)
+
+    def _draw_pie(
+        self, region: _Rect, series: list[_Series], categories: list[str]
+    ) -> None:
+        """Slices, then their labels.
+
+        Measured, all on PowerPoint's own export:
+
+        * angle zero is **12 o'clock** and slices run **clockwise**, with
+          ``c:firstSliceAng`` added as degrees;
+        * the radius is **half the shorter side** of the region, centred in it;
+        * ``c:holeSize`` is a percentage **of the outer radius**;
+        * several series make concentric rings, innermost first, splitting the space
+          between the hole and the outer radius evenly;
+        * ``c:explosion`` shrinks the radius by ``1/(1+e)`` and offsets each slice by
+          ``e`` of the *shrunk* radius along its own bisector.
+        """
+        if not series:
+            return
+        radius = min(region.width, region.height) / 2
+        centre_x = (region.left + region.right) / 2
+        centre_y = (region.top + region.bottom) / 2
+        if radius <= 0:
+            return
+
+        explosion = max(
+            (source.explosion or 0.0 for source in self.plot.series), default=0.0
+        )
+        for source in self.plot.series:
+            for point in source.data_points:
+                if point.explosion:
+                    explosion = max(explosion, point.explosion)
+        if explosion > 0:
+            radius /= 1.0 + explosion / 100.0
+
+        hole = (
+            self.plot.hole_size if self.plot.hole_size is not None else DEFAULT_HOLE_SIZE
+        ) / 100.0
+        hole = min(max(hole, 0.0), 0.95)
+        inner_base = radius * hole
+        band = (radius - inner_base) / max(len(series), 1)
+        start_angle = self.plot.first_slice_angle or 0.0
+
+        for ring, item in enumerate(series):
+            inner = inner_base + ring * band
+            outer = inner + band
+            total = sum(abs(value) for value in item.values if value is not None)
+            if total <= 0:
+                continue
+            angle = start_angle
+            for point in range(len(item.values)):
+                value = item.values[point]
+                if value is None or value == 0:
+                    continue
+                sweep = abs(value) / total * 360.0
+                offset = self._slice_offset(item, point, angle + sweep / 2, radius)
+                self._slice(
+                    centre_x + offset[0],
+                    centre_y + offset[1],
+                    inner,
+                    outer,
+                    angle,
+                    sweep,
+                    fill=self._point_fill(item, point),
+                    outline=item.point_outlines.get(point, item.outline),
+                )
+                angle += sweep
+
+        self._draw_pie_labels(
+            region, series, categories, centre_x, centre_y, radius, inner_base, start_angle
+        )
+
+    def _slice_offset(
+        self, item: _Series, point: int, mid_angle: float, radius: float
+    ) -> tuple[float, float]:
+        """How far this slice is pushed out of the middle, in frame points."""
+        explosion = self._point_explosion(point)
+        if not explosion:
+            return 0.0, 0.0
+        distance = radius * explosion / 100.0
+        radians = math.radians(mid_angle)
+        return distance * math.sin(radians), -distance * math.cos(radians)
+
+    def _point_explosion(self, point: int) -> float:
+        for source in self.plot.series:
+            for override in source.data_points:
+                if override.index == point and override.explosion:
+                    return override.explosion
+            if source.explosion:
+                return source.explosion
+        return 0.0
+
+    def _point_fill(self, item: _Series, point: int) -> m.Fill | None:
+        fill = item.point_fills.get(point)
+        if fill is None and point < len(item.vary_fills):
+            fill = item.vary_fills[point]
+        return fill if fill is not None else item.fill
+
+    def _slice(
+        self,
+        cx: float,
+        cy: float,
+        inner: float,
+        outer: float,
+        start: float,
+        sweep: float,
+        *,
+        fill: m.Fill | None,
+        outline: m.Outline | None,
+    ) -> None:
+        commands = _ring_path(cx, cy, inner, outer, start, sweep)
+        left = cx - outer
+        top = cy - outer
+        size = outer * 2
+        local = _translate_path(commands, -left, -top)
+        self.elements.append(
+            m.ShapeElement(
+                transform=m.Transform(
+                    offset_x=left * EMU_PER_POINT,
+                    offset_y=top * EMU_PER_POINT,
+                    extent_width=size * EMU_PER_POINT,
+                    extent_height=size * EMU_PER_POINT,
+                ),
+                geometry=m.CustomGeometry(
+                    paths=[m.CustomGeometryPath(width=size, height=size, commands=local)]
+                ),
+                fill=fill,
+                outline=outline,
+            )
+        )
+
+    def _draw_pie_labels(
+        self,
+        region: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        centre_x: float,
+        centre_y: float,
+        radius: float,
+        inner_base: float,
+        start_angle: float,
+    ) -> None:
+        band = (radius - inner_base) / max(len(series), 1)
+        for ring, item in enumerate(series):
+            total = sum(abs(value) for value in item.values if value is not None)
+            if total <= 0:
+                continue
+            shares = _percent_shares([
+                abs(value) if value is not None else 0.0 for value in item.values
+            ])
+            angle = start_angle
+            for point in range(len(item.values)):
+                value = item.values[point]
+                if value is None or value == 0:
+                    continue
+                sweep = abs(value) / total * 360.0
+                mid = angle + sweep / 2
+                angle += sweep
+                labels = item.point_labels.get(point, item.labels)
+                if labels is None or not labels.anything or labels.font is None:
+                    continue
+                parts: list[str] = []
+                if labels.show_series and item.name:
+                    parts.append(item.name)
+                if labels.show_category and point < len(categories) and categories[point]:
+                    parts.append(categories[point])
+                if labels.show_percent:
+                    parts.append(f"{shares[point]}%")
+                if labels.show_value:
+                    parts.append(
+                        format_number(value, labels.number_format or item.format_code)
+                    )
+                if not parts:
+                    continue
+                fraction = PIE_LABEL_RADIUS.get(labels.position or "bestFit", 0.710)
+                outer = inner_base + (ring + 1) * band
+                distance = outer * fraction
+                offset = self._slice_offset(item, point, mid, radius)
+                radians = math.radians(mid)
+                x = centre_x + offset[0] + distance * math.sin(radians)
+                y = centre_y + offset[1] - distance * math.cos(radians)
+                self._centred_label(parts, labels.font, x, y)
+
+    def _centred_label(
+        self, lines: list[str], font: ChartFont, x: float, y: float
+    ) -> None:
+        """A multi-line label whose block is centred on ``(x, y)``."""
+        box = font.box
+        width = max((font.width(line) for line in lines), default=0.0) + box.size
+        block = box.line_height * len(lines)
+        first = y - block / 2 + box.ascent
+        for index, line in enumerate(lines):
+            self._text(
+                self._label_body(line, font, align="ctr"),
+                left=x - width / 2,
+                width=width,
+                baseline=first + index * box.line_height,
+                box=box,
+            )
+
     def _top_inset(self, label: FontBox) -> float:
         """Space above the plot area for the topmost value label to sit in.
 
@@ -1081,18 +1381,20 @@ class ChartBuilder:
         """
         return max(EDGE_INSET_PT, TOP_INSET_BASE_PT + label.line_height / 2)
 
-    def _legend_side_width(self, font: ChartFont) -> float:
+    def _legend_side_width(self, font: ChartFont, *, per_point: bool = False) -> float:
         # Only the entries actually drawn: a series struck out by `c:legendEntry` would
         # otherwise reserve width for a label nobody sees, shifting the plot rectangle.
         deleted = self.chart.legend.deleted_entries if self.chart.legend else set()
-        widest = max(
-            (
-                font.width(source.name.plain or "")
+        if per_point:
+            # A pie legends its *categories*, not its series.
+            names = self._legend_names(per_point=True)
+        else:
+            names = [
+                source.name.plain or ""
                 for index, source in enumerate(self.plot.series)
                 if source.name is not None and index not in deleted
-            ),
-            default=0.0,
-        )
+            ]
+        widest = max((font.width(name) for name in names), default=0.0)
         return (
             widest
             + (LEGEND_SIDE_LEAD_EM + LEGEND_SWATCH_EM + LEGEND_SWATCH_GAP_EM + LEGEND_SIDE_TRAIL_EM)
@@ -1788,17 +2090,59 @@ class ChartBuilder:
         y1 = self._value_to_y(rect, end, scale)
         return _Rect(offset, min(y0, y1), offset + size, max(y0, y1))
 
-    def _draw_legend(self, rect: _Rect, series: list[_Series]) -> None:
+    def _legend_names(self, *, per_point: bool) -> list[str]:
+        """Legend entry labels.
+
+        A bar or line chart legends its **series**; a pie legends its **categories**,
+        because its one series is the whole chart.  Measured: the probe pie's legend reads
+        Alpha/Beta/Gamma/Delta, and its band matches the series formula fed those names.
+        """
+        deleted = self.chart.legend.deleted_entries if self.chart.legend else set()
+        if not per_point:
+            return [
+                source.name.plain or ""
+                for index, source in enumerate(self.plot.series)
+                if source.name is not None and index not in deleted
+            ]
+        for source in self.plot.series:
+            if any(source.categories):
+                return [
+                    name
+                    for index, name in enumerate(source.categories)
+                    if name and index not in deleted
+                ]
+        return []
+
+    def _draw_legend(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        *,
+        per_point: bool = False,
+        categories: list[str] | None = None,
+    ) -> None:
         position = self._legend_position()
         if position is None or not series:
             return
         legend = self.chart.legend
         deleted = legend.deleted_entries if legend else set()
-        entries = [
-            (index, item)
-            for index, item in enumerate(series)
-            if index not in deleted and item.name
-        ]
+        if per_point:
+            item = series[0]
+            names = categories or []
+            entries = [
+                (
+                    index,
+                    replace(item, name=name, fill=self._point_fill(item, index)),
+                )
+                for index, name in enumerate(names)
+                if name and index not in deleted
+            ]
+        else:
+            entries = [
+                (index, item)
+                for index, item in enumerate(series)
+                if index not in deleted and item.name
+            ]
         if not entries:
             return
 
@@ -2109,6 +2453,103 @@ def _path_commands(points: list[tuple[float, float]], smooth: bool) -> str:
             f"C {c1[0]:.4f} {c1[1]:.4f} {c2[0]:.4f} {c2[1]:.4f} {p2[0]:.4f} {p2[1]:.4f}"
         )
     return " ".join(parts)
+
+
+#: A cubic Bezier approximates a circular arc well up to a quarter turn; beyond that the
+#: error becomes visible, so a sweep is cut into pieces no larger than this.
+MAX_ARC_DEGREES = 90.0
+
+
+def _arc_points(
+    cx: float, cy: float, radius: float, start: float, sweep: float
+) -> list[tuple[float, float]]:
+    """A clockwise arc as ``M``-less Bezier control points, in frame coordinates.
+
+    Angles are degrees **clockwise from 12 o'clock**, which is where PowerPoint starts and
+    which way it runs -- measured on the real doughnut and on every probe pie.
+    """
+    pieces = max(1, math.ceil(abs(sweep) / MAX_ARC_DEGREES))
+    step = sweep / pieces
+    points: list[tuple[float, float]] = []
+    for piece in range(pieces):
+        a0 = math.radians(start + piece * step)
+        a1 = math.radians(start + (piece + 1) * step)
+        # Standard cubic approximation, in the (sin, -cos) frame that puts 0 at 12 o'clock.
+        alpha = 4 / 3 * math.tan((a1 - a0) / 4)
+        p0 = (cx + radius * math.sin(a0), cy - radius * math.cos(a0))
+        p1 = (cx + radius * math.sin(a1), cy - radius * math.cos(a1))
+        t0 = (radius * math.cos(a0), radius * math.sin(a0))
+        t1 = (radius * math.cos(a1), radius * math.sin(a1))
+        points.append((p0[0] + alpha * t0[0], p0[1] + alpha * t0[1]))
+        points.append((p1[0] - alpha * t1[0], p1[1] - alpha * t1[1]))
+        points.append(p1)
+    return points
+
+
+def _ring_path(
+    cx: float, cy: float, inner: float, outer: float, start: float, sweep: float
+) -> str:
+    """One slice: the outer arc, then back along the inner one (or through the centre)."""
+    sweep = max(min(sweep, 360.0), -360.0)
+    begin = (cx + outer * math.sin(math.radians(start)),
+             cy - outer * math.cos(math.radians(start)))
+    parts = [f"M {begin[0]:.4f} {begin[1]:.4f}"]
+    points = _arc_points(cx, cy, outer, start, sweep)
+    for index in range(0, len(points), 3):
+        c1, c2, end = points[index:index + 3]
+        parts.append(
+            f"C {c1[0]:.4f} {c1[1]:.4f} {c2[0]:.4f} {c2[1]:.4f} {end[0]:.4f} {end[1]:.4f}"
+        )
+    if inner <= 0:
+        parts.append(f"L {cx:.4f} {cy:.4f}")
+    else:
+        back = (cx + inner * math.sin(math.radians(start + sweep)),
+                cy - inner * math.cos(math.radians(start + sweep)))
+        parts.append(f"L {back[0]:.4f} {back[1]:.4f}")
+        points = _arc_points(cx, cy, inner, start + sweep, -sweep)
+        for index in range(0, len(points), 3):
+            c1, c2, end = points[index:index + 3]
+            parts.append(
+                f"C {c1[0]:.4f} {c1[1]:.4f} {c2[0]:.4f} {c2[1]:.4f} "
+                f"{end[0]:.4f} {end[1]:.4f}"
+            )
+    parts.append("Z")
+    return " ".join(parts)
+
+
+def _translate_path(commands: str, dx: float, dy: float) -> str:
+    """Shift an absolute path, so a slice can be drawn in its own shape box."""
+    out: list[str] = []
+    for token in commands.split(" "):
+        out.append(token)
+    numbers = [index for index, token in enumerate(out)
+               if re.fullmatch(r"-?\d+\.?\d*", token)]
+    for position, index in enumerate(numbers):
+        value = float(out[index]) + (dx if position % 2 == 0 else dy)
+        out[index] = f"{value:.4f}"
+    return " ".join(out)
+
+
+def _percent_shares(values: list[float]) -> list[int]:
+    """Whole percentages that add up to 100.
+
+    Measured: three equal values are labelled 34%, 33%, 33% -- rounding each on its own
+    would give 33% three times and total 99.  Largest remainder, ties to the earlier
+    index, reproduces it.  **One measurement**; the tie-breaking order in particular is
+    only what that case shows.
+    """
+    total = sum(values)
+    if total <= 0:
+        return [0] * len(values)
+    exact = [value / total * 100 for value in values]
+    floors = [int(math.floor(value)) for value in exact]
+    remainder = 100 - sum(floors)
+    order = sorted(
+        range(len(values)), key=lambda i: (-(exact[i] - floors[i]), i)
+    )
+    for index in order[:max(remainder, 0)]:
+        floors[index] += 1
+    return floors
 
 
 def _at(values: list[float | None], index: int) -> float | None:

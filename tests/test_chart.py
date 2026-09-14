@@ -444,18 +444,18 @@ def test_a_chart_part_that_is_missing_warns_and_draws_an_empty_frame(authoring):
 
 
 def test_a_chart_type_that_is_not_implemented_says_so(authoring):
-    """Only barChart is drawn so far; the rest must say so, not draw a wrong picture."""
+    """Types with no renderer must say so rather than draw a wrong picture."""
     from tests.deckbuilder import derive_deck
 
     chart_xml = (
         "<?xml version='1.0'?>"
-        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:pieChart>"
+        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:radarChart>"
         "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
         "<c:pt idx='0'><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
-        "</c:pieChart></c:plotArea></c:chart></c:chartSpace>"
+        "</c:radarChart></c:plotArea></c:chart></c:chartSpace>"
     ).encode()
     frame = (
-        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Pie'/>"
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Radar'/>"
         "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
         "<p:xfrm><a:off x='0' y='0'/><a:ext cx='1000000' cy='1000000'/></p:xfrm>"
         "<a:graphic><a:graphicData "
@@ -481,7 +481,7 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
     options = ConvertOptions()
     convert_pptx_to_model(deck_bytes, options)
     warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
-    assert "pieChart" in warning.message
+    assert "radarChart" in warning.message
 
 
 # -- The probe sweep -------------------------------------------------------------------
