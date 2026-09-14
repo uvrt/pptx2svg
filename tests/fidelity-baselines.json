@@ -5,22 +5,25 @@
         "Aptos",
         "Aptos Display"
       ],
+      "conditional": [],
       "hash": "ae15a1311a30",
-      "missing": []
+      "missing": [],
+      "substituted": [],
+      "uncovered": ""
     },
-    "histogram": 0.7956,
+    "histogram": 0.8101,
     "slides": [
       {
-        "coverage": 0.2223,
-        "histogram": 0.7956,
-        "mean_abs": 8.404,
-        "over10": 6.763,
-        "over64": 5.72,
+        "coverage": 0.2232,
+        "histogram": 0.8101,
+        "mean_abs": 8.476,
+        "over10": 6.835,
+        "over64": 5.802,
         "sparse": false,
-        "ssim": 0.7661
+        "ssim": 0.7776
       }
     ],
-    "ssim": 0.7661
+    "ssim": 0.7776
   },
   "real-basic-theme": {
     "fonts": {
@@ -29,41 +32,35 @@
         "Lato",
         "Raleway"
       ],
+      "conditional": [
+        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
+      ],
       "hash": "c6e32795015d",
-      "missing": []
+      "missing": [],
+      "substituted": [
+        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
+      ],
+      "uncovered": ""
     },
-    "histogram": 0.9999,
-    "slides": [
-      {
-        "coverage": 0.9056,
-        "histogram": 1.0,
-        "mean_abs": 0.974,
-        "over10": 0.814,
-        "over64": 0.523,
-        "sparse": false,
-        "ssim": 0.9842
-      },
-      {
-        "coverage": 0.2552,
-        "histogram": 0.9997,
-        "mean_abs": 1.633,
-        "over10": 2.229,
-        "over64": 0.851,
-        "sparse": false,
-        "ssim": 0.9506
-      }
-    ],
-    "ssim": 0.9674
+    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it resolved the name differently",
+    "slides": []
   },
   "real-financial-report": {
     "fonts": {
       "available": [
+        "Arial",
+        "Calibri",
         "Calibri Light"
       ],
-      "hash": "9ac368b35211",
+      "conditional": [
+        "\u6e38\u30b4\u30b7\u30c3\u30af Light"
+      ],
+      "hash": "b58c2bc56ca2",
       "missing": [
         "Noto Sans JP"
-      ]
+      ],
+      "substituted": [],
+      "uncovered": ""
     },
     "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
     "slides": []
@@ -71,12 +68,17 @@
   "real-product-page": {
     "fonts": {
       "available": [
+        "Arial",
+        "Calibri",
         "Calibri Light"
       ],
-      "hash": "9ac368b35211",
+      "conditional": [],
+      "hash": "b58c2bc56ca2",
       "missing": [
         "Noto Sans JP"
-      ]
+      ],
+      "substituted": [],
+      "uncovered": ""
     },
     "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
     "slides": []
@@ -84,80 +86,37 @@
   "sample": {
     "fonts": {
       "available": [
+        "Arial",
         "Calibri",
         "Courier New"
       ],
-      "hash": "4faa2ec68b19",
-      "missing": []
+      "conditional": [
+        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
+      ],
+      "hash": "9e2876cadc09",
+      "missing": [],
+      "substituted": [
+        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
+      ],
+      "uncovered": ""
     },
-    "histogram": 0.9738,
-    "slides": [
-      {
-        "coverage": 0.0185,
-        "histogram": 0.9635,
-        "mean_abs": 1.874,
-        "over10": 1.639,
-        "over64": 1.179,
-        "sparse": false,
-        "ssim": 0.0294
-      },
-      {
-        "coverage": 0.0443,
-        "histogram": 0.9695,
-        "mean_abs": 7.293,
-        "over10": 4.027,
-        "over64": 3.302,
-        "sparse": false,
-        "ssim": 0.0253
-      },
-      {
-        "coverage": 0.0349,
-        "histogram": 0.9712,
-        "mean_abs": 4.752,
-        "over10": 2.98,
-        "over64": 2.362,
-        "sparse": false,
-        "ssim": 0.1187
-      },
-      {
-        "coverage": 0.0328,
-        "histogram": 0.9694,
-        "mean_abs": 4.227,
-        "over10": 2.699,
-        "over64": 2.014,
-        "sparse": false,
-        "ssim": 0.1611
-      },
-      {
-        "coverage": 0.0202,
-        "histogram": 0.9804,
-        "mean_abs": 2.319,
-        "over10": 1.529,
-        "over64": 1.12,
-        "sparse": false,
-        "ssim": 0.2599
-      },
-      {
-        "coverage": 0.024,
-        "histogram": 0.9891,
-        "mean_abs": 2.368,
-        "over10": 2.065,
-        "over64": 1.509,
-        "sparse": false,
-        "ssim": 0.1124
-      }
-    ],
-    "ssim": 0.1178
+    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it resolved the name differently",
+    "slides": []
   },
   "sample-issue-387": {
     "fonts": {
       "available": [
+        "Arial",
+        "Calibri",
         "Calibri Light"
       ],
-      "hash": "9ac368b35211",
+      "conditional": [],
+      "hash": "b58c2bc56ca2",
       "missing": [
         "Noto Sans JP"
-      ]
+      ],
+      "substituted": [],
+      "uncovered": ""
     },
     "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
     "slides": []
@@ -165,23 +124,28 @@
   "table-test": {
     "fonts": {
       "available": [
-        "Aptos Display"
+        "Aptos",
+        "Aptos Display",
+        "Arial"
       ],
-      "hash": "af056106f360",
-      "missing": []
+      "conditional": [],
+      "hash": "14487c31b223",
+      "missing": [],
+      "substituted": [],
+      "uncovered": ""
     },
-    "histogram": 0.9984,
+    "histogram": 0.9983,
     "slides": [
       {
-        "coverage": 0.2296,
-        "histogram": 0.9984,
-        "mean_abs": 1.247,
-        "over10": 1.193,
-        "over64": 0.555,
+        "coverage": 0.2306,
+        "histogram": 0.9983,
+        "mean_abs": 1.416,
+        "over10": 1.241,
+        "over64": 0.589,
         "sparse": false,
-        "ssim": 0.9531
+        "ssim": 0.9494
       }
     ],
-    "ssim": 0.9531
+    "ssim": 0.9494
   }
 }

@@ -57,6 +57,30 @@ class FontMetrics:
     bold_cjk_width: int = 0
     bold_widths: dict = field(default_factory=dict)
 
+    def bold_is_indistinguishable(self) -> bool:
+        """Whether the bold table carries no information the upright one does not.
+
+        The four MS Japanese faces are measured from ``msgothic.ttc`` /
+        ``msmincho.ttc``, neither of which contains a bold cut at all, so the extractor
+        writes a bold table *identical* to the upright one.  ``bool(bold_widths)`` cannot
+        tell that apart from a real bold face, which is how PowerPoint's synthetic
+        emboldening came to be missing from the layout entirely.
+
+        Deliberately phrased as a property of the *table*, not a claim about the font:
+        Cousine answers True as well, and it does ship a bold cut -- monospace bold is
+        simply the same width.  That is why only the East Asian path in
+        :mod:`pptx2svg.text.measure` consults this, where the two cases coincide.
+
+        Cached because measurement asks per call and the tables run to a couple of
+        thousand entries.
+        """
+        cached = self.__dict__.get("_bold_indistinguishable")
+        if cached is None:
+            cached = self.bold_widths == self.widths and self.bold_cjk_width == self.cjk_width
+            # frozen=True, so the cache goes in through __dict__ directly.
+            object.__setattr__(self, "_bold_indistinguishable", cached)
+        return cached
+
 
 # --- BEGIN GENERATED METRICS (tools/extract_font_metrics.py) ---
 

@@ -72,6 +72,33 @@ def test_requested_faces_drops_theme_script_fallbacks():
     assert len(faces) < 10
 
 
+def test_requested_faces_keeps_the_minor_font_scheme():
+    """The major scheme's script list sits between the two collections.
+
+    Truncating the theme at the first `<a:font script=...>` threw the whole
+    `<a:minorFont>` block away with it, which is why `table-test` reported only
+    "Aptos Display" while its body text is Aptos.
+    """
+    faces = fidelity.requested_faces(FIXTURES / "authoring-integration.pptx")
+    assert {"Aptos", "Aptos Display"} <= set(faces)
+
+
+def test_the_east_asian_script_entry_is_read_separately():
+    """`sample.pptx` names no `a:ea` face; its Japanese comes from the `Jpan` entry."""
+    deck = FIXTURES / "sample.pptx"
+    assert "ＭＳ Ｐゴシック" not in fidelity.requested_faces(deck)
+    assert fidelity.script_faces(deck)["Jpan"] == "ＭＳ Ｐゴシック"
+
+
+def test_deck_script_reads_the_characters_not_the_theme():
+    """Every stock theme offers all four; only the text says which one is in play."""
+    assert fidelity.deck_script("Markdownから") == "Jpan"
+    assert fidelity.deck_script("한국어") == "Hang"
+    # Han alone is Chinese, Japanese and Korean at once and decides nothing.
+    assert fidelity.deck_script("概要") is None
+    assert fidelity.deck_script("Latin only") is None
+
+
 def test_slide_count_matches_the_package():
     assert fidelity.slide_count(FIXTURES / "real-basic-theme.pptx") == 2
     assert fidelity.slide_count(FIXTURES / "sample.pptx") == 6
@@ -80,7 +107,9 @@ def test_slide_count_matches_the_package():
 def test_font_profile_partitions_faces_and_is_hashable():
     local = _profile()
     profile = fidelity.font_profile(FIXTURES / "real-basic-theme.pptx", local)
-    assert set(profile) == {"available", "missing", "hash"}
+    assert set(profile) == {
+        "available", "missing", "conditional", "uncovered", "substituted", "hash"
+    }
     assert not set(profile["available"]) & set(profile["missing"])
     assert len(profile["hash"]) == 12
     # Stable across calls, or a baseline could never be matched to its inputs.

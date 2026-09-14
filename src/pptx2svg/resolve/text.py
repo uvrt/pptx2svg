@@ -324,25 +324,40 @@ def _theme_body_latin(context) -> str | None:
 
 
 def _resolve_typeface(context, typeface: str | None) -> str | None:
-    """Expand the theme font placeholders ``+mj-lt`` / ``+mn-ea`` / ``+mn-cs`` etc."""
+    """Expand the theme font placeholders ``+mj-lt`` / ``+mn-ea`` / ``+mn-cs`` etc.
+
+    A placeholder that cannot be expanded resolves to ``None``, not to itself.  A theme
+    that writes ``<a:cs typeface=""/>`` -- which is most of them, and every deck in this
+    corpus -- is saying it names no complex-script face, so the correct answer is "this
+    run states no typeface for that script" and the cascade should carry on as if the
+    attribute were absent.  Returning the pointer instead put the literal string
+    ``+mn-cs`` into the model, and from there into the SVG's ``font-family`` list, where
+    it did far more damage than an unused name: ``+`` cannot start a CSS identifier, so
+    resvg rejected the *whole* declaration and fell back to its default family.  Every
+    Japanese glyph in ``sample.pptx`` was drawn by resvg's fallback instead of the
+    ＭＳ Ｐゴシック the stack asked for, which is measurable -- "テンプレート" at 100 px
+    inks 563 px wide through the poisoned stack and 503 px with the same stack minus the
+    pointer.
+    """
     if typeface is None:
         return None
     scheme = context.theme.font_scheme if context.theme else None
     if scheme is None:
-        return typeface
+        # No theme to expand against.  A pointer is still not a face name.
+        return None if typeface.startswith("+") else typeface
 
     if typeface == "+mj-lt":
-        return scheme.major_latin or typeface
+        return _non_empty(scheme.major_latin)
     if typeface == "+mn-lt":
-        return scheme.minor_latin or typeface
+        return _non_empty(scheme.minor_latin)
     if typeface == "+mj-ea":
-        return _non_empty(scheme.major_east_asian) or scheme.major_japanese or typeface
+        return _non_empty(scheme.major_east_asian) or _non_empty(scheme.major_japanese)
     if typeface == "+mn-ea":
-        return _non_empty(scheme.minor_east_asian) or scheme.minor_japanese or typeface
+        return _non_empty(scheme.minor_east_asian) or _non_empty(scheme.minor_japanese)
     if typeface == "+mj-cs":
-        return _non_empty(scheme.major_complex_script) or typeface
+        return _non_empty(scheme.major_complex_script)
     if typeface == "+mn-cs":
-        return _non_empty(scheme.minor_complex_script) or typeface
+        return _non_empty(scheme.minor_complex_script)
     return typeface
 
 

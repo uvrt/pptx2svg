@@ -311,3 +311,43 @@ def test_every_font_stack_ends_in_a_generic_family(pptx_path):
     for document in documents:
         for value in re.findall(r'font-family="([^"]*)"', document):
             assert value.rsplit(", ", 1)[-1] in generics, value
+
+
+def test_no_theme_pointer_reaches_a_font_family_stack(pptx_path):
+    """``+`` cannot start a CSS identifier, and resvg drops the whole declaration.
+
+    A theme that writes ``<a:cs typeface=""/>`` -- which every deck in the corpus does --
+    used to resolve ``+mn-cs`` to itself, and the literal pointer was emitted in the
+    stack.  The cost was not one dead entry: resvg rejected the entire ``font-family``
+    and fell back to its default face, so *every* named face in the stack was lost.
+    """
+    for document in convert_pptx_to_svg(
+        pptx_path, ConvertOptions(warn_on_font_substitution=False)
+    ):
+        for value in re.findall(r'font-family="([^"]*)"', document):
+            assert "+" not in value, value
+
+
+def test_synthetic_bold_widens_a_cjk_face_with_no_bold_cut():
+    """PowerPoint emboldens such a face itself, and the advance grows with it.
+
+    Not by a ratio -- by a constant.  Read off the pen origins in PowerPoint's PDF export
+    of ``sample.pptx``, which sets the same Japanese text bold at three sizes: 24 pt goes
+    24.000 -> 24.1248, 28 pt goes 28.000 -> 28.1260, 32 pt goes 32.000 -> 32.1248.  A
+    1/256 em model would have predicted +0.094 at 24 pt.
+    """
+    from pptx2svg.text.measure import DefaultTextMeasurer
+    from pptx2svg.units import PX_PER_PT
+
+    measurer = DefaultTextMeasurer()
+    text = "テンプレート"
+    for size in (24, 28, 32):
+        upright = measurer.measure_text_width(text, size, False, None, "ＭＳ Ｐゴシック")
+        bold = measurer.measure_text_width(text, size, True, None, "ＭＳ Ｐゴシック")
+        per_glyph = (bold - upright) / PX_PER_PT / len(text)
+        assert per_glyph == pytest.approx(0.125, abs=0.002), size
+
+    # A face that does ship a bold cut is measured from it, not nudged.
+    upright = measurer.measure_text_width(text, 32, False, None, "Noto Sans JP")
+    bold = measurer.measure_text_width(text, 32, True, None, "Noto Sans JP")
+    assert bold == pytest.approx(upright, abs=0.01)
