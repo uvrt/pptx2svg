@@ -39,7 +39,7 @@ from ..parse.drawing import parse_group_transforms
 from ..parse.shapes import parse_shape_tree
 from ..parse.table_styles_builtin import builtin_table_style
 from ..units import ROTATION_UNIT
-from ..xmlutil import child
+from ..xmlutil import attr, child, descendants
 from .color import ColorContext, build_effective_color_map, resolve_color
 
 #: Placeholder types that inherit from the master's ``body`` placeholder.
@@ -798,11 +798,7 @@ def _resolve_diagram(
     part is plain DrawingML, the same vocabulary as a slide's own shape tree, which is
     why this is forty lines and not a diagram engine.
 
-    The hop is two relationships deep, and neither is from the slide::
-
-        slide rels --r:dm--> ppt/diagrams/data1.xml
-            data1.xml rels --diagramDrawing--> ppt/diagrams/drawing1.xml
-                dsp:drawing/dsp:spTree
+    Finding that part is the fiddly bit; see :func:`_diagram_drawing_part`.
 
     Children are resolved with ``part_path`` pointed at the *drawing* part, because the
     pictures inside a diagram are related to it and not to the slide; resolving them
@@ -815,11 +811,7 @@ def _resolve_diagram(
     if data_part is None:
         return None
 
-    drawing_part = None
-    for rel_type in DIAGRAM_DRAWING_REL_TYPES:
-        drawing_part = context.package.first_related_part(data_part, rel_type)
-        if drawing_part is not None:
-            break
+    drawing_part = _diagram_drawing_part(context, data_part)
     if drawing_part is None:
         return None
 
@@ -864,6 +856,69 @@ def _resolve_diagram(
         children=children,
         alt_text=node.alt_text or node.name,
     )
+
+
+def _diagram_drawing_part(context: ResolveContext, data_part: str) -> str | None:
+    """Find the cached DrawingML rendering that belongs to one diagram.
+
+    This is not where the obvious reading of the schema puts it.  ``dgm:relIds`` on the
+    graphic frame names four parts -- data model, layout, quick style, colours -- and
+    conspicuously not the drawing, because the cached drawing was added to the format
+    after ``relIds`` was specified.  Microsoft keyed it through an extension instead::
+
+        slide rels --r:dm--------------> ppt/diagrams/data1.xml
+            data1.xml dgm:extLst/dsp:dataModelExt@relId = "rId6"
+                                                 |
+        slide rels --rId6 (diagramDrawing)-------+--> ppt/diagrams/drawing1.xml
+
+    So the relationship id is written in the *data* part but resolved against the
+    *slide's* relationships.  Every one of the 46 real PowerPoint decks checked that has
+    a cached drawing at all does it this way, and none of them has a
+    ``ppt/diagrams/_rels/data1.xml.rels`` for it to hang off.
+
+    Two fallbacks follow, in decreasing confidence:
+
+    * the data part's own relationships, which is what the ISO/transitional layout would
+      imply and what an independent producer might reasonably write;
+    * failing that, a diagram-drawing relationship on the owning part -- but only when
+      there is exactly one, since a slide with two SmartArt frames offers no way to tell
+      which drawing belongs to which frame without the ``relId`` above.
+    """
+    owner = context.part_path
+
+    relationship_id = _data_model_drawing_rel_id(context, data_part)
+    if relationship_id is not None:
+        target = context.package.related_part(owner, relationship_id)
+        if target is not None and context.package.has_part(target):
+            return target
+
+    for rel_type in DIAGRAM_DRAWING_REL_TYPES:
+        target = context.package.first_related_part(data_part, rel_type)
+        if target is not None and context.package.has_part(target):
+            return target
+
+    candidates = [
+        target
+        for rel_type in DIAGRAM_DRAWING_REL_TYPES
+        for target in context.package.related_parts_of_type(owner, rel_type)
+        if context.package.has_part(target)
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _data_model_drawing_rel_id(context: ResolveContext, data_part: str) -> str | None:
+    """``dsp:dataModelExt@relId`` out of the data model part, if it carries one."""
+    try:
+        data_model = context.package.read_xml(data_part)
+    except Exception:
+        return None
+    if data_model is None:
+        return None
+    for node in descendants(data_model, "dataModelExt"):
+        relationship_id = attr(node, "relId")
+        if relationship_id:
+            return relationship_id
+    return None
 
 
 def _diagram_child_transform(sp_tree, frame: m.Transform) -> m.Transform:
