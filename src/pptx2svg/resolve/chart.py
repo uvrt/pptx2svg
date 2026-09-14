@@ -133,16 +133,27 @@ DEFAULT_CHART_FONT_PT = 10.0
 DEFAULT_AXIS_LINE_EMU = 6350.0
 DEFAULT_AXIS_COLOR = "#000000"
 
+#: The outline on a negative bar drawn hollow by ``c:invertIfNegative`` -- 0.75 pt.
+INVERTED_BAR_OUTLINE_EMU = 9525.0
+
 #: ``c:gapWidth`` when absent, in percent of one bar's width (ECMA-376 default).
 DEFAULT_GAP_WIDTH = 150.0
 
 #: The six theme accents a series cycles through when it has no fill of its own.
 ACCENT_KEYS = ("accent1", "accent2", "accent3", "accent4", "accent5", "accent6")
 
-#: How many major intervals PowerPoint aims for on an automatic value axis.  Fitted to
-#: three real charts: 0..5 -> 0..6 by 1, 0..4285 -> 0..5000 by 1000, 0..1842 -> 0..2000
-#: by 500.  All three need 5 and no other value reproduces all three.
-DESIRED_TICKS = 5
+#: Below this many major units of span, the plain power of ten is halved.  See
+#: :func:`nice_axis_scale`; the threshold is somewhere in (1.842, 4.285] and 2 is the
+#: round number inside it.
+AXIS_HALVING_RATIO = 2.0
+
+#: A horizontal bar chart's value axis comes out coarser than a vertical one's for the
+#: same data and the same axis length, so once the interval is chosen it is stepped up
+#: until the axis holds no more than this many of them.  **One measurement only** -- the
+#: horizontal probe, whose 0..5 data PowerPoint drew as 0..6 by 2 where the identical
+#: data on a vertical axis of almost the same length (151.4 pt against 145.0 pt) came out
+#: 0..6 by 1.  It is therefore not a density limit, and what it really is remains unknown.
+HORIZONTAL_MAX_INTERVALS = 5
 
 
 # --------------------------------------------------------------------------------------
@@ -151,14 +162,30 @@ DESIRED_TICKS = 5
 
 
 def nice_axis_scale(
-    data_minimum: float, data_maximum: float, desired_ticks: int = DESIRED_TICKS
+    data_minimum: float, data_maximum: float, horizontal: bool = False
 ) -> tuple[float, float, float]:
     """``(minimum, maximum, major_unit)`` for a value axis PowerPoint would draw itself.
 
+    The major unit is the plain **power of ten** just below the span, halved when the span
+    is less than :data:`AXIS_HALVING_RATIO` of it.  That is not the "aim for N ticks" rule
+    every charting library uses, and the difference is not cosmetic -- N ticks cannot
+    produce both of these, which PowerPoint does:
+
+    ===========  ==============  ==========
+    data         PowerPoint      intervals
+    ===========  ==============  ==========
+    0..5         0..6 by 1       6
+    0..9         0..10 by 1      10
+    -2..5        -3..6 by 1      9
+    0..1842      0..2000 by 500  4
+    0..4285      0..5000 by 1000 5
+    ===========  ==============  ==========
+
     The domain always includes zero -- a bar that does not start at its axis is a
-    different picture -- and the maximum is rounded *strictly* up, so a series topping out
-    at exactly 5 gets an axis to 6 rather than one whose last bar touches the frame.  That
-    last rule is not cosmetic: it is what ``authoring-integration.pptx`` does.
+    different picture -- and both ends are rounded *strictly* outwards, so a series
+    topping out at exactly 5 gets an axis to 6 rather than one whose last bar touches the
+    frame.  Both bumps are measured: the first is what ``authoring-integration.pptx``
+    does, the second is the -3 on the negative-value probe whose data floor is -2.
     """
     low = min(0.0, data_minimum)
     high = max(0.0, data_maximum)
@@ -169,25 +196,40 @@ def nice_axis_scale(
         # smallest one that shows anything.
         return 0.0, 1.0, 1.0
 
-    unit = _nice_number(span / max(1, desired_ticks))
+    unit = 10.0 ** math.floor(math.log10(span))
+    if span / unit < AXIS_HALVING_RATIO:
+        unit /= 2
+
+    minimum, maximum = _axis_extent(unit, low, high, data_minimum, data_maximum)
+    if horizontal:
+        # Counted on the *rounded* extent, not the data span: 0..5 of data becomes a
+        # 0..6 axis, and it is the six intervals in that which PowerPoint coarsens.
+        while (maximum - minimum) / unit > HORIZONTAL_MAX_INTERVALS:
+            unit = _next_nice_unit(unit)
+            minimum, maximum = _axis_extent(unit, low, high, data_minimum, data_maximum)
+    return minimum, maximum, unit
+
+
+def _axis_extent(
+    unit: float, low: float, high: float, data_minimum: float, data_maximum: float
+) -> tuple[float, float]:
+    """Round the domain outwards to whole units, strictly past the data at both ends."""
     maximum = math.ceil(high / unit) * unit
     if maximum <= data_maximum:
         maximum += unit
     minimum = math.floor(low / unit) * unit
     if data_minimum < 0 and minimum >= data_minimum:
         minimum -= unit
-    return minimum, maximum, unit
+    return minimum, maximum
 
 
-def _nice_number(raw: float) -> float:
-    """Round an interval up to 1, 2, 5 or 10 times a power of ten."""
-    magnitude = 10.0 ** math.floor(math.log10(raw))
-    residual = raw / magnitude
-    if residual <= 1:
-        return magnitude
-    if residual <= 2:
+def _next_nice_unit(unit: float) -> float:
+    """The next step up the 1-2-5 ladder from a unit already on it."""
+    magnitude = 10.0 ** math.floor(math.log10(unit))
+    mantissa = round(unit / magnitude, 6)
+    if mantissa < 2:
         return 2 * magnitude
-    if residual <= 5:
+    if mantissa < 5:
         return 5 * magnitude
     return 10 * magnitude
 
@@ -486,9 +528,6 @@ class ChartBuilder:
         self._resolve_typeface = resolve_typeface
         self.elements: list[m.SlideElement] = []
         self._title_cache: "tuple[m.TextBody, FontBox] | None | object" = _UNSET
-        #: Set by _draw_background, consumed by _draw_gridlines: the plot rectangle is
-        #: not known until the labels have been measured, so the fill has to wait.
-        self._plot_area_fill: m.Fill | None = None
 
     # -- public -------------------------------------------------------------------------
 
@@ -502,15 +541,16 @@ class ChartBuilder:
         label_font = self._label_font(value_axis)
         tick_texts = self._tick_texts(scale, value_axis)
 
-        plot_rect = self._plot_rect(tick_texts, categories, label_font)
+        plot_rect = self._plot_rect(tick_texts, categories, label_font, scale)
 
-        self._draw_background()
+        self._draw_background(plot_rect)
         self._draw_title()
         self._draw_gridlines(plot_rect, scale, value_axis)
         self._draw_bars(plot_rect, series, categories, scale)
-        self._draw_axis_lines(plot_rect, value_axis, category_axis)
-        self._draw_value_labels(plot_rect, scale, tick_texts, value_axis, label_font)
-        self._draw_category_labels(plot_rect, categories, category_axis, label_font)
+        self._draw_axis_lines(plot_rect, scale, value_axis, category_axis)
+        self._draw_labels(
+            plot_rect, scale, tick_texts, categories, value_axis, category_axis, label_font
+        )
         self._draw_legend(plot_rect, series)
 
         data = m.ChartData(
@@ -538,6 +578,16 @@ class ChartBuilder:
 
     # -- model --------------------------------------------------------------------------
 
+    def _vary_colors(self) -> bool:
+        """Whether each *point* takes its own colour rather than the series' one.
+
+        Only meaningful for a single unstacked series; with several series the colours
+        already vary by series.
+        """
+        if not self.plot.vary_colors or len(self.plot.series) != 1:
+            return False
+        return (self.plot.grouping or "clustered") not in ("stacked", "percentStacked")
+
     def _series(self) -> list[_Series]:
         out: list[_Series] = []
         for index, source in enumerate(self.plot.series):
@@ -559,6 +609,14 @@ class ChartBuilder:
                     True if source.invert_if_negative is None else source.invert_if_negative
                 ),
             )
+            if self._vary_colors() and self._resolve_fill(source.fill) is None:
+                # Measured on the varyColors probe: points take accent1, accent2, accent3
+                # *exactly*.  pptx-renderer darkens them to 88%, which PowerPoint does not.
+                for point_index in range(len(item.values)):
+                    if self.style.accents:
+                        item.point_fills[point_index] = m.SolidFill(
+                            color=self.style.accents[point_index % len(self.style.accents)]
+                        )
             for point in source.data_points:
                 point_fill = self._resolve_fill(point.fill)
                 if point_fill is not None:
@@ -612,7 +670,8 @@ class ChartBuilder:
     ) -> tuple[float, float, float]:
         stacked = (self.plot.grouping or "clustered") in ("stacked", "percentStacked")
         if (self.plot.grouping or "") == "percentStacked":
-            return 0.0, 1.0, 0.2
+            # Measured: PowerPoint labels 0%, 10% ... 100%.
+            return 0.0, 1.0, 0.1
 
         numbers: list[float] = []
         if stacked:
@@ -634,7 +693,9 @@ class ChartBuilder:
 
         if not numbers:
             numbers = [0.0]
-        minimum, maximum, unit = nice_axis_scale(min(numbers), max(numbers))
+        minimum, maximum, unit = nice_axis_scale(
+            min(numbers), max(numbers), horizontal=(self.plot.bar_direction or "col") == "bar"
+        )
 
         if axis is not None:
             if axis.minimum is not None:
@@ -708,6 +769,7 @@ class ChartBuilder:
         tick_texts: list[tuple[float, str]],
         categories: list[str],
         font: ChartFont,
+        scale: tuple[float, float, float],
     ) -> _Rect:
         frame = self.frame
         value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
@@ -715,10 +777,30 @@ class ChartBuilder:
 
         show_values = _labels_shown(value_axis)
         show_categories = _labels_shown(category_axis)
+        horizontal = (self.plot.bar_direction or "col") == "bar"
+
+        # The left column and the band under the plot each hold one axis' labels, and
+        # `barDir` decides which.  Measured on the horizontal probe: its left inset,
+        # 55.41 pt, is the same formula as a vertical chart's but fed the widest
+        # *category* label instead of the widest tick.
+        tick_labels = [text for _, text in tick_texts]
+        down_left = categories if horizontal else tick_labels
+        show_left = show_categories if horizontal else show_values
+        show_bottom = show_values if horizontal else show_categories
+        # `tickLblPos="nextTo"` means next to the *axis*, and a chart with negative values
+        # has its category axis floating above the plot's lower edge.  PowerPoint then
+        # reserves no band under the plot at all -- the negative probe's bottom inset is
+        # 11.103 pt, the same half-label allowance as its top -- and prints the category
+        # labels inside the plot, just under the zero line.
+        labels_under_plot = show_bottom and (
+            horizontal
+            or scale[0] >= 0
+            or (category_axis is not None and category_axis.tick_label_position == "low")
+        )
 
         left = frame.left + EDGE_INSET_PT
-        if show_values:
-            widest = max((font.width(text) for _, text in tick_texts), default=0.0)
+        if show_left:
+            widest = max((font.width(text) for text in down_left), default=0.0)
             left = (
                 frame.left
                 + FRAME_PADDING_PT
@@ -728,12 +810,19 @@ class ChartBuilder:
             )
 
         right = frame.right - EDGE_INSET_PT
-        top = frame.top + self._top_inset(font.box)
-        bottom = frame.bottom - (
-            FRAME_PADDING_PT + font.box.line_height + CATEGORY_LABEL_GAP_EM * font.size
-            if show_categories
-            else EDGE_INSET_PT
-        )
+        if horizontal and show_values:
+            # The value axis runs along the bottom now, and its last label is centred on
+            # the plot's right edge, so half of it hangs outside.  Measured 13.67 pt
+            # against an 11.0 pt inset and a 5.34 pt label.
+            right -= max((font.width(text) for text in tick_labels), default=0.0) / 2
+        # Nothing overhangs the top of a horizontal chart, so it takes the plain inset.
+        top = frame.top + (EDGE_INSET_PT if horizontal else self._top_inset(font.box))
+        if labels_under_plot:
+            bottom = frame.bottom - (
+                FRAME_PADDING_PT + font.box.line_height + CATEGORY_LABEL_GAP_EM * font.size
+            )
+        else:
+            bottom = frame.bottom - self._top_inset(font.box)
 
         title = self._title_box()
         if title is not None:
@@ -839,16 +928,21 @@ class ChartBuilder:
 
     # -- drawing ------------------------------------------------------------------------
 
-    def _draw_background(self) -> None:
+    def _draw_background(self, rect: _Rect) -> None:
+        """The chart frame's own fill, then the plot rectangle's.
+
+        A chart with no ``c:spPr`` at all is transparent -- the slide shows through, which
+        is what PowerPoint drew for ``authoring-integration.pptx`` -- so an absent fill is
+        not the same as a white one and nothing is emitted for it.
+        """
         fill = self._resolve_fill(self.chart.fill)
         outline = self._resolve_outline(self.chart.outline)
-        if fill is not None and not isinstance(fill, m.NoFill) or outline is not None:
+        if (fill is not None and not isinstance(fill, m.NoFill)) or outline is not None:
             self._rect(self.frame, fill=fill, outline=outline)
 
         plot_fill = self._resolve_fill(self.chart.plot_area_fill)
         if plot_fill is not None and not isinstance(plot_fill, m.NoFill):
-            # Drawn later, once the rectangle is known; recorded here would be wrong.
-            self._plot_area_fill = plot_fill
+            self._rect(rect, fill=plot_fill, outline=None)
 
     def _draw_title(self) -> None:
         title = self._title()
@@ -870,8 +964,6 @@ class ChartBuilder:
         scale: tuple[float, float, float],
         axis: c.SourceChartAxis | None,
     ) -> None:
-        if self._plot_area_fill is not None:
-            self._rect(rect, fill=self._plot_area_fill, outline=None)
         if axis is None or not axis.major_gridlines:
             return
         outline = self._axis_outline(axis.major_gridline_outline)
@@ -916,7 +1008,11 @@ class ChartBuilder:
         totals = _percent_totals(series) if percent else None
 
         for point in range(len(categories)):
-            band_start = (rect.top if horizontal else rect.left) + point * band
+            # A horizontal bar chart runs its category axis bottom-to-top, so category 0
+            # is the *lowest* band.  Measured: "Reader" labels the bottom bar.
+            band_start = (
+                rect.bottom - (point + 1) * band if horizontal else rect.left + point * band
+            )
             centre = band_start + band / 2
             positive_base = 0.0
             negative_base = 0.0
@@ -961,11 +1057,13 @@ class ChartBuilder:
         fill = item.point_fills.get(point, item.fill)
         outline = item.point_outlines.get(point, item.outline)
         if end < start and item.invert_if_negative and point not in item.point_fills:
-            # PowerPoint draws a negative bar hollow unless the file opts out.
+            # Measured: PowerPoint draws a negative bar white with a black 0.75 pt
+            # outline, and draws it in the series colour when the file sets
+            # `invertIfNegative` to 0.
             fill = m.SolidFill(color=m.ResolvedColor(hex="#FFFFFF"))
             outline = outline or m.Outline(
-                width=DEFAULT_AXIS_LINE_EMU,
-                fill=m.SolidFill(color=item.color),
+                width=INVERTED_BAR_OUTLINE_EMU,
+                fill=m.SolidFill(color=m.ResolvedColor(hex=DEFAULT_AXIS_COLOR)),
             )
 
         if horizontal:
@@ -980,9 +1078,37 @@ class ChartBuilder:
             return
         self._rect(box, fill=fill, outline=outline)
 
+    def _category_axis_y(
+        self,
+        rect: _Rect,
+        scale: tuple[float, float, float],
+        axis: c.SourceChartAxis | None,
+    ) -> float:
+        """Where the category axis crosses the value axis, in frame coordinates.
+
+        ``c:crosses="autoZero"`` -- the default and what every chart in the corpus says --
+        puts it at value zero, which is the plot's lower edge only while nothing is
+        negative.  ``tickLblPos="low"`` pins the labels to the bottom regardless; that
+        spelling appears in ``real-financial-report.pptx`` but only over positive data, so
+        its behaviour under a negative minimum is **implemented from the schema and not
+        measured**.
+        """
+        if axis is not None and axis.tick_label_position == "low":
+            return rect.bottom
+        crosses = axis.crosses if axis is not None else None
+        if crosses == "max":
+            return rect.top
+        if crosses == "min":
+            return rect.bottom
+        value = axis.crosses_at if axis is not None and crosses == "val" else 0.0
+        if value is None:
+            value = 0.0
+        return min(rect.bottom, max(rect.top, self._value_to_y(rect, value, scale)))
+
     def _draw_axis_lines(
         self,
         rect: _Rect,
+        scale: tuple[float, float, float],
         value_axis: c.SourceChartAxis | None,
         category_axis: c.SourceChartAxis | None,
     ) -> None:
@@ -991,69 +1117,126 @@ class ChartBuilder:
                 rect.left, rect.top, rect.left, rect.bottom, self._axis_outline(value_axis.outline)
             )
         if category_axis is not None and not category_axis.delete:
+            # The category axis sits where it crosses, which is the zero line and not the
+            # plot's foot once anything is negative.
+            y = (
+                rect.bottom
+                if (self.plot.bar_direction or "col") == "bar"
+                else self._category_axis_y(rect, scale, category_axis)
+            )
             self._line(
-                rect.left,
-                rect.bottom,
-                rect.right,
-                rect.bottom,
-                self._axis_outline(category_axis.outline),
+                rect.left, y, rect.right, y, self._axis_outline(category_axis.outline)
             )
 
-    def _draw_value_labels(
+    def _draw_labels(
         self,
         rect: _Rect,
         scale: tuple[float, float, float],
         tick_texts: list[tuple[float, str]],
-        axis: c.SourceChartAxis | None,
+        categories: list[str],
+        value_axis: c.SourceChartAxis | None,
+        category_axis: c.SourceChartAxis | None,
         font: ChartFont,
     ) -> None:
-        if not _labels_shown(axis):
-            return
+        """Draw both axes' labels, on whichever side ``barDir`` puts them.
+
+        A ``col`` chart labels values down the left and categories along the bottom; a
+        ``bar`` chart does the opposite.  Both sides use the same two placements, so the
+        orientation only decides which set of strings goes where.
+        """
+        horizontal = (self.plot.bar_direction or "col") == "bar"
+        if _labels_shown(value_axis):
+            if horizontal:
+                self._labels_along_bottom(
+                    rect,
+                    [(self._value_to_x(rect, value, scale), text) for value, text in tick_texts],
+                    font,
+                    axis_y=rect.bottom,
+                    centred_on_position=True,
+                )
+            else:
+                self._labels_down_left(
+                    rect,
+                    [(self._value_to_y(rect, value, scale), text) for value, text in tick_texts],
+                    font,
+                )
+        if _labels_shown(category_axis) and categories:
+            if horizontal:
+                band = rect.height / len(categories)
+                self._labels_down_left(
+                    rect,
+                    # Category 0 is the lowest band on a horizontal chart.
+                    [
+                        (rect.bottom - (index + 0.5) * band, text)
+                        for index, text in enumerate(categories)
+                    ],
+                    font,
+                )
+            else:
+                band = rect.width / len(categories)
+                self._labels_along_bottom(
+                    rect,
+                    [
+                        (rect.left + index * band, text)
+                        for index, text in enumerate(categories)
+                    ],
+                    font,
+                    axis_y=self._category_axis_y(rect, scale, category_axis),
+                    width=band,
+                )
+
+    def _labels_down_left(
+        self, rect: _Rect, labels: list[tuple[float, str]], font: ChartFont
+    ) -> None:
+        """Right-aligned in the column left of the plot, each centred on its own y."""
         box = font.box
-        for value, text in tick_texts:
+        width = rect.left - self.frame.left - box.descent - VALUE_LABEL_GAP_EM * box.size
+        for y, text in labels:
             if not text:
                 continue
-            y = self._value_to_y(rect, value, scale)
-            # The label's own ink is centred on the tick.  Digits have no descender, so
-            # their ink runs from the baseline to the cap height and half of that is the
-            # offset.  Measured against PowerPoint this lands within 0.7 pt.
-            baseline = y + box.ink_centre
-            body = self._label_body(text, font, align="r")
             self._text(
-                body,
+                self._label_body(text, font, align="r"),
                 left=self.frame.left,
-                width=rect.left - self.frame.left - box.descent
-                - VALUE_LABEL_GAP_EM * box.size,
-                baseline=baseline,
+                width=width,
+                baseline=y + box.ink_centre,
                 box=box,
             )
 
-    def _draw_category_labels(
+    def _labels_along_bottom(
         self,
         rect: _Rect,
-        categories: list[str],
-        axis: c.SourceChartAxis | None,
+        labels: list[tuple[float, str]],
         font: ChartFont,
+        *,
+        axis_y: float,
+        width: float | None = None,
+        centred_on_position: bool = False,
     ) -> None:
-        if not _labels_shown(axis) or not categories:
-            return
+        """One line below the axis: category labels centred in their band, ticks on theirs.
+
+        The baseline hangs off the *category axis*, not the frame, because ``nextTo`` means
+        what it says: on a chart with negative values the axis floats above the plot's
+        lower edge and the labels follow it.  ``ascent + 0.615 em`` reproduces all five
+        measurements -- Aptos at 8/10/14 pt, Arial at 12 pt, and the negative probe --
+        with a worst residual of 0.63 pt, and is the same number as hanging the line's
+        descender one frame padding above the frame whenever the axis *is* at the foot.
+        """
         box = font.box
-        band = rect.width / len(categories)
-        # The label line's descender bottom sits one frame padding above whatever is below
-        # it -- the frame edge, or the legend band.  Measured to within 0.55 pt.
-        region_bottom = self.frame.bottom - FRAME_PADDING_PT
-        legend = self._legend_position()
-        if legend == "b":
-            region_bottom -= LEGEND_BAND_LINES * self._legend_font().box.line_height
-        baseline = region_bottom - box.descent
-        for index, text in enumerate(categories):
+        baseline = axis_y + box.ascent + CATEGORY_LABEL_GAP_EM * box.size
+        for position, text in labels:
             if not text:
                 continue
-            body = self._label_body(text, font, align="ctr")
+            if centred_on_position:
+                # A value tick's label is centred on the tick, so the box is opened wide
+                # either side of it and the text centred in that.
+                span = font.width(text) + box.size
+                left, box_width = position - span / 2, span
+            else:
+                left, box_width = position, width or box.size
             self._text(
-                body,
-                left=rect.left + index * band,
-                width=band,
+                self._label_body(text, font, align="ctr"),
+                left=left,
+                width=box_width,
                 baseline=baseline,
                 box=box,
             )

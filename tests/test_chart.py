@@ -316,14 +316,17 @@ def _labels(chart):
 
 
 def _bars(chart):
+    """Every drawn bar, left to right.
+
+    The legend swatch is a filled rectangle too, and in the fixture it is even the same
+    colour; it is an order of magnitude smaller, which is what separates them.
+    """
     bars = [
         child
         for child in chart.children
         if isinstance(child, m.ShapeElement)
         and isinstance(child.fill, m.SolidFill)
-        and child.fill.color.hex.upper() == "#F97316"
         and child.text_body is None
-        # The legend swatch is the same colour and an order of magnitude smaller.
         and child.transform.extent_width > 10 * 12700
     ]
     return sorted(bars, key=lambda bar: bar.transform.offset_x)
@@ -714,3 +717,257 @@ def test_clustered_series_sit_side_by_side_inside_the_category_band(probe_deck):
     assert bars[0].transform.extent_width / 12700.0 == pytest.approx(
         band / 3.5, abs=0.1
     )
+
+
+# -- The variant sweep -----------------------------------------------------------------
+#
+# A second six-chart probe covering the barChart variants no deck in the corpus has:
+# horizontal bars, stacked and percent-stacked grouping, negative values with and without
+# `invertIfNegative`, and `varyColors`.  Same frame as the first sweep, same method --
+# exported by PowerPoint and read back out of the PDF as exact vector coordinates.
+
+VARIANT_SWEEP = {
+    "horizontal": (
+        {"bar_dir": "bar"},
+        {"left": 55.413, "right": 13.670, "top": 11.000, "bottom": 24.965},
+        (0.0, 6.0, 2.0),
+    ),
+    "stacked": (
+        {"grouping": "stacked", "series": 2, "overlap": 100},
+        {"left": 26.413, "right": 10.999, "top": 11.103, "bottom": 24.965},
+        (0.0, 10.0, 1.0),
+    ),
+    "percent-stacked": (
+        {"grouping": "percentStacked", "series": 2, "overlap": 100},
+        {"left": 40.012, "right": 10.999, "top": 11.103, "bottom": 24.965},
+        (0.0, 1.0, 0.1),
+    ),
+    # A chart with negative values reserves *no* band under the plot: `tickLblPos`
+    # defaults to `nextTo`, the category axis floats at zero, and the labels go with it.
+    "negative-default": (
+        {"values": [3, -2, 5]},
+        {"left": 24.478, "right": 10.999, "top": 11.103, "bottom": 11.103},
+        (-3.0, 6.0, 1.0),
+    ),
+    "negative-noinvert": (
+        {"values": [3, -2, 5], "invert": False},
+        {"left": 24.478, "right": 10.999, "top": 11.103, "bottom": 11.103},
+        (-3.0, 6.0, 1.0),
+    ),
+    "vary-colors": (
+        {"vary": True, "colour": None},
+        {"left": 21.073, "right": 10.999, "top": 11.103, "bottom": 24.965},
+        (0.0, 6.0, 1.0),
+    ),
+}
+
+
+def variant_chart_xml(
+    *,
+    bar_dir="col",
+    grouping="clustered",
+    series=1,
+    values=None,
+    colour="F97316",
+    vary=False,
+    invert=None,
+    overlap=0,
+):
+    colours = [colour, "2563EB"]
+    data = [values or [3, 4, 5], [2, 1, 4]]
+    categories = ["Reader", "Writer", "Renderer"]
+
+    series_xml = ""
+    for index in range(series):
+        points = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(data[index])
+        )
+        cats = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(categories)
+        )
+        fill = (
+            f"<c:spPr><a:solidFill><a:srgbClr val='{colours[index]}'/></a:solidFill></c:spPr>"
+            if colours[index]
+            else ""
+        )
+        invert_xml = (
+            f"<c:invertIfNegative val='{1 if invert else 0}'/>" if invert is not None else ""
+        )
+        series_xml += (
+            f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+            f"<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>S{index}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+            f"{fill}{invert_xml}"
+            f"<c:cat><c:strRef><c:strCache><c:ptCount val='3'/>{cats}"
+            "</c:strCache></c:strRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+            f"<c:ptCount val='3'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+        )
+
+    return (
+        "<?xml version='1.0'?>"
+        f"<c:chartSpace {C} {A} {R}>"
+        "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        f"<c:barChart><c:barDir val='{bar_dir}'/><c:grouping val='{grouping}'/>"
+        f"<c:varyColors val='{1 if vary else 0}'/>{series_xml}"
+        f"<c:gapWidth val='150'/><c:overlap val='{overlap}'/>"
+        "<c:axId val='100002'/><c:axId val='100003'/></c:barChart>"
+        "<c:catAx><c:axId val='100002'/><c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='b'/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100003'/>"
+        "<c:crosses val='autoZero'/><c:auto val='1'/><c:lblAlgn val='ctr'/>"
+        "<c:lblOffset val='100'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/><c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        "</c:plotArea>"
+        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart></c:chartSpace>"
+    ).encode()
+
+
+@pytest.fixture(scope="module")
+def variant_deck(authoring):
+    from tests.deckbuilder import derive_deck
+
+    chart_type = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+    parts, relationships, overrides, shapes = {}, [], {}, ""
+    for index, (name, (kwargs, _, _)) in enumerate(VARIANT_SWEEP.items()):
+        part = f"ppt/charts/variant{index}.xml"
+        parts[part] = variant_chart_xml(**kwargs)
+        overrides[f"/{part}"] = chart_type
+        relationships.append(
+            (
+                f"rIdVar{index}",
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+                f"../charts/variant{index}.xml",
+            )
+        )
+        shapes += (
+            f"<p:graphicFrame><p:nvGraphicFramePr>"
+            f"<p:cNvPr id='{300 + index}' name='{name}'/>"
+            "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+            f"<p:xfrm><a:off x='0' y='0'/>"
+            f"<a:ext cx='{PROBE_FRAME[0]}' cy='{PROBE_FRAME[1]}'/></p:xfrm>"
+            "<a:graphic><a:graphicData "
+            "uri='http://schemas.openxmlformats.org/drawingml/2006/chart'>"
+            "<c:chart xmlns:c='http://schemas.openxmlformats.org/drawingml/2006/chart' "
+            "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships' "
+            f"r:id='rIdVar{index}'/></a:graphicData></a:graphic></p:graphicFrame>"
+        )
+
+    deck = convert_pptx_to_model(
+        derive_deck(
+            authoring,
+            parts=parts,
+            shapes_xml=shapes,
+            slide_relationships=relationships,
+            overrides=overrides,
+        )
+    )
+    charts = [e for e in deck.slides[0].elements if isinstance(e, m.ChartElement)]
+    return dict(zip(VARIANT_SWEEP, charts[1:]))
+
+
+@pytest.mark.parametrize("name", list(VARIANT_SWEEP))
+def test_the_variant_sweep_reproduces_powerpoints_plot_rectangle(name, variant_deck):
+    chart = variant_deck[name]
+    _, expected, _ = VARIANT_SWEEP[name]
+    width = chart.transform.extent_width / 12700.0
+    height = chart.transform.extent_height / 12700.0
+    lines = [c for c in chart.children if isinstance(c, m.ConnectorElement)]
+    value = [line for line in lines if line.transform.extent_width == 0][0].transform
+    horizontal = [line for line in lines if line.transform.extent_height == 0]
+    category = max(horizontal, key=lambda line: line.transform.offset_y).transform
+    ours = {
+        "left": value.offset_x / 12700.0,
+        "right": width - (category.offset_x + category.extent_width) / 12700.0,
+        "top": value.offset_y / 12700.0,
+        "bottom": height - (value.offset_y + value.extent_height) / 12700.0,
+    }
+    for edge, truth in expected.items():
+        assert ours[edge] == pytest.approx(truth, abs=SWEEP_TOLERANCE_PT), (
+            f"{name} {edge}: PowerPoint {truth:.4f}, ours {ours[edge]:.4f}"
+        )
+
+
+@pytest.mark.parametrize("name", list(VARIANT_SWEEP))
+def test_the_variant_sweep_reproduces_powerpoints_axis(name, variant_deck):
+    scale = variant_deck[name].chart.value_axis
+    minimum, maximum, unit = VARIANT_SWEEP[name][2]
+    assert (scale.minimum, scale.maximum, scale.major_unit) == pytest.approx(
+        (minimum, maximum, unit)
+    )
+
+
+def test_a_negative_bar_is_drawn_hollow_unless_the_file_opts_out(variant_deck):
+    """Measured: white fill, black 0.75 pt outline -- and the series colour at val="0"."""
+    default = _bars(variant_deck["negative-default"])
+    assert [bar.fill.color.hex.upper() for bar in default] == [
+        "#F97316",
+        "#FFFFFF",
+        "#F97316",
+    ]
+    inverted = next(bar for bar in default if bar.fill.color.hex.upper() == "#FFFFFF")
+    assert inverted.outline is not None
+    assert inverted.outline.fill.color.hex.upper() == "#000000"
+    assert inverted.outline.width == 9525
+
+    kept = _bars(variant_deck["negative-noinvert"])
+    assert {bar.fill.color.hex.upper() for bar in kept} == {"#F97316"}
+
+
+def test_vary_colors_cycles_the_theme_accents_undarkened(variant_deck):
+    """pptx-renderer darkens these to 88%; PowerPoint's export says it does not."""
+    bars = _bars(variant_deck["vary-colors"])
+    assert [bar.fill.color.hex.upper() for bar in bars] == ["#4472C4", "#ED7D31", "#A5A5A5"]
+
+
+def test_a_horizontal_chart_puts_the_first_category_at_the_bottom(variant_deck):
+    chart = variant_deck["horizontal"]
+    bars = sorted(
+        (
+            child
+            for child in chart.children
+            if isinstance(child, m.ShapeElement)
+            and isinstance(child.fill, m.SolidFill)
+            and child.text_body is None
+            and child.transform.extent_width > 10 * 12700
+        ),
+        key=lambda bar: bar.transform.offset_y,
+    )
+    assert len(bars) == 3
+    # Values 3, 4, 5 with "Reader" lowest, so the bars get *shorter* going down.
+    widths = [bar.transform.extent_width for bar in bars]
+    assert widths[0] > widths[1] > widths[2]
+
+
+def test_a_stacked_series_sits_on_top_of_the_one_before_it(variant_deck):
+    chart = variant_deck["stacked"]
+    bars = [
+        child
+        for child in chart.children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.fill, m.SolidFill)
+        and child.text_body is None
+        and child.transform.extent_width > 10 * 12700
+    ]
+    first = sorted(
+        (b for b in bars if b.fill.color.hex.upper() == "#F97316"),
+        key=lambda bar: bar.transform.offset_x,
+    )
+    second = sorted(
+        (b for b in bars if b.fill.color.hex.upper() == "#2563EB"),
+        key=lambda bar: bar.transform.offset_x,
+    )
+    assert len(first) == len(second) == 3
+    for lower, upper in zip(first, second):
+        assert lower.transform.offset_x == pytest.approx(upper.transform.offset_x)
+        # The second series' foot is the first series' head.
+        assert upper.transform.offset_y + upper.transform.extent_height == pytest.approx(
+            lower.transform.offset_y, abs=1.0
+        )
