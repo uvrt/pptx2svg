@@ -328,6 +328,13 @@ def font_family_value(
     for font in fonts:
         if not font or font in seen:
             continue
+        if font.startswith("+"):
+            # An unexpanded theme pointer (``+mn-cs``).  :func:`substitution_for` already
+            # declines to map these; letting one into the emitted list is worse than
+            # useless, because ``+`` is not a legal start for a CSS identifier and resvg
+            # discards the entire ``font-family`` declaration rather than just the bad
+            # token.  One stray pointer therefore costs every other face in the stack.
+            continue
         seen.add(font)
         unique.append(font)
 

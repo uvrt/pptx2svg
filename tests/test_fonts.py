@@ -311,3 +311,18 @@ def test_every_font_stack_ends_in_a_generic_family(pptx_path):
     for document in documents:
         for value in re.findall(r'font-family="([^"]*)"', document):
             assert value.rsplit(", ", 1)[-1] in generics, value
+
+
+def test_no_theme_pointer_reaches_a_font_family_stack(pptx_path):
+    """``+`` cannot start a CSS identifier, and resvg drops the whole declaration.
+
+    A theme that writes ``<a:cs typeface=""/>`` -- which every deck in the corpus does --
+    used to resolve ``+mn-cs`` to itself, and the literal pointer was emitted in the
+    stack.  The cost was not one dead entry: resvg rejected the entire ``font-family``
+    and fell back to its default face, so *every* named face in the stack was lost.
+    """
+    for document in convert_pptx_to_svg(
+        pptx_path, ConvertOptions(warn_on_font_substitution=False)
+    ):
+        for value in re.findall(r'font-family="([^"]*)"', document):
+            assert "+" not in value, value
