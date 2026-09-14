@@ -7,6 +7,7 @@ where each constant came from and what its residual against the measurement is.
 
 from __future__ import annotations
 
+import re
 import zipfile
 from xml.etree.ElementTree import fromstring
 
@@ -975,7 +976,7 @@ def test_a_stacked_series_sits_on_top_of_the_one_before_it(variant_deck):
 # -- Malformed and hostile input -------------------------------------------------------
 
 
-def _build(body: str):
+def _build(body: str, *, width: float = 200.0, height: float = 150.0):
     """Lay out a bare chart with no colour or text resolution, and return its children."""
     from pptx2svg.resolve.chart import ChartBuilder, ChartStyle
 
@@ -983,8 +984,8 @@ def _build(body: str):
     return ChartBuilder(
         source,
         source.plots[0],
-        width_pt=200.0,
-        height_pt=150.0,
+        width_pt=width,
+        height_pt=height,
         style=ChartStyle(
             font_family="Aptos",
             font_size=10.0,
@@ -995,10 +996,32 @@ def _build(body: str):
                 m.ResolvedColor(hex="#A5A5A5"),
             ],
         ),
-        resolve_fill=lambda fill: None,
-        resolve_outline=lambda outline: None,
+        resolve_fill=_fake_fill,
+        resolve_outline=_fake_outline,
         resolve_text=lambda rich, text, size, align: m.TextBody(),
     ).build()
+
+
+def _fake_fill(fill):
+    """Resolve the one fill spelling these tests use, without a whole ResolveContext."""
+    from pptx2svg.parse import source as s
+
+    if isinstance(fill, s.SourceSolidFill) and isinstance(fill.color, s.SrgbColor):
+        return m.SolidFill(color=m.ResolvedColor(hex=f"#{fill.color.hex}"))
+    if isinstance(fill, s.SourceNoFill):
+        return m.NoFill()
+    return None
+
+
+def _fake_outline(outline):
+    from pptx2svg.parse import source as s
+
+    if outline is None:
+        return None
+    fill = _fake_fill(outline.fill)
+    if isinstance(fill, m.NoFill) or fill is None:
+        return None
+    return m.Outline(width=outline.width or 12700, fill=fill)
 
 
 @pytest.mark.parametrize(
@@ -1417,3 +1440,214 @@ def test_the_metrics_less_fallback_line_box_matches_the_renderers():
     box = font_box("a face nothing has metrics for", 18.0)
     assert box.line_height == pytest.approx(DEFAULT_LINE_HEIGHT_RATIO * 18.0)
     assert box.first_baseline < box.line_height
+
+
+# -- Line charts -----------------------------------------------------------------------
+#
+# Measured on a six-chart probe deck exported by PowerPoint, plus the real line chart in
+# `real-financial-report.pptx`.  Coordinates are frame-relative points read out of the
+# PDF as exact vectors.
+
+LINE_CATS = ["Reader", "Writer", "Renderer"]
+
+
+def line_chart_xml(
+    *,
+    values=(3, 4, 5),
+    line="<a:ln w='25400'><a:solidFill><a:srgbClr val='F97316'/></a:solidFill></a:ln>",
+    marker="<c:marker><c:symbol val='none'/></c:marker>",
+    smooth=None,
+    blanks="gap",
+):
+    points = "".join(
+        f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>"
+        for i, v in enumerate(values)
+        if v is not None
+    )
+    cats = "".join(
+        f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(LINE_CATS)
+    )
+    smooth_xml = "" if smooth is None else f"<c:smooth val='{1 if smooth else 0}'/>"
+    return (
+        "<c:chart><c:plotArea><c:layout/>"
+        "<c:lineChart><c:grouping val='standard'/><c:varyColors val='0'/>"
+        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>A</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        f"<c:spPr><a:solidFill><a:srgbClr val='F97316'/></a:solidFill>{line}</c:spPr>"
+        f"{marker}"
+        f"<c:cat><c:strRef><c:strCache><c:ptCount val='3'/>{cats}"
+        "</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+        f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef></c:val>"
+        f"{smooth_xml}</c:ser>"
+        "<c:axId val='1'/><c:axId val='2'/></c:lineChart>"
+        "<c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:majorGridlines/>"
+        "<c:crossBetween val='between'/></c:valAx>"
+        f"</c:plotArea><c:dispBlanksAs val='{blanks}'/></c:chart>"
+    )
+
+
+def _polylines(children):
+    return [
+        child
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.geometry, m.CustomGeometry)
+    ]
+
+
+def _markers(children):
+    return sorted(
+        (
+            child
+            for child in children
+            if isinstance(child, m.ShapeElement)
+            and isinstance(child.geometry, m.PresetGeometry)
+            and child.geometry.preset in ("ellipse", "diamond", "triangle", "star5")
+        ),
+        key=lambda child: child.transform.offset_x,
+    )
+
+
+def _vertices(shape):
+    """A polyline's vertices in frame coordinates, from its box and its path data."""
+    transform = shape.transform
+    path = shape.geometry.paths[0]
+    scale_x = transform.extent_width / 12700.0 / path.width if path.width else 1.0
+    scale_y = transform.extent_height / 12700.0 / path.height if path.height else 1.0
+    out = []
+    for token in re.finditer(r"[ML] ([-\d.]+) ([-\d.]+)", path.commands):
+        out.append(
+            (
+                round(transform.offset_x / 12700.0 + float(token.group(1)) * scale_x, 3),
+                round(transform.offset_y / 12700.0 + float(token.group(2)) * scale_y, 3),
+            )
+        )
+    return out
+
+
+def test_a_line_chart_draws_a_polyline_through_the_band_centres():
+    """Measured on the probe: vertices at 52.473, 115.273 and 178.05 pt across the frame.
+
+    `c:crossBetween="between"` puts a point in the middle of its category band, exactly
+    where a bar would be -- the real line chart in `real-financial-report.pptx` says the
+    same and PowerPoint drew it the same way.
+    """
+    children, data = _build(line_chart_xml(), width=220.4724, height=181.1024)
+    assert data.kind == "lineChart"
+    polylines = _polylines(children)
+    assert len(polylines) == 1
+    vertices = _vertices(polylines[0])
+    assert [v[0] for v in vertices] == pytest.approx([52.473, 115.273, 178.052], abs=0.6)
+    # Values 3, 4 and 5 on a 0..6 axis, so the vertices climb by equal steps.
+    steps = [vertices[i][1] - vertices[i + 1][1] for i in range(2)]
+    assert steps[0] == pytest.approx(steps[1], abs=0.01)
+
+
+def test_a_line_takes_its_colour_from_a_ln_and_not_from_a_solid_fill():
+    """Measured: a series stating only `a:solidFill` was drawn in accent1, fill ignored.
+
+    A bar chart takes `a:solidFill` as its bar colour, so reusing that rule here would
+    paint the line the wrong colour on any deck that sets both.
+    """
+    explicit, _ = _build(line_chart_xml(), width=220.0, height=181.0)
+    assert _polylines(explicit)[0].outline.fill.color.hex.upper() == "#F97316"
+
+    bare, _ = _build(line_chart_xml(line=""), width=220.0, height=181.0)
+    assert _polylines(bare)[0].outline.fill.color.hex.upper() == "#4472C4"
+
+
+def test_a_line_series_that_states_no_width_gets_one_and_a_half_points():
+    bare, _ = _build(line_chart_xml(line=""), width=220.0, height=181.0)
+    assert _polylines(bare)[0].outline.width == 19050
+    # And a stated width is taken literally.
+    stated, _ = _build(line_chart_xml(), width=220.0, height=181.0)
+    assert _polylines(stated)[0].outline.width == 25400
+
+
+def test_a_line_stroke_has_round_caps():
+    """Measured: PowerPoint emits `1 J` on a line series whether or not `a:ln` says so."""
+    children, _ = _build(line_chart_xml(), width=220.0, height=181.0)
+    assert _polylines(children)[0].outline.line_cap == "round"
+
+
+def test_marker_size_is_a_diameter_in_points():
+    """`c:size val="7"` measured 6.96 pt across in the probe."""
+    children, _ = _build(
+        line_chart_xml(
+            marker="<c:marker><c:symbol val='circle'/><c:size val='7'/></c:marker>"
+        ),
+        width=220.0,
+        height=181.0,
+    )
+    markers = _markers(children)
+    assert len(markers) == 3
+    for marker in markers:
+        assert marker.geometry.preset == "ellipse"
+        assert marker.transform.extent_width / 12700.0 == pytest.approx(7.0, abs=0.01)
+
+
+def test_symbol_none_draws_no_marker():
+    children, _ = _build(line_chart_xml(), width=220.0, height=181.0)
+    assert _markers(children) == []
+
+
+def test_a_series_with_no_marker_element_still_gets_one():
+    """Measured: PowerPoint drew a **diamond** for series 0 of a marker-less line chart.
+
+    The rest of the cycle is from the specification and is not measured.
+    """
+    children, _ = _build(line_chart_xml(marker=""), width=220.0, height=181.0)
+    markers = _markers(children)
+    assert len(markers) == 3
+    assert {marker.geometry.preset for marker in markers} == {"diamond"}
+
+
+def test_a_blank_breaks_the_line_in_two():
+    """`dispBlanksAs="gap"` is the default and really leaves a gap."""
+    children, _ = _build(
+        line_chart_xml(values=(3, None, 5)), width=220.0, height=181.0
+    )
+    assert len(_polylines(children)) == 0  # two isolated points, no run of two
+
+    spanned, _ = _build(
+        line_chart_xml(values=(3, None, 5), blanks="span"), width=220.0, height=181.0
+    )
+    assert len(_vertices(_polylines(spanned)[0])) == 2
+
+
+def test_smoothing_emits_curves_rather_than_segments():
+    """`c:smooth` is drawn as a spline; the probe's control points are not collinear.
+
+    The tension PowerPoint uses was **not** measured, so only the shape of the output is
+    asserted here, not its exact curvature.
+    """
+    straight, _ = _build(line_chart_xml(), width=220.0, height=181.0)
+    assert "C " not in _polylines(straight)[0].geometry.paths[0].commands
+
+    curved, _ = _build(
+        line_chart_xml(values=(3, 5, 2), smooth=True), width=220.0, height=181.0
+    )
+    assert "C " in _polylines(curved)[0].geometry.paths[0].commands
+
+
+def test_the_real_line_chart_renders():
+    """`real-financial-report.pptx` slide 2 holds the only line chart in the corpus."""
+    from tests.conftest import FIXTURE_DIR
+
+    deck = convert_pptx_to_model(
+        (FIXTURE_DIR / "real-financial-report.pptx").read_bytes()
+    )
+    charts = [
+        element
+        for slide in deck.slides
+        for element in slide.elements
+        if isinstance(element, m.ChartElement) and element.chart.kind == "lineChart"
+    ]
+    assert len(charts) == 1
+    chart = charts[0]
+    assert len(chart.chart.series) == 3
+    assert len(_polylines(chart.children)) == 3
+    assert len(_markers(chart.children)) == 9

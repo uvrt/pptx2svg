@@ -92,6 +92,10 @@ METAFILE_MIME_TYPES = frozenset({"image/emf", "image/wmf", "image/x-emf", "image
 #: Two spellings exist for the same relationship -- Microsoft's own and the ISO/IEC
 #: transitional one that ``purl.oclc.org`` hosts -- and which one appears depends on
 #: which Office version and which save format wrote the file, so both are accepted.
+#: Chart groups the renderer can draw.  Everything else warns and draws an empty frame
+#: rather than a wrong picture.
+DRAWABLE_CHART_KINDS = frozenset({"barChart", "lineChart"})
+
 DIAGRAM_DRAWING_REL_TYPES = (
     "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing",
     "http://purl.oclc.org/ooxml/officeDocument/relationships/diagramDrawing",
@@ -911,12 +915,12 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
 def _first_drawable_plot(source) -> "object | None":
     """The first plot group this renderer knows how to draw.
 
-    Only ``barChart`` (and its 3-D spelling, drawn flat) so far.  A combo chart whose
+    ``barChart`` and ``lineChart`` (and their 3-D spellings, drawn flat).  A combo chart whose
     *first* group is a line but whose second is a bar still draws the bar, which is a
     better picture than an empty frame and is why this scans rather than taking ``[0]``.
     """
     for plot in source.plots:
-        if flat_chart_kind(plot.kind) == "barChart":
+        if flat_chart_kind(plot.kind) in DRAWABLE_CHART_KINDS:
             return plot
     return None
 
