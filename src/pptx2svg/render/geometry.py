@@ -44,18 +44,6 @@ def _adj(adj: dict, name: str, default: float) -> float:
 
 
 
-def _regular_polygon(w: float, h: float, sides: int) -> str:
-    cx, cy = w / 2, h / 2
-    points = [
-        (
-            cx + cx * math.cos(math.tau * i / sides - math.pi / 2),
-            cy + cy * math.sin(math.tau * i / sides - math.pi / 2),
-        )
-        for i in range(sides)
-    ]
-    return f'<polygon points="{_pts(*points)}"/>'
-
-
 
 # --------------------------------------------------------------------------------------
 # Basic shapes
@@ -241,25 +229,6 @@ def _flow_merge(w, h, adj):
 
 
 
-def _flow_delay(w, h, adj):
-    arc_w = w * 0.35
-    return (
-        f'<path d="M 0 0 L {_n(w-arc_w)} 0 A {_n(arc_w)} {_n(h/2)} 0 0 1 {_n(w-arc_w)} {_n(h)} '
-        f'L 0 {_n(h)} Z"/>'
-    )
-
-
-def _flow_display(w, h, adj):
-    left_w = w * 0.15
-    arc_w = w * 0.35
-    return (
-        f'<path d="M {_n(left_w)} 0 L {_n(w-arc_w)} 0 A {_n(arc_w)} {_n(h/2)} 0 0 1 {_n(w-arc_w)} {_n(h)} '
-        f'L {_n(left_w)} {_n(h)} L 0 {_n(h/2)} Z"/>'
-    )
-
-
-
-
 
 
 # --------------------------------------------------------------------------------------
@@ -409,11 +378,6 @@ def _snip2_same_rect(w, h, adj):
     return f'<polygon points="{_pts((d1, 0), (w - d1, 0), (w, d1), (w, h - d2), (w - d2, h), (d2, h), (0, h - d2), (0, d1))}"/>'
 
 
-def _snip2_diag_rect(w, h, adj):
-    d1 = _adj(adj, "adj1", 16667) * min(w, h)
-    d2 = _adj(adj, "adj2", 0) * min(w, h)
-    return f'<polygon points="{_pts((d1, 0), (w, 0), (w, h - d2), (w - d2, h), (0, h), (0, d1))}"/>'
-
 
 def _snip_round_rect(w, h, adj):
     r = _adj(adj, "adj1", 16667) * min(w, h)
@@ -452,20 +416,6 @@ def _round2_diag_rect(w, h, adj):
     )
 
 
-def _left_bracket(w, h, adj):
-    r = _adj(adj, "adj", 8333) * h
-    return (
-        f'<path d="M {_n(w)} 0 L {_n(r)} 0 A {_n(r)} {_n(r)} 0 0 0 0 {_n(r)} L 0 {_n(h-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 0 {_n(r)} {_n(h)} L {_n(w)} {_n(h)}"/>'
-    )
-
-
-def _right_bracket(w, h, adj):
-    r = _adj(adj, "adj", 8333) * h
-    return (
-        f'<path d="M 0 0 L {_n(w-r)} 0 A {_n(r)} {_n(r)} 0 0 1 {_n(w)} {_n(r)} L {_n(w)} {_n(h-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(w-r)} {_n(h)} L 0 {_n(h)}"/>'
-    )
 
 
 def _left_brace(w, h, adj):
@@ -730,8 +680,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "triangle": _triangle,
     "rtTriangle": _rt_triangle,
     "diamond": _diamond,
-    "decagon": lambda w, h, adj: _regular_polygon(w, h, 10),
-    "dodecagon": lambda w, h, adj: _regular_polygon(w, h, 12),
     "line": _line,
     # Stars and seals
     # Arrows
@@ -758,8 +706,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "flowChartSort": _flow_sort,
     "flowChartExtract": _flow_extract,
     "flowChartMerge": _flow_merge,
-    "flowChartDelay": _flow_delay,
-    "flowChartDisplay": _flow_display,
     # Callouts
     "wedgeRectCallout": _wedge_rect_callout,
     "wedgeRoundRectCallout": _wedge_round_rect_callout,
@@ -775,13 +721,10 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "bevel": _bevel,
     "snip1Rect": _snip1_rect,
     "snip2SameRect": _snip2_same_rect,
-    "snip2DiagRect": _snip2_diag_rect,
     "snipRoundRect": _snip_round_rect,
     "round1Rect": _round1_rect,
     "round2SameRect": _round2_same_rect,
     "round2DiagRect": _round2_diag_rect,
-    "leftBracket": _left_bracket,
-    "rightBracket": _right_bracket,
     "leftBrace": _left_brace,
     "rightBrace": _right_brace,
 }

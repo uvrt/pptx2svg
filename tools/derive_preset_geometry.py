@@ -180,6 +180,14 @@ SPEC_DRIVEN = [
     "irregularSeal1",
     "irregularSeal2",
     "wave",
+    # Stragglers the 0.95 threshold hid: ours 0.95-0.99 against PowerPoint, the specification 0.998-1.000.
+    "decagon",
+    "dodecagon",
+    "flowChartDelay",
+    "flowChartDisplay",
+    "leftBracket",
+    "rightBracket",
+    "snip2DiagRect",
 ]
 
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
