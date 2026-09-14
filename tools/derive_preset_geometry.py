@@ -188,6 +188,21 @@ SPEC_DRIVEN = [
     "leftBracket",
     "rightBracket",
     "snip2DiagRect",
+    # Found by the adjustment sweep: our generators applied out-of-range values raw where the specification pins them, so these agreed at defaults and drifted at the ends.
+    "bevel",
+    "downArrow",
+    "foldedCorner",
+    "frame",
+    "round2DiagRect",
+    "snip1Rect",
+    "snip2SameRect",
+    "snipRoundRect",
+    "triangle",
+    "upDownArrow",
+    # Found only by measuring a region larger than the shape: their leader lines fall outside the box, where a crop of the box alone cannot see them.
+    "borderCallout3",
+    "wedgeRectCallout",
+    "wedgeRoundRectCallout",
 ]
 
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
