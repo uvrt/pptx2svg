@@ -89,23 +89,6 @@ def _diamond(w, h, adj):
     return f'<polygon points="{_pts((w/2, 0), (w, h/2), (w/2, h), (0, h/2))}"/>'
 
 
-def _parallelogram(w, h, adj):
-    offset = _adj(adj, "adj", 25000) * w
-    return f'<polygon points="{_pts((offset, 0), (w, 0), (w - offset, h), (0, h))}"/>'
-
-
-def _trapezoid(w, h, adj):
-    offset = _adj(adj, "adj", 25000) * w
-    return f'<polygon points="{_pts((offset, 0), (w - offset, 0), (w, h), (0, h))}"/>'
-
-
-def _hexagon(w, h, adj):
-    offset = _adj(adj, "adj", 25000) * w
-    return (
-        f'<polygon points="{_pts((offset, 0), (w - offset, 0), (w, h/2), (w - offset, h), (offset, h), (0, h/2))}"/>'
-    )
-
-
 
 
 def _up_arrow(w, h, adj):
@@ -434,23 +417,6 @@ def _border_callout3(w, h, adj):
 # --------------------------------------------------------------------------------------
 
 
-def _plus(w, h, adj):
-    t = _adj(adj, "adj", 25000)
-    lx, rx = t * w, w - t * w
-    ty, by = t * h, h - t * h
-    return f'<polygon points="{_pts((lx, 0), (rx, 0), (rx, ty), (w, ty), (w, by), (rx, by), (rx, h), (lx, h), (lx, by), (0, by), (0, ty), (lx, ty))}"/>'
-
-
-def _corner(w, h, adj):
-    cx = _adj(adj, "adj1", 50000) * w
-    cy = _adj(adj, "adj2", 50000) * h
-    return f'<polygon points="{_pts((0, 0), (cx, 0), (cx, cy), (w, cy), (w, h), (0, h))}"/>'
-
-
-def _diag_stripe(w, h, adj):
-    d = _adj(adj, "adj", 50000) * min(w, h)
-    return f'<polygon points="{_pts((0, d), (d, 0), (w, 0), (0, h))}"/>'
-
 
 def _folded_corner(w, h, adj):
     fold = _adj(adj, "adj", 16667) * min(w, h)
@@ -458,35 +424,6 @@ def _folded_corner(w, h, adj):
         f'<path d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(h-fold)} L {_n(w-fold)} {_n(h)} L 0 {_n(h)} Z '
         f'M {_n(w-fold)} {_n(h)} L {_n(w-fold)} {_n(h-fold)} L {_n(w)} {_n(h-fold)}"/>'
     )
-
-
-def _plaque(w, h, adj):
-    r = _adj(adj, "adj", 16667) * min(w, h)
-    return (
-        f'<path d="M 0 {_n(r)} A {_n(r)} {_n(r)} 0 0 1 {_n(r)} 0 L {_n(w-r)} 0 '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(w)} {_n(r)} L {_n(w)} {_n(h-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(w-r)} {_n(h)} L {_n(r)} {_n(h)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 0 {_n(h-r)} Z"/>'
-    )
-
-
-def _can(w, h, adj):
-    ry = _adj(adj, "adj", 25000) * h * 0.5
-    return (
-        f'<path d="M 0 {_n(ry)} A {_n(w/2)} {_n(ry)} 0 0 1 {_n(w)} {_n(ry)} L {_n(w)} {_n(h-ry)} '
-        f'A {_n(w/2)} {_n(ry)} 0 0 1 0 {_n(h-ry)} Z '
-        f'M 0 {_n(ry)} A {_n(w/2)} {_n(ry)} 0 0 0 {_n(w)} {_n(ry)}"/>'
-    )
-
-
-def _cube(w, h, adj):
-    d = _adj(adj, "adj", 25000) * min(w, h)
-    return (
-        f'<path d="M 0 {_n(d)} L {_n(d)} 0 L {_n(w)} 0 L {_n(w)} {_n(h-d)} L {_n(w-d)} {_n(h)} L 0 {_n(h)} Z '
-        f'M 0 {_n(d)} L {_n(w-d)} {_n(d)} L {_n(w)} 0 M {_n(w-d)} {_n(d)} L {_n(w-d)} {_n(h)}"/>'
-    )
-
-
 
 
 
@@ -507,11 +444,6 @@ def _bevel(w, h, adj):
         f'M {_n(w)} {_n(h)} L {_n(w-t)} {_n(h-t)} M 0 {_n(h)} L {_n(t)} {_n(h-t)}"/>'
     )
 
-
-def _half_frame(w, h, adj):
-    adj_x = _adj(adj, "adj1", 33333) * w
-    adj_y = _adj(adj, "adj2", 33333) * h
-    return f'<polygon points="{_pts((0, 0), (w, 0), (w, adj_y), (adj_x, adj_y), (adj_x, h), (0, h))}"/>'
 
 
 def _snip1_rect(w, h, adj):
@@ -605,16 +537,6 @@ def _right_brace(w, h, adj):
 
 
 
-
-
-def _teardrop(w, h, adj):
-    d = _adj(adj, "adj", 100000) * min(w, h) * 0.5
-    rx, ry = w / 2, h / 2
-    cx, cy = rx, ry
-    return (
-        f'<path d="M {_n(cx)} 0 L {_n(cx+d)} 0 L {_n(w)} {_n(cy - d + ry)} '
-        f'A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx)} 0 Z"/>'
-    )
 
 
 
@@ -877,12 +799,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "triangle": _triangle,
     "rtTriangle": _rt_triangle,
     "diamond": _diamond,
-    "parallelogram": _parallelogram,
-    "trapezoid": _trapezoid,
-    "pentagon": lambda w, h, adj: _regular_polygon(w, h, 5),
-    "hexagon": _hexagon,
-    "heptagon": lambda w, h, adj: _regular_polygon(w, h, 7),
-    "octagon": lambda w, h, adj: _regular_polygon(w, h, 8),
     "decagon": lambda w, h, adj: _regular_polygon(w, h, 10),
     "dodecagon": lambda w, h, adj: _regular_polygon(w, h, 12),
     "line": _line,
@@ -928,16 +844,9 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     # Misc
     "cloud": _cloud,
     "heart": _heart,
-    "plus": _plus,
-    "corner": _corner,
-    "diagStripe": _diag_stripe,
     "foldedCorner": _folded_corner,
-    "plaque": _plaque,
-    "can": _can,
-    "cube": _cube,
     "frame": _frame,
     "bevel": _bevel,
-    "halfFrame": _half_frame,
     "snip1Rect": _snip1_rect,
     "snip2SameRect": _snip2_same_rect,
     "snip2DiagRect": _snip2_diag_rect,
@@ -949,7 +858,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "rightBracket": _right_bracket,
     "leftBrace": _left_brace,
     "rightBrace": _right_brace,
-    "teardrop": _teardrop,
     "wave": _wave,
     "doubleWave": _double_wave,
 }

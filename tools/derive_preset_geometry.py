@@ -157,6 +157,21 @@ SPEC_DRIVEN = [
     "flowChartPunchedTape",
     "flowChartSummingJunction",
     "flowChartTerminator",
+    # Polygons, prisms and tabs: ours 0.71-0.95 against PowerPoint, the specification 0.997-1.000.
+    "can",
+    "corner",
+    "cube",
+    "diagStripe",
+    "halfFrame",
+    "heptagon",
+    "hexagon",
+    "octagon",
+    "parallelogram",
+    "pentagon",
+    "plaque",
+    "plus",
+    "teardrop",
+    "trapezoid",
 ]
 
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
