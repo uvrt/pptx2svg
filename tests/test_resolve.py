@@ -84,8 +84,23 @@ def test_images_carry_base64_payloads(authoring):
 
 
 def test_unsupported_graphic_frames_warn_rather_than_vanish(authoring):
+    """A frame holding something we cannot draw says so instead of vanishing.
+
+    `authoring-integration.pptx` used to be the fixture for this because its chart was
+    the unsupported thing; now the chart renders, so the frame has to be a synthetic one.
+    """
+    from tests.deckbuilder import derive_deck
+
+    frame = (
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='98' name='Embedded movie'/>"
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        "<p:xfrm><a:off x='0' y='0'/><a:ext cx='1000000' cy='1000000'/></p:xfrm>"
+        "<a:graphic><a:graphicData "
+        "uri='http://schemas.openxmlformats.org/presentationml/2006/media'>"
+        "<p:media/></a:graphicData></a:graphic></p:graphicFrame>"
+    )
     options = ConvertOptions()
-    convert_pptx_to_model(authoring, options)
+    convert_pptx_to_model(derive_deck(authoring, shapes_xml=frame), options)
     codes = {warning.code for warning in options.warnings}
     assert "unsupported-graphic-frame" in codes
 

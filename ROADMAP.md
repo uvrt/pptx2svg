@@ -32,7 +32,7 @@ after it needs a way to tell "better" from "different".
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
-| Charts | **Not rendered** |
+| Charts | `barChart` read and drawn, **verified against PowerPoint** across 18 probe charts and 3 real ones; every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -594,7 +594,7 @@ appears.
 
 ## Phase 3 — Charts
 
-**Effort: XL. The largest single piece of work here.**
+**Effort: XL. 3.1 and the `barChart` half of 3.2 are done; the rest is not.**
 
 No shortcut: unlike SmartArt, PowerPoint does *not* cache a rendered chart. The
 `c:chartSpace` part holds data plus styling, and the renderer must do axis scaling, tick
@@ -609,62 +609,160 @@ majorGridlines tickLblPos numFmt formatCode legend legendPos dLbls …`
 ### Build or delegate?
 
 **[pptx-renderer]** delegates to [ECharts](https://echarts.apache.org/). The Python
-equivalents are matplotlib (SVG backend) and pygal (pure-Python SVG). I recommend
-**hand-rolling** anyway:
+equivalents are matplotlib (SVG backend) and pygal (pure-Python SVG). Hand-rolling was
+the call and it held: the whole of `resolve/chart.py` lowers a chart to the
+`ShapeElement`s and `ConnectorElement`s the renderer already draws, so there is no second
+code path, no dependency, and the chart composes into the slide's transform stack for
+free. `render/svg.py` gained one line.
 
-- Both bring heavy styling opinions that must then be fought back to Office defaults.
-- matplotlib is a large dependency for a library whose selling point is having none; it
-  would have to be optional, which means two code paths.
-- The output must compose into an existing SVG document with our transform/clip stack, not
-  stand alone.
+The reference's `postProcess.ts` — 530 lines of pushing ECharts output back towards
+PowerPoint — is the cost that decision avoids, and reading it was still worth it: it is
+where the real PowerPoint behaviours are written down.
 
-This is a judgement call worth revisiting if chart work stalls — delegating would trade
-fidelity and dependency weight for a large amount of saved time.
+### 3.1 Chart data model and reader — **done**
 
-### 3.1 Chart data model and reader (M)
+`parse/chart.py` reads `c:chartSpace` into a `SourceChart`; `model.ChartData` /
+`ChartSeries` / `ChartAxisScale` carry the result out to `convert_pptx_to_model` callers,
+alongside the drawn primitives. Verified against all six charts in the corpus.
 
-- New `parse/chart.py`: `c:chartSpace` → `SourceChart` (type, series, categories, axes,
-  legend, title).
-- Values live in `c:numCache` with `c:f` holding the spreadsheet formula. **Always read the
-  cache**; parsing the embedded XLSX workbook is a separate project.
-- New `model.py` types mirroring pptx-glimpse's `ChartData` / `ChartSeries` / `ChartLegend`.
-- Resolve series colours through the theme (`a:solidFill` under `c:spPr`, else the
-  `varyColors` accent cycle).
-- **[pptx-renderer]**: chart-local colour maps must stay isolated from the parent slide's.
-  Easy to get wrong, hard to notice.
+Three things the obvious reading gets wrong, each found in a fixture:
 
-### 3.2 Renderer, in order of real-world frequency (L)
+* **Chart booleans default to *true* when `val` is absent.** `<c:delete/>` deletes an axis
+  and `<c:overlay/>` overlays a legend. The `is_true` used for ordinary DrawingML
+  attributes reads both as false.
+* **Categories are not always `c:strRef`.** Every category axis in
+  `real-financial-report.pptx` is a `c:multiLvlStrRef`, and a numeric or date axis arrives
+  as `c:numRef`. A reader that only looks at `c:strRef` silently draws a bare axis.
+* **A missing `c:pt` is a blank cell, not a zero.** `c:dispBlanksAs` draws gap, zero and
+  span differently, so blanks survive as `None` rather than being flattened at parse time.
 
-1. `barChart` (clustered, stacked, percentStacked; `barDir` col/bar) — most common by far
+`c:ptCount` is attacker-controlled and is clamped rather than trusted. The chart's own
+`c:clrMapOvr` **replaces** the slide's rather than layering on it — a slide that remaps
+`bg1`/`tx1` for its own shapes does not remap them for a chart that declares its own
+mapping. Both **[pptx-renderer]** and this roadmap flagged it; it is invisible until a
+deck does both at once.
+
+### 3.2 Renderer — `barChart` **done**, the rest not started
+
+1. ✅ `barChart` — clustered, stacked, percentStacked, `barDir` col and bar
 2. `lineChart`
 3. `pieChart` / `doughnutChart`
 4. `areaChart`
 5. `scatterChart` / `bubbleChart`
 6. `radarChart`, `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
 
-Shared infrastructure, built once: zero-inclusive value domain, "nice" tick selection, tick
-formatting honouring `c:numFmt@formatCode`, gridlines, legend layout for the four
-`legendPos` values, plot-area rectangle.
+Anything else warns `chart-unsupported-type` and draws an empty frame rather than a wrong
+picture. The shared infrastructure — value domain, tick selection, number formatting,
+gridlines, legend layout for all four `legendPos` values, plot-area rectangle — is built
+and is what the other chart types will reuse.
 
-**[pptx-renderer]** also handles: sparse scatter/bubble caches preserving missing
-coordinates *and* explicit zeros (different things), gap/span/zero handling, and explicit
-negative-bar inversion (`c:invertIfNegative`, present in our fixture). Worth reading their
-implementation before writing ours.
+#### Every constant was measured, and the measurement kept correcting the reasoning
+
+Eighteen probe charts differing in one input each — title, legend on each of four sides,
+8/10/14 pt text, gap width, tick marks, series count, horizontal bars, stacked and
+percent-stacked grouping, negative values with and without `invertIfNegative`,
+`varyColors` — were laid out at an identical frame size, exported by PowerPoint 16.106,
+and read back out of the PDF as **exact vector coordinates**. Both sweeps are tests
+(`tests/test_chart.py`), rebuilt from their XML generators, so no binary is committed.
+
+Against `authoring-integration.pptx`, whose chart is half the slide:
+
+| | SSIM | histogram |
+| --- | --- | --- |
+| before | 0.8379 | 0.8106 |
+| after | **0.9327** | **0.9984** |
+| the chart region alone, after | 0.9124 | 0.9957 (was 0.0499) |
+
+Its plot rectangle, first bar, bar width and every text baseline land within 0.47 pt of
+PowerPoint's; all seven gridlines and the category axis land on the same pixel row at
+1280 px. The two bar charts in `real-financial-report.pptx` agree on all four insets to
+within 0.14 pt and on the axis exactly.
+
+What the measurement said that the reasoning did not:
+
+* **The axis rule is not "aim for N ticks".** It is the plain power of ten below the span,
+  halved when the span is under twice it. No tick target reproduces both 0..9 → 0..10 by 1
+  (ten intervals) and 0..1842 → 0..2000 by 500 (four). Both ends round *strictly*
+  outwards, so data topping out at 5 gets an axis to 6.
+* **The tick-mark allowance is reserved whether or not tick marks are drawn.**
+  `majorTickMark="none"` and `"out"` produced byte-identical plot rectangles.
+* **The default axis and gridline colour is black at 0.5 pt, not grey.** Charts written by
+  modern PowerPoint carry a `c:style` or a chart-style part that overrides this; none of
+  the decks measured here does.
+* **A chart's axis labels and its title resolve through different cascades.** With no
+  `c:txPr` anywhere, PowerPoint drew `authoring-integration`'s axis labels in Aptos 10 pt
+  (the theme's minor face, the chart default) and its title, whose `a:rPr` names nothing
+  at all, in Arial 18 pt — the same fallback any unstyled text box gets.
+* **`c:txPr` names a typeface as well as a size.** Reading only the size measured
+  `real-financial-report`'s Arial labels in the theme face and put the plot area 1.7 pt
+  out.
+* **`varyColors` cycles the theme accents exactly.** **[pptx-renderer]** darkens them to
+  88%; PowerPoint's export says #4472C4, #ED7D31, #A5A5A5 unmodified.
+* **A negative bar is white with a *black* 0.75 pt outline**, and the series colour when
+  `invertIfNegative` is 0.
+* **`tickLblPos="nextTo"` means next to the axis, and the axis is at zero.** With negative
+  values PowerPoint reserves no band under the plot at all and prints the category labels
+  inside it, beside the zero line.
+* **A horizontal value axis comes out coarser than a vertical one** for the same data on
+  an axis of almost the same length, so it is not a density limit. One measurement only,
+  and the code says so.
+
+One rule resisted: **the vertical centring of a one-line label on a tick**. Five
+measurements across two faces and three sizes fit none of half the cap height, half the
+x-height, half the line box, or the centre of the digits' own ink. The constant is the
+fitted mean and its worst residual is 0.61 pt.
+
+#### Not done for `barChart`
+
+Each of these is known-missing rather than merely absent:
+
+* **Data labels.** `c:dLbls` is read in full — `showVal`, `showCatName`, `showSerName`,
+  `showPercent`, `dLblPos`, per-point `c:dLbl` overrides, text and box styling — and
+  nothing is drawn from it. No chart in the corpus switches any of them on.
+* **Rotated category labels.** PowerPoint rotates them 45° when they will not fit, which
+  is what `real-financial-report.pptx` slide 3 does; we draw them horizontally and they
+  overlap. That deck's chart3 is the one place our layout is badly wrong (bottom inset
+  27.3 pt against PowerPoint's 69.5 pt) and it is entirely this.
+* **Axis titles**, **minor gridlines and minor ticks**, **`c:dTable`**, and manual
+  `c:layout` for the plot area or the legend.
+* **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
+  list, which is the hard part and is done; a second value axis is then mostly drawing.
+* **Log scales** and `c:tickLblSkip` / `c:tickMarkSkip`. `c:crosses` and `c:crossesAt`
+  move the category axis but have only been measured at zero.
+* **`dispBlanksAs="span"`** is treated as `gap`, which is right for a bar chart and will
+  not be for a line one.
+* The chart frame's rounded corners (`c:roundedCorners`) and effects.
+
+#### What the probe sweeps could not catch
+
+A review of the finished branch found ten defects, and the shape of them is worth keeping:
+**both sweeps assert the plot rectangle, and four of the ten got the rectangle right while
+drawing the wrong thing inside it.** A horizontal chart's gridlines ran across the bars
+instead of up the plot; `barDir` swapped which line each axis' `c:delete` and `c:spPr`
+applied to; `c:catAx/c:txPr` and `c:overlay` were parsed and then never read. Two more
+silently lost data — a series longer than the labelled one lost its tail, and a
+`c:multiLvlStrCache` without `c:ptCount` lost every label — and three were crashes on
+numbers a file controls (`c:gapWidth="-100"` divides by zero; a datum near the float
+ceiling overflows the axis rounding; a denormal span underflows the unit).
+
+The lesson is not that measuring was wrong — it is that a measurement pins the *frame* and
+says nothing about the *contents*, and that the four orientation bugs all lived in the one
+variant with no corpus deck behind it. Anything drawn, not just the box it is drawn in,
+needs its own assertion; a parsed field with no reader needs one too.
 
 ### 3.3 Combo charts (M)
 
-Multiple `c:*Chart` groups sharing a category axis with a secondary value axis. Do this
-after single-type charts are solid — pptx-glimpse treats it as a distinct code path
-(`renderCategoryComboChart`) for good reason.
+Multiple `c:*Chart` groups sharing a category axis with a secondary value axis. The reader
+already returns every group and each one's `c:axId` list, and the renderer picks the first
+group it can draw — so a combo chart whose *second* group is a bar still draws the bar.
+Drawing several groups at once, and the secondary axis, is not done.
 
 ### 3.4 3-D chart fallbacks (S)
 
-`bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents.
-**[pptx-renderer]** does exactly this and is explicit that it is not PowerPoint-perfect —
-but a flat bar chart beats an empty frame.
-
-**Sequencing note:** 3.1 is independently valuable — it gives `convert_pptx_to_model`
-callers the chart *data* before anything is drawn.
+`bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents —
+`parse/chart.flat_chart_kind` does this and `bar3DChart` therefore already draws flat.
+**[pptx-renderer]** does the same and is explicit that it is not PowerPoint-perfect; no
+3-D chart has been compared against real output here either.
 
 ---
 
@@ -957,7 +1055,7 @@ Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrende
                                       ├─▶ Phase 2  (SmartArt — DONE)
                                       ├─▶ Phase 4  (EMF previews — DONE)
                                       ├─▶ Phase 5.1 DONE / 5.2  (small gaps)
-                                      └─▶ Phase 3  (charts — longest pole, start early)
+                                      └─▶ Phase 3  (charts — reader + barChart done)
                                                               Phase 5.3 last
 ```
 
@@ -977,7 +1075,11 @@ Revised quick wins, in order of payoff per day:
    like: it turned up two arc-conversion bugs that had been silently misdrawing
    custom geometry, and it replaced hand-transcription with a spec compiler.
 
-Phase 3 remains the long pole and should start in parallel rather than waiting.
+Phase 3 is started: the reader and `barChart` are done and measured, and the shared
+infrastructure the other chart types need -- value domain, tick selection, number
+formatting, gridlines, legend layout, plot-area rectangle -- is built. `lineChart` is
+the next one worth having and should be cheap now; data labels and rotated category
+labels are the two gaps inside `barChart` itself.
 
 ## Non-goals
 

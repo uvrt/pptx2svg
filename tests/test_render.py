@@ -447,6 +447,23 @@ UNRENDERED_FIELDS = {
         "major_font_cs", "minor_font_cs", "major_font_jpan", "minor_font_jpan",
     )},
 
+    # Chart *data*.  The resolver lowers a chart to ordinary rectangles, lines and text
+    # in `ChartElement.children`, which is what the renderer draws; these fields carry
+    # the numbers and the chosen axis range for callers of `convert_pptx_to_model`, so
+    # nothing in render/ reads them and nothing should.
+    **{f"ChartData.{name}": "chart data, not drawing" for name in (
+        "kind", "series", "categories", "title", "grouping", "bar_direction",
+        "value_axis", "legend_position",
+    )},
+    **{f"ChartSeries.{name}": "chart data, not drawing" for name in (
+        "name", "values", "categories", "color", "format_code",
+    )},
+    **{f"ChartAxisScale.{name}": "chart data, not drawing" for name in (
+        "minimum", "maximum", "major_unit",
+    )},
+    "ChartElement.chart": "chart data, not drawing",
+    "ChartElement.alt_text": "accessibility metadata, not geometry",
+
     # Metadata that describes a shape rather than drawing it.
     "ShapeElement.alt_text": "accessibility metadata, not geometry",
     "ImageElement.alt_text": "accessibility metadata, not geometry",
