@@ -26,7 +26,7 @@ from pptx2svg.fonts import (
     font_dirs,
 )
 from pptx2svg.fonts.check import check_deck, check_families
-from pptx2svg.text.fontmap import SUBSTITUTIONS
+from pptx2svg.text.fontmap import SUBSTITUTIONS, font_family_value, typographic_family
 from pptx2svg.text.measure import DefaultTextMeasurer
 from pptx2svg.text.metrics import METRICS
 
@@ -301,6 +301,32 @@ def test_the_font_stack_asks_for_the_original_face_before_the_substitute(authori
         authoring, ConvertOptions(warn_on_font_substitution=False)
     )
     assert 'font-family="Aptos, Carlito, sans-serif"' in svg
+
+
+def test_a_superfamily_face_names_its_typographic_family_too():
+    """resvg indexes by OpenType name ID 16, which a deck never spells.
+
+    ``Aptos Display.ttf`` carries ID 1 "Aptos Display" but ID 16 "Aptos", and fontdb
+    files it under the latter only -- measured, not assumed: with just that file loaded,
+    resvg draws nothing for ``font-family="Aptos Display"``.  Without "Aptos" in the
+    stack the request fell past every named face to the generic and drew ~10% wide.
+    """
+    value = font_family_value(["Aptos Display"])
+    names = value.split(", ")
+    assert names[0] == "'Aptos Display'"
+    assert names[1] == "Aptos"
+
+
+def test_typographic_family_strips_one_style_word_only():
+    assert typographic_family("Calibri Light") == "Calibri"
+    assert typographic_family("Open Sans SemiBold") == "Open Sans"
+    assert typographic_family("\u6e38\u30b4\u30b7\u30c3\u30af Light") == "\u6e38\u30b4\u30b7\u30c3\u30af"
+    # Not a style word, and a real family in its own right: Aptos Narrow's own ID 16 is
+    # "Aptos Narrow", so inventing a fallback to "Aptos" would be wrong.
+    assert typographic_family("Aptos Narrow") is None
+    assert typographic_family("Calibri") is None
+    # A different glyph set rather than a weight -- see _TYPOGRAPHIC_STYLE_WORDS.
+    assert typographic_family("Hoefler Text Ornaments") is None
 
 
 def test_every_font_stack_ends_in_a_generic_family(pptx_path):

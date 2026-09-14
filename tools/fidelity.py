@@ -326,8 +326,16 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int, str]]:
         # typographic family -- groups every weight of a superfamily under one name, so
         # Aptos-Light.ttf and Aptos-Black.ttf both answer to "Aptos" there and the first
         # one scanned would become "Aptos regular".  nameID 1 keeps them apart as
-        # "Aptos Light" and "Aptos Black", which is also how PowerPoint and fontdb match
-        # a font-family string, so it is the name a deck is actually asking for.
+        # "Aptos Light" and "Aptos Black", so it is the name a deck is actually asking
+        # for.
+        #
+        # This used to add "and that is how fontdb matches a font-family string too".
+        # That is false, and it cost `table-test` the gate: fontdb indexes a face under
+        # nameID 16 *whenever the face has one*, and never under nameID 1.  Measured with
+        # only Aptos-Light.ttf loaded, resvg draws nothing for font-family="Aptos Light"
+        # and draws the Light face for font-family="Aptos".  So the name a deck asks for
+        # and the name our rasteriser answers to are two different questions, and
+        # :func:`addressable_font_files` is what reconciles them.
         for record in table.names:
             if record.nameID not in (1, 6):
                 continue
@@ -424,6 +432,114 @@ def write_profile() -> dict:
     }
     PROFILE_PATH.write_text(json.dumps(profile, indent=2, sort_keys=True) + "\n")
     return profile
+
+
+#: Where name-normalised copies of superfamily faces are staged.  Gitignored, like the
+#: profile that points at their originals, and for the same reason: they are derived from
+#: licensed Office fonts and are not ours to redistribute.
+SHADOW_DIR = ROOT / "tests" / "local-fonts"
+
+
+def _typographic_name(path: str) -> str | None:
+    """nameID 16 of the first face in ``path``, or ``None`` if it has none."""
+    from fontTools.ttLib import TTCollection, TTFont
+
+    try:
+        fonts = (
+            TTCollection(path, lazy=True).fonts
+            if path.lower().endswith((".ttc", ".otc"))
+            else [TTFont(path, lazy=True, fontNumber=0)]
+        )
+        for record in fonts[0]["name"].names:
+            if record.nameID == 16:
+                return (record.toUnicode() or "").strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def _has_family(font, family: str) -> bool:
+    """Whether ``font`` answers to ``family`` as its nameID 1, in any language."""
+    for record in font["name"].names:
+        if record.nameID != 1:
+            continue
+        try:
+            if (record.toUnicode() or "").strip() == family:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def addressable_font_files(profile: dict, names) -> list[str]:
+    """Copies of ``names``' faces that resvg will answer to *by that name*.
+
+    This file's premise is that both sides draw with the same faces.  The premise had a
+    hole in it: a face being installed is not the same as the rasteriser being able to
+    reach it, and for a superfamily member it usually is not.
+
+    OpenType carries two family names.  nameID 1 is the four-style family a deck spells --
+    "Aptos Display", "Calibri Light".  nameID 16 is the *typographic* family that gathers
+    the whole superfamily -- "Aptos", "Calibri" -- with the distinguishing style in
+    nameID 17.  fontdb, which is what resvg matches ``font-family`` against, files a face
+    under nameID 16 whenever it has one and **never** under nameID 1.  Measured, not
+    assumed: with only ``Aptos-Light.ttf`` loaded, resvg draws nothing at all for
+    ``font-family="Aptos Light"`` and draws the Light face for ``font-family="Aptos"``.
+    64 of the 580 families installed on this machine are unreachable that way.
+
+    That is not a small error dressed up as a font question.  ``table-test``'s title is
+    Aptos Display 44 pt; PowerPoint inked it 227 px wide and we inked it 249, because we
+    measured with Aptos Display's real advance widths and resvg drew with its default
+    sans-serif -- the request fell past *every* named face in the stack to the generic.
+    Nothing in the score said "wrong face".  It said SSIM 0.9494, just under the gate.
+
+    The deck's spelling is not negotiable and neither is fontdb's rule, so the fix goes
+    between them: each affected face is copied once into :data:`SHADOW_DIR` with its
+    nameID 16 and 17 records dropped, which leaves fontdb no choice but to index it under
+    nameID 1 -- the name the deck asked for.  Nothing else is touched; same outlines, same
+    ``hmtx``, same everything the comparison is about.
+
+    Only faces a deck actually names are staged, and only where the name is genuinely
+    unreachable.  Handing the copies to resvg as ``font_files`` *alongside* the untouched
+    ``font_dirs`` is deliberate: the originals go on answering to their typographic name,
+    so a slide using both Aptos Display and Aptos -- which ``table-test`` does -- gets
+    each of them instead of one at the other's expense.
+    """
+    from fontTools.ttLib import TTCollection, TTFont
+
+    wanted = {name.casefold() for name in names}
+    staged: list[str] = []
+    for family, styles in sorted(profile["faces"].items()):
+        if family.casefold() not in wanted:
+            continue
+        for style, entry in sorted(styles.items()):
+            source = entry["path"]
+            typographic = _typographic_name(source)
+            if not typographic or typographic == family:
+                # Reachable already: either there is no typographic name for fontdb to
+                # prefer, or the one it prefers is the name being asked for anyway.
+                continue
+            target = SHADOW_DIR / f"{entry['sha256']}-{style}.ttf"
+            if not target.exists():
+                SHADOW_DIR.mkdir(parents=True, exist_ok=True)
+                if source.lower().endswith((".ttc", ".otc")):
+                    collection = TTCollection(source).fonts
+                    # One .ttc holds several unrelated faces -- msgothic.ttc holds both
+                    # MS Gothic and MS PGothic -- so the right one is found by name, not
+                    # by position.
+                    font = next(
+                        (f for f in collection if _has_family(f, family)), collection[0]
+                    )
+                else:
+                    font = TTFont(source)
+                font["name"].names = [
+                    record
+                    for record in font["name"].names
+                    if record.nameID not in (16, 17)
+                ]
+                font.save(str(target))
+            staged.append(str(target))
+    return staged
 
 
 def load_profile() -> dict | None:
@@ -742,6 +858,11 @@ def render_pair(deck: Path, pdf: Path, slide_index: int, profile: dict):
     raster_kwargs = _supported(
         svg_to_png,
         font_dirs=profile["directories"],
+        # Superfamily members -- Aptos Display, Calibri Light -- are installed but not
+        # addressable by the name the deck spells.  See :func:`addressable_font_files`.
+        font_files=addressable_font_files(
+            profile, requested_faces(deck) + list(script_faces(deck).values())
+        ),
         skip_system_fonts=True,
         use_bundled_fonts=False,
     )

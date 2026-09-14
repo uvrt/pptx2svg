@@ -134,18 +134,18 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9983,
+    "histogram": 0.9984,
     "slides": [
       {
-        "coverage": 0.2306,
-        "histogram": 0.9983,
-        "mean_abs": 1.416,
-        "over10": 1.241,
-        "over64": 0.589,
+        "coverage": 0.2281,
+        "histogram": 0.9984,
+        "mean_abs": 0.452,
+        "over10": 0.856,
+        "over64": 0.192,
         "sparse": false,
-        "ssim": 0.9494
+        "ssim": 0.9734
       }
     ],
-    "ssim": 0.9494
+    "ssim": 0.9734
   }
 }

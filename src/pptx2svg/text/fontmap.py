@@ -46,6 +46,7 @@ __all__ = [
     "metrics_fallback_font",
     "metrics_for",
     "substitution_for",
+    "typographic_family",
 ]
 
 
@@ -327,6 +328,68 @@ def generic_family(font_family: str) -> str:
     return "sans-serif"
 
 
+#: Style words that an Office family name appends to its *typographic* family, so that
+#: stripping one recovers the name a rasteriser is likely to index the face under.  See
+#: :func:`typographic_family` for why that matters and where this list came from.
+#:
+#: ``Ornaments`` is measured-and-excluded on purpose: "Hoefler Text Ornaments" really is
+#: built that way, but it is a different glyph set rather than a weight of "Hoefler
+#: Text", so falling back to the text family would draw letters where ornaments belong.
+_TYPOGRAPHIC_STYLE_WORDS = frozenset(
+    {
+        "black",
+        "bold",
+        "book",
+        "demibold",
+        "display",
+        "extrabold",
+        "extralight",
+        "hairline",
+        "heavy",
+        "light",
+        "medium",
+        "regular",
+        "semibold",
+        "semilight",
+        "thin",
+        "ultrabold",
+        "ultralight",
+    }
+)
+
+
+def typographic_family(font_family: str | None) -> str | None:
+    """The family name a rasteriser indexes ``font_family`` under, if it differs.
+
+    OpenType carries two family names: name ID 1, the four-style "compatible" family a
+    PPTX spells (``Aptos Display``, ``Calibri Light``), and name ID 16, the *typographic*
+    family that groups a whole superfamily under one name (``Aptos``, ``Calibri``) with
+    the style carried in ID 17.  fontdb -- which is what resvg matches ``font-family``
+    against -- indexes a face under ID 16 whenever the face has one, and never under ID 1.
+
+    Measured on this machine rather than assumed: with only ``Aptos-Light.ttf`` loaded,
+    resvg draws nothing for ``font-family="Aptos Light"`` and draws the Light face for
+    ``font-family="Aptos"``.  64 of the 580 families installed here are unreachable by
+    the name a deck would use, including ``Calibri Light`` and ``Yu Gothic Light``.
+
+    So the emitted stack names the typographic family behind the exact one.  It is only
+    ever consulted when the exact name fails to resolve, which is precisely the case this
+    exists for; where the exact name works, this token is dead weight and costs nothing.
+
+    The rule -- strip one trailing style word -- is derived from the fonts themselves, not
+    guessed: of the installed faces whose ID 1 and ID 16 disagree, every one that a deck
+    might name is exactly ``ID16 + " " + <style word>``.  (The rest are Noto's abbreviated
+    script names, where ID 1 is a *contraction* of ID 16 rather than an extension of it;
+    no suffix rule recovers those and they are left alone.)
+    """
+    if not font_family:
+        return None
+    head, _, tail = font_family.rpartition(" ")
+    if not head or tail.lower() not in _TYPOGRAPHIC_STYLE_WORDS:
+        return None
+    return head
+
+
 def _escape(name: str) -> str:
     return name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
@@ -339,7 +402,10 @@ def font_family_value(
     Ordering matters -- the original name goes first so a host that really has Calibri
     uses it and matches PowerPoint exactly; the substitute only kicks in when it is
     missing, and because it is metric-compatible the layout computed from our tables
-    still holds.  The trailing generic keyword is not decoration: with
+    still holds.  Between the two sits :func:`typographic_family`, for the faces a
+    rasteriser files under a name the deck never spells: without it ``Aptos Display``
+    resolved to the *generic* on a machine that has Aptos installed, skipping every
+    named face in the stack, and the title of ``table-test`` drew 10% wide.  The trailing generic keyword is not decoration: with
     ``skip_system_fonts`` set, resvg draws *nothing at all* for a family it cannot
     resolve, and :data:`pptx2svg.fonts.GENERIC_FAMILY_DEFAULTS` points the generics at
     the bundle so an unknown face degrades to visible text at roughly the right size
@@ -361,6 +427,11 @@ def font_family_value(
             continue
         seen.add(font)
         unique.append(font)
+
+        typographic = typographic_family(font)
+        if typographic and typographic not in seen:
+            seen.add(typographic)
+            unique.append(typographic)
 
         substitute = mapped_font(font, mapping)
         if substitute and substitute not in seen:
