@@ -53,6 +53,28 @@ def _styled(geometry_svg: str, attrs: str) -> str:
     return f"{geometry_svg[:tag_end]} {attrs}{geometry_svg[tag_end:]}"
 
 
+def _render_shape_text(
+    shape: m.ShapeElement, transform: m.Transform, context: RenderContext
+) -> str:
+    """Lay the text out in its own box when the shape gives it one.
+
+    ``dsp:txXfrm`` is SmartArt's way of saying "the label goes *here*, not across the
+    middle of the shape".  The text renderer positions relative to the shape group's
+    origin and only reads the extent, so the box's own offset has to be applied as a
+    translation of the difference between the two -- both are absolute in the same space.
+    """
+    box = shape.text_transform or transform
+    text_svg = render_text_body(shape.text_body, box, context)
+    if not text_svg or shape.text_transform is None:
+        return text_svg
+
+    dx = emu_to_px(shape.text_transform.offset_x - transform.offset_x)
+    dy = emu_to_px(shape.text_transform.offset_y - transform.offset_y)
+    if not dx and not dy:
+        return text_svg
+    return f'<g transform="translate({num(dx)}, {num(dy)})">{text_svg}</g>'
+
+
 def render_shape(shape: m.ShapeElement, context: RenderContext) -> str:
     transform = shape.transform
 
@@ -76,9 +98,7 @@ def render_shape(shape: m.ShapeElement, context: RenderContext) -> str:
         parts.append(_styled(geometry_svg, f"{fill_attrs} {outline_attrs}"))
 
     if shape.text_body is not None:
-        text_svg = render_text_body(shape.text_body, transform, context)
-        if text_svg:
-            parts.append(text_svg)
+        parts.append(_render_shape_text(shape, transform, context))
 
     parts.append("</g>")
     return "".join(parts)

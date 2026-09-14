@@ -88,6 +88,19 @@ DIAGRAM_DRAWING_REL_TYPES = (
     "http://purl.oclc.org/ooxml/officeDocument/relationships/diagramDrawing",
 )
 
+#: Why a SmartArt frame can come out blank through no fault of the file.  PowerPoint
+#: caches a laid-out DrawingML copy of every diagram, and reading that cache is the whole
+#: of our SmartArt support: the layout algorithms in ``dgm:layoutDef`` are a diagram
+#: engine and a project in their own right.  Office 2007 did not always write the cache,
+#: and later versions sometimes write an empty one, so a perfectly valid deck can carry a
+#: diagram nothing here can draw.
+NO_CACHED_DRAWING = (
+    "has no cached DrawingML rendering.  PowerPoint caches a laid-out copy of every "
+    "diagram and that copy is what we draw; Office 2007 did not always write one.  "
+    "Laying the diagram out from its layout definition is not implemented, so the frame "
+    "is left empty"
+)
+
 #: A user-supplied EMF/WMF converter: ``(bytes, mime_type) -> (bytes, mime_type) | None``.
 #: Returning ``None`` means "I cannot convert this", and resolution falls through to the
 #: built-in preview extraction.
@@ -381,6 +394,11 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
         fill=_resolve_shape_fill(context, shape.fill, shape.style),
         outline=_resolve_shape_outline(context, shape.outline, shape.style),
         text_body=text_body,
+        text_transform=(
+            _resolve_transform(context, shape.text_transform)
+            if shape.text_transform is not None
+            else None
+        ),
         effects=_resolve_shape_effects(context, shape.effects, shape.style),
         placeholder_type=placeholder_type,
         placeholder_idx=shape.placeholder.idx if shape.placeholder else None,
@@ -767,11 +785,21 @@ def _resolve_unsupported(
         diagram = _resolve_diagram(context, node, path)
         if diagram is not None:
             return diagram
+        # _resolve_diagram has already said which link in the chain failed, and "no
+        # cached drawing" is a different fact from "failed to load" -- someone looking
+        # at a blank rectangle needs to know which.  The vaguer warning on top of it
+        # would only bury that.
+        return _empty_graphic_frame(context, node)
 
     context.warn(
         "unsupported-graphic-frame",
         f"{node.what} {node.name or ''!r} is not rendered; drawing an empty frame",
     )
+    return _empty_graphic_frame(context, node)
+
+
+def _empty_graphic_frame(context: ResolveContext, node: s.SourceUnsupported) -> m.SlideElement:
+    """A positioned but undrawn frame: the honest output for content we cannot render."""
     return m.ShapeElement(
         transform=_resolve_transform(context, node.transform),
         geometry=m.PresetGeometry(preset="rect"),
@@ -804,27 +832,43 @@ def _resolve_diagram(
     pictures inside a diagram are related to it and not to the slide; resolving them
     against the slide would silently find the wrong image or none at all.
 
-    Returns ``None`` when any link in the chain is missing, so the caller falls back to
-    its warning and empty frame.
+    Returns ``None`` when any link in the chain is missing, having first said *which*
+    link and why; the caller then draws an empty frame.
     """
+    label = f"SmartArt {node.name or node.shape_id or ''!r}"
+
+    def give_up(code: str, detail: str) -> None:
+        context.warn(code, f"{label} {detail}")
+        return None
+
     data_part = context.package.related_part(context.part_path, node.fallback_rel_id)
     if data_part is None:
-        return None
+        return give_up(
+            "diagram-unreadable", "points at a data-model part that is not in the package"
+        )
 
     drawing_part = _diagram_drawing_part(context, data_part)
     if drawing_part is None:
-        return None
+        return give_up("diagram-no-cached-drawing", NO_CACHED_DRAWING)
 
     try:
         drawing = context.package.read_xml(drawing_part)
     except Exception:
-        return None
+        return give_up(
+            "diagram-unreadable",
+            f"has a cached drawing ({drawing_part}) that is not well-formed XML",
+        )
     if drawing is None:
-        return None
+        return give_up(
+            "diagram-unreadable", f"has an unreadable cached drawing ({drawing_part})"
+        )
 
     sp_tree = child(drawing, "spTree")
     if sp_tree is None:
-        return None
+        return give_up(
+            "diagram-unreadable",
+            f"has a cached drawing ({drawing_part}) with no dsp:spTree in it",
+        )
 
     frame_transform = _resolve_transform(context, node.transform)
     child_transform = _diagram_child_transform(sp_tree, frame_transform)
@@ -846,9 +890,15 @@ def _resolve_diagram(
         context.part_path, context.id_prefix = outer_part, outer_prefix
 
     if not children:
-        # An empty cached drawing is indistinguishable from a missing one as far as the
-        # output goes, and the caller's warning is the more useful outcome.
-        return None
+        # PowerPoint writes this: a complete dsp:spTree holding nvGrpSpPr and grpSpPr and
+        # no shapes at all.  Thirteen of the forty-six real decks measured look like this.
+        # As far as output goes it is the same as having no drawing, and the reader needs
+        # the same explanation.
+        return give_up(
+            "diagram-no-cached-drawing",
+            f"has a cached drawing ({drawing_part}) whose shape tree is empty, so there "
+            "is nothing to draw",
+        )
 
     return m.GroupElement(
         transform=frame_transform,

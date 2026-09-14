@@ -407,6 +407,10 @@ class ShapeElement:
     fill: Fill | None = None
     outline: Outline | None = None
     text_body: TextBody | None = None
+    #: ``dsp:txXfrm`` -- where the text box sits when SmartArt places it away from the
+    #: shape.  Absolute, in the same space as :attr:`transform`; ``None`` means the text
+    #: fills the shape, which is what every non-diagram shape does.
+    text_transform: Transform | None = None
     effects: EffectList | None = None
     placeholder_type: str | None = None
     placeholder_idx: int | None = None

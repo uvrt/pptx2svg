@@ -378,6 +378,8 @@ class SourceShape:
     effects: SourceEffectList | None = None
     style: SourceShapeStyle | None = None
     text_body: SourceTextBody | None = None
+    #: ``dsp:txXfrm`` -- SmartArt places a shape's text box separately from the shape.
+    text_transform: SourceTransform | None = None
     #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
     hidden: bool = False
     hyperlink_rel_id: str | None = None

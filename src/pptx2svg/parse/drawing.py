@@ -555,6 +555,20 @@ def parse_group_transforms(
     return outer, inner
 
 
+def parse_text_transform(sp: Element | None) -> SourceTransform | None:
+    """``dsp:txXfrm`` -- a diagram shape's text box, placed independently of the shape.
+
+    Only SmartArt's cached drawings use this, and they use it constantly: a Venn ring's
+    label belongs in the sliver that ring does not share, a cycle arrow's label beside
+    the arrow rather than across it.  Without it every label lands at its shape's own
+    origin, which for a circle means the top-left corner of its bounding box.
+
+    The offset is in the same coordinate space as the shape's own ``a:xfrm``, so the
+    renderer works with the difference between the two.
+    """
+    return _transform_from_xfrm(child(sp, "txXfrm"))
+
+
 def _transform_from_xfrm(xfrm: Element | None) -> SourceTransform | None:
     if xfrm is None:
         return None

@@ -225,22 +225,32 @@ def test_a_diagram_scales_when_its_layout_space_differs_from_the_frame(basic_the
     assert "scale(2, 2)" in svg
 
 
-def test_a_deleted_drawing_part_still_renders_and_still_warns(basic_theme):
+def test_a_deleted_drawing_part_says_the_cache_is_missing(basic_theme):
+    """Twenty of the forty-six real decks measured are in exactly this state -- Office
+    2007 did not always write the cache.  "no cached drawing" is a different fact from
+    "failed to load", and someone looking at a blank rectangle needs to know which."""
     options = ConvertOptions(slide_numbers=[1])
     resolved = convert_pptx_to_model(deck_with_diagram(basic_theme, drawing=None), options)
 
     assert diagram_group(resolved.slides[0]) is None
-    warnings = [w for w in options.warnings if w.code == "unsupported-graphic-frame"]
-    assert warnings and "diagram" in warnings[0].message
+    warnings = [w for w in options.warnings if w.code == "diagram-no-cached-drawing"]
+    assert warnings, [str(w) for w in options.warnings]
+    assert "not implemented" in warnings[0].message
+    # The vaguer warning must not be piled on top of the specific one.
+    assert not [w for w in options.warnings if w.code == "unsupported-graphic-frame"]
 
 
 def test_an_empty_cached_drawing_warns_rather_than_emitting_an_empty_group(basic_theme):
+    """A complete dsp:spTree holding nvGrpSpPr and grpSpPr and no shapes.  PowerPoint
+    really writes this -- thirteen of the forty-six real decks measured are like it --
+    and it needs the same explanation as having no drawing at all."""
     deck = deck_with_diagram(basic_theme, drawing=drawing_xml(group_xfrm=GROUP_XFRM, shapes=""))
     options = ConvertOptions(slide_numbers=[1])
     resolved = convert_pptx_to_model(deck, options)
 
     assert diagram_group(resolved.slides[0]) is None
-    assert [w for w in options.warnings if w.code == "unsupported-graphic-frame"]
+    warnings = [w for w in options.warnings if w.code == "diagram-no-cached-drawing"]
+    assert warnings and "empty" in warnings[0].message
 
 
 def test_a_corrupt_drawing_part_does_not_abort_the_deck(basic_theme):
@@ -249,7 +259,8 @@ def test_a_corrupt_drawing_part_does_not_abort_the_deck(basic_theme):
     resolved = convert_pptx_to_model(deck, options)
 
     assert diagram_group(resolved.slides[0]) is None
-    assert [w for w in options.warnings if w.code == "unsupported-graphic-frame"]
+    warnings = [w for w in options.warnings if w.code == "diagram-unreadable"]
+    assert warnings and "well-formed" in warnings[0].message
     assert resolved.slides[0].elements, "the rest of the slide must still resolve"
 
 
@@ -310,6 +321,297 @@ def test_diagram_output_is_reproducible(basic_theme):
     first = convert_pptx_to_svg(deck, ConvertOptions(slide_numbers=[1]))[0]
     second = convert_pptx_to_svg(deck, ConvertOptions(slide_numbers=[1]))[0]
     assert first == second
+
+
+# --------------------------------------------------------------------------------------
+# The layout PowerPoint actually writes
+#
+# The decks above use the data part's own relationships, which is what the schema reads
+# like and what an independent producer might write.  Real PowerPoint does something
+# else, and the fixtures could not have shown it: `dgm:relIds` names the data model,
+# layout, quick style and colours but *not* the drawing, because the cached drawing was
+# added after `relIds` was specified.  The drawing's relationship id lives in an
+# extension inside the data part and resolves against the *slide's* relationships.
+#
+# Measured across the 46 SmartArt decks in LibreOffice's test corpus: 27 carry a cached
+# drawing, and all 27 key it this way.  Exactly one has a
+# `ppt/diagrams/_rels/data1.xml.rels` at all, and not for the drawing.
+# --------------------------------------------------------------------------------------
+
+DATA_MODEL_EXT_NS = "http://schemas.microsoft.com/office/drawing/2008/diagram"
+
+
+def data_model_with_ext(relationship_id: str | None) -> bytes:
+    """A data-model part carrying ``dsp:dataModelExt@relId``, as PowerPoint writes it."""
+    extension = ""
+    if relationship_id is not None:
+        extension = (
+            "<dgm:extLst>"
+            f'<a:ext uri="{DATA_MODEL_EXT_NS}">'
+            f'<dsp:dataModelExt xmlns:dsp="{DATA_MODEL_EXT_NS}" '
+            f'relId="{relationship_id}" minVer="http://schemas.openxmlformats.org/'
+            'drawingml/2006/diagram"/>'
+            "</a:ext></dgm:extLst>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"'
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        "<dgm:ptLst/><dgm:cxnLst/><dgm:bg/><dgm:whole/>"
+        f"{extension}</dgm:dataModel>"
+    ).encode()
+
+
+def frame_xml(shape_id: int, data_rel_id: str, x: int) -> str:
+    return f"""<p:graphicFrame
+ xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+ xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+ <p:nvGraphicFramePr><p:cNvPr id="{shape_id}" name="Diagram {shape_id}"/>
+  <p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>
+ <p:xfrm><a:off x="{x}" y="914400"/><a:ext cx="1828800" cy="914400"/></p:xfrm>
+ <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram">
+  <dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"
+   r:dm="{data_rel_id}" r:lo="{data_rel_id}" r:qs="{data_rel_id}" r:cs="{data_rel_id}"/>
+ </a:graphicData></a:graphic></p:graphicFrame>"""
+
+
+def powerpoint_layout_deck(basic_theme, frames, *, extra_slide_rels=(), decoys=0):
+    """Build a deck the way PowerPoint lays SmartArt out.
+
+    ``frames`` is a list of ``(shape_id, label, ext_rel_id)``: ``ext_rel_id`` is what the
+    data part's ``dataModelExt`` names, or ``None`` to omit the extension entirely.  No
+    ``ppt/diagrams/_rels/*`` parts are written at all, because real decks do not have
+    them -- so a lookup that goes through the data part's own relationships finds
+    nothing, which is the bug this guards.
+    """
+    parts: dict[str, bytes] = {}
+    overrides: dict[str, str] = {}
+    slide_rels = list(extra_slide_rels)
+    shapes = ""
+
+    # `decoys` adds cached drawings that no frame points at.  Their only job is to make
+    # the count of drawing relationships greater than one, which disables the
+    # lone-relationship fallback -- so a test using them can only pass through the
+    # `dataModelExt` id.
+    for decoy in range(decoys):
+        path = f"ppt/diagrams/drawingDecoy{decoy}.xml"
+        parts[path] = drawing_xml(
+            group_xfrm=GROUP_XFRM,
+            shapes=node_shape(
+                "9999999-9999-9999-9999-99999999999" + str(decoy),
+                0,
+                838200,
+                "FF0000",
+                f"DECOY{decoy}",
+            ),
+        )
+        overrides[path] = DRAWING_CONTENT_TYPE
+        slide_rels.append(
+            (f"rIdDecoy{decoy}", MS_DRAWING_REL, f"../diagrams/drawingDecoy{decoy}.xml")
+        )
+
+    for index, (shape_id, label, ext_rel_id) in enumerate(frames, start=1):
+        data_path = f"ppt/diagrams/data{index}.xml"
+        drawing_path = f"ppt/diagrams/drawing{index}.xml"
+        data_rel, drawing_rel = f"rIdDm{index}", f"rIdDrw{index}"
+
+        parts[data_path] = data_model_with_ext(ext_rel_id)
+        overrides[data_path] = DATA_CONTENT_TYPE
+        parts[drawing_path] = drawing_xml(
+            group_xfrm=GROUP_XFRM,
+            shapes=node_shape(
+                f"{index}1111111-1111-1111-1111-111111111111", 0, 838200, "4472C4", label
+            ),
+        )
+        overrides[drawing_path] = DRAWING_CONTENT_TYPE
+
+        slide_rels.append((data_rel, DIAGRAM_DATA_REL, f"../diagrams/data{index}.xml"))
+        slide_rels.append(
+            (drawing_rel, MS_DRAWING_REL, f"../diagrams/drawing{index}.xml")
+        )
+        shapes += frame_xml(shape_id, data_rel, 914400 + (index - 1) * 2000000)
+
+    return derive_deck(
+        basic_theme,
+        parts=parts,
+        shapes_xml=shapes,
+        slide_relationships=slide_rels,
+        overrides=overrides,
+    )
+
+
+def group_for(slide, shape_id: int) -> m.GroupElement | None:
+    for element in slide.elements:
+        if isinstance(element, m.GroupElement) and (element.element_id or "").endswith(
+            f".{shape_id}"
+        ):
+            return element
+    return None
+
+
+def labels_of(group) -> list[str]:
+    return [
+        run.text
+        for shape in group.children
+        for paragraph in (shape.text_body.paragraphs if shape.text_body else [])
+        for run in paragraph.runs
+    ]
+
+
+def test_the_drawing_is_found_through_dataModelExt_against_the_slides_rels(basic_theme):
+    """The whole of the real-world case: no diagram _rels part exists, and the id that
+    names the drawing is written in the data part but resolved on the slide.
+
+    A decoy drawing is added so that the slide carries two drawing relationships.  That
+    disables the lone-relationship fallback, leaving the `dataModelExt` id as the only
+    route -- without it this test would pass on the fallback alone and prove nothing.
+    """
+    deck = powerpoint_layout_deck(basic_theme, [(8001, "Plan", "rIdDrw1")], decoys=1)
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(deck, options)
+
+    group = group_for(resolved.slides[0], 8001)
+    assert group is not None, [str(w) for w in options.warnings]
+    assert labels_of(group) == ["Plan"], "picked up the decoy instead of its own drawing"
+    assert not options.warnings
+
+
+def test_two_frames_on_one_slide_each_get_their_own_drawing(basic_theme):
+    """`relIds` cannot disambiguate -- it does not name the drawing at all -- so the
+    `dataModelExt` id is the only thing keeping two diagrams on one slide apart."""
+    deck = powerpoint_layout_deck(
+        basic_theme, [(8001, "First", "rIdDrw1"), (8002, "Second", "rIdDrw2")]
+    )
+    resolved = convert_pptx_to_model(deck, ConvertOptions(slide_numbers=[1]))
+
+    first = group_for(resolved.slides[0], 8001)
+    second = group_for(resolved.slides[0], 8002)
+    assert first is not None and second is not None
+    assert labels_of(first) == ["First"]
+    assert labels_of(second) == ["Second"]
+
+
+def test_the_frames_are_not_crossed_when_the_ids_are_swapped(basic_theme):
+    """A lookup that ignored the id and simply took the first drawing it found would
+    pass the test above and fail this one."""
+    deck = powerpoint_layout_deck(
+        basic_theme, [(8001, "First", "rIdDrw2"), (8002, "Second", "rIdDrw1")]
+    )
+    resolved = convert_pptx_to_model(deck, ConvertOptions(slide_numbers=[1]))
+
+    assert labels_of(group_for(resolved.slides[0], 8001)) == ["Second"]
+    assert labels_of(group_for(resolved.slides[0], 8002)) == ["First"]
+
+
+def test_a_lone_drawing_relationship_is_used_when_there_is_no_extension(basic_theme):
+    """Last-resort fallback: one diagram, one drawing relationship on the slide, no
+    extension to key it with.  Unambiguous, so it is used."""
+    deck = powerpoint_layout_deck(basic_theme, [(8001, "Plan", None)])
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(deck, options)
+
+    group = group_for(resolved.slides[0], 8001)
+    assert group is not None and labels_of(group) == ["Plan"]
+
+
+def test_two_candidate_drawings_without_an_extension_are_refused(basic_theme):
+    """With two drawings on the slide and nothing to key them by, guessing would put the
+    wrong diagram in the wrong frame half the time.  Refusing says so instead."""
+    deck = powerpoint_layout_deck(
+        basic_theme, [(8001, "First", None), (8002, "Second", None)]
+    )
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(deck, options)
+
+    assert group_for(resolved.slides[0], 8001) is None
+    assert group_for(resolved.slides[0], 8002) is None
+    assert len([w for w in options.warnings if w.code == "diagram-no-cached-drawing"]) == 2
+
+
+def test_an_extension_pointing_at_a_missing_part_falls_back_rather_than_failing(basic_theme):
+    """A dangling relId must not shadow the fallback -- one of the 46 real decks has a
+    diagramDrawing relationship whose target is not in the package."""
+    deck = powerpoint_layout_deck(basic_theme, [(8001, "Plan", "rIdNoSuchThing")])
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(deck, options)
+
+    group = group_for(resolved.slides[0], 8001)
+    assert group is not None and labels_of(group) == ["Plan"]
+
+
+# --------------------------------------------------------------------------------------
+# dsp:txXfrm -- the label's own box
+# --------------------------------------------------------------------------------------
+
+TX_SHAPE = """<dsp:sp xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram"
+ xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" modelId="{{A}}">
+  <dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>
+  <dsp:spPr>
+   <a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm>
+   <a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>
+  </dsp:spPr>
+  <dsp:txBody><a:bodyPr/><a:lstStyle/>
+   <a:p><a:r><a:rPr lang="en-US" sz="1200"/><a:t>Ring</a:t></a:r></a:p>
+  </dsp:txBody>
+  {txXfrm}
+ </dsp:sp>"""
+
+#: 1/4 inch right and 1/2 inch down from the shape's own origin, and wide enough that
+#: the label still fits on one line -- the offset is what this fixture is about.
+TX_XFRM = (
+    '<dsp:txXfrm xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram"'
+    ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+    '<a:off x="228600" y="457200"/><a:ext cx="1828800" cy="228600"/></dsp:txXfrm>'
+)
+
+
+def deck_with_tx_shape(basic_theme, tx_xfrm: str) -> bytes:
+    return deck_with_diagram(
+        basic_theme,
+        drawing=drawing_xml(
+            group_xfrm=GROUP_XFRM, shapes=TX_SHAPE.format(txXfrm=tx_xfrm)
+        ),
+    )
+
+
+def test_a_shape_without_txXfrm_puts_its_text_in_itself(basic_theme):
+    """The control: every shape outside SmartArt has no txXfrm and must be untouched."""
+    svg = convert_pptx_to_svg(
+        deck_with_tx_shape(basic_theme, ""), ConvertOptions(slide_numbers=[1])
+    )[0]
+    assert "Ring" in svg
+    assert 'transform="translate(24, 48)"' not in svg
+
+
+def test_txXfrm_moves_the_label_to_its_own_box(basic_theme):
+    """SmartArt places a label in the part of the shape it is meant to annotate -- the
+    sliver a Venn ring does not share, the space beside a cycle arrow.  Without this the
+    label lands at the shape's origin, which for a circle is the corner of its bounding
+    box."""
+    svg = convert_pptx_to_svg(
+        deck_with_tx_shape(basic_theme, TX_XFRM), ConvertOptions(slide_numbers=[1])
+    )[0]
+    assert "Ring" in svg
+    # 228600 EMU = 24 px, 457200 EMU = 48 px, relative to the shape's own origin.
+    assert 'transform="translate(24, 48)"' in svg
+
+
+def test_the_label_is_wrapped_to_its_own_width_not_the_shapes(basic_theme):
+    """The box supplies the extent as well as the offset, so a narrow label box wraps
+    text the shape's own width would have fitted on one line."""
+    narrow = (
+        '<dsp:txXfrm xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram"'
+        ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<a:off x="0" y="0"/><a:ext cx="228600" cy="914400"/></dsp:txXfrm>'
+    )
+    wide = convert_pptx_to_svg(
+        deck_with_tx_shape(basic_theme, ""), ConvertOptions(slide_numbers=[1])
+    )[0]
+    thin = convert_pptx_to_svg(
+        deck_with_tx_shape(basic_theme, narrow), ConvertOptions(slide_numbers=[1])
+    )[0]
+    assert wide != thin
 
 
 @pytest.mark.skip(

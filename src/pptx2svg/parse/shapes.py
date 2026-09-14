@@ -36,6 +36,7 @@ from .drawing import (
     parse_outline,
     parse_relative_rect,
     parse_shape_style,
+    parse_text_transform,
     parse_transform,
 )
 from .source import (
@@ -125,6 +126,7 @@ def parse_shape(sp: Element) -> SourceShape:
         effects=parse_effect_list(child(sp_pr, "effectLst")),
         style=parse_shape_style(child(sp, "style")),
         text_body=parse_text_body(child(sp, "txBody")),
+        text_transform=parse_text_transform(sp),
         hyperlink_rel_id=_hyperlink_rel_id(c_nv_pr),
         hidden=_hidden(c_nv_pr),
     )
