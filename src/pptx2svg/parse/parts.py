@@ -407,16 +407,44 @@ def parse_font_scheme(font_scheme: Element | None) -> SourceFontScheme:
         minor_east_asian=attr(child(minor, "ea"), "typeface"),
         major_complex_script=attr(child(major, "cs"), "typeface"),
         minor_complex_script=attr(child(minor, "cs"), "typeface"),
-        major_japanese=_script_typeface(major, "Jpan"),
-        minor_japanese=_script_typeface(minor, "Jpan"),
+        major_japanese=_east_asian_script_typeface(major),
+        minor_japanese=_east_asian_script_typeface(minor),
     )
+
+
+#: East Asian scripts to try in a font collection's ``a:font script="..."`` list, in the
+#: order they are tried.
+#:
+#: Jpan first, which is *not* the order ``aiden0z/pptx-renderer`` uses -- its
+#: ``resolveScriptFont()`` tries Hans, Hant, Jpan, Hang.  That order is wrong for the two
+#: decks here that depend on this path.  A stock Office theme carries all four entries,
+#: so ``sample.pptx`` offers Jpan=ＭＳ Ｐゴシック *and* Hans=宋体 with no ``lang`` anywhere
+#: to choose between them, and Hans-first would pick the Chinese face for Japanese text.
+#: PowerPoint's own PDF export of that deck embeds MS-Gothic and MS-Mincho, so it chose
+#: the Japanese entry.
+#:
+#: The properly general answer is to choose by the characters in the run -- kana implies
+#: Jpan, Hangul implies Hang, bare Han is genuinely ambiguous -- and that is not done
+#: here because no deck in the corpus exercises it and there would be nothing to check
+#: the rule against.  This list is the part that is measured: it stops a Chinese or
+#: Korean deck getting *no* East Asian face at all, which is what reading only Jpan did.
+EAST_ASIAN_SCRIPTS = ("Jpan", "Hans", "Hant", "Hang")
 
 
 def _script_typeface(font: Element | None, script: str) -> str | None:
     """``a:font script="Jpan"`` -- the per-script override list inside a font collection."""
     for node in children(font, "font"):
         if attr(node, "script") == script:
-            return attr(node, "typeface")
+            return attr(node, "typeface") or None
+    return None
+
+
+def _east_asian_script_typeface(font: Element | None) -> str | None:
+    """The first East Asian face this font collection's script list offers."""
+    for script in EAST_ASIAN_SCRIPTS:
+        found = _script_typeface(font, script)
+        if found:
+            return found
     return None
 
 

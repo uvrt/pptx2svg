@@ -45,6 +45,37 @@ rather than scored against substitutes: a baseline taken under one font profile 
 against a run under another is exactly the apples-to-oranges number this file exists to
 stop, which is what the profile hash in every baseline entry guards.
 
+"The same faces" turned out to need asking three ways, not one, and the other two were
+both learned from decks that this harness was happily scoring:
+
+1. **A face the deck names that this machine lacks.**  The original check.  PowerPoint
+   lacked it too, so its export is already drawn with a substitute of its own.
+2. **Text that no face the deck names can draw.**  A name-based check cannot see this --
+   there is no name to look up.  A theme saying ``<a:ea typeface=""/>`` over Japanese
+   body text obliges *both* renderers to invent a face, and two independently-invented
+   fallbacks are not a measurement of anything.  So coverage is read from the faces'
+   own cmaps instead.
+3. **A face PowerPoint resolved differently.**  Coverage is necessary and not
+   sufficient.  ``sample.pptx`` names ＭＳ Ｐゴシック through its theme's ``Jpan`` script
+   entry, this machine has it, and PowerPoint's export embeds ``MS-Gothic`` and
+   ``MS-Mincho`` -- never ``MS-PGothic``.  Those are two different faces inside one
+   ``.ttc``: MS Gothic advances every CJK glyph a full em, MS PGothic is proportional
+   and runs 0.648 em to 1.0 for katakana.  Nothing this renderer does can close a gap
+   that begins with different outlines at different widths.
+
+Check 3 reads ``/BaseFont`` out of PowerPoint's PDF, which is the thing the comment above
+:func:`font_profile` warns against doing -- for a different purpose.  It warns against
+*adopting* PowerPoint's fallback as our own, and that still stands.  Using the same fact
+to decide whether a comparison means anything is the argument of that comment, not an
+exception to it.
+
+The cost is real and worth stating: two decks that used to score, ``sample`` (0.06) and
+``real-basic-theme`` (0.97), are now skipped.  The 0.97 was not wrong so much as not
+about this library -- its Japanese runs were our MS PGothic against PowerPoint's MS
+Gothic, and it passed because there is not much Japanese on those slides.  The way to get
+them back is the one this file has always recommended: make the face PowerPoint resolves
+match the face the deck names, then re-export.
+
 The bundled substitutes are what we *ship*; ``pptx2svg fonts --check`` and
 ``tests/test_fonts.py`` cover those.  They are deliberately not the reference here.
 
@@ -256,8 +287,8 @@ LICENSED_FONT_DIRECTORIES = (
 PROFILE_PATH = ROOT / "tests" / "font-profile.local.json"
 
 
-def _faces_in(path: str) -> list[tuple[set[str], str, int]]:
-    """``(family names, style, weight)`` for every face in a font file.
+def _faces_in(path: str) -> list[tuple[set[str], str, int, str]]:
+    """``(family names, style, weight, PostScript name)`` for every face in a file.
 
     Style is one of ``regular``/``bold``/``italic``/``bolditalic``, taken from the OS/2
     selection flags rather than the subfamily string, which is localised and creative
@@ -278,13 +309,14 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int]]:
     except Exception:  # unreadable, bitmap-only, or a format fontTools declines
         return []
 
-    result: list[tuple[set[str], str, int]] = []
+    result: list[tuple[set[str], str, int, str]] = []
     for font in fonts:
         try:
             table = font["name"]
         except Exception:
             continue
         names: set[str] = set()
+        postscript = ""
         # Every language record, not just the English one.  A Japanese deck asks for
         # "游ゴシック"; the file calls itself "Yu Gothic" in English and
         # "游ゴシック" in Japanese, and only reading both makes the two meet.
@@ -297,13 +329,21 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int]]:
         # "Aptos Light" and "Aptos Black", which is also how PowerPoint and fontdb match
         # a font-family string, so it is the name a deck is actually asking for.
         for record in table.names:
-            if record.nameID != 1:
+            if record.nameID not in (1, 6):
                 continue
             try:
                 value = record.toUnicode()
             except Exception:
                 continue
-            if value:
+            if not value:
+                continue
+            if record.nameID == 6:
+                # nameID 6 is what a PDF writes in /BaseFont, so it is the only name that
+                # can be matched against an exported PDF without guessing.  It is also
+                # what tells MS PGothic apart from MS Gothic, which share a file and
+                # therefore share everything the path can say about them.
+                postscript = postscript or value.strip()
+            else:
                 names.add(value.strip())
         if not names:
             continue
@@ -315,7 +355,7 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int]]:
         bold = bool(selection & 0x20)
         italic = bool(selection & 0x01)
         style = ("bold" if bold else "") + ("italic" if italic else "") or "regular"
-        result.append((names, style, weight))
+        result.append((names, style, weight, postscript))
     return result
 
 
@@ -344,11 +384,12 @@ def scan_licensed_fonts() -> dict[str, dict]:
             digest = hashlib.sha256()
             with open(path, "rb") as handle:
                 digest.update(handle.read())
-            for families, style, weight in faces:
+            for families, style, weight, postscript in faces:
                 entry = {
                     "path": path,
                     "sha256": digest.hexdigest()[:16],
                     "weight": weight,
+                    "postscript": postscript,
                 }
                 for family in families:
                     styles = found.setdefault(family, {})
@@ -394,60 +435,262 @@ def load_profile() -> dict | None:
 #: A theme's font scheme ends with a long ``<a:font script="Arab" typeface="..."/>`` list
 #: -- forty-odd faces for scripts the deck never uses.  Counting those as "requested"
 #: buries the two or three faces that actually get drawn, so they are skipped.
-_SCRIPT_FONT = re.compile(rb"<a:font\s+script=")
+#:
+#: With one exception, added after this comment turned out to be wrong about a deck in
+#: the corpus.  ``sample.pptx`` writes ``<a:ea typeface=""/>`` in both font collections
+#: and sets Japanese body text anyway, so ``+mn-ea`` has nothing to expand to -- and the
+#: face it actually resolves through is ``<a:font script="Jpan" typeface="ＭＳ Ｐゴシック"/>``
+#: in that same skipped list.  For an East Asian script the list is not noise, it is the
+#: resolution path, so those four entries are read separately by
+#: :func:`script_faces` instead of being discarded with the rest.
+#:
+#: Matches the whole element so it can be *removed*.  This used to truncate the theme at
+#: the first script font instead, which threw away everything after it -- including the
+#: entire ``<a:minorFont>`` block, since the major scheme's script list sits between the
+#: two.  That is why ``table-test`` reported only "Aptos Display" as requested while its
+#: body text is Aptos, and why PowerPoint embedding Aptos looked like a substitution.
+_SCRIPT_FONT = re.compile(rb"<a:font\s+script=\"[^\"]*\"\s+typeface=\"[^\"]*\"\s*/>")
+
+#: Scripts whose theme fallback entry is a real resolution path for ``+mj-ea``/``+mn-ea``.
+_EAST_ASIAN_SCRIPTS = ("Jpan", "Hans", "Hant", "Hang")
+
+_THEME_PARTS = ("ppt/slides/slide", "ppt/slideLayouts/", "ppt/slideMasters/", "ppt/theme/")
+
+
+def _deck_parts(deck: Path):
+    with zipfile.ZipFile(deck) as archive:
+        for name in archive.namelist():
+            if name.startswith(_THEME_PARTS):
+                yield name, archive.read(name)
 
 
 def requested_faces(deck: Path) -> list[str]:
-    """The faces a deck could actually draw with: slides, layouts, masters, theme.
+    """The faces a deck names outright: slides, layouts, masters, theme.
 
-    Only ``a:latin`` / ``a:ea`` / ``a:cs`` entries count.  Theme script fallbacks are
-    excluded (see :data:`_SCRIPT_FONT`), as are ``+mj-lt``-style theme references, which
-    are pointers rather than names.
+    ``a:latin`` / ``a:ea`` / ``a:cs``, plus ``a:buFont``, which names the face a bullet
+    glyph is drawn in and is a face PowerPoint really does embed -- ``sample.pptx``'s
+    bullets are Arial and its PDF says so.  Theme script fallbacks are excluded (see
+    :data:`_SCRIPT_FONT` and :func:`script_faces`), as are ``+mj-lt``-style theme
+    references, which are pointers rather than names.
     """
     names: set[str] = set()
-    pattern = re.compile(rb'<a:(?:latin|ea|cs)\s+typeface="([^"]*)"')
-    with zipfile.ZipFile(deck) as archive:
-        for name in archive.namelist():
-            if not name.startswith(
-                ("ppt/slides/slide", "ppt/slideLayouts/", "ppt/slideMasters/", "ppt/theme/")
-            ):
-                continue
-            body = _SCRIPT_FONT.split(archive.read(name))[0] if b"ppt/theme/" in name.encode() else archive.read(name)
-            for match in pattern.findall(body):
-                value = match.decode("utf-8", "replace")
-                if value and not value.startswith("+"):
-                    names.add(value)
+    pattern = re.compile(rb'<a:(?:latin|ea|cs|buFont)\s+typeface="([^"]*)"')
+    for name, body in _deck_parts(deck):
+        if name.startswith("ppt/theme/"):
+            body = _SCRIPT_FONT.sub(b"", body)
+        for match in pattern.findall(body):
+            value = match.decode("utf-8", "replace")
+            if value and not value.startswith("+"):
+                names.add(value)
     return sorted(names)
 
 
-#: Why there is no "PowerPoint fell back to X, so we will too" table here.
+def script_faces(deck: Path) -> dict[str, str]:
+    """The theme's ``a:font script="..."`` East Asian entries, keyed by script.
+
+    Kept apart from :func:`requested_faces` because they are *conditional*: a stock
+    Office theme carries all four whether or not the deck sets a word of East Asian text,
+    so counting them as requested would skip a Latin-only deck for want of 宋体.  Which
+    one is in play is decided by the characters -- see :func:`deck_script`.
+    """
+    found: dict[str, str] = {}
+    pattern = re.compile(
+        rb'<a:font\s+script="(' + b"|".join(s.encode() for s in _EAST_ASIAN_SCRIPTS)
+        + rb')"\s+typeface="([^"]*)"'
+    )
+    for name, body in _deck_parts(deck):
+        if not name.startswith("ppt/theme/"):
+            continue
+        for script, match in pattern.findall(body):
+            value = match.decode("utf-8", "replace")
+            if value:
+                found.setdefault(script.decode(), value)
+    return found
+
+
+#: Characters that name their script outright, as (script, first, last) ranges.
+#:
+#: Han is deliberately absent: 概 is a Chinese, Japanese and Korean character at once and
+#: says nothing about which face should draw it.  Kana and Hangul do say, and that is
+#: enough to tell the two decks here apart from a Chinese one.
+_SCRIPT_RANGES = (
+    ("Jpan", 0x3040, 0x30FF),   # hiragana and katakana
+    ("Hang", 0x1100, 0x11FF),   # hangul jamo
+    ("Hang", 0x3130, 0x318F),   # hangul compatibility jamo
+    ("Hang", 0xAC00, 0xD7A3),   # hangul syllables
+)
+
+
+def deck_script(text: str) -> str | None:
+    """Which East Asian script this text is, when its characters are unambiguous."""
+    for char in text:
+        code = ord(char)
+        for script, first, last in _SCRIPT_RANGES:
+            if first <= code <= last:
+                return script
+    return None
+
+
+def deck_text(deck: Path) -> str:
+    """Every ``a:t`` run of text on the slides -- what actually has to be drawn."""
+    pattern = re.compile(rb"<a:t>(.*?)</a:t>", re.S)
+    out: list[str] = []
+    for name, body in _deck_parts(deck):
+        if not name.startswith("ppt/slides/slide"):
+            continue
+        for match in pattern.findall(body):
+            out.append(match.decode("utf-8", "replace"))
+    return "".join(out)
+
+
+def _face_cmaps(faces: dict, names: list[str]) -> dict[str, set[int]]:
+    """Code points each named face can draw, read from its own cmap.
+
+    Per face rather than unioned, because the interesting question is not only "can
+    anything draw this character" but "is there exactly one face that can" -- see
+    :func:`font_profile`.
+    """
+    from fontTools.ttLib import TTCollection, TTFont
+
+    result: dict[str, set[int]] = {}
+    cache: dict[str, set[int]] = {}
+    for name in names:
+        covered: set[int] = set()
+        for entry in (faces.get(name) or {}).values():
+            path = entry["path"]
+            if path not in cache:
+                points: set[int] = set()
+                try:
+                    fonts = (
+                        TTCollection(path, lazy=True).fonts
+                        if path.lower().endswith((".ttc", ".otc"))
+                        else [TTFont(path, lazy=True, fontNumber=0)]
+                    )
+                except Exception:
+                    fonts = []
+                for font in fonts:
+                    try:
+                        points.update(font.getBestCmap())
+                    except Exception:
+                        continue
+                cache[path] = points
+            covered |= cache[path]
+        if covered:
+            result[name] = covered
+    return result
+
+
+def _pdf_base_fonts(pdf: Path) -> set[str]:
+    """The PostScript names in the export's ``/BaseFont`` entries.
+
+    Read from the file rather than through a text API so that a face used for a single
+    glyph still shows up.  The ``AAAAAE+`` subset prefix an embedded font carries is
+    stripped; it is assigned per document and means nothing across exports.
+    """
+    data = pdf.read_bytes()
+    found: set[str] = set()
+    for match in re.finditer(rb"/BaseFont\s*/([A-Za-z0-9+#,.\-]+)", data):
+        name = match.group(1).decode("latin-1")
+        if len(name) > 7 and name[6] == "+":
+            name = name[7:]
+        found.add(name)
+    return found
+
+
+#: Why there is still no "PowerPoint fell back to X, so we will too" table here.
 #:
 #: It is tempting: read ``/BaseFont`` out of the exported PDF, see that PowerPoint drew
-#: Calibri where the deck asked for Noto Sans JP, and point our render at Calibri as
-#: well.  It would make three more decks scoreable.  It would also be measuring the wrong
-#: thing twice over -- our layout would still be computed from Noto Sans JP's advance
-#: widths while drawing Calibri's, so the comparison would contain a deliberate
+#: MS Gothic where the deck asked for MS PGothic, and point our render at MS Gothic as
+#: well.  It would make two more decks scoreable.  It would also be measuring the wrong
+#: thing twice over -- our layout would still be computed from MS PGothic's advance
+#: widths while drawing MS Gothic's, so the comparison would contain a deliberate
 #: metrics/outline mismatch of our own making, and any conclusion drawn from it would be
-#: about the fudge rather than about the renderer.
+#: about the fudge rather than about the renderer.  Worse, it would bake one machine's
+#: font matching into the library: PowerPoint on Windows, where MS PGothic is a
+#: separately addressable family, would have drawn what the deck asked for.
 #:
-#: A deck naming a face PowerPoint does not have is simply not a deck this corpus can
-#: score.  The fix is to install the face where PowerPoint can see it and re-export, not
-#: to guess around it.
+#: What *is* read out of the PDF is the far weaker question of whether the comparison is
+#: meaningful at all -- see :func:`font_profile`.  That is the same instinct this comment
+#: was always about: a deck PowerPoint drew differently is not a failing deck, it is an
+#: unmeasurable one, and the honest thing is to say so rather than either score it or
+#: quietly copy PowerPoint's choice.
 
 
-def font_profile(deck: Path, profile: dict | None) -> dict:
-    """Which of a deck's faces the licensed profile can supply, and a hash of that answer.
+def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> dict:
+    """Whether this deck can be compared at all, and a hash of the answer.
 
-    ``missing`` is the field that decides whether a deck gets scored at all.  A deck we
-    cannot draw with the same faces PowerPoint drew with is not a failing deck, it is an
-    unmeasurable one, and scoring it anyway is how a font-availability difference gets
-    recorded as a rendering regression.
+    Three ways a comparison stops being about this renderer, all of which end in a
+    skip-with-a-reason rather than a score:
+
+    * **A named face this machine does not have.**  PowerPoint did not have it either,
+      so its PDF is already drawn with a substitute of its own choosing, and scoring
+      against it compares our fallback to Microsoft's.
+
+    * **Text no named face can draw.**  The check has to be coverage-based because a
+      name-based one cannot see this case: there is no name to look up.  A deck whose
+      theme says ``<a:ea typeface=""/>`` and then sets Japanese body text obliges *both*
+      renderers to invent a face, and two independently-invented fallbacks are not a
+      measurement of anything.
+
+    * **PowerPoint drew a face the deck never named.**  Cmap coverage is necessary and
+      not sufficient: the deck can name a face, this machine can have it, and PowerPoint
+      can still have resolved the name to something else.  ``sample.pptx`` asks for
+      ＭＳ Ｐゴシック through its theme's ``Jpan`` entry, this machine has it, and
+      PowerPoint's export embeds ``MS-Gothic`` and ``MS-Mincho`` -- never ``MS-PGothic``.
+      Those are different faces, not different names for one: MS Gothic advances every
+      CJK glyph a full em and MS PGothic is proportional, 0.648 em to 1.0 for katakana.
+      Nothing our renderer does can close a gap that starts with different outlines at
+      different widths, and reporting it as an SSIM failure says the opposite.
     """
     faces = (profile or {}).get("faces", {})
+    named = requested_faces(deck)
+    text = deck_text(deck)
+    script = deck_script(text)
+    # Only the script the deck actually writes in.  A theme offering Jpan, Hans, Hant and
+    # Hang -- which is every stock Office theme -- otherwise hands four faces to a deck
+    # that uses one, and four faces between them cover every CJK character, so nothing
+    # ever looks load-bearing.
+    conditional = [script_faces(deck)[script]] if script in script_faces(deck) else []
     available: list[str] = []
     missing: list[str] = []
-    for face in requested_faces(deck):
+    for face in named:
         (available if face in faces else missing).append(face)
+
+    usable = available + [face for face in conditional if face in faces]
+    uncovered = ""
+    substituted: list[str] = []
+    if not missing and profile:
+        cmaps = _face_cmaps(faces, usable)
+        wanted = {ord(char) for char in text if not char.isspace()}
+        unmatched = sorted(
+            code for code in wanted if not any(code in c for c in cmaps.values())
+        )
+        uncovered = "".join(chr(code) for code in unmatched[:8])
+
+        if pdf is not None and pdf.exists() and not uncovered:
+            # A face is *load-bearing* when some character in the deck can be drawn by
+            # it and by nothing else the deck names.  Only those are worth checking
+            # against the export: a Latin face the deck shares with two others tells us
+            # nothing, and a face PowerPoint used for content we do not render at all --
+            # Arial for a chart's axis labels, say -- is a missing feature of ours, not a
+            # font-matching difference, and must not be dressed up as one.
+            drawn = _pdf_base_fonts(pdf)
+            for face, covered in cmaps.items():
+                others = [c for name, c in cmaps.items() if name != face]
+                exclusive = any(
+                    code in covered and not any(code in other for other in others)
+                    for code in wanted
+                )
+                if not exclusive:
+                    continue
+                postscript = {
+                    entry.get("postscript")
+                    for entry in faces[face].values()
+                    if entry.get("postscript")
+                }
+                if postscript and not (postscript & drawn):
+                    substituted.append(face)
+            substituted.sort()
 
     digest = hashlib.sha256()
     for face in available:
@@ -456,6 +699,9 @@ def font_profile(deck: Path, profile: dict | None) -> dict:
     return {
         "available": available,
         "missing": missing,
+        "conditional": conditional,
+        "uncovered": uncovered,
+        "substituted": substituted,
         "hash": digest.hexdigest()[:12],
     }
 
@@ -514,6 +760,38 @@ def render_pair(deck: Path, pdf: Path, slide_index: int, profile: dict):
     return np.asarray(ours), np.asarray(truth)
 
 
+def skip_reason(fonts: dict) -> str | None:
+    """Why this deck cannot be compared, or ``None`` if it can.
+
+    Each of these is a difference between the two renderers' *inputs*, not their output.
+    Scoring through one records a font difference as a rendering regression, which is the
+    failure this whole file was built to stop.
+    """
+    if fonts["missing"]:
+        # PowerPoint did not have these faces either, so its PDF is already drawn with
+        # substitutes of its own choosing.  Scoring would compare our fallback to
+        # Microsoft's.
+        return (
+            "PowerPoint substituted too: no "
+            + ", ".join(fonts["missing"])
+            + " on this machine"
+        )
+    if fonts["uncovered"]:
+        # No name to check, so the name-based rule above cannot see this one.
+        return (
+            "no named face can draw "
+            + fonts["uncovered"]
+            + "; both renderers invented a fallback"
+        )
+    if fonts["substituted"]:
+        return (
+            "PowerPoint did not draw "
+            + ", ".join(fonts["substituted"])
+            + ", which nothing else here covers; it resolved the name differently"
+        )
+    return None
+
+
 def slide_count(deck: Path) -> int:
     with zipfile.ZipFile(deck) as archive:
         return sum(
@@ -536,17 +814,11 @@ def run(oracle_dir: Path, profile: dict) -> dict:
         pdf = deck.with_suffix(".pdf")
         if not pdf.exists():
             continue
-        fonts = font_profile(deck, profile)
+        fonts = font_profile(deck, profile, pdf)
         entry: dict = {"fonts": fonts, "slides": []}
-        if fonts["missing"]:
-            # PowerPoint did not have these faces either, so its PDF is already drawn
-            # with substitutes of its own choosing.  Scoring against it would compare
-            # our fallback to Microsoft's.
-            entry["skipped"] = (
-                "PowerPoint substituted too: no "
-                + ", ".join(fonts["missing"])
-                + " on this machine"
-            )
+        reason = skip_reason(fonts)
+        if reason:
+            entry["skipped"] = reason
             results[deck.stem] = entry
             continue
         for index in range(slide_count(deck)):
