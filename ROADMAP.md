@@ -258,7 +258,7 @@ image = page.render(scale=1280 / page.get_size()[0]).to_pil()
 
 | Constraint | Consequence |
 | --- | --- |
-| PowerPoint is sandboxed | Paths must be under the user's home. `/tmp` and `/private/tmp` fail with error **−9074**. |
+| PowerPoint is sandboxed | Paths must be in a directory PowerPoint has **already been granted**. Under `$HOME` is *not* sufficient: a freshly created `~/pptx2svg-star/`, and a fresh directory under `~/Documents/`, both fail with **−9074** exactly as `/tmp` does, while the directory earlier exports used keeps working. The deck opens (a `~$` lock file appears) and only the save fails, so it reads as a broken deck rather than an unapproved path — which cost most of a session. Reuse the directory that already works. |
 | **−9074 has a second cause** | A file PowerPoint wants to repair raises an app-modal dialog, and *every* export then fails −9074 until it is cleared — including known-good files. Check for a dialog before suspecting the path; one bad input otherwise looks exactly like a broken environment. |
 | The export script cannot clear that dialog | It is blocked inside `open` and never regains control. Dismissal has to run in a separate process, and **Escape does not work** — only a real button click does, matched across localisations (`Annuleren` on a Dutch install). |
 | `count of presentations` is not a health check | A wedged PowerPoint answers `0` while still refusing every file. |
