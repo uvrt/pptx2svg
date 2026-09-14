@@ -7,6 +7,7 @@ where each constant came from and what its residual against the measurement is.
 
 from __future__ import annotations
 
+import math
 import re
 import zipfile
 from xml.etree.ElementTree import fromstring
@@ -444,18 +445,18 @@ def test_a_chart_part_that_is_missing_warns_and_draws_an_empty_frame(authoring):
 
 
 def test_a_chart_type_that_is_not_implemented_says_so(authoring):
-    """Only barChart is drawn so far; the rest must say so, not draw a wrong picture."""
+    """Types with no renderer must say so rather than draw a wrong picture."""
     from tests.deckbuilder import derive_deck
 
     chart_xml = (
         "<?xml version='1.0'?>"
-        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:pieChart>"
+        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:radarChart>"
         "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
         "<c:pt idx='0'><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
-        "</c:pieChart></c:plotArea></c:chart></c:chartSpace>"
+        "</c:radarChart></c:plotArea></c:chart></c:chartSpace>"
     ).encode()
     frame = (
-        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Pie'/>"
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Radar'/>"
         "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
         "<p:xfrm><a:off x='0' y='0'/><a:ext cx='1000000' cy='1000000'/></p:xfrm>"
         "<a:graphic><a:graphicData "
@@ -481,7 +482,7 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
     options = ConvertOptions()
     convert_pptx_to_model(deck_bytes, options)
     warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
-    assert "pieChart" in warning.message
+    assert "radarChart" in warning.message
 
 
 # -- The probe sweep -------------------------------------------------------------------
@@ -1855,3 +1856,265 @@ def test_a_line_chart_puts_its_labels_to_the_right_of_the_point():
     assert _label_text_left(labels[0]) == pytest.approx(
         306.067 - 244.094, abs=DATA_LABEL_TOLERANCE_PT
     )
+
+
+# -- Pie and doughnut ------------------------------------------------------------------
+#
+# The core geometry is measured on `real-financial-report.pptx`'s own doughnut; the rest
+# on a twelve-chart probe.  Frame-relative points throughout.
+
+#: chart4 of real-financial-report: a 285 x 150 pt frame with a right-hand legend.
+REAL_DOUGHNUT = {
+    "centre": (91.008, 75.000),
+    "outer": 64.000,
+    "inner": 32.000,          # c:holeSize = 50, so half the outer radius
+    "legend_band": 113.98,    # the same band that deck's bar charts reserve
+}
+
+PIE_TOLERANCE_PT = 0.4
+
+
+def pie_chart_xml(
+    *,
+    kind="pieChart",
+    values=(43, 30, 19, 8),
+    cats=("Alpha", "Beta", "Gamma", "Delta"),
+    first_angle=None,
+    hole=None,
+    explosion=None,
+    vary=None,
+    dlbl_show=(),
+    dlbl_pos=None,
+    series=1,
+    legend=None,
+):
+    body = ""
+    for index in range(series):
+        points = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(values)
+        )
+        cpts = "".join(f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(cats))
+        exp = "" if explosion is None else f"<c:explosion val='{explosion}'/>"
+        labels = ""
+        if dlbl_show:
+            flags = "".join(
+                f"<c:show{flag} val='{1 if flag in dlbl_show else 0}'/>"
+                for flag in ("LegendKey", "Val", "CatName", "SerName", "Percent",
+                             "BubbleSize")
+            )
+            pos = "" if dlbl_pos is None else f"<c:dLblPos val='{dlbl_pos}'/>"
+            labels = f"<c:dLbls>{pos}{flags}</c:dLbls>"
+        body += (
+            f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+            "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>S{index}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+            f"{exp}{labels}"
+            f"<c:cat><c:strRef><c:strCache><c:ptCount val='{len(cats)}'/>{cpts}"
+            "</c:strCache></c:strRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+            f"<c:ptCount val='{len(values)}'/>{points}"
+            "</c:numCache></c:numRef></c:val></c:ser>"
+        )
+    vary_xml = "" if vary is None else f"<c:varyColors val='{1 if vary else 0}'/>"
+    ang = "" if first_angle is None else f"<c:firstSliceAng val='{first_angle}'/>"
+    hole_xml = "" if hole is None else f"<c:holeSize val='{hole}'/>"
+    legend_xml = (
+        f"<c:legend><c:legendPos val='{legend}'/><c:overlay val='0'/></c:legend>"
+        if legend
+        else ""
+    )
+    return (
+        f"<c:chart><c:plotArea><c:layout/><c:{kind}>{vary_xml}{body}{ang}{hole_xml}"
+        f"</c:{kind}></c:plotArea>{legend_xml}</c:chart>"
+    )
+
+
+def _slices(children):
+    return [
+        child
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.geometry, m.CustomGeometry)
+    ]
+
+
+def _path_points(shape):
+    transform = shape.transform
+    path = shape.geometry.paths[0]
+    sx = transform.extent_width / 12700.0 / path.width if path.width else 1.0
+    sy = transform.extent_height / 12700.0 / path.height if path.height else 1.0
+    points = []
+    for token in re.finditer(r"([MLC])((?: -?[\d.]+)+)", path.commands):
+        numbers = [float(v) for v in token.group(2).split()]
+        for i in range(0, len(numbers) - 1, 2):
+            points.append(
+                (
+                    transform.offset_x / 12700.0 + numbers[i] * sx,
+                    transform.offset_y / 12700.0 + numbers[i + 1] * sy,
+                )
+            )
+    return points
+
+
+def _radii(shape, centre):
+    return sorted({round(math.hypot(x - centre[0], y - centre[1]), 2)
+                   for x, y in _path_points(shape)})
+
+
+def test_the_real_doughnut_matches_powerpoints_geometry():
+    """chart4 of `real-financial-report.pptx`, whose export pins every polar rule."""
+    from tests.conftest import FIXTURE_DIR
+
+    deck = convert_pptx_to_model((FIXTURE_DIR / "real-financial-report.pptx").read_bytes())
+    charts = [
+        element
+        for slide in deck.slides
+        for element in slide.elements
+        if isinstance(element, m.ChartElement)
+        and element.chart.kind == "doughnutChart"
+    ]
+    assert len(charts) == 1
+    parts = _slices(charts[0].children)
+    assert len(parts) == 4
+    centre = REAL_DOUGHNUT["centre"]
+    for part in parts:
+        radii = _radii(part, centre)
+        # The path visits both arcs; its Bezier control points sit off them either way, so
+        # the test is that each radius is present rather than that it bounds the set.
+        for wanted in (REAL_DOUGHNUT["inner"], REAL_DOUGHNUT["outer"]):
+            assert any(abs(r - wanted) < PIE_TOLERANCE_PT for r in radii), (wanted, radii)
+
+
+def test_angle_zero_is_twelve_oclock_and_slices_run_clockwise():
+    """The real doughnut's first slice, a 43% share, ends at 154.80 deg = 43% of 360."""
+    children, _ = _build(
+        pie_chart_xml(values=(43, 30, 19, 8)), width=220.4724, height=181.1024
+    )
+    first = _slices(children)[0]
+    centre = (110.236, 90.551)
+    start = _path_points(first)[0]
+    angle = math.degrees(
+        math.atan2(start[0] - centre[0], -(start[1] - centre[1]))
+    ) % 360
+    assert angle == pytest.approx(0.0, abs=0.5) or angle == pytest.approx(360.0, abs=0.5)
+
+
+def test_first_slice_angle_rotates_clockwise_from_twelve():
+    children, _ = _build(
+        pie_chart_xml(first_angle=90), width=220.4724, height=181.1024
+    )
+    start = _path_points(_slices(children)[0])[0]
+    centre = (110.236, 90.551)
+    angle = math.degrees(
+        math.atan2(start[0] - centre[0], -(start[1] - centre[1]))
+    ) % 360
+    assert angle == pytest.approx(90.0, abs=0.5)
+
+
+def test_hole_size_is_a_percentage_of_the_outer_radius():
+    children, _ = _build(
+        pie_chart_xml(kind="doughnutChart", hole=25), width=220.4724, height=181.1024
+    )
+    centre = (110.236, 90.551)
+    radii = _radii(_slices(children)[0], centre)
+    for wanted in (79.551, 0.25 * 79.551):
+        assert any(abs(r - wanted) < PIE_TOLERANCE_PT for r in radii), (wanted, radii)
+
+
+def test_a_doughnut_with_no_hole_size_draws_as_a_pie():
+    """ECMA-376 documents a default of 10; PowerPoint's export has no inner arc at all."""
+    children, _ = _build(
+        pie_chart_xml(kind="doughnutChart"), width=220.4724, height=181.1024
+    )
+    centre = (110.236, 90.551)
+    assert min(_radii(_slices(children)[0], centre)) == pytest.approx(0.0, abs=0.05)
+
+
+def test_several_series_make_concentric_rings():
+    children, _ = _build(
+        pie_chart_xml(kind="doughnutChart", series=2), width=220.4724, height=181.1024
+    )
+    parts = _slices(children)
+    assert len(parts) == 8
+    centre = (110.236, 90.551)
+    band = 79.551 / 2
+    assert any(abs(r - band) < PIE_TOLERANCE_PT for r in _radii(parts[0], centre))
+    outer_ring = _radii(parts[4], centre)
+    for wanted in (band, 79.551):
+        assert any(abs(r - wanted) < PIE_TOLERANCE_PT for r in outer_ring), (
+            wanted, outer_ring
+        )
+
+
+def test_explosion_shrinks_the_radius_and_pushes_each_slice_out():
+    """Measured: radius x 1/(1+e), offset e x the *shrunk* radius along the bisector."""
+    children, _ = _build(pie_chart_xml(explosion=20), width=220.4724, height=181.1024)
+    centre = (110.236, 90.551)
+    radius = 79.551 / 1.2
+    first = _slices(children)[0]
+    points = _path_points(first)
+    # The wedge's apex is the exploded centre.
+    apex = min(points, key=lambda p: math.hypot(p[0] - centre[0], p[1] - centre[1]))
+    offset = math.hypot(apex[0] - centre[0], apex[1] - centre[1])
+    assert offset == pytest.approx(radius * 0.2, abs=PIE_TOLERANCE_PT)
+    far = max(math.hypot(x - apex[0], y - apex[1]) for x, y in points)
+    assert far >= radius - PIE_TOLERANCE_PT
+
+
+def test_a_pie_varies_its_colours_by_point_without_being_asked():
+    """A bar chart with no `c:varyColors` draws one colour; a pie cycles the accents."""
+    children, _ = _build(pie_chart_xml(), width=220.4724, height=181.1024)
+    fills = [
+        part.fill.color.hex.upper()
+        for part in _slices(children)
+        if isinstance(part.fill, m.SolidFill)
+    ]
+    assert fills == ["#4472C4", "#ED7D31", "#A5A5A5", "#4472C4"]
+
+
+def test_percentages_add_up_to_one_hundred():
+    """Measured: three equal values are labelled 34%, 33%, 33%, not 33% three times."""
+    from pptx2svg.resolve.chart import _percent_shares
+
+    assert _percent_shares([1, 1, 1]) == [34, 33, 33]
+    assert sum(_percent_shares([1, 1, 1, 1, 1, 1])) == 100
+    assert _percent_shares([43, 30, 19, 8]) == [43, 30, 19, 8]
+    assert _percent_shares([0, 0]) == [0, 0]
+
+
+def test_a_slice_label_sits_at_the_measured_fraction_of_the_radius():
+    centre = (110.236, 90.551)
+    radius = 79.551
+    for position, fraction in (("ctr", 0.500), ("inEnd", 0.856),
+                               ("outEnd", 1.020), ("bestFit", 0.710)):
+        children, _ = _build(
+            pie_chart_xml(dlbl_show=("Val",), dlbl_pos=position),
+            width=220.4724,
+            height=181.1024,
+        )
+        labels = [
+            child
+            for child in children
+            if isinstance(child, m.ShapeElement) and child.text_body is not None
+        ]
+        assert len(labels) == 4, position
+        # The first slice spans 0..154.8 deg, so its bisector is at 77.4.
+        first = labels[0]
+        size = first.text_body.paragraphs[0].runs[0].properties.font_size
+        cx = first.transform.offset_x / 12700.0 + first.transform.extent_width / 25400.0
+        cy = first.transform.offset_y / 12700.0 + (1.2 - APTOS_DESCENT) * size - size * 0.3
+        distance = math.hypot(cx - centre[0], cy - centre[1])
+        assert distance / radius == pytest.approx(fraction, abs=0.06), position
+
+
+def test_a_pie_legends_its_categories_not_its_series():
+    children, _ = _build(
+        pie_chart_xml(legend="r"), width=220.4724, height=181.1024
+    )
+    texts = {
+        "".join(r.text for p in child.text_body.paragraphs for r in p.runs)
+        for child in children
+        if isinstance(child, m.ShapeElement) and child.text_body is not None
+    }
+    assert {"Alpha", "Beta", "Gamma", "Delta"} <= texts
+    assert "S0" not in texts

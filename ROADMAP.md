@@ -32,7 +32,7 @@ after it needs a way to tell "better" from "different".
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
-| Charts | `barChart` and `lineChart` read and drawn with their data labels, **verified against PowerPoint** across 30 probe charts and 4 real ones; every other chart type warns and draws an empty frame |
+| Charts | `barChart`, `lineChart`, `pieChart` and `doughnutChart` read and drawn with their data labels, **verified against PowerPoint** across 42 probe charts and 5 real ones; every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -644,16 +644,57 @@ Three things the obvious reading gets wrong, each found in a fixture:
 mapping. Both **[pptx-renderer]** and this roadmap flagged it; it is invisible until a
 deck does both at once.
 
-### 3.2 Renderer — `barChart` and `lineChart` **done**, the rest not started
+### 3.2 Renderer — four types **done**, the rest not started
 
 1. ✅ `barChart` — clustered, stacked, percentStacked, `barDir` col and bar
 2. ✅ `lineChart` — markers, smoothing, blanks, the real fixture on slide 2
-3. `pieChart` / `doughnutChart`
+3. ✅ `pieChart` / `doughnutChart` — hole, rings, explosion, the real fixture on slide 3
 4. `areaChart`
 5. `scatterChart` / `bubbleChart`
 6. `radarChart`, `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
 
-Data labels are drawn for both, at all four `c:dLblPos` values plus a line chart's `r`.
+Data labels are drawn for all four, at every `c:dLblPos` each type accepts.
+
+#### Polar layout, measured
+
+The core comes off `real-financial-report.pptx`'s own doughnut, which is exact enough to
+pin it without a probe at all:
+
+* the plot region is the **same** one a bar chart computes — edge insets plus the legend
+  band, whose 113.98 pt on that deck is the identical number its bar charts reserve;
+* the radius is **half the shorter side** of that region, centred in it;
+* **angle zero is 12 o'clock and slices run clockwise**; its first slice ends at
+  154.80° for a 43% share, which is 43% of 360;
+* **`c:holeSize` is a percentage of the outer radius**, not of the frame or the diameter.
+
+A twelve-chart probe adds the rest, and two of them contradict the obvious reading:
+
+* **A `c:doughnutChart` stating no `c:holeSize` draws as a solid pie.** ECMA-376 documents
+  a default of 10; the wedge PowerPoint emitted closes through the centre with no inner
+  arc at all.
+* **`varyColors` is the default for a pie and not for a bar.** Probe pies stating no
+  `c:varyColors` came out accent1..accent4 across their slices, and a two-ring doughnut
+  cycled the same four in *both* rings — per point, not per series.
+* Several series make **concentric rings**, innermost first, splitting the space between
+  the hole and the outer radius evenly.
+* **`c:explosion` shrinks the radius by `1/(1+e)`** and offsets each slice by `e` of the
+  *shrunk* radius along its own bisector — both halves measured to 0.01 pt.
+* Slice labels sit along the bisector at a fraction of the radius: `ctr` exactly 0.5,
+  `inEnd` 0.856, `outEnd` 1.020, `bestFit` 0.710.
+* **`showPercent` percentages add up to 100**: three equal values are labelled 34%, 33%,
+  33%, where rounding each on its own gives 33% three times and totals 99.
+* A pie legends its **categories**, not its series.
+
+#### The corpus contains no drawn data label
+
+Worth stating once, because two separate readings of the same files got it wrong. Five of
+the six charts carry a `c:dLbls` block. Four state every `c:show*` flag as 0. The fifth,
+chart4's doughnut, *does* set `showCatName` and `showPercent` — and then carries four
+`c:dLbl` overrides, one per point, that set every flag back to 0. PowerPoint's export
+confirms it: no label is drawn on any chart in the corpus. Counting `c:dLbls` elements
+says nothing; the flags have to be read, and then the per-point overrides on top of them.
+
+Data-label rendering is therefore verified **entirely against probes**.
 
 Anything else warns `chart-unsupported-type` and draws an empty frame rather than a wrong
 picture. The shared infrastructure — value domain, tick selection, number formatting,
@@ -746,7 +787,7 @@ A rule was written, measured against all of it, found to contradict the stacked 
 everywhere except short plots. Whoever picks this up starts from the table above; the
 discriminating pair is the 30.9 pt cell and the stacked probe.
 
-#### Not done for `barChart` and `lineChart`
+#### Not done for the four types that draw
 
 Each of these is known-missing rather than merely absent:
 
@@ -754,7 +795,16 @@ Each of these is known-missing rather than merely absent:
   multi-part label; we draw it on one. `c:separator`, `c:leaderLines` and a data label's
   own `c:layout` are read or ignored but never drawn.
 * **A line chart's legend key.** PowerPoint draws a line with its marker on it; we draw
-  the bar chart's square swatch.
+  the bar chart's square swatch — worth about 11 pt of band width on
+  `real-financial-report.pptx`'s line chart, which is the whole of that chart's residual
+  legend error.
+* **Where a wrapped legend's rows sit.** The band cap and the opened row pitch are
+  measured; how PowerPoint places the block vertically is not. Ours centres the rows and
+  comes out about 5 pt high on chart4, whose measured baselines are 26.46, 43.50, 56.70,
+  86.94 and 116.94 pt from the frame top.
+* **`bestFit` is a fixed fraction of the radius.** PowerPoint's moves a label out of the
+  way when it does not fit; the probe pie's labels all fit, so that behaviour was never
+  exercised.
 * **`c:smooth`'s tension.** Drawn as a Catmull-Rom spline, which has the right shape —
   the probe's control points are not collinear with its vertices, so it is a real spline —
   but PowerPoint's own tension was not measured and the curves will not coincide.
