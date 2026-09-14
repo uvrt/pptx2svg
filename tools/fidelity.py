@@ -415,9 +415,47 @@ def scan_licensed_fonts() -> dict[str, dict]:
     return found
 
 
+#: Every field :func:`scan_licensed_fonts` puts in a face entry, and the top-level keys
+#: :func:`write_profile` writes.  Both are hashed into :data:`PROFILE_SCHEMA`.
+#:
+#: This exists because a profile that is merely *old* is far more dangerous than one that
+#: is missing.  ``postscript`` was added to the face entry when the coverage-based skip
+#: rule landed, and the ``/BaseFont`` comparison needs it to notice that PowerPoint drew
+#: a face other than the one the deck named.  A profile written before that change has
+#: the field nowhere, so the check could not fire -- and the harness scored two decks it
+#: cannot measure as though they were fine, one of them at a passing 0.9674.  Same
+#: commit, same decks, same PDFs, opposite verdicts, no error anywhere.  A wrong answer
+#: in the direction of confidence is the worst kind, so this one is fatal, not a warning.
+#:
+#: Declared rather than derived from a sample so that the writer can *assert* against it:
+#: add a field to a face entry without listing it here and ``--write-profile`` fails on
+#: the spot, which is the moment the schema really changed.  Listing it then changes the
+#: hash, which retires every profile written under the old shape.
+_FACE_FIELDS = ("path", "postscript", "sha256", "weight")
+_PROFILE_FIELDS = ("directories", "faces", "schema")
+
+#: Fingerprint of the shape above.  Stamped into every profile and refused on mismatch.
+PROFILE_SCHEMA = hashlib.sha256(
+    ("|".join(_FACE_FIELDS) + "//" + "|".join(_PROFILE_FIELDS)).encode()
+).hexdigest()[:12]
+
+
+class StaleProfile(Exception):
+    """A profile on disk that was written under a different schema."""
+
+
 def write_profile() -> dict:
     faces = scan_licensed_fonts()
+    for family, styles in faces.items():
+        for style, entry in styles.items():
+            if tuple(sorted(entry)) != tuple(sorted(_FACE_FIELDS)):
+                raise AssertionError(
+                    f"face entry for {family} {style} has fields {sorted(entry)}, but "
+                    f"_FACE_FIELDS says {sorted(_FACE_FIELDS)}.  Update _FACE_FIELDS -- "
+                    "that is what retires profiles written under the old shape."
+                )
     profile = {
+        "schema": PROFILE_SCHEMA,
         # resvg is pointed at whole directories rather than individual files: a face is
         # four files (regular, bold, italic, bold-italic) and the deck decides at render
         # time which it needs, so naming only the upright would silently drop bold.
@@ -543,9 +581,26 @@ def addressable_font_files(profile: dict, names) -> list[str]:
 
 
 def load_profile() -> dict | None:
+    """The profile on disk, or ``None`` if there is none.
+
+    Raises :class:`StaleProfile` for one written under a different schema rather than
+    using it -- see :data:`PROFILE_SCHEMA` for what that silently cost.
+    """
     if not PROFILE_PATH.exists():
         return None
-    return json.loads(PROFILE_PATH.read_text())
+    profile = json.loads(PROFILE_PATH.read_text())
+    found = profile.get("schema")
+    if found != PROFILE_SCHEMA:
+        raise StaleProfile(
+            f"{PROFILE_PATH.name} was written under schema {found or 'none'}, but this "
+            f"checkout expects {PROFILE_SCHEMA}.\n"
+            "The profile records one fact per face and the skip rules read all of them; "
+            "an older one is missing\nfields those rules need, and the harness then "
+            "scores decks it cannot measure as though they were fine.\n"
+            "Regenerate it:\n"
+            "    python3 tools/fidelity.py --write-profile"
+        )
+    return profile
 
 
 #: A theme's font scheme ends with a long ``<a:font script="Arab" typeface="..."/>`` list
@@ -1027,7 +1082,11 @@ def main() -> int:
         global SOURCE_ROOT
         SOURCE_ROOT = os.path.abspath(os.path.expanduser(args.src))
 
-    profile = load_profile()
+    try:
+        profile = load_profile()
+    except StaleProfile as stale:
+        print(stale, file=sys.stderr)
+        return 2
     if profile is None:
         print(
             f"no font profile at {PROFILE_PATH}.\n"
