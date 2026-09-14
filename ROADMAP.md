@@ -845,6 +845,59 @@ knowing before repeating it:
   angle was converted, which rotates any arc not beginning on an axis. Invisible in a
   square box. That bug would not have been found any other way.
 
+#### The adjustment values have been measured too
+
+The sweep above moved no handles: every shape was drawn at its **default** adjustments, so
+a preset that mishandles a non-default value passed it untouched. That gap is now closed.
+298 handles across 122 presets were swept **one at a time**, others left at their
+defaults — the two ends of the range the specification's own `pin` guides define, plus one
+value outside each end, with a default-adjustment instance per preset as a control. 1102
+cases, each at both aspect ratios.
+
+| Outcome | Cases |
+| --- | --- |
+| Both matched PowerPoint | 890 |
+| Specification matched, ours did not → **promoted** | 15 (10 presets) |
+| Undecidable by this method, then re-probed → **promoted** | 8 (3 presets) |
+| Neither matched | 38 |
+| Ours matched, the specification did not | 8 |
+| Undecidable even after re-probing | 2 |
+
+**There is no clamp divergence, and that was the thing worth checking.** PowerPoint honours
+the specification's `pin` exactly. Sweeping `parallelogram` through its published range
+gives rendered areas of 1.000, 0.750, 0.600, 0.500, 0.400, 0.250 at adj = 0, 25000, 40000,
+50000, 60000, 75000 — tracking the published geometry at every step.
+
+**What PowerPoint does differently is narrower and stranger.** At the exact values where
+the published geometry *degenerates to zero area*, PowerPoint draws the shape's bounding
+rectangle instead of the collapsed path. `parallelogram` at adj = 100000 and `diagStripe`
+at adj = 100000 both reduce to a line under the spec's own formulas, and both render as a
+filled box. That accounts for most of the 38 "neither matched" cases and for all 8 where
+our older approximation scored better — `leftBrace` and `rightBrace` collapse at both ends
+of `adj2`, and our hand-written brace happened to land nearer PowerPoint's substitute.
+
+This is **not implemented**. It only occurs at the extreme end of an adjustment range,
+which PowerPoint's own UI will not let a user reach by dragging, and a
+"degenerate → bounding box" fallback would mask real geometry bugs as readily as it would
+match Office. It is recorded here as a known, bounded divergence.
+
+**The promotions came almost entirely from out-of-range values**, which is the argument for
+testing them: a generator that ignores the clamp is indistinguishable from one that
+honours it until you hand it something out of range. `downArrow` at adj1 = -25000 scored
+0.727 where the specification scores 1.000; `triangle`, `snip1Rect`, `snip2SameRect`,
+`snipRoundRect`, `round2DiagRect`, `foldedCorner`, `bevel`, `frame` and `upDownArrow` the
+same way.
+
+**A blind spot found and then closed.** A callout's handles move its *leader line*, which
+lies outside the shape's box — so cropping the box clips it away for PowerPoint and for us
+alike, and 164 cases compared two identical pictures. Reporting those as agreement would
+have been false; they were reported undecidable, then re-probed with the shape inset inside
+a larger measured region. 162 became real measurements and 8 of them were failures:
+`borderCallout3` on six handles, `wedgeRectCallout` and `wedgeRoundRectCallout` on `adj2`.
+**When a preset's geometry can leave its own box, the box is the wrong crop.**
+
+155 of the 188 registered presets are now compiled from the specification.
+
 **The lesson that generalises.** The ranking this replaced was produced by eye and was
 wrong in both directions: it listed `chevron` at 0.31 divergence (a square-box artefact of
 measuring at 2:1) while calling `decagon` and `dodecagon` fine at a glance, when both were
