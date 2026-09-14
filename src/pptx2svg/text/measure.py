@@ -33,6 +33,28 @@ WIDE_RATIO = 1.0
 #: that spread, which is another way of saying it is wrong for every one of them.
 BOLD_FACTOR = 1.05
 
+#: What PowerPoint's synthetic bold adds to an East Asian advance, in points per glyph.
+#:
+#: A CJK face with no bold cut -- which is all four MS Japanese faces; ``msgothic.ttc``
+#: and ``msmincho.ttc`` contain none -- is emboldened by PowerPoint rather than left
+#: light, and the emboldening widens the advance.  This is **not a ratio**, which is the
+#: surprising part and the reason it is a constant here.  Read off the pen origins in
+#: PowerPoint's own PDF export of ``sample.pptx``, which sets the same Japanese text bold
+#: at three sizes:
+#:
+#:     24 pt   upright 24.000   bold 24.1248    (+0.1248)
+#:     28 pt   upright 28.000   bold 28.1260    (+0.1260)
+#:     32 pt   upright 32.000   bold 32.1248    (+0.1248)
+#:
+#: The increment does not scale with the font size, so it cannot be expressed in ems; a
+#: 1/256 em model would predict +0.094 at 24 pt and the measurement says +0.125.  The
+#: upright numbers are exactly the point size because MS Gothic is full-width monospaced
+#: -- every CJK glyph advances 1 em -- which makes the difference unusually easy to read.
+#:
+#: It is small: 0.4% at 32 pt.  It is here because it is measured and free, not because
+#: it rescues a layout on its own.
+EAST_ASIAN_SYNTHETIC_BOLD_PT = 0.125
+
 #: PowerPoint's line box for single spacing, as a multiple of the font size.
 #:
 #: This is a constant, not a property of the typeface, and that is genuinely surprising:
@@ -101,6 +123,13 @@ class DefaultTextMeasurer:
         base_size_px = font_size_pt * PX_PER_PT
         latin_metrics = metrics_for(font_family)
         ea_metrics = metrics_for(font_family_ea)
+        # A face with no bold design of its own gets PowerPoint's synthetic emboldening,
+        # and that widens every East Asian advance by a fixed amount.  Asking once per
+        # call rather than once per character: the tables are large and the answer is a
+        # property of the face.
+        synthetic_bold_px = (
+            EAST_ASIAN_SYNTHETIC_BOLD_PT * PX_PER_PT if bold else 0.0
+        )
         total = 0.0
 
         for char in text:
@@ -115,10 +144,18 @@ class DefaultTextMeasurer:
                 # The rasteriser will draw this with the real bold face, so measure with
                 # the real bold face.  See BOLD_FACTOR for what the alternative costs.
                 width = _measure_with_metrics(char, code_point, base_size_px, metrics, True)
+                if east_asian and metrics.bold_is_indistinguishable():
+                    # ...unless there is no bold face to draw with.  A bold table equal
+                    # to the upright one means the file had no bold cut, so PowerPoint
+                    # emboldened the upright and the advance grew with it.  See
+                    # EAST_ASIAN_SYNTHETIC_BOLD_PT.
+                    width += synthetic_bold_px
             else:
                 width = _measure_with_metrics(char, code_point, base_size_px, metrics, False)
                 if bold and not east_asian:
                     width *= BOLD_FACTOR
+                elif bold and east_asian:
+                    width += synthetic_bold_px
             total += width
         return total
 

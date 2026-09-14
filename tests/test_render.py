@@ -717,3 +717,39 @@ def test_a_single_face_line_is_left_flowing():
     svg = text_svg(one_run("Markdown", font_size=18, font_family="Calibri"))
     (attrs,) = re.findall(r"<tspan([^>]*)>", svg)
     assert attrs.count('x="') == 1  # the line's own start, and nothing after it
+
+
+def test_italic_is_sheared_on_a_face_that_has_no_italic():
+    """resvg does not synthesise obliques, so `font-style` alone leaves CJK upright.
+
+    PowerPoint slants it.  The shear comes from the text matrix in its own PDF export
+    (45.3125 / 133.3333 = 0.33984) and is confirmed against the raster.  It has to sit on
+    a `<text>` element: `transform` on a `<tspan>` rasterises identically to no transform
+    at all.
+    """
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun(
+                        "編集可能な",
+                        m.RunProperties(
+                            font_size=18, italic=True,
+                            font_family="Calibri", font_family_ea="ＭＳ Ｐゴシック",
+                        ),
+                    )
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body)
+    assert "skewX(-18.77)" in svg, svg
+    # The shear replaces the request; asking for both would slant twice on a host that
+    # turns out to have an italic Japanese face.
+    assert 'font-style="italic"' not in svg
+
+
+def test_italic_is_left_to_the_font_when_the_font_has_one():
+    svg = text_svg(one_run("Slanted", font_size=18, italic=True, font_family="Calibri"))
+    assert 'font-style="italic"' in svg
+    assert "skewX" not in svg

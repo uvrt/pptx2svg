@@ -63,6 +63,10 @@ class Substitution:
     #: True when ``substitute`` was built to ``office``'s advance widths, so the
     #: substitution moves glyph shapes but not a single line break.
     metric_compatible: bool = True
+    #: False when neither the Office face nor ``substitute`` ships an italic design, so
+    #: a rasteriser asked for one draws upright and PowerPoint's slant has to be
+    #: synthesised.  See :data:`pptx2svg.render.text.SYNTHETIC_OBLIQUE_SHEAR`.
+    has_italic_cut: bool = True
     #: Anything a caller should know that the flags above cannot say.  Surfaced verbatim
     #: by ``pptx2svg fonts --check``, so it is written for a human reading a table.
     caveat: str = ""
@@ -152,6 +156,11 @@ def _entries() -> list[Substitution]:
             Substitution(
                 office, "Noto Sans JP", table,
                 metric_compatible=(office in ("Noto Sans JP", "Noto Sans CJK JP")),
+                # No Japanese face here has an italic cut -- not MS Gothic or MS Mincho
+                # inside Office's .ttc files, and not the Noto Sans JP we ship, which is
+                # a weight-axis variable font with no slant axis and no oblique sibling.
+                # So whichever of them the rasteriser picks, italic text draws upright.
+                has_italic_cut=False,
             )
         )
     # Mincho is a serif; Noto Sans JP is not, and we ship no Japanese serif.  Mapping it
@@ -166,7 +175,10 @@ def _entries() -> list[Substitution]:
     )
     for office, table in japanese_mincho:
         rows.append(
-            Substitution(office, "Noto Sans JP", table, metric_compatible=False)
+            Substitution(
+                office, "Noto Sans JP", table,
+                metric_compatible=False, has_italic_cut=False,
+            )
         )
     return rows
 
@@ -284,6 +296,18 @@ def metrics_for(font_family: str | None) -> FontMetrics | None:
     """Metrics table for a PPTX font name, or ``None`` when we have no data for it."""
     substitution = substitution_for(font_family)
     return METRICS.get(substitution.metrics) if substitution else None
+
+
+def synthesises_italic(font_family: str | None) -> bool:
+    """Whether italic for this family has to be faked, because no cut of it exists.
+
+    PowerPoint slants such a face itself; resvg does not synthesise obliques at all, so
+    `font-style="italic"` on a family with no italic design is silently a no-op and the
+    run draws upright.  A family we know nothing about is assumed to have one, because
+    skewing a face that does ship an italic would be a double slant.
+    """
+    substitution = substitution_for(font_family)
+    return substitution is not None and not substitution.has_italic_cut
 
 
 def metrics_fallback_font(font_family: str | None) -> str | None:

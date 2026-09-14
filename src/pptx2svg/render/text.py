@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .. import model as m
-from ..text.fontmap import font_family_value
+from ..text.fontmap import font_family_value, synthesises_italic
 from ..text.measure import is_cjk
 from ..text.wrap import LineSegment, wrap_paragraph
 from ..units import PX_PER_PT, emu_to_px, px_to_emu
@@ -31,6 +31,28 @@ from .context import RenderContext, escape_xml_attr, escape_xml_text, num
 
 DEFAULT_LINE_SPACING = 1.0
 DEFAULT_FONT_SIZE_PT = 18.0
+
+#: The shear PowerPoint applies when it has to fake an italic, as ``dx/dy``.
+#:
+#: No Japanese face involved here has an italic cut -- not MS Gothic or MS Mincho inside
+#: Office's .ttc files, not the Noto Sans JP we ship -- and resvg does not synthesise
+#: obliques, so `font-style="italic"` on one of them is silently a no-op and the run
+#: draws bolt upright.  PowerPoint slants it.
+#:
+#: Read straight out of the text matrix in PowerPoint's PDF export of `sample.pptx`,
+#: whose slide 2 sets one Japanese run italic::
+#:
+#:     45.3125 / 133.3333 = 0.33984375
+#:
+#: and confirmed independently against the raster: rendering that run through this skew
+#: and scoring it against PowerPoint's own pixels peaks at 0.34 (SSIM 0.87, against 0.23
+#: upright), with 0.30 and 0.36 both clearly worse.  It is a steep slant -- 18.8 degrees,
+#: where a designed italic is usually 10-15 -- which is why it was worth confirming twice.
+#:
+#: A shear leaves the advance alone, and so does PowerPoint: the pen origins either side
+#: of that run are exactly 32.000 pt apart at 32 pt, the same as the upright runs around
+#: it.  So this changes no line break.
+SYNTHETIC_OBLIQUE_SHEAR = 0.33984
 
 _VERTICAL_TYPES = frozenset({"vert", "eaVert", "wordArtVert", "mongolianVert"})
 
@@ -245,6 +267,7 @@ def _render_column(
     # which is why it is accumulated here rather than recovered afterwards.
     baseline = 0.0
     highlights: list[_Highlight] = []
+    obliques: list[_Oblique] = []
 
     for paragraph in paragraphs:
         properties = paragraph.properties
@@ -329,6 +352,9 @@ def _render_column(
                         line.segments, x_pos, anchor, line_dy, dims.margin_left,
                         properties, body.default_tab_size, default_font_size,
                         font_scale, context,
+                        # The same baseline the highlights get: one line advance on from
+                        # where the accumulator currently stands.
+                        baseline + float(dy), obliques,
                     )
                 )
                 baseline += float(dy)
@@ -374,6 +400,7 @@ def _render_column(
                     [LineSegment(run.text, run.properties) for run in paragraph.runs if run.text],
                     x_pos, anchor, line_dy, dims.margin_left, properties,
                     body.default_tab_size, default_font_size, font_scale, context,
+                    baseline + float(dy), obliques,
                 )
             )
             baseline += float(dy)
@@ -387,7 +414,8 @@ def _render_column(
 
         previous_space_after = _spacing_px(properties.space_after, para_font_size)
 
-    if not tspans:
+    if not tspans and not obliques:
+        # A body whose every run was detached for shearing still has text to draw.
         return ""
 
     # Vertical anchoring needs the total height, which is only known now.
@@ -413,6 +441,10 @@ def _render_column(
     )
 
     element = f'<text x="0" y="{num(y_start)}" xml:space="preserve">{"".join(tspans)}</text>'
+    if obliques:
+        # After the main <text>, not before: these are glyphs, not backgrounds, and a
+        # sheared run leans into its neighbours' space by design.
+        element += "".join(run.svg(y_start) for run in obliques)
     if highlights:
         # Behind the text, and in one go: a highlight run is a background, so it must not
         # paint over a neighbouring run's glyphs.
@@ -499,6 +531,8 @@ def _render_line(
     default_font_size: float,
     font_scale: float,
     context: RenderContext,
+    baseline: float = 0.0,
+    obliques: list[_Oblique] | None = None,
 ) -> list[str]:
     """Emit one line's tspans, starting a new chunk at every tab stop and font change.
 
@@ -534,10 +568,12 @@ def _render_line(
     """
     pieces = _split_on_tabs(segments)
     honour_tabs = anchor == "start" and any(piece is None for piece in pieces)
+    if obliques is None:
+        obliques = []
 
     # Plan the whole line before emitting any of it: a chunk boundary needs to know how
     # far along the line it falls, and a centred line needs its total width first.
-    planned: list[tuple[LineSegment, list[tuple[str | None, str, str]]] | None] = [
+    planned: list[tuple[LineSegment, list[tuple[str | None, str, str, bool]]] | None] = [
         None if piece is None
         else (piece, _segment_tspans(piece, font_scale, context, default_font_size))
         for piece in pieces
@@ -546,10 +582,16 @@ def _render_line(
         family
         for entry in planned
         if entry is not None
-        for family, _styles, _text in entry[1]
+        for family, _styles, _text, _oblique in entry[1]
     ]
+    any_oblique = any(
+        oblique
+        for entry in planned
+        if entry is not None
+        for _family, _styles, _text, oblique in entry[1]
+    )
 
-    if len(set(families)) <= 1 and not honour_tabs:
+    if len(set(families)) <= 1 and not honour_tabs and not any_oblique:
         out = []
         first = True
         for entry in planned:
@@ -574,7 +616,7 @@ def _render_line(
             _tspan_width(text, entry[0].properties, default_font_size, font_scale, context)
             for entry in planned
             if entry is not None
-            for _family, _styles, text in entry[1]
+            for _family, _styles, text, _oblique in entry[1]
         )
         left = (
             x_pos - total / 2 if anchor == "middle"
@@ -607,7 +649,23 @@ def _render_line(
 
         piece, tspans = entry
         rendered: list[str] = []
-        for family, styles, text in tspans:
+        for family, styles, text, oblique in tspans:
+            width = _tspan_width(
+                text, piece.properties, default_font_size, font_scale, context
+            )
+            if oblique and chunk_anchor == "start":
+                # Detached into its own <text> sibling, because the shear has to live on
+                # an element and a <tspan> is not one resvg will transform.  The run
+                # leaves the flow, so whatever follows has to re-anchor: forcing
+                # `previous_family` to the sentinel makes the next tspan open a chunk.
+                obliques.append(
+                    _Oblique(x=cursor, baseline=baseline, styles=styles, text=text)
+                )
+                pending, previous_family = None, _NO_FAMILY
+                cursor += width
+                chunk_width += width
+                continue
+
             if pending is not None:
                 prefix, pending = pending, None
                 previous_family = family
@@ -623,18 +681,16 @@ def _render_line(
             else:
                 prefix = ""
             rendered.append(f"<tspan {prefix}{styles}>{escape_xml_text(text)}</tspan>")
-            width = _tspan_width(
-                text, piece.properties, default_font_size, font_scale, context
-            )
             cursor += width
             chunk_width += width
 
         content = "".join(rendered)
-        if piece.properties.hyperlink is not None:
+        if content and piece.properties.hyperlink is not None:
             content = (
                 f'<a href="{escape_xml_attr(piece.properties.hyperlink.url)}">{content}</a>'
             )
-        out.append(content)
+        if content:
+            out.append(content)
     return out
 
 
@@ -669,6 +725,46 @@ def _chunk_end(start: float, width: float, anchor: str) -> float:
 # --------------------------------------------------------------------------------------
 # Highlight
 # --------------------------------------------------------------------------------------
+
+
+@dataclass
+class _Oblique:
+    """An italic run in a face with no italic, drawn as a sheared ``<text>`` sibling.
+
+    It cannot stay a ``<tspan>``: SVG 1.1 puts ``transform`` on container and graphics
+    elements, not on ``tspan``, and resvg follows that to the letter -- a ``transform``
+    on a ``tspan`` rasterises byte-identically to no transform at all, which was checked
+    rather than assumed.  So the run leaves the parent ``<text>`` flow and is positioned
+    absolutely instead, which is affordable only because we already know where every run
+    on the line starts.
+    """
+
+    x: float
+    #: distance from the <text> element's y down to this line's baseline
+    baseline: float
+    styles: str
+    text: str
+
+    def svg(self, y_start: float) -> str:
+        y = y_start + self.baseline
+        # Shear about this run's own origin, so the baseline stays put and only the
+        # verticals lean; skewX alone would slide the whole run sideways by x * shear.
+        transform = (
+            f"translate({num(self.x)},{num(y)}) "
+            f"skewX({num(-_shear_degrees())}) "
+            f"translate({num(-self.x)},{num(-y)})"
+        )
+        return (
+            f'<text x="{num(self.x)}" y="{num(y)}" transform="{transform}" '
+            f'xml:space="preserve"><tspan {self.styles}>'
+            f"{escape_xml_text(self.text)}</tspan></text>"
+        )
+
+
+def _shear_degrees() -> float:
+    import math
+
+    return math.degrees(math.atan(SYNTHETIC_OBLIQUE_SHEAR))
 
 
 @dataclass
@@ -899,13 +995,17 @@ def _segment_tspans(
     font_scale: float,
     context: RenderContext,
     default_font_size: float = DEFAULT_FONT_SIZE_PT,
-) -> list[tuple[str | None, str, str]]:
-    """``(font-family, style attributes, text)`` for every tspan this segment needs.
+) -> list[tuple[str | None, str, str, bool]]:
+    """``(font-family, style attributes, text, needs oblique)`` per tspan.
 
     The family is returned alongside the attribute string it is already inside because
     :func:`_render_line` has to compare it against the next tspan's: an SVG text chunk
     that changes face part-way through is the one thing resvg cannot draw (see
     :func:`_render_line`), so the family is what decides where a chunk ends.
+
+    The last field says this run is italic in a face that has no italic to draw, so the
+    slant has to be sheared on rather than asked for.  It also ends a chunk, because the
+    shear can only be carried by an element a ``<tspan>`` is not allowed to be.
     """
     properties = segment.properties
     if not _needs_script_split(properties):
@@ -920,13 +1020,24 @@ def _segment_tspans(
             ) + [properties.font_family_cs]
             chains.append((fonts, part_text))
 
-    out: list[tuple[str | None, str, str]] = []
+    out: list[tuple[str | None, str, str, bool]] = []
     for fonts, part_text in chains:
         styles = _style_attrs(properties, font_scale, fonts, context, default_font_size)
         chain = fonts if fonts is not None else [
             properties.font_family, properties.font_family_ea, properties.font_family_cs
         ]
-        out.append((font_family_value(chain, context.font_mapping), styles, part_text))
+        # The face that will actually draw this run is the first name in the stack, which
+        # is the first name in the chain that resolves.
+        oblique = bool(properties.italic) and any(
+            synthesises_italic(name) for name in chain if name
+        )
+        if oblique:
+            # We are about to shear the upright face ourselves, so asking for an italic
+            # as well would be a second slant on any host that turns out to have one.
+            styles = styles.replace(' font-style="italic"', "")
+        out.append(
+            (font_family_value(chain, context.font_mapping), styles, part_text, oblique)
+        )
     return out
 
 
@@ -939,7 +1050,7 @@ def _render_segment(
 ) -> str:
     content = "".join(
         f"<tspan {prefix if index == 0 else ''}{styles}>{escape_xml_text(text)}</tspan>"
-        for index, (_family, styles, text) in enumerate(
+        for index, (_family, styles, text, _oblique) in enumerate(
             _segment_tspans(segment, font_scale, context, default_font_size)
         )
     )
