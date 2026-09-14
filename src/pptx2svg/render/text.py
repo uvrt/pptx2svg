@@ -538,7 +538,8 @@ def _render_line(
     # Plan the whole line before emitting any of it: a chunk boundary needs to know how
     # far along the line it falls, and a centred line needs its total width first.
     planned: list[tuple[LineSegment, list[tuple[str | None, str, str]]] | None] = [
-        None if piece is None else (piece, _segment_tspans(piece, font_scale, context))
+        None if piece is None
+        else (piece, _segment_tspans(piece, font_scale, context, default_font_size))
         for piece in pieces
     ]
     families = [
@@ -556,7 +557,9 @@ def _render_line(
                 continue
             out.append(
                 _render_segment(
-                    entry[0], font_scale, _leading(x_pos, dy, anchor) if first else "", context
+                    entry[0], font_scale,
+                    _leading(x_pos, dy, anchor) if first else "",
+                    context, default_font_size,
                 )
             )
             first = False
@@ -892,7 +895,10 @@ def _split_by_script(text: str) -> list[tuple[str, bool]]:
 
 
 def _segment_tspans(
-    segment: LineSegment, font_scale: float, context: RenderContext
+    segment: LineSegment,
+    font_scale: float,
+    context: RenderContext,
+    default_font_size: float = DEFAULT_FONT_SIZE_PT,
 ) -> list[tuple[str | None, str, str]]:
     """``(font-family, style attributes, text)`` for every tspan this segment needs.
 
@@ -916,7 +922,7 @@ def _segment_tspans(
 
     out: list[tuple[str | None, str, str]] = []
     for fonts, part_text in chains:
-        styles = _style_attrs(properties, font_scale, fonts, context)
+        styles = _style_attrs(properties, font_scale, fonts, context, default_font_size)
         chain = fonts if fonts is not None else [
             properties.font_family, properties.font_family_ea, properties.font_family_cs
         ]
@@ -925,12 +931,16 @@ def _segment_tspans(
 
 
 def _render_segment(
-    segment: LineSegment, font_scale: float, prefix: str, context: RenderContext
+    segment: LineSegment,
+    font_scale: float,
+    prefix: str,
+    context: RenderContext,
+    default_font_size: float = DEFAULT_FONT_SIZE_PT,
 ) -> str:
     content = "".join(
         f"<tspan {prefix if index == 0 else ''}{styles}>{escape_xml_text(text)}</tspan>"
         for index, (_family, styles, text) in enumerate(
-            _segment_tspans(segment, font_scale, context)
+            _segment_tspans(segment, font_scale, context, default_font_size)
         )
     )
     if segment.properties.hyperlink is not None:
@@ -943,13 +953,23 @@ def _style_attrs(
     font_scale: float,
     fonts: list[str | None] | None,
     context: RenderContext,
+    default_font_size: float = DEFAULT_FONT_SIZE_PT,
 ) -> str:
     styles: list[str] = []
 
-    if properties.font_size:
-        # Written as user units (px), not `pt`: resvg's presentation-attribute parser
-        # rejects unit suffixes on font-size, and px is understood by every backend.
-        styles.append(f'font-size="{num(properties.font_size * font_scale * PX_PER_PT)}"')
+    # Always emitted, even when the run itself states no size.  Nothing in OOXML obliges
+    # a run to state one and plenty of real decks state one nowhere -- every run in
+    # `authoring-integration.pptx` reaches the renderer with `font_size=None`.  The size
+    # the *layout* used in that case is `default_font_size`, and leaving the attribute
+    # off did not mean "same as the layout": it meant the rasteriser drew at the CSS
+    # initial value of 16 px while the line had been wrapped, centred and spaced for
+    # 18 pt.  Measured on that deck, every glyph came out about 1.65x too small.
+    #
+    # Written as user units (px), not `pt`: resvg's presentation-attribute parser
+    # rejects unit suffixes on font-size, and px is understood by every backend.
+    size = properties.font_size or default_font_size
+    if size:
+        styles.append(f'font-size="{num(size * font_scale * PX_PER_PT)}"')
 
     # `a:cs` names the typeface for complex scripts -- Arabic, Hebrew, Thai, Devanagari.
     # There is no per-script selection to make here the way `_split_by_script` makes one
