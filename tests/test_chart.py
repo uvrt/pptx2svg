@@ -971,3 +971,152 @@ def test_a_stacked_series_sits_on_top_of_the_one_before_it(variant_deck):
         assert upper.transform.offset_y + upper.transform.extent_height == pytest.approx(
             lower.transform.offset_y, abs=1.0
         )
+
+
+# -- Malformed and hostile input -------------------------------------------------------
+
+
+def _build(body: str):
+    """Lay out a bare chart with no colour or text resolution, and return its children."""
+    from pptx2svg.resolve.chart import ChartBuilder, ChartStyle
+
+    source = chart(body)
+    return ChartBuilder(
+        source,
+        source.plots[0],
+        width_pt=200.0,
+        height_pt=150.0,
+        style=ChartStyle(
+            font_family="Aptos",
+            font_size=10.0,
+            color=m.ResolvedColor(hex="#000000"),
+            accents=[m.ResolvedColor(hex="#4472C4")],
+        ),
+        resolve_fill=lambda fill: None,
+        resolve_outline=lambda outline: None,
+        resolve_text=lambda rich, text, size, align: m.TextBody(),
+    ).build()
+
+
+@pytest.mark.parametrize(
+    "name,body",
+    [
+        ("no series", "<c:chart><c:plotArea><c:barChart/></c:plotArea></c:chart>"),
+        (
+            "series with no values",
+            "<c:chart><c:plotArea><c:barChart><c:ser/></c:barChart></c:plotArea></c:chart>",
+        ),
+        (
+            "every point blank",
+            bar(
+                "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='3'/>"
+                "</c:numCache></c:numRef></c:val></c:ser>"
+            ),
+        ),
+        (
+            "every value zero",
+            bar(
+                "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='2'/>"
+                "<c:pt idx='0'><c:v>0</c:v></c:pt><c:pt idx='1'><c:v>0</c:v></c:pt>"
+                "</c:numCache></c:numRef></c:val></c:ser>"
+            ),
+        ),
+        (
+            "NaN and infinities",
+            bar(
+                "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='3'/>"
+                "<c:pt idx='0'><c:v>NaN</c:v></c:pt>"
+                "<c:pt idx='1'><c:v>Infinity</c:v></c:pt>"
+                "<c:pt idx='2'><c:v>1e400</c:v></c:pt>"
+                "</c:numCache></c:numRef></c:val></c:ser>"
+            ),
+        ),
+        (
+            "values at the edge of the float range",
+            bar(
+                "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='2'/>"
+                "<c:pt idx='0'><c:v>1e300</c:v></c:pt>"
+                "<c:pt idx='1'><c:v>-1e300</c:v></c:pt>"
+                "</c:numCache></c:numRef></c:val></c:ser>"
+            ),
+        ),
+        (
+            "zero gap width",
+            bar(
+                "<c:gapWidth val='0'/><c:ser><c:val><c:numRef><c:numCache>"
+                "<c:ptCount val='1'/><c:pt idx='0'><c:v>5</c:v></c:pt>"
+                "</c:numCache></c:numRef></c:val></c:ser>"
+            ),
+        ),
+        (
+            "percent stacked whose totals are zero",
+            bar(
+                "<c:grouping val='percentStacked'/><c:ser><c:val><c:numRef><c:numCache>"
+                "<c:ptCount val='2'/><c:pt idx='0'><c:v>0</c:v></c:pt>"
+                "<c:pt idx='1'><c:v>0</c:v></c:pt>"
+                "</c:numCache></c:numRef></c:val></c:ser>"
+            ),
+        ),
+        (
+            "series of different lengths",
+            bar(
+                "<c:grouping val='stacked'/>"
+                "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='5'/>"
+                "<c:pt idx='4'><c:v>3</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+                "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+                "<c:pt idx='0'><c:v>2</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+            ),
+        ),
+    ],
+)
+def test_malformed_charts_lay_out_rather_than_raise(name, body):
+    children, data = _build(body)
+    assert data.value_axis.maximum > data.value_axis.minimum
+    assert data.value_axis.major_unit > 0
+    for child in children:
+        assert child.transform.extent_width >= 0
+        assert child.transform.extent_height >= 0
+
+
+def test_a_hostile_major_unit_cannot_generate_unbounded_ticks():
+    """`c:majorUnit` is attacker-controlled; 1e-7 over a 1.5e12 axis is 10^19 gridlines."""
+    children, data = _build(
+        "<c:chart><c:plotArea>"
+        "<c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>1e12</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:majorGridlines/><c:majorUnit val='0.0000001'/>"
+        "</c:valAx></c:plotArea></c:chart>"
+    )
+    assert len(children) < 50
+
+
+def test_an_axis_minimum_above_its_maximum_still_spans_something():
+    _, data = _build(
+        "<c:chart><c:plotArea>"
+        "<c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>5</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:scaling><c:min val='100'/><c:max val='1'/>"
+        "</c:scaling></c:valAx></c:plotArea></c:chart>"
+    )
+    assert data.value_axis.maximum > data.value_axis.minimum
+
+
+def test_an_explicit_axis_range_wins_over_the_computed_one():
+    _, data = _build(
+        "<c:chart><c:plotArea>"
+        "<c:barChart><c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>5</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/><c:scaling><c:min val='-10'/><c:max val='40'/>"
+        "</c:scaling><c:majorUnit val='10'/></c:valAx></c:plotArea></c:chart>"
+    )
+    assert (data.value_axis.minimum, data.value_axis.maximum, data.value_axis.major_unit) == (
+        -10.0,
+        40.0,
+        10.0,
+    )
