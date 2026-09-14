@@ -95,7 +95,10 @@ def render_element(element: m.SlideElement, context: RenderContext) -> str:
         rendered = render_image(element, context)
     elif isinstance(element, m.ConnectorElement):
         rendered = render_connector(element, context)
-    elif isinstance(element, m.GroupElement):
+    elif isinstance(element, (m.GroupElement, m.ChartElement)):
+        # A chart is a group that also carries its data: the resolver has already lowered
+        # it to rectangles, lines and text in the frame's own coordinate space, so there
+        # is nothing chart-specific left to draw.
         rendered = render_group(element, context)
     elif isinstance(element, m.TableElement):
         rendered = render_table(element, context)
@@ -144,7 +147,7 @@ def _add_attrs(fragment: str, attributes: dict[str, str]) -> str:
     return fragment
 
 
-def render_group(group: m.GroupElement, context: RenderContext) -> str:
+def render_group(group: "m.GroupElement | m.ChartElement", context: RenderContext) -> str:
     """Map the group's child coordinate space onto its on-slide box.
 
     A group declares both where it sits (``a:off``/``a:ext``) and what coordinate system

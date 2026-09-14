@@ -35,11 +35,20 @@ from ..metafile import extract_metafile_preview
 from ..metafile.pdf import PdfRasterizerNotAvailable, rasterise_pdf
 from ..opc import OpcPackage
 from ..parse import source as s
+from ..parse.chart import flat_chart_kind, parse_chart_space
 from ..parse.drawing import parse_group_transforms
 from ..parse.shapes import parse_shape_tree
 from ..parse.table_styles_builtin import builtin_table_style
 from ..units import ROTATION_UNIT
 from ..xmlutil import attr, child, descendants
+from .chart import (
+    CHART_TEXT_BODY,
+    EMU_PER_POINT,
+    ChartBuilder,
+    ChartStyle,
+    accent_colors,
+    default_font_size,
+)
 from .color import ColorContext, build_effective_color_map, resolve_color
 
 #: Placeholder types that inherit from the master's ``body`` placeholder.
@@ -781,6 +790,14 @@ def _resolve_unsupported(
                     alt_text=node.alt_text or node.name,
                 )
 
+    if node.what == "chart":
+        drawn = _resolve_chart(context, node)
+        if drawn is not None:
+            return drawn
+        # _resolve_chart has already said which link failed; an empty frame plus a
+        # second, vaguer warning would only bury it.
+        return _empty_graphic_frame(context, node)
+
     if node.what == "diagram":
         diagram = _resolve_diagram(context, node, path)
         if diagram is not None:
@@ -807,6 +824,172 @@ def _empty_graphic_frame(context: ResolveContext, node: s.SourceUnsupported) -> 
         outline=None,
         alt_text=node.alt_text or node.name,
     )
+
+
+# --------------------------------------------------------------------------------------
+# Charts
+# --------------------------------------------------------------------------------------
+
+
+def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.SlideElement | None:
+    """Read the chart part and lay it out.
+
+    There is no cached drawing to fall back on -- PowerPoint stores a chart as data and
+    re-draws it every time -- so this reads ``c:chartSpace`` and hands it to
+    :mod:`pptx2svg.resolve.chart`, which computes the plot rectangle, the axis range and
+    every bar.  Returns ``None`` when the part is missing or holds no chart type this
+    can draw, having first said which; the caller then draws an empty frame.
+    """
+    label = f"chart {node.name or node.shape_id or ''!r}"
+
+    def give_up(code: str, detail: str) -> None:
+        context.warn(code, f"{label} {detail}")
+        return None
+
+    if node.fallback_rel_id is None:
+        return give_up("chart-unreadable", "names no chart part")
+    part = context.package.related_part(context.part_path, node.fallback_rel_id)
+    if part is None or not context.package.has_part(part):
+        return give_up("chart-unreadable", "points at a chart part that is not in the package")
+
+    try:
+        xml = context.package.read_xml(part)
+    except Exception:
+        return give_up("chart-unreadable", f"has a chart part ({part}) that is not well-formed XML")
+    if xml is None:
+        return give_up("chart-unreadable", f"has an unreadable chart part ({part})")
+
+    source = parse_chart_space(xml)
+    if source is None:
+        return give_up("chart-unreadable", f"has a chart part ({part}) with no c:chart in it")
+
+    plot = _first_drawable_plot(source)
+    if plot is None:
+        kinds = ", ".join(sorted({p.kind for p in source.plots})) or "nothing"
+        return give_up(
+            "chart-unsupported-type",
+            f"holds {kinds}, which is not rendered yet; drawing an empty frame",
+        )
+
+    transform = _resolve_transform(context, node.transform)
+    if transform.extent_width <= 0 or transform.extent_height <= 0:
+        return give_up("chart-unreadable", "has a zero-sized frame")
+
+    chart_context = _chart_context(context, source, part)
+    style = _chart_style(chart_context, source)
+
+    builder = ChartBuilder(
+        source,
+        plot,
+        width_pt=transform.extent_width / EMU_PER_POINT,
+        height_pt=transform.extent_height / EMU_PER_POINT,
+        style=style,
+        resolve_fill=lambda fill: _resolve_fill(chart_context, fill),
+        resolve_outline=lambda outline: _resolve_outline(chart_context, outline),
+        resolve_text=lambda rich, text, size, align: _resolve_chart_title_text(
+            chart_context, rich, text, size, align
+        ),
+    )
+    children, data = builder.build()
+
+    return m.ChartElement(
+        transform=transform,
+        chart=data,
+        child_transform=m.Transform(
+            offset_x=0,
+            offset_y=0,
+            extent_width=transform.extent_width,
+            extent_height=transform.extent_height,
+        ),
+        children=children,
+        alt_text=node.alt_text or node.name,
+    )
+
+
+def _first_drawable_plot(source) -> "object | None":
+    """The first plot group this renderer knows how to draw.
+
+    Only ``barChart`` (and its 3-D spelling, drawn flat) so far.  A combo chart whose
+    *first* group is a line but whose second is a bar still draws the bar, which is a
+    better picture than an empty frame and is why this scans rather than taking ``[0]``.
+    """
+    for plot in source.plots:
+        if flat_chart_kind(plot.kind) == "barChart":
+            return plot
+    return None
+
+
+def _chart_context(context: ResolveContext, source, part: str) -> ResolveContext:
+    """A resolution context scoped to the chart part.
+
+    Two things have to change and nothing else.  ``part_path`` moves to the chart, because
+    anything the chart relates to is related to *it* and not to the slide.  And the colour
+    map becomes the chart's own: ``c:clrMapOvr`` is the innermost scope, and layering it
+    on top of the slide's override -- the obvious thing to do -- is wrong, because a slide
+    that remaps ``bg1``/``tx1`` for its own shapes does not remap them for a chart that
+    declares its own mapping.  Both pptx-renderer and this project's roadmap flag it, and
+    it is invisible until a deck does both at once.
+    """
+    if source.color_map_override is None:
+        return replace(context, part_path=part)
+    mapping = build_effective_color_map(
+        context.master.color_map if context.master else None,
+        None,
+        source.color_map_override,
+    )
+    return replace(context, part_path=part, colors=ColorContext(context.theme, mapping))
+
+
+def _chart_style(context: ResolveContext, source) -> ChartStyle:
+    """The chart's text and series-colour defaults.
+
+    Measured on ``authoring-integration.pptx``: with no ``c:txPr`` anywhere, PowerPoint
+    drew every axis label and legend entry in **Aptos at 10 pt** -- the theme's minor
+    latin face -- and black.  The title is deliberately not styled here; see
+    :func:`_resolve_chart_title_text`.
+    """
+    theme = context.theme
+    minor = (theme.font_scheme.minor_latin or None) if theme is not None else None
+    text_color = resolve_color(context.colors, s.SchemeColor(scheme="tx1")) or m.ResolvedColor(
+        hex="#000000"
+    )
+    accents = accent_colors(
+        lambda key: resolve_color(context.colors, s.SchemeColor(scheme=key))
+    )
+    return ChartStyle(
+        font_family=minor,
+        font_size=default_font_size(source),
+        color=text_color,
+        accents=accents,
+    )
+
+
+def _resolve_chart_title_text(
+    context: ResolveContext, rich, text: str, size: float, align: str
+) -> m.TextBody:
+    """A chart title, through the ordinary text cascade.
+
+    This is the one piece of chart text that does *not* take the chart's 10 pt minor-face
+    default.  ``c:title/c:tx/c:rich`` is plain DrawingML, and PowerPoint resolves it the
+    way it resolves any unstyled text box: in ``authoring-integration.pptx`` the axis
+    labels came out Aptos 10 pt and the title, whose ``a:rPr`` names nothing at all, came
+    out Arial 18 pt -- the same face and size that file's plain text boxes get.  Running
+    it through :func:`resolve_text_body` reproduces both halves of that for free.
+    """
+    if rich is None:
+        return m.TextBody(
+            paragraphs=[
+                m.Paragraph(
+                    runs=[m.TextRun(text=text, properties=m.RunProperties(font_size=size))],
+                    properties=m.ParagraphProperties(alignment=align),
+                )
+            ],
+            body_properties=CHART_TEXT_BODY,
+        )
+    body = _resolve_text_body(context, rich, [], None)
+    for paragraph in body.paragraphs:
+        paragraph.properties.alignment = align
+    return replace(body, body_properties=CHART_TEXT_BODY)
 
 
 # --------------------------------------------------------------------------------------

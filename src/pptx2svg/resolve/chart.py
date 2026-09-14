@@ -65,6 +65,10 @@ FRAME_PADDING_PT = 6.5
 #: also the floor on the top inset (see :func:`_top_inset`).
 EDGE_INSET_PT = 11.0
 
+#: How far above its baseline a one-line label's optical centre sits, in ems.  Fitted;
+#: see :attr:`FontBox.ink_centre` for the five measurements and why no exact rule emerged.
+LABEL_INK_CENTRE_EM = 0.27
+
 #: Gap between the right edge of the value labels and the value axis, over and above the
 #: font's descent.  Fitted to 0.645 em across Aptos at 8/10/14 pt and Arial at 12 pt with
 #: a residual under 0.05 pt in all four -- the tightest fit in this file.
@@ -298,11 +302,28 @@ class FontBox:
     size: float
     ascent: float
     descent: float
-    cap_height: float
 
     @property
     def line_height(self) -> float:
         return self.ascent + self.descent
+
+    @property
+    def ink_centre(self) -> float:
+        """How far above its baseline a label's optical centre sits.
+
+        Used wherever PowerPoint centres a one-line label on something: a value-axis tick,
+        or a legend swatch.  **The rule behind it was not identified.**  Measured offsets
+        are 0.218 em (Aptos 10 pt), 0.2975 em (Aptos 8 pt), 0.2687 em (Aptos 14 pt),
+        0.3208 em (Arial 12 pt) and 0.213 em (a 10 pt Aptos legend swatch), and that set
+        is consistent with *none* of the obvious candidates -- half the cap height, half
+        the x-height, half the line box, or the centre of the digits' own ink bounding
+        box, each of which is out by 0.4 to 1.2 pt and in inconsistent directions.  So
+        this is the fitted mean of the five, whose worst residual is 0.61 pt (about one
+        pixel at the 1280 px the fidelity harness scores at).  Two of the five are 8 and
+        10 pt, where PowerPoint's own 0.12 pt coordinate quantisation is +/-0.11 pt, so
+        part of the spread is measurement noise rather than a missing term.
+        """
+        return LABEL_INK_CENTRE_EM * self.size
 
     @property
     def first_baseline(self) -> float:
@@ -319,26 +340,20 @@ class FontBox:
 #: Calibri's, which is the commonest chart face after the theme's own.
 FALLBACK_ASCENT = 0.75
 FALLBACK_DESCENT = 0.25
-FALLBACK_CAP_HEIGHT = 0.64
 
 
 def font_box(family: str | None, size: float) -> FontBox:
     metrics = metrics_for(family)
     if metrics is None:
         return FontBox(
-            size=size,
-            ascent=FALLBACK_ASCENT * size,
-            descent=FALLBACK_DESCENT * size,
-            cap_height=FALLBACK_CAP_HEIGHT * size,
+            size=size, ascent=FALLBACK_ASCENT * size, descent=FALLBACK_DESCENT * size
         )
     units = metrics.units_per_em
-    ascent = metrics.ascender / units * size
-    descent = abs(metrics.descender) / units * size
-    # Digit height stands in for the cap height, which the metrics tables do not carry.
-    # Every value-axis label is digits, so this is the ink being centred, not a proxy.
-    zero = metrics.widths.get("0")
-    cap_height = FALLBACK_CAP_HEIGHT * size if zero is None else 0.657 * size
-    return FontBox(size=size, ascent=ascent, descent=descent, cap_height=cap_height)
+    return FontBox(
+        size=size,
+        ascent=metrics.ascender / units * size,
+        descent=abs(metrics.descender) / units * size,
+    )
 
 
 def text_width(text: str, family: str | None, size: float) -> float:
@@ -357,7 +372,7 @@ def text_width(text: str, family: str | None, size: float) -> float:
 
 
 @dataclass
-class _Style:
+class ChartStyle:
     """Everything the drawing needs that is not geometry."""
 
     font_family: str | None
@@ -410,7 +425,7 @@ class ChartBuilder:
         *,
         width_pt: float,
         height_pt: float,
-        style: _Style,
+        style: ChartStyle,
         resolve_fill,
         resolve_outline,
         resolve_text,
@@ -423,6 +438,10 @@ class ChartBuilder:
         self._resolve_outline = resolve_outline
         self._resolve_text = resolve_text
         self.elements: list[m.SlideElement] = []
+        self._title_cache: "tuple[m.TextBody, FontBox] | None | object" = _UNSET
+        #: Set by _draw_background, consumed by _draw_gridlines: the plot rectangle is
+        #: not known until the labels have been measured, so the fill has to wait.
+        self._plot_area_fill: m.Fill | None = None
 
     # -- public -------------------------------------------------------------------------
 
@@ -712,10 +731,39 @@ class ChartBuilder:
             return _text_size(legend.text_properties) or self.style.font_size
         return self.style.font_size
 
-    def _title_box(self) -> FontBox | None:
-        if self._title_text() is None:
+    def _title(self) -> tuple[m.TextBody, FontBox] | None:
+        """The title's resolved text body and the metrics of the face it will be drawn in.
+
+        The face matters to the *layout*, not just the drawing: the title band is a
+        multiple of its line height, and a 3 pt error there moves every bar.  So the body
+        is resolved before the plot rectangle is computed and the metrics are read back
+        off it, rather than being guessed from a default.  Resolving a chart title is a
+        full trip through the text cascade, so the result is cached.
+        """
+        if self._title_cache is _UNSET:
+            self._title_cache = self._build_title()
+        return self._title_cache
+
+    def _build_title(self) -> "tuple[m.TextBody, FontBox] | None":
+        text = self._title_text()
+        if text is None or self.chart.title is None:
             return None
-        return font_box(None, _title_size(self.chart.title))
+        size = _title_size(self.chart.title)
+        body = self._resolve_text(self.chart.title.rich, text, size, align="ctr")
+        family, resolved_size = _first_run_font(body)
+        size = resolved_size or size
+        # A run that named no size would otherwise take the *renderer's* default, which
+        # is a second place the number lives.  Stamping it makes the size the layout used
+        # and the size drawn the same number by construction.
+        for paragraph in body.paragraphs:
+            for run in paragraph.runs:
+                if run.properties.font_size is None:
+                    run.properties.font_size = size
+        return body, font_box(family, size)
+
+    def _title_box(self) -> FontBox | None:
+        title = self._title()
+        return None if title is None else title[1]
 
     def _title_text(self) -> str | None:
         if self.chart.auto_title_deleted or self.chart.title is None:
@@ -736,13 +784,11 @@ class ChartBuilder:
             self._plot_area_fill = plot_fill
 
     def _draw_title(self) -> None:
-        text = self._title_text()
-        if text is None or self.chart.title is None:
+        title = self._title()
+        if title is None:
             return
-        box = self._title_box()
-        assert box is not None
+        body, box = title
         baseline = self.frame.top + TITLE_BASELINE_ASCENTS * box.ascent
-        body = self._resolve_text(self.chart.title.rich, text, box.size, align="ctr")
         self._text(
             body,
             left=self.frame.left,
@@ -757,7 +803,7 @@ class ChartBuilder:
         scale: tuple[float, float, float],
         axis: c.SourceChartAxis | None,
     ) -> None:
-        if getattr(self, "_plot_area_fill", None) is not None:
+        if self._plot_area_fill is not None:
             self._rect(rect, fill=self._plot_area_fill, outline=None)
         if axis is None or not axis.major_gridlines:
             return
@@ -903,7 +949,7 @@ class ChartBuilder:
             # The label's own ink is centred on the tick.  Digits have no descender, so
             # their ink runs from the baseline to the cap height and half of that is the
             # offset.  Measured against PowerPoint this lands within 0.7 pt.
-            baseline = y + box.cap_height / 2
+            baseline = y + box.ink_centre
             body = self._label_body(text, box.size, align="r")
             self._text(
                 body,
@@ -981,13 +1027,13 @@ class ChartBuilder:
                 x += width + LEGEND_ENTRY_GAP_EM * box.size
             return
 
-        x = (
-            rect.right + LEGEND_SIDE_LEAD_EM * box.size
-            if position == "l" and False
-            else rect.right + LEGEND_SIDE_LEAD_EM * box.size
-        )
+        # A side legend sits one lead gap outside the plot area.  Measured 15.996 pt at
+        # 10 pt with the legend on the right, and the band on the left came out exactly
+        # the same width, so the left case mirrors it against the frame edge.
         if position == "l":
             x = self.frame.left + FRAME_PADDING_PT
+        else:
+            x = rect.right + LEGEND_SIDE_LEAD_EM * box.size
         height = band * len(entries)
         y = self.frame.top + (self.frame.height - height) / 2
         for _, item in entries:
@@ -1004,7 +1050,7 @@ class ChartBuilder:
         gap: float,
         box: FontBox,
     ) -> None:
-        centre = baseline - box.cap_height / 2
+        centre = baseline - box.ink_centre
         self._rect(
             _Rect(x, centre - swatch / 2, x + swatch, centre + swatch / 2),
             fill=item.fill,
@@ -1090,7 +1136,7 @@ class ChartBuilder:
                     properties=m.ParagraphProperties(alignment=align),  # type: ignore[arg-type]
                 )
             ],
-            body_properties=_TIGHT_BODY,
+            body_properties=CHART_TEXT_BODY,
         )
 
     def _text(
@@ -1120,7 +1166,7 @@ class ChartBuilder:
 
 #: Chart text sits in a box with no inset and no wrapping: the layout already decided
 #: where every string goes, so letting the text engine re-wrap it would move it.
-_TIGHT_BODY = m.BodyProperties(
+CHART_TEXT_BODY = m.BodyProperties(
     anchor="t",
     margin_left=0,
     margin_right=0,
@@ -1128,6 +1174,17 @@ _TIGHT_BODY = m.BodyProperties(
     margin_bottom=0,
     wrap="none",
 )
+
+
+#: Distinguishes "no title" from "not resolved yet" in the title cache.
+_UNSET = object()
+
+
+def _first_run_font(body: m.TextBody) -> tuple[str | None, float | None]:
+    for paragraph in body.paragraphs:
+        for run in paragraph.runs:
+            return run.properties.font_family, run.properties.font_size
+    return None, None
 
 
 def _labels_shown(axis: c.SourceChartAxis | None) -> bool:
@@ -1201,12 +1258,13 @@ def default_font_size(chart: c.SourceChart) -> float:
 
 
 __all__ = [
+    "CHART_TEXT_BODY",
     "ChartBuilder",
+    "ChartStyle",
     "accent_colors",
     "default_font_size",
     "font_box",
     "format_number",
     "nice_axis_scale",
     "text_width",
-    "_Style",
 ]
