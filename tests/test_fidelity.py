@@ -108,7 +108,8 @@ def test_font_profile_partitions_faces_and_is_hashable():
     local = _profile()
     profile = fidelity.font_profile(FIXTURES / "real-basic-theme.pptx", local)
     assert set(profile) == {
-        "available", "missing", "conditional", "uncovered", "substituted", "hash"
+        "available", "missing", "conditional", "uncovered", "substituted", "instead",
+        "hash",
     }
     assert not set(profile["available"]) & set(profile["missing"])
     assert len(profile["hash"]) == 12
