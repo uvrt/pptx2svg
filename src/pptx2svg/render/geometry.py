@@ -215,30 +215,6 @@ def _flow_merge(w, h, adj):
 # --------------------------------------------------------------------------------------
 
 
-def _wedge_rect_callout(w, h, adj):
-    tip_x = w / 2 + _adj(adj, "adj1", -20833) * w
-    tip_y = h / 2 + _adj(adj, "adj2", 62500) * h
-    bx = w / 2
-    wedge = w * 0.06
-    return (
-        f'<path d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(h)} L {_n(bx+wedge)} {_n(h)} '
-        f'L {_n(tip_x)} {_n(tip_y)} L {_n(bx-wedge)} {_n(h)} L 0 {_n(h)} Z"/>'
-    )
-
-
-def _wedge_round_rect_callout(w, h, adj):
-    tip_x = w / 2 + _adj(adj, "adj1", -20833) * w
-    tip_y = h / 2 + _adj(adj, "adj2", 62500) * h
-    r = _adj(adj, "adj3", 16667) * min(w, h)
-    bx = w / 2
-    wedge = w * 0.06
-    return (
-        f'<path d="M {_n(r)} 0 L {_n(w-r)} 0 A {_n(r)} {_n(r)} 0 0 1 {_n(w)} {_n(r)} '
-        f'L {_n(w)} {_n(h-r)} A {_n(r)} {_n(r)} 0 0 1 {_n(w-r)} {_n(h)} '
-        f'L {_n(bx+wedge)} {_n(h)} L {_n(tip_x)} {_n(tip_y)} L {_n(bx-wedge)} {_n(h)} '
-        f'L {_n(r)} {_n(h)} A {_n(r)} {_n(r)} 0 0 1 0 {_n(h-r)} L 0 {_n(r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(r)} 0 Z"/>'
-    )
 
 
 def _wedge_ellipse_callout(w, h, adj):
@@ -282,20 +258,6 @@ def _border_callout2(w, h, adj):
         f'M {_n(x1)} {_n(y1)} L {_n(x2)} {_n(y2)} L {_n(x3)} {_n(y3)}"/>'
     )
 
-
-def _border_callout3(w, h, adj):
-    y1 = _adj(adj, "adj1", 18750) * h
-    x1 = _adj(adj, "adj2", -8333) * w
-    y2 = _adj(adj, "adj3", 18750) * h
-    x2 = _adj(adj, "adj4", -16667) * w
-    y3 = _adj(adj, "adj5", 100000) * h
-    x3 = _adj(adj, "adj6", -16667) * w
-    y4 = _adj(adj, "adj7", 112963) * h
-    x4 = _adj(adj, "adj8", -46667) * w
-    return (
-        f'<path d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(h)} L 0 {_n(h)} Z '
-        f'M {_n(x1)} {_n(y1)} L {_n(x2)} {_n(y2)} L {_n(x3)} {_n(y3)} L {_n(x4)} {_n(y4)}"/>'
-    )
 
 
 # --------------------------------------------------------------------------------------
@@ -628,12 +590,9 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "flowChartExtract": _flow_extract,
     "flowChartMerge": _flow_merge,
     # Callouts
-    "wedgeRectCallout": _wedge_rect_callout,
-    "wedgeRoundRectCallout": _wedge_round_rect_callout,
     "wedgeEllipseCallout": _wedge_ellipse_callout,
     "borderCallout1": _border_callout1,
     "borderCallout2": _border_callout2,
-    "borderCallout3": _border_callout3,
     # Arcs
     # Math
     # Misc

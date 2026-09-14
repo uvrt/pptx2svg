@@ -3784,4 +3784,77 @@ PRESET_SPECS: dict = {
             )),
         ),
     ),
+    "borderCallout3": (
+        (
+            ("adj1", 18750), ("adj2", -8333), ("adj3", 18750), ("adj4", -16667),
+            ("adj5", 100000), ("adj6", -16667), ("adj7", 112963), ("adj8", -8333),
+        ),
+        (
+            ("y1", "*/ h adj1 100000"), ("x1", "*/ w adj2 100000"), ("y2", "*/ h adj3 100000"),
+            ("x2", "*/ w adj4 100000"), ("y3", "*/ h adj5 100000"), ("x3", "*/ w adj6 100000"),
+            ("y4", "*/ h adj7 100000"), ("x4", "*/ w adj8 100000"),
+        ),
+        (
+            ("norm", True, None, (
+                ("M", "l", "t"), ("L", "r", "t"), ("L", "r", "b"), ("L", "l", "b"), ("Z",),
+            )),
+            ("none", True, None, (
+                ("M", "x1", "y1"), ("L", "x2", "y2"), ("L", "x3", "y3"), ("L", "x4", "y4"),
+            )),
+        ),
+    ),
+    "wedgeRectCallout": (
+        (("adj1", -20833), ("adj2", 62500),),
+        (
+            ("dxPos", "*/ w adj1 100000"), ("dyPos", "*/ h adj2 100000"),
+            ("xPos", "+- hc dxPos 0"), ("yPos", "+- vc dyPos 0"), ("dx", "+- xPos 0 hc"),
+            ("dy", "+- yPos 0 vc"), ("dq", "*/ dxPos h w"), ("ady", "abs dyPos"),
+            ("adq", "abs dq"), ("dz", "+- ady 0 adq"), ("xg1", "?: dxPos 7 2"),
+            ("xg2", "?: dxPos 10 5"), ("x1", "*/ w xg1 12"), ("x2", "*/ w xg2 12"),
+            ("yg1", "?: dyPos 7 2"), ("yg2", "?: dyPos 10 5"), ("y1", "*/ h yg1 12"),
+            ("y2", "*/ h yg2 12"), ("t1", "?: dxPos l xPos"), ("xl", "?: dz l t1"),
+            ("t2", "?: dyPos x1 xPos"), ("xt", "?: dz t2 x1"), ("t3", "?: dxPos xPos r"),
+            ("xr", "?: dz r t3"), ("t4", "?: dyPos xPos x1"), ("xb", "?: dz t4 x1"),
+            ("t5", "?: dxPos y1 yPos"), ("yl", "?: dz y1 t5"), ("t6", "?: dyPos t yPos"),
+            ("yt", "?: dz t6 t"), ("t7", "?: dxPos yPos y1"), ("yr", "?: dz y1 t7"),
+            ("t8", "?: dyPos yPos b"), ("yb", "?: dz t8 b"),
+        ),
+        (
+            ("norm", True, None, (
+                ("M", "l", "t"), ("L", "x1", "t"), ("L", "xt", "yt"), ("L", "x2", "t"),
+                ("L", "r", "t"), ("L", "r", "y1"), ("L", "xr", "yr"), ("L", "r", "y2"),
+                ("L", "r", "b"), ("L", "x2", "b"), ("L", "xb", "yb"), ("L", "x1", "b"),
+                ("L", "l", "b"), ("L", "l", "y2"), ("L", "xl", "yl"), ("L", "l", "y1"), ("Z",),
+            )),
+        ),
+    ),
+    "wedgeRoundRectCallout": (
+        (("adj1", -20833), ("adj2", 62500), ("adj3", 16667),),
+        (
+            ("dxPos", "*/ w adj1 100000"), ("dyPos", "*/ h adj2 100000"),
+            ("xPos", "+- hc dxPos 0"), ("yPos", "+- vc dyPos 0"), ("dq", "*/ dxPos h w"),
+            ("ady", "abs dyPos"), ("adq", "abs dq"), ("dz", "+- ady 0 adq"),
+            ("xg1", "?: dxPos 7 2"), ("xg2", "?: dxPos 10 5"), ("x1", "*/ w xg1 12"),
+            ("x2", "*/ w xg2 12"), ("yg1", "?: dyPos 7 2"), ("yg2", "?: dyPos 10 5"),
+            ("y1", "*/ h yg1 12"), ("y2", "*/ h yg2 12"), ("t1", "?: dxPos l xPos"),
+            ("xl", "?: dz l t1"), ("t2", "?: dyPos x1 xPos"), ("xt", "?: dz t2 x1"),
+            ("t3", "?: dxPos xPos r"), ("xr", "?: dz r t3"), ("t4", "?: dyPos xPos x1"),
+            ("xb", "?: dz t4 x1"), ("t5", "?: dxPos y1 yPos"), ("yl", "?: dz y1 t5"),
+            ("t6", "?: dyPos t yPos"), ("yt", "?: dz t6 t"), ("t7", "?: dxPos yPos y1"),
+            ("yr", "?: dz y1 t7"), ("t8", "?: dyPos yPos b"), ("yb", "?: dz t8 b"),
+            ("u1", "*/ ss adj3 100000"), ("u2", "+- r 0 u1"), ("v2", "+- b 0 u1"),
+            ("il", "*/ u1 29289 100000"), ("ir", "+- r 0 il"), ("ib", "+- b 0 il"),
+        ),
+        (
+            ("norm", True, None, (
+                ("M", "l", "u1"), ("A", "u1", "u1", "cd2", "cd4"), ("L", "x1", "t"),
+                ("L", "xt", "yt"), ("L", "x2", "t"), ("L", "u2", "t"),
+                ("A", "u1", "u1", "3cd4", "cd4"), ("L", "r", "y1"), ("L", "xr", "yr"),
+                ("L", "r", "y2"), ("L", "r", "v2"), ("A", "u1", "u1", "0", "cd4"),
+                ("L", "x2", "b"), ("L", "xb", "yb"), ("L", "x1", "b"), ("L", "u1", "b"),
+                ("A", "u1", "u1", "cd4", "cd4"), ("L", "l", "y2"), ("L", "xl", "yl"),
+                ("L", "l", "y1"), ("Z",),
+            )),
+        ),
+    ),
 }
