@@ -450,13 +450,13 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
 
     chart_xml = (
         "<?xml version='1.0'?>"
-        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:radarChart>"
+        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:stockChart>"
         "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
         "<c:pt idx='0'><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
-        "</c:radarChart></c:plotArea></c:chart></c:chartSpace>"
+        "</c:stockChart></c:plotArea></c:chart></c:chartSpace>"
     ).encode()
     frame = (
-        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Radar'/>"
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Stock'/>"
         "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
         "<p:xfrm><a:off x='0' y='0'/><a:ext cx='1000000' cy='1000000'/></p:xfrm>"
         "<a:graphic><a:graphicData "
@@ -477,12 +477,12 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
                 "../charts/chartPie.xml",
             )
         ],
-        overrides={"/ppt/charts/chartPie.xml": chart_type},
+        overrides={"ppt/charts/chartPie.xml": chart_type},
     )
     options = ConvertOptions()
     convert_pptx_to_model(deck_bytes, options)
     warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
-    assert "radarChart" in warning.message
+    assert "stockChart" in warning.message
 
 
 # -- The probe sweep -------------------------------------------------------------------
@@ -646,7 +646,7 @@ def probe_deck(authoring):
     for index, (name, (kwargs, _)) in enumerate(PROBE_SWEEP.items()):
         part = f"ppt/charts/probe{index}.xml"
         parts[part] = probe_chart_xml(**kwargs)
-        overrides[f"/{part}"] = chart_type
+        overrides[part] = chart_type
         relationships.append(
             (
                 f"rIdProbe{index}",
@@ -848,7 +848,7 @@ def variant_deck(authoring):
     for index, (name, (kwargs, _, _)) in enumerate(VARIANT_SWEEP.items()):
         part = f"ppt/charts/variant{index}.xml"
         parts[part] = variant_chart_xml(**kwargs)
-        overrides[f"/{part}"] = chart_type
+        overrides[part] = chart_type
         relationships.append(
             (
                 f"rIdVar{index}",
@@ -2118,3 +2118,515 @@ def test_a_pie_legends_its_categories_not_its_series():
     }
     assert {"Alpha", "Beta", "Gamma", "Delta"} <= texts
     assert "S0" not in texts
+# -- Radar ------------------------------------------------------------------------------
+#
+# Measured on eighteen probe charts across three decks, all in the same
+# 220.4724 x 181.1024 pt frame, exported by PowerPoint 16.106 and read back out of the PDF
+# as exact vector coordinates -- plus `real-financial-report.pptx`'s own radar, whose
+# export is in the corpus and whose web, spokes, rings and polygons are all measurable
+# there despite the deck being skipped by the fidelity harness for want of Noto Sans JP.
+# Vector geometry does not move when a font is substituted, which is why the corpus can
+# pin the polar conventions that the brief for this work assumed only probes could.
+#
+# Frame-relative points throughout.  The frame centre is (110.2362, 90.5512).
+
+RADAR_CENTRE = (110.2362, 90.5512)
+RADAR_TOLERANCE_PT = 0.35
+
+#: PowerPoint's own radius for each probe, in points, against a plot region whose half
+#: height is 79.5512 pt and half width 99.2362 pt.  Five of these are bound by the
+#: vertical label reserve and three by the horizontal one; `no-cat-axis` has no labels at
+#: all and is the anchor that says the reserve goes to zero.
+RADAR_RADIUS = {
+    "standard": ({}, 69.47),
+    "aptos-8": ({"size": 8.0}, 72.48),
+    "aptos-14": ({"size": 14.0}, 63.36),
+    "arial-10": ({"size": 10.0, "face": "Arial"}, 70.80),
+    "arial-14": ({"size": 14.0, "face": "Arial"}, 65.04),
+    "no-cat-axis": ({"delete_cat": True}, 79.44),
+    "long-labels": (
+        {
+            "cats": (
+                "Category One", "Category Two", "Category Three",
+                "Category Four", "Category Five",
+            )
+        },
+        60.24,
+    ),
+    "two-line": (
+        {"cats": ("One Two", "Two Three", "Red Blue", "Six Ten", "Sun Moon")},
+        55.44,
+    ),
+    "four-cats": ({"cats": ("A", "B", "C", "D"), "values": ((3, 4, 5, 2),)}, 69.47),
+    "eight-cats": (
+        {"cats": tuple("ABCDEFGH"), "values": ((3, 4, 5, 2, 1, 3, 4, 2),)},
+        69.47,
+    ),
+}
+
+
+def radar_chart_xml(
+    *,
+    style="standard",
+    cats=("A", "B", "C", "D", "E"),
+    values=((3, 4, 5, 2, 1),),
+    legend=None,
+    size=None,
+    face=None,
+    delete_cat=False,
+    delete_val=False,
+    gridlines=True,
+    cat_axis_line=False,
+    series_line=None,
+    dlbl_show=(),
+):
+    """One radar probe, in the same shape the exported decks used."""
+    body = ""
+    for index, row in enumerate(values):
+        points = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(row)
+        )
+        cpts = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(cats)
+        )
+        sp = (
+            f"<c:spPr><a:solidFill><a:srgbClr val='2563EB'/></a:solidFill>"
+            f"<a:ln w='{series_line}'>"
+            "<a:solidFill><a:srgbClr val='2563EB'/></a:solidFill></a:ln></c:spPr>"
+            if series_line
+            else ""
+        )
+        labels = ""
+        if dlbl_show:
+            flags = "".join(
+                f"<c:show{flag} val='{1 if flag in dlbl_show else 0}'/>"
+                for flag in ("LegendKey", "Val", "CatName", "SerName", "Percent",
+                             "BubbleSize")
+            )
+            labels = f"<c:dLbls>{flags}</c:dLbls>"
+        # CT_RadarSer's sequence is strict: idx, order, tx, spPr, marker, dPt, dLbls,
+        # cat, val.  Out of order is one of the four known PowerPoint hang signatures.
+        body += (
+            f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+            "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>Series {index + 1}</c:v></c:pt>"
+            "</c:strCache></c:strRef></c:tx>"
+            f"{sp}{labels}"
+            f"<c:cat><c:strRef><c:strCache><c:ptCount val='{len(cats)}'/>{cpts}"
+            "</c:strCache></c:strRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+            f"<c:ptCount val='{len(row)}'/>{points}"
+            "</c:numCache></c:numRef></c:val></c:ser>"
+        )
+    legend_xml = (
+        f"<c:legend><c:legendPos val='{legend}'/><c:overlay val='0'/></c:legend>"
+        if legend
+        else ""
+    )
+    tx_pr = (
+        "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>"
+        f"<a:defRPr sz='{int(size * 100)}'>"
+        + (f"<a:latin typeface='{face}'/>" if face else "")
+        + "</a:defRPr></a:pPr><a:endParaRPr lang='en-US'/></a:p></c:txPr>"
+        if size
+        else ""
+    )
+    cat_line = (
+        "<c:spPr><a:ln w='12700'><a:solidFill><a:srgbClr val='888888'/></a:solidFill>"
+        "</a:ln></c:spPr>"
+        if cat_axis_line
+        else ""
+    )
+    grid = "<c:majorGridlines/>" if gridlines else ""
+    return (
+        "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        f"<c:radarChart><c:radarStyle val='{style}'/><c:varyColors val='0'/>{body}"
+        "<c:axId val='100002'/><c:axId val='100003'/></c:radarChart>"
+        "<c:catAx><c:axId val='100002'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        f"<c:delete val='{1 if delete_cat else 0}'/><c:axPos val='b'/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        f"<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"
+        f"<c:tickLblPos val='nextTo'/>{cat_line}<c:crossAx val='100003'/>"
+        "<c:crosses val='autoZero'/><c:auto val='1'/><c:lblAlgn val='ctr'/>"
+        "<c:lblOffset val='100'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        f"<c:delete val='{1 if delete_val else 0}'/><c:axPos val='l'/>{grid}"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        f"</c:plotArea>{legend_xml}<c:plotVisOnly val='1'/>"
+        f"<c:dispBlanksAs val='gap'/></c:chart>{tx_pr}"
+    )
+
+
+def _radar(**kwargs):
+    children, _ = _build(
+        radar_chart_xml(**kwargs), width=220.4724, height=181.1024
+    )
+    return children
+
+
+def _paths(children):
+    """Every custom-geometry shape, with its points in frame coordinates."""
+    out = []
+    for child in children:
+        if not isinstance(child, m.ShapeElement):
+            continue
+        if not isinstance(child.geometry, m.CustomGeometry):
+            continue
+        out.append((child, _path_points(child)))
+    return out
+
+
+def _radius_of(children, centre=RADAR_CENTRE):
+    points = [point for _, points in _paths(children) for point in points]
+    return max(math.hypot(x - centre[0], y - centre[1]) for x, y in points)
+
+
+@pytest.mark.parametrize("name", list(RADAR_RADIUS))
+def test_the_radar_radius_matches_powerpoints(name):
+    """The whole layout in one number, across two faces, three sizes and four shapes."""
+    kwargs, expected = RADAR_RADIUS[name]
+    ours = _radius_of(_radar(**kwargs))
+    assert ours == pytest.approx(expected, abs=RADAR_TOLERANCE_PT), (
+        f"{name}: PowerPoint {expected:.2f}, ours {ours:.2f}"
+    )
+
+
+def test_the_web_is_polygonal_and_follows_the_category_count():
+    """Three, five, six and eight categories gave triangles, pentagons, hexagons, octagons."""
+    for count, cats in ((3, "ABC"), (5, "ABCDE"), (6, "ABCDEF"), (8, "ABCDEFGH")):
+        values = tuple((index % 5) + 1 for index in range(count))
+        rings = [
+            points
+            for shape, points in _paths(_radar(cats=tuple(cats), values=(values,)))
+            if isinstance(shape.fill, m.NoFill)
+        ]
+        assert rings, count
+        # A ring closes, so it visits one more point than it has corners.
+        assert all(len(points) == count + 1 for points in rings), (
+            count, [len(p) for p in rings]
+        )
+
+
+def test_angle_zero_is_twelve_oclock_and_categories_run_clockwise():
+    """Measured on the four-category probe: due north, east, south then west."""
+    children = _radar(cats=("A", "B", "C", "D"), values=((5, 5, 5, 5),))
+    ring = max(
+        (
+            points
+            for shape, points in _paths(children)
+            if isinstance(shape.fill, m.NoFill)
+        ),
+        key=lambda points: max(
+            math.hypot(x - RADAR_CENTRE[0], y - RADAR_CENTRE[1]) for x, y in points
+        ),
+    )
+    radius = max(
+        math.hypot(x - RADAR_CENTRE[0], y - RADAR_CENTRE[1]) for x, y in ring
+    )
+    expected = [
+        (RADAR_CENTRE[0], RADAR_CENTRE[1] - radius),
+        (RADAR_CENTRE[0] + radius, RADAR_CENTRE[1]),
+        (RADAR_CENTRE[0], RADAR_CENTRE[1] + radius),
+        (RADAR_CENTRE[0] - radius, RADAR_CENTRE[1]),
+    ]
+    for wanted in expected:
+        assert any(
+            abs(x - wanted[0]) < 0.05 and abs(y - wanted[1]) < 0.05 for x, y in ring
+        ), (wanted, ring)
+
+
+def test_a_point_sits_at_its_fraction_of_the_radius():
+    """Values 3, 4, 5, 2, 1 on a 0..5 axis: 0.6, 0.8, 1.0, 0.4 and 0.2 of the radius."""
+    children = _radar()
+    radius = _radius_of(children)
+    series = [
+        points
+        for shape, points in _paths(children)
+        if isinstance(shape.fill, m.NoFill) and len(points) == 6
+    ]
+    # Rings and the series polygon are all five-sided; the series is the one whose
+    # vertices are at different radii.
+    ragged = [
+        points
+        for points in series
+        if len({
+            round(math.hypot(x - RADAR_CENTRE[0], y - RADAR_CENTRE[1]), 1)
+            for x, y in points
+        }) > 1
+    ]
+    assert len(ragged) == 1
+    distances = [
+        math.hypot(x - RADAR_CENTRE[0], y - RADAR_CENTRE[1]) for x, y in ragged[0][:5]
+    ]
+    assert [d / radius for d in distances] == pytest.approx(
+        [0.6, 0.8, 1.0, 0.4, 0.2], abs=0.01
+    )
+
+
+def test_a_radars_axis_stops_at_the_data_where_a_bars_goes_past_it():
+    """The one discriminating observation: 0..5 of data draws five rings, not six."""
+    from pptx2svg.resolve.chart import nice_axis_scale
+
+    assert nice_axis_scale(0, 5) == (0.0, 6.0, 1.0)
+    assert nice_axis_scale(0, 5, strict=False) == (0.0, 5.0, 1.0)
+
+    children = _radar()
+    rings = [
+        points
+        for shape, points in _paths(children)
+        if isinstance(shape.fill, m.NoFill) and len(points) == 6
+    ]
+    # Five rings plus the series polygon.
+    assert len(rings) == 6
+
+
+def test_standard_and_marker_draw_the_same_picture():
+    """ECMA-376 says `standard` has no markers; PowerPoint's two exports are identical."""
+    def summary(style):
+        children = _radar(style=style)
+        return [
+            (
+                type(child).__name__,
+                round(child.transform.offset_x / 12700.0, 3),
+                round(child.transform.offset_y / 12700.0, 3),
+            )
+            for child in children
+        ]
+
+    assert len(summary("standard")) > 10, "nothing drawn, so the comparison is vacuous"
+    assert summary("standard") == summary("marker")
+
+
+def test_a_filled_radar_fills_and_does_not_stroke_or_mark():
+    """Measured: the probe, which states no `a:ln`, emits a bare `f` and no markers."""
+    filled = [
+        shape
+        for shape, _ in _paths(_radar(style="filled"))
+        if isinstance(shape.fill, m.SolidFill)
+    ]
+    assert len(filled) == 1
+    assert filled[0].outline is None
+    # No markers either: every remaining shape is a web ring.
+    markers = [
+        child
+        for child in _radar(style="filled")
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.geometry, m.PresetGeometry)
+        and child.geometry.preset in ("diamond", "ellipse", "rect")
+        and child.text_body is None
+    ]
+    assert markers == []
+
+
+def test_a_filled_radar_strokes_when_the_series_states_a_line():
+    """The other half of the pair: the corpus radar says `w="25400"` and is stroked."""
+    filled = [
+        shape
+        for shape, _ in _paths(_radar(style="filled", series_line=25400))
+        if isinstance(shape.fill, m.SolidFill)
+    ]
+    assert len(filled) == 1
+    assert filled[0].outline is not None
+    assert filled[0].outline.width == 25400
+
+
+def test_the_web_is_drawn_without_major_gridlines_and_with_the_value_axis_deleted():
+    """Both probes still drew every ring, so the web is not the value axis' gridlines."""
+    def rings(**kwargs):
+        return [
+            points
+            for shape, points in _paths(_radar(**kwargs))
+            if isinstance(shape.fill, m.NoFill) and len(points) == 6
+        ]
+
+    assert len(rings()) == len(rings(gridlines=False)) == len(rings(delete_val=True))
+
+
+def test_spokes_are_drawn_only_when_the_category_axis_states_a_line():
+    """No probe without a `c:spPr` drew any; the corpus radar's #888888 line drew six."""
+    assert [c for c in _radar() if isinstance(c, m.ConnectorElement)] == []
+    spokes = [c for c in _radar(cat_axis_line=True) if isinstance(c, m.ConnectorElement)]
+    assert len(spokes) == 5
+    assert all(spoke.outline.width == 12700 for spoke in spokes)
+
+
+def test_the_value_labels_are_right_aligned_two_digits_left_of_the_spoke():
+    """Measured on six charts across two faces and three sizes, worst residual 0.14 pt."""
+    from pptx2svg.resolve.chart import text_width
+
+    for size, face, pen in ((10.0, None, 94.216), (8.0, None, 97.411),
+                            (14.0, None, 87.796), (10.0, "Arial", 93.556),
+                            (14.0, "Arial", 86.881)):
+        family = face or "Aptos"
+        children = _radar(size=size, face=face)
+        labels = [
+            child
+            for child in children
+            if isinstance(child, m.ShapeElement) and child.text_body is not None
+            and "".join(
+                r.text for p in child.text_body.paragraphs for r in p.runs
+            ) == "0"
+        ]
+        assert len(labels) == 1, (size, face)
+        box = labels[0].transform
+        # The text is right-aligned in its box with no right inset, so the box's right
+        # edge is the text's.  PowerPoint's pen x plus the digit's advance is where that
+        # edge landed.
+        right = (box.offset_x + box.extent_width) / 12700.0
+        expected = pen + text_width("0", family, size)
+        assert right == pytest.approx(expected, abs=0.2), (size, face)
+        # And that edge is two digit widths left of the spoke, which is the rule itself.
+        assert right == pytest.approx(
+            RADAR_CENTRE[0] - 2 * text_width("0", family, size), abs=0.01
+        ), (size, face)
+
+
+def test_a_category_label_wraps_rather_than_rotating():
+    """Every `rot` in the long-label probe is zero, and "Category Three" is two lines."""
+    from pptx2svg.resolve.chart import _wrap_to_width, font_box, ChartFont
+
+    font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
+    cap = 198.4724 * 0.25
+    assert _wrap_to_width("Category Three", font, cap) == ["Category", "Three"]
+    # The bracket: 43.72 pt stayed on one line, 59.10 pt wrapped.
+    assert _wrap_to_width("Two Three", font, cap) == ["Two Three"]
+    assert _wrap_to_width("Category One", font, cap) == ["Category", "One"]
+    # A single word is never split.
+    assert _wrap_to_width("Supercalifragilistic", font, 10.0) == [
+        "Supercalifragilistic"
+    ]
+
+
+def test_a_side_category_label_is_anchored_at_the_vertex():
+    """Measured pen positions: B at 178.945, C at 152.701, D right edge 68.132."""
+    children = _radar()
+    found = {}
+    for child in children:
+        if not isinstance(child, m.ShapeElement) or child.text_body is None:
+            continue
+        text = "".join(r.text for p in child.text_body.paragraphs for r in p.runs)
+        if text in ("B", "C", "D", "E"):
+            size = child.text_body.paragraphs[0].runs[0].properties.font_size
+            left = child.transform.offset_x / 12700.0 + size / 2
+            found[text] = (left, left + child.transform.extent_width / 12700.0 - size)
+    assert found["B"][0] == pytest.approx(178.945, abs=0.4)
+    assert found["C"][0] == pytest.approx(152.701, abs=0.4)
+    assert found["D"][1] == pytest.approx(68.132, abs=0.5)
+    assert found["E"][1] == pytest.approx(42.637, abs=1.2)
+
+
+def test_a_line_style_radar_legends_with_a_line_and_marker_not_a_swatch():
+    """Measured: a 19.200 pt rule with the marker on it, then 2.025 pt before the text."""
+    children = _radar(legend="r")
+    keys = [c for c in children if isinstance(c, m.ConnectorElement)]
+    assert len(keys) == 1
+    assert keys[0].transform.extent_width / 12700.0 == pytest.approx(19.2, abs=0.01)
+    assert keys[0].transform.offset_x / 12700.0 == pytest.approx(154.957, abs=0.4)
+    # A filled radar takes the ordinary swatch instead.
+    assert [
+        c for c in _radar(style="filled", legend="r")
+        if isinstance(c, m.ConnectorElement)
+    ] == []
+
+
+def test_a_radar_legends_its_series_not_its_categories():
+    texts = {
+        "".join(r.text for p in child.text_body.paragraphs for r in p.runs)
+        for child in _radar(legend="r")
+        if isinstance(child, m.ShapeElement) and child.text_body is not None
+    }
+    assert "Series 1" in texts
+
+
+def test_a_radar_series_with_no_marker_size_gets_six_points_not_seven():
+    """Measured 6.0 pt square on the probe's second series; ECMA-376's default is 7."""
+    markers = [
+        child
+        for child in _radar(values=((3, 4, 5, 2, 1), (1, 2, 3, 4, 5)))
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.geometry, m.PresetGeometry)
+        and child.geometry.preset in ("diamond", "rect")
+        and child.text_body is None
+    ]
+    assert markers, "no markers drawn"
+    assert all(
+        marker.transform.extent_width / 12700.0 == pytest.approx(6.0, abs=0.01)
+        for marker in markers
+    )
+    # The cycle is diamond then square, the same one a line chart uses.
+    presets = [marker.geometry.preset for marker in markers]
+    assert presets[:5] == ["diamond"] * 5
+    assert presets[5:] == ["rect"] * 5
+
+
+def test_a_blank_leaves_the_radar_ring_open():
+    """Not measured -- mirrors the line chart, whose blank behaviour was.
+
+    A whole ring visits six points (five corners and the close).  A blank at one corner
+    leaves **one** open run of four, not two runs of two and three: the ring is a cycle,
+    so the stretch that passes through index 0 is a single run.  No marker is drawn for
+    the missing point.
+    """
+    children = _radar(values=((3, 4, None, 2, 1),))
+    runs = sorted(
+        len(points)
+        for shape, points in _paths(children)
+        if isinstance(shape.fill, m.NoFill) and len(points) != 6
+    )
+    assert runs == [4]
+    markers = [
+        child
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.geometry, m.PresetGeometry)
+        and child.geometry.preset == "diamond"
+    ]
+    assert len(markers) == 4
+
+
+def test_the_real_radar_matches_powerpoints_geometry():
+    """chart5 of `real-financial-report.pptx`, the only radar in the corpus.
+
+    PowerPoint's own export puts the centre at (132.72, 75.60) with a radius of 45.56 pt.
+    The centre lands within 0.1 pt.  **The radius does not**, and the reason is measured:
+    the category labels are Japanese, PowerPoint laid them out in a CJK face whose line
+    box is about 1.57 em, and our `font_box` reads the `<a:latin typeface="Arial"/>` the
+    axis names, whose line box is 1.117 em.  Feeding the fitted reserve the CJK line
+    height reproduces PowerPoint's 18.44 pt exactly; feeding it Arial's gives 11.61.  So
+    this asserts what is actually right today and records the gap.
+    """
+    from tests.conftest import FIXTURE_DIR
+
+    deck = convert_pptx_to_model((FIXTURE_DIR / "real-financial-report.pptx").read_bytes())
+    charts = [
+        element
+        for slide in deck.slides
+        for element in slide.elements
+        if isinstance(element, m.ChartElement) and element.chart.kind == "radarChart"
+    ]
+    assert len(charts) == 1
+    chart = charts[0]
+    assert chart.chart.value_axis.minimum == 0.0
+    assert chart.chart.value_axis.maximum == 100.0
+    assert chart.chart.value_axis.major_unit == 50.0
+
+    points = [point for _, points in _paths(chart.children) for point in points]
+    xs = [x for x, _ in points]
+    ys = [y for _, y in points]
+    assert (min(xs) + max(xs)) / 2 == pytest.approx(132.720, abs=0.2)
+    assert (min(ys) + max(ys)) / 2 == pytest.approx(75.600, abs=0.7)
+
+    # Two filled series, both stroked because the file states `a:ln w="25400"`, and six
+    # spokes because its category axis states a #888888 line.
+    filled = [
+        shape for shape, _ in _paths(chart.children)
+        if isinstance(shape.fill, m.SolidFill)
+    ]
+    assert [shape.fill.color.hex.upper() for shape in filled] == ["#2563EB", "#94A3B8"]
+    assert all(shape.outline is not None for shape in filled)
+    assert len([c for c in chart.children if isinstance(c, m.ConnectorElement)]) == 6
