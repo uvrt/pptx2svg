@@ -43,10 +43,6 @@ def _adj(adj: dict, name: str, default: float) -> float:
     return adj.get(name, default) / 100000
 
 
-def _angle(adj: dict, name: str, default: float) -> float:
-    """OOXML angle (1/60,000 degrees) -> radians."""
-    return math.radians(adj.get(name, default) / 60000)
-
 
 def _regular_polygon(w: float, h: float, sides: int) -> str:
     cx, cy = w / 2, h / 2
@@ -69,25 +65,6 @@ def _star_polygon(w: float, h: float, points: int, inner_ratio: float) -> str:
         coords.append((cx + cx * radius * math.cos(angle), cy + cy * radius * math.sin(angle)))
     return f'<polygon points="{_pts(*coords)}"/>'
 
-
-def _elliptical_arc_endpoints(
-    w: float, h: float, start_angle: float, end_angle: float
-) -> tuple[float, float, float, float, int]:
-    """Shared setup for arc/chord/pie/blockArc.
-
-    OOXML measures angles clockwise from 3 o'clock; SVG's y axis points down, so the
-    sine is negated and the sweep flag is 0 (counter-clockwise in SVG terms).
-    """
-    rx, ry = w / 2, h / 2
-    cx, cy = rx, ry
-    x1 = cx + rx * math.cos(start_angle)
-    y1 = cy - ry * math.sin(start_angle)
-    x2 = cx + rx * math.cos(end_angle)
-    y2 = cy - ry * math.sin(end_angle)
-    sweep = start_angle - end_angle
-    if sweep < 0:
-        sweep += math.tau
-    return x1, y1, x2, y2, (1 if sweep > math.pi else 0)
 
 
 # --------------------------------------------------------------------------------------
@@ -192,60 +169,12 @@ def _straight_connector1(w, h, adj):
     return f'<path d="M 0 0 L {_n(w)} {_n(h)}"/>'
 
 
-def _bent_connector2(w, h, adj):
-    return f'<path d="M 0 0 L {_n(w)} 0 L {_n(w)} {_n(h)}"/>'
 
 
-def _bent_connector3(w, h, adj):
-    mid_x = _adj(adj, "adj1", 50000) * w
-    return f'<path d="M 0 0 L {_n(mid_x)} 0 L {_n(mid_x)} {_n(h)} L {_n(w)} {_n(h)}"/>'
 
 
-def _bent_connector4(w, h, adj):
-    mid_x = _adj(adj, "adj1", 50000) * w
-    mid_y = _adj(adj, "adj2", 50000) * h
-    return (
-        f'<path d="M 0 0 L {_n(mid_x)} 0 L {_n(mid_x)} {_n(mid_y)} '
-        f'L {_n(w)} {_n(mid_y)} L {_n(w)} {_n(h)}"/>'
-    )
 
 
-def _bent_connector5(w, h, adj):
-    x1 = _adj(adj, "adj1", 50000) * w
-    mid_y = _adj(adj, "adj2", 50000) * h
-    x2 = _adj(adj, "adj3", 50000) * w
-    return (
-        f'<path d="M 0 0 L {_n(x1)} 0 L {_n(x1)} {_n(mid_y)} L {_n(x2)} {_n(mid_y)} '
-        f'L {_n(x2)} {_n(h)} L {_n(w)} {_n(h)}"/>'
-    )
-
-
-def _curved_connector2(w, h, adj):
-    return f'<path d="M 0 0 C {_n(w)} 0 0 {_n(h)} {_n(w)} {_n(h)}"/>'
-
-
-def _curved_connector3(w, h, adj):
-    mid_x = _adj(adj, "adj1", 50000) * w
-    return f'<path d="M 0 0 C {_n(mid_x)} 0 {_n(mid_x)} {_n(h)} {_n(w)} {_n(h)}"/>'
-
-
-def _curved_connector4(w, h, adj):
-    mid_x = _adj(adj, "adj1", 50000) * w
-    mid_y = _adj(adj, "adj2", 50000) * h
-    return (
-        f'<path d="M 0 0 C {_n(mid_x)} 0 {_n(mid_x)} {_n(mid_y)} {_n(mid_x)} {_n(mid_y)} '
-        f'S {_n(w)} {_n(mid_y)} {_n(w)} {_n(h)}"/>'
-    )
-
-
-def _curved_connector5(w, h, adj):
-    x1 = _adj(adj, "adj1", 50000) * w
-    mid_y = _adj(adj, "adj2", 50000) * h
-    x2 = _adj(adj, "adj3", 50000) * w
-    return (
-        f'<path d="M 0 0 C {_n(x1)} 0 {_n(x1)} {_n(mid_y)} {_n(x1)} {_n(mid_y)} '
-        f'S {_n(x2)} {_n(mid_y)} {_n(x2)} {_n(h)} S {_n(w)} {_n(h)} {_n(w)} {_n(h)}"/>'
-    )
 
 
 def _cloud(w, h, adj):
@@ -544,15 +473,6 @@ def _flow_display(w, h, adj):
     )
 
 
-def _flow_magnetic_tape(w, h, adj):
-    r = min(w, h) / 2
-    cx, cy = w / 2, h / 2
-    return (
-        f'<path d="M {_n(cx+r)} {_n(cy)} A {_n(r)} {_n(r)} 0 1 1 {_n(cx+r-0.01)} {_n(cy+0.01)} '
-        f'L {_n(w)} {_n(cy)} L {_n(w)} {_n(h)} L {_n(w - r*0.3)} {_n(h)} '
-        f'L {_n(cx + r*math.cos(math.pi/6))} {_n(cy + r*math.sin(math.pi/6))}"/>'
-    )
-
 
 def _flow_magnetic_disk(w, h, adj):
     ry = h * 0.15
@@ -705,115 +625,13 @@ def _border_callout3(w, h, adj):
 # --------------------------------------------------------------------------------------
 
 
-def _arc(w, h, adj):
-    x1, y1, x2, y2, large = _elliptical_arc_endpoints(
-        w, h, _angle(adj, "adj1", 16200000), _angle(adj, "adj2", 0)
-    )
-    return f'<path d="M {_n(x1)} {_n(y1)} A {_n(w/2)} {_n(h/2)} 0 {large} 0 {_n(x2)} {_n(y2)}"/>'
 
-
-def _chord(w, h, adj):
-    x1, y1, x2, y2, large = _elliptical_arc_endpoints(
-        w, h, _angle(adj, "adj1", 2700000), _angle(adj, "adj2", 16200000)
-    )
-    return f'<path d="M {_n(x1)} {_n(y1)} A {_n(w/2)} {_n(h/2)} 0 {large} 0 {_n(x2)} {_n(y2)} Z"/>'
-
-
-def _pie(w, h, adj):
-    x1, y1, x2, y2, large = _elliptical_arc_endpoints(
-        w, h, _angle(adj, "adj1", 0), _angle(adj, "adj2", 16200000)
-    )
-    return (
-        f'<path d="M {_n(w/2)} {_n(h/2)} L {_n(x1)} {_n(y1)} '
-        f'A {_n(w/2)} {_n(h/2)} 0 {large} 0 {_n(x2)} {_n(y2)} Z"/>'
-    )
-
-
-def _block_arc(w, h, adj):
-    start = _angle(adj, "adj1", 10800000)
-    end = _angle(adj, "adj2", 0)
-    thickness = _adj(adj, "adj3", 25000)
-    rx, ry = w / 2, h / 2
-    cx, cy = rx, ry
-    irx, iry = rx * (1 - thickness), ry * (1 - thickness)
-    ox1, oy1, ox2, oy2, large = _elliptical_arc_endpoints(w, h, start, end)
-    ix1 = cx + irx * math.cos(start)
-    iy1 = cy - iry * math.sin(start)
-    ix2 = cx + irx * math.cos(end)
-    iy2 = cy - iry * math.sin(end)
-    return (
-        f'<path d="M {_n(ox1)} {_n(oy1)} A {_n(rx)} {_n(ry)} 0 {large} 0 {_n(ox2)} {_n(oy2)} '
-        f'L {_n(ix2)} {_n(iy2)} A {_n(irx)} {_n(iry)} 0 {large} 1 {_n(ix1)} {_n(iy1)} Z"/>'
-    )
 
 
 # --------------------------------------------------------------------------------------
 # Math
 # --------------------------------------------------------------------------------------
 
-
-def _math_plus(w, h, adj):
-    t = _adj(adj, "adj1", 23520)
-    tw, th = t * w, t * h
-    lx = (w - tw) / 2
-    rx = lx + tw
-    ty = (h - th) / 2
-    by = ty + th
-    return f'<polygon points="{_pts((lx, 0), (rx, 0), (rx, ty), (w, ty), (w, by), (rx, by), (rx, h), (lx, h), (lx, by), (0, by), (0, ty), (lx, ty))}"/>'
-
-
-def _math_minus(w, h, adj):
-    th = _adj(adj, "adj1", 23520) * h
-    ty = (h - th) / 2
-    return f'<rect x="0" y="{_n(ty)}" width="{_n(w)}" height="{_n(th)}"/>'
-
-
-def _math_multiply(w, h, adj):
-    d = _adj(adj, "adj1", 23520) * min(w, h) * 0.5
-    cx, cy = w / 2, h / 2
-    return f'<polygon points="{_pts((cx, cy - d), (w - d, 0), (w, d), (cx + d, cy), (w, h - d), (w - d, h), (cx, cy + d), (d, h), (0, h - d), (cx - d, cy), (0, d), (d, 0))}"/>'
-
-
-def _math_divide(w, h, adj):
-    t = _adj(adj, "adj1", 23520)
-    th = t * h
-    ty = (h - th) / 2
-    by = ty + th
-    dot_r = min(w, h) * t * 0.5
-    cx = w / 2
-    top_dot_y = ty / 2
-    bottom_dot_y = h - ty / 2
-    return (
-        f'<path d="M 0 {_n(ty)} L {_n(w)} {_n(ty)} L {_n(w)} {_n(by)} L 0 {_n(by)} Z '
-        f'M {_n(cx+dot_r)} {_n(top_dot_y)} A {_n(dot_r)} {_n(dot_r)} 0 1 1 {_n(cx+dot_r-0.01)} {_n(top_dot_y-0.01)} Z '
-        f'M {_n(cx+dot_r)} {_n(bottom_dot_y)} A {_n(dot_r)} {_n(dot_r)} 0 1 1 {_n(cx+dot_r-0.01)} {_n(bottom_dot_y-0.01)} Z"/>'
-    )
-
-
-def _math_equal(w, h, adj):
-    t = _adj(adj, "adj1", 23520)
-    gap = bar = t * h
-    y1 = (h - gap) / 2 - bar
-    y2 = (h + gap) / 2
-    return (
-        f'<path d="M 0 {_n(y1)} L {_n(w)} {_n(y1)} L {_n(w)} {_n(y1+bar)} L 0 {_n(y1+bar)} Z '
-        f'M 0 {_n(y2)} L {_n(w)} {_n(y2)} L {_n(w)} {_n(y2+bar)} L 0 {_n(y2+bar)} Z"/>'
-    )
-
-
-def _math_not_equal(w, h, adj):
-    t = _adj(adj, "adj1", 23520)
-    gap = bar = t * h
-    y1 = (h - gap) / 2 - bar
-    y2 = (h + gap) / 2
-    slash_w = w * 0.15
-    sx = w / 2 - slash_w / 2
-    return (
-        f'<path d="M 0 {_n(y1)} L {_n(w)} {_n(y1)} L {_n(w)} {_n(y1+bar)} L 0 {_n(y1+bar)} Z '
-        f'M 0 {_n(y2)} L {_n(w)} {_n(y2)} L {_n(w)} {_n(y2+bar)} L 0 {_n(y2+bar)} Z '
-        f'M {_n(sx+slash_w)} {_n(y1-bar)} L {_n(sx + 2*slash_w)} {_n(y1-bar)} '
-        f'L {_n(sx)} {_n(y2 + 2*bar)} L {_n(sx-slash_w)} {_n(y2 + 2*bar)} Z"/>'
-    )
 
 
 # --------------------------------------------------------------------------------------
@@ -874,58 +692,7 @@ def _cube(w, h, adj):
     )
 
 
-def _donut(w, h, adj):
-    t = _adj(adj, "adj", 25000)
-    rx, ry = w / 2, h / 2
-    irx, iry = rx * (1 - t), ry * (1 - t)
-    cx, cy = rx, ry
-    return (
-        f'<path fill-rule="evenodd" d="M {_n(cx+rx)} {_n(cy)} A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx-rx)} {_n(cy)} '
-        f'A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx+rx)} {_n(cy)} Z '
-        f'M {_n(cx+irx)} {_n(cy)} A {_n(irx)} {_n(iry)} 0 1 0 {_n(cx-irx)} {_n(cy)} '
-        f'A {_n(irx)} {_n(iry)} 0 1 0 {_n(cx+irx)} {_n(cy)} Z"/>'
-    )
 
-
-def _no_smoking(w, h, adj):
-    t = _adj(adj, "adj", 18750)
-    rx, ry = w / 2, h / 2
-    cx, cy = rx, ry
-    irx, iry = rx * (1 - t), ry * (1 - t)
-    angle = math.pi / 4
-    lx1 = cx + irx * math.cos(angle)
-    ly1 = cy - iry * math.sin(angle)
-    lx2 = cx - irx * math.cos(angle)
-    ly2 = cy + iry * math.sin(angle)
-    return (
-        f'<path fill-rule="evenodd" d="M {_n(cx+rx)} {_n(cy)} A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx-rx)} {_n(cy)} '
-        f'A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx+rx)} {_n(cy)} Z '
-        f'M {_n(cx+irx)} {_n(cy)} A {_n(irx)} {_n(iry)} 0 1 0 {_n(cx-irx)} {_n(cy)} '
-        f'A {_n(irx)} {_n(iry)} 0 1 0 {_n(cx+irx)} {_n(cy)} Z '
-        f'M {_n(lx1)} {_n(ly1)} L {_n(lx2)} {_n(ly2)}"/>'
-    )
-
-
-def _smiley_face(w, h, adj):
-    smile = _adj(adj, "adj", 4653)
-    rx, ry = w / 2, h / 2
-    cx, cy = rx, ry
-    eye_rx, eye_ry = w * 0.06, h * 0.06
-    eye_y = h * 0.35
-    left_eye_x, right_eye_x = w * 0.35, w * 0.65
-    mouth_y = h * 0.6
-    mouth_w = w * 0.3
-    curve = smile * h
-    return (
-        f'<path d="M {_n(cx+rx)} {_n(cy)} A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx-rx)} {_n(cy)} '
-        f'A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx+rx)} {_n(cy)} Z '
-        f'M {_n(left_eye_x+eye_rx)} {_n(eye_y)} A {_n(eye_rx)} {_n(eye_ry)} 0 1 1 {_n(left_eye_x-eye_rx)} {_n(eye_y)} '
-        f'A {_n(eye_rx)} {_n(eye_ry)} 0 1 1 {_n(left_eye_x+eye_rx)} {_n(eye_y)} Z '
-        f'M {_n(right_eye_x+eye_rx)} {_n(eye_y)} A {_n(eye_rx)} {_n(eye_ry)} 0 1 1 {_n(right_eye_x-eye_rx)} {_n(eye_y)} '
-        f'A {_n(eye_rx)} {_n(eye_ry)} 0 1 1 {_n(right_eye_x+eye_rx)} {_n(eye_y)} Z '
-        f'M {_n(cx-mouth_w)} {_n(mouth_y)} C {_n(cx - mouth_w*0.5)} {_n(mouth_y+curve)}, '
-        f'{_n(cx + mouth_w*0.5)} {_n(mouth_y+curve)}, {_n(cx+mouth_w)} {_n(mouth_y)}"/>'
-    )
 
 
 def _frame(w, h, adj):
@@ -1042,41 +809,7 @@ def _right_brace(w, h, adj):
     )
 
 
-def _bracket_pair(w, h, adj):
-    r = _adj(adj, "adj", 16667) * min(w, h)
-    return (
-        f'<path d="M {_n(r)} 0 A {_n(r)} {_n(r)} 0 0 0 0 {_n(r)} L 0 {_n(h-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 0 {_n(r)} {_n(h)} '
-        f'M {_n(w-r)} 0 A {_n(r)} {_n(r)} 0 0 1 {_n(w)} {_n(r)} L {_n(w)} {_n(h-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(w-r)} {_n(h)}"/>'
-    )
 
-
-def _brace_pair(w, h, adj):
-    r = _adj(adj, "adj", 8333) * min(w, h)
-    return (
-        f'<path d="M {_n(r)} 0 A {_n(r)} {_n(r)} 0 0 0 0 {_n(r)} L 0 {_n(h/2-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 1 {_n(-r)} {_n(h/2)} A {_n(r)} {_n(r)} 0 0 1 0 {_n(h/2+r)} '
-        f'L 0 {_n(h-r)} A {_n(r)} {_n(r)} 0 0 0 {_n(r)} {_n(h)} '
-        f'M {_n(w-r)} 0 A {_n(r)} {_n(r)} 0 0 1 {_n(w)} {_n(r)} L {_n(w)} {_n(h/2-r)} '
-        f'A {_n(r)} {_n(r)} 0 0 0 {_n(w+r)} {_n(h/2)} A {_n(r)} {_n(r)} 0 0 0 {_n(w)} {_n(h/2+r)} '
-        f'L {_n(w)} {_n(h-r)} A {_n(r)} {_n(r)} 0 0 1 {_n(w-r)} {_n(h)}"/>'
-    )
-
-
-def _lightning_bolt(w, h, adj):
-    ratios = [(0.55, 0.0), (0.3, 0.4), (0.52, 0.4), (0.25, 1.0), (0.75, 0.5), (0.52, 0.5), (0.85, 0.0)]
-    return f'<polygon points="{_pts(*[(w*x, h*y) for x, y in ratios])}"/>'
-
-
-def _moon(w, h, adj):
-    t = _adj(adj, "adj", 50000) * w
-    rx, ry = w / 2, h / 2
-    irx = t / 2
-    return (
-        f'<path d="M {_n(w)} 0 A {_n(rx)} {_n(ry)} 0 1 0 {_n(w)} {_n(h)} '
-        f'A {_n(irx)} {_n(ry)} 0 1 1 {_n(w)} 0 Z"/>'
-    )
 
 
 def _teardrop(w, h, adj):
@@ -1088,23 +821,6 @@ def _teardrop(w, h, adj):
         f'A {_n(rx)} {_n(ry)} 0 1 1 {_n(cx)} 0 Z"/>'
     )
 
-
-def _sun(w, h, adj):
-    cx, cy = w / 2, h / 2
-    inner = 0.35
-    parts = [
-        f'M {_n(cx + cx*inner)} {_n(cy)} '
-        f'A {_n(cx*inner)} {_n(cy*inner)} 0 1 1 {_n(cx - cx*inner)} {_n(cy)} '
-        f'A {_n(cx*inner)} {_n(cy*inner)} 0 1 1 {_n(cx + cx*inner)} {_n(cy)} Z'
-    ]
-    for i in range(8):
-        angle = math.tau * i / 8
-        x1 = cx + cx * inner * 1.15 * math.cos(angle)
-        y1 = cy + cy * inner * 1.15 * math.sin(angle)
-        x2 = cx + cx * math.cos(angle)
-        y2 = cy + cy * math.sin(angle)
-        parts.append(f"M {_n(x1)} {_n(y1)} L {_n(x2)} {_n(y2)}")
-    return f'<path d="{" ".join(parts)}"/>'
 
 
 def _wave(w, h, adj):
@@ -1422,14 +1138,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "uturnArrow": _uturn_arrow,
     # Connectors
     "straightConnector1": _straight_connector1,
-    "bentConnector2": _bent_connector2,
-    "bentConnector3": _bent_connector3,
-    "bentConnector4": _bent_connector4,
-    "bentConnector5": _bent_connector5,
-    "curvedConnector2": _curved_connector2,
-    "curvedConnector3": _curved_connector3,
-    "curvedConnector4": _curved_connector4,
-    "curvedConnector5": _curved_connector5,
     # Flowchart
     "flowChartProcess": _rect,
     "flowChartAlternateProcess": _flow_alternate_process,
@@ -1454,7 +1162,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "flowChartOnlineStorage": _flow_online_storage,
     "flowChartDelay": _flow_delay,
     "flowChartDisplay": _flow_display,
-    "flowChartMagneticTape": _flow_magnetic_tape,
     "flowChartMagneticDisk": _flow_magnetic_disk,
     "flowChartMagneticDrum": _flow_magnetic_drum,
     "flowChartSummingJunction": _flow_summing_junction,
@@ -1468,17 +1175,7 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "borderCallout2": _border_callout2,
     "borderCallout3": _border_callout3,
     # Arcs
-    "arc": _arc,
-    "chord": _chord,
-    "pie": _pie,
-    "blockArc": _block_arc,
     # Math
-    "mathPlus": _math_plus,
-    "mathMinus": _math_minus,
-    "mathMultiply": _math_multiply,
-    "mathDivide": _math_divide,
-    "mathEqual": _math_equal,
-    "mathNotEqual": _math_not_equal,
     # Misc
     "cloud": _cloud,
     "heart": _heart,
@@ -1489,9 +1186,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "plaque": _plaque,
     "can": _can,
     "cube": _cube,
-    "donut": _donut,
-    "noSmoking": _no_smoking,
-    "smileyFace": _smiley_face,
     "frame": _frame,
     "bevel": _bevel,
     "halfFrame": _half_frame,
@@ -1506,12 +1200,7 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "rightBracket": _right_bracket,
     "leftBrace": _left_brace,
     "rightBrace": _right_brace,
-    "bracketPair": _bracket_pair,
-    "bracePair": _brace_pair,
-    "lightningBolt": _lightning_bolt,
-    "moon": _moon,
     "teardrop": _teardrop,
-    "sun": _sun,
     "wave": _wave,
     "doubleWave": _double_wave,
     "ribbon": _ribbon,

@@ -121,13 +121,22 @@ def test_output_is_byte_stable(name):
 
 @pytest.mark.parametrize("name", sorted(SPEC_PRESETS))
 def test_adjustments_actually_reach_the_guides(name):
-    """A preset that ignored `a:avLst` would silently render every instance identically."""
+    """A preset that ignored `a:avLst` would silently render every instance identically.
+
+    Nudged both ways, because a default often sits *on* one of the spec's own `pin`
+    bounds -- `smileyFace` defaults to the widest smile it allows -- so moving in one
+    direction legitimately changes nothing.
+    """
     spec = SPEC_PRESETS[name]
     if not spec.adjustments:
         pytest.skip(f"{name} has no adjustment values")
     first_name, default = spec.adjustments[0]
-    nudged = preset_geometry_svg(name, 200.0, 100.0, {first_name: default + 7000})
-    assert nudged != preset_geometry_svg(name, 200.0, 100.0, {})
+    unchanged = preset_geometry_svg(name, 200.0, 100.0, {})
+    nudged = [
+        preset_geometry_svg(name, 200.0, 100.0, {first_name: default + delta})
+        for delta in (7000, -7000)
+    ]
+    assert any(value != unchanged for value in nudged)
 
 
 # --------------------------------------------------------------------------------------
