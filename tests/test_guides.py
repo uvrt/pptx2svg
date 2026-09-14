@@ -9,6 +9,7 @@ import pytest
 from pptx2svg.guides import (
     DEGREE,
     arc_endpoint,
+    arc_segments,
     builtin_variables,
     evaluate_formula,
     evaluate_guides,
@@ -168,9 +169,17 @@ def test_a_quarter_arc_ends_where_the_geometry_says():
     assert (large, sweep) == (0, 1)
 
 
-def test_a_sweep_over_half_a_turn_sets_the_large_arc_flag():
-    _, _, large, sweep = arc_endpoint(10.0, 0.0, 10.0, 10.0, 0.0, 270 * DEGREE)
-    assert (large, sweep) == (1, 1)
+def test_a_sweep_over_half_a_turn_is_cut_into_representable_pieces():
+    """Rather than lean on SVG's large-arc flag, a long sweep is split into pieces of at
+    most half a turn each -- which is what makes the full-circle case work at all."""
+    segments = arc_segments(10.0, 0.0, 10.0, 10.0, 0.0, 270 * DEGREE)
+    assert len(segments) == 2
+    assert all(large == 0 for _, _, large, _ in segments)
+    assert all(sweep == 1 for _, _, _, sweep in segments)
+    # Centre is (0, 0); three quarters clockwise from 3 o'clock lands at 12 o'clock.
+    end_x, end_y, _, _ = segments[-1]
+    assert end_x == pytest.approx(0.0, abs=1e-9)
+    assert end_y == pytest.approx(-10.0)
 
 
 def test_a_negative_sweep_reverses_the_direction_flag():
@@ -252,8 +261,25 @@ def test_a_quarter_sweep_on_an_ellipse_lands_on_the_axis():
 def test_the_conversion_preserves_the_revolution():
     """`atan2` returns (-pi, pi], so an arc crossing 12 o'clock would jump a whole turn
     and reverse itself if the revolution were not carried through."""
-    _, _, large, sweep = arc_endpoint(30.0, 0.0, 30.0, 5.0, 0.0, 300 * DEGREE)
-    assert (large, sweep) == (1, 1)
+    segments = arc_segments(30.0, 0.0, 30.0, 5.0, 0.0, 300 * DEGREE)
+    assert len(segments) == 2
+    assert all(sweep == 1 for _, _, _, sweep in segments)
+
+
+def test_a_full_turn_is_split_rather_than_silently_dropped():
+    """SVG draws nothing when an arc's endpoints coincide, and DrawingML writes a circle
+    as one arcTo sweeping 360 degrees.  Taken literally that erases every circle in the
+    preset catalogue -- smileyFace's face and eyes, the middle of sun, donut's hole."""
+    segments = arc_segments(10.0, 0.0, 10.0, 10.0, 0.0, 360 * DEGREE)
+    assert len(segments) == 2, "one segment would start and end at the same point"
+    midpoint = segments[0][:2]
+    assert midpoint[0] == pytest.approx(-10.0)
+    assert segments[-1][0] == pytest.approx(10.0)
+    assert segments[-1][1] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_a_zero_sweep_produces_no_segments():
+    assert arc_segments(10.0, 0.0, 10.0, 10.0, 0.0, 0.0) == []
 
 
 def test_a_full_sweep_returns_to_the_starting_point():

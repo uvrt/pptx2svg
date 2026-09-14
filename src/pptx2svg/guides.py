@@ -179,27 +179,33 @@ def _parametric_angle(geometric: float, width_radius: float, height_radius: floa
     return t + math.tau * round((geometric - t) / math.tau)
 
 
-def arc_endpoint(
+def arc_segments(
     current_x: float,
     current_y: float,
     width_radius: float,
     height_radius: float,
     start_angle: float,
     sweep_angle: float,
-) -> tuple[float, float, int, int]:
-    """Convert a DrawingML ``a:arcTo`` into what SVG's ``A`` command needs.
+) -> list[tuple[float, float, int, int]]:
+    """Convert a DrawingML ``a:arcTo`` into one or more SVG ``A`` commands.
 
     The two models disagree about what an arc *is*.  DrawingML gives a start angle and a
     sweep about an implied ellipse centre, with the current point already on that
     ellipse; SVG gives radii and an explicit end point and infers the centre.  So the
-    centre is reconstructed from the current point and the start angle, and the end point
-    projected from it.
+    centre is reconstructed from the current point and the start angle, and each end
+    point is projected from it.  Both angles are geometric and must be converted to the
+    ellipse's parametric angle first -- see :func:`_parametric_angle`.
 
-    Both angles are geometric and must be converted to the ellipse's parametric angle
-    before they can generate a point -- see :func:`_parametric_angle`.
+    **Why more than one segment.**  SVG defines an arc whose endpoints coincide as
+    drawing *nothing*, and DrawingML draws a circle as a single ``arcTo`` sweeping a full
+    360 degrees -- which is exactly that case.  Taken literally, every circle in the
+    preset catalogue disappears: the face of ``smileyFace``, its eyes, the middle of
+    ``sun``, the hole in ``donut``.  So a sweep is cut into pieces of at most half a
+    turn, which is representable, exact, and what every other converter does.
 
-    Returns ``(end_x, end_y, large_arc_flag, sweep_flag)``.  Angles arrive in 1/60000 of
-    a degree, and y grows downwards in both models, so no sign flip is needed.
+    Returns a list of ``(end_x, end_y, large_arc_flag, sweep_flag)``, in order.  Angles
+    arrive in 1/60000 of a degree, and y grows downwards in both models, so no sign flip
+    is needed.
     """
     start_geometric = math.radians(start_angle / DEGREE)
     end_geometric = math.radians((start_angle + sweep_angle) / DEGREE)
@@ -208,13 +214,36 @@ def arc_endpoint(
 
     center_x = current_x - width_radius * math.cos(start_parametric)
     center_y = current_y - height_radius * math.sin(start_parametric)
-    end_x = center_x + width_radius * math.cos(end_parametric)
-    end_y = center_y + height_radius * math.sin(end_parametric)
 
-    # The flags describe the arc actually swept, so they follow the parametric sweep --
-    # which for a very eccentric ellipse can straddle 180 degrees differently from the
-    # geometric one.
-    parametric_sweep = end_parametric - start_parametric
-    large_arc = 1 if abs(parametric_sweep) > math.pi else 0
-    sweep_flag = 1 if parametric_sweep > 0 else 0
-    return end_x, end_y, large_arc, sweep_flag
+    total = end_parametric - start_parametric
+    if total == 0:
+        return []
+    count = max(1, math.ceil(abs(total) / math.pi - 1e-9))
+    step = total / count
+
+    segments = []
+    for index in range(1, count + 1):
+        angle = start_parametric + step * index
+        end_x = center_x + width_radius * math.cos(angle)
+        end_y = center_y + height_radius * math.sin(angle)
+        # Each piece is at most half a turn by construction, so large-arc is never set;
+        # the direction still follows the sign of the sweep.
+        segments.append((end_x, end_y, 1 if abs(step) > math.pi else 0, 1 if step > 0 else 0))
+    return segments
+
+
+def arc_endpoint(
+    current_x: float,
+    current_y: float,
+    width_radius: float,
+    height_radius: float,
+    start_angle: float,
+    sweep_angle: float,
+) -> tuple[float, float, int, int]:
+    """The final point of an ``a:arcTo``; see :func:`arc_segments` for the detail."""
+    segments = arc_segments(
+        current_x, current_y, width_radius, height_radius, start_angle, sweep_angle
+    )
+    if not segments:
+        return current_x, current_y, 0, 0
+    return segments[-1]

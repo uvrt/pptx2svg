@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import Element
 
-from ..guides import arc_endpoint, evaluate_guides, resolve_value
+from ..guides import arc_segments, evaluate_guides, resolve_value
 from ..model import ArrowEndpoint, CustomGeometryPath
 from ..xmlutil import (
     attr,
@@ -719,14 +719,18 @@ def _convert_arc_to(
     if (width_radius == 0 and height_radius == 0) or sweep_angle == 0:
         return None
 
-    end_x, end_y, large_arc, sweep_flag = arc_endpoint(
+    segments = arc_segments(
         current_x, current_y, width_radius, height_radius, start_angle, sweep_angle
     )
+    if not segments:
+        return None
 
-    command = (
+    command = " ".join(
         f"A {_round(width_radius)} {_round(height_radius)} 0 "
         f"{large_arc} {sweep_flag} {_round(end_x)} {_round(end_y)}"
+        for end_x, end_y, large_arc, sweep_flag in segments
     )
+    end_x, end_y = segments[-1][0], segments[-1][1]
     return command, end_x, end_y
 
 

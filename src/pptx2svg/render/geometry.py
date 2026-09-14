@@ -20,7 +20,7 @@ import math
 from typing import Callable
 
 from .. import model as m
-from ..guides import arc_endpoint, evaluate_guides, resolve_value
+from ..guides import arc_segments, evaluate_guides, resolve_value
 from .preset_specs import PRESET_SPECS
 
 Generator = Callable[[float, float, dict], str]
@@ -1328,12 +1328,13 @@ def _spec_path_data(commands, variables: dict, scale: tuple[float, float] = (1.0
             start_angle, sweep_angle = value(command[3]), value(command[4])
             if sweep_angle == 0 or (width_radius == 0 and height_radius == 0):
                 continue
-            x, y, large, sweep = arc_endpoint(
+            for x, y, large, sweep in arc_segments(
                 x, y, width_radius, height_radius, start_angle, sweep_angle
-            )
-            parts.append(
-                f"A {_n(width_radius)} {_n(height_radius)} 0 {large} {sweep} {_n(x)} {_n(y)}"
-            )
+            ):
+                parts.append(
+                    f"A {_n(width_radius)} {_n(height_radius)} 0 {large} {sweep} "
+                    f"{_n(x)} {_n(y)}"
+                )
         elif kind in ("Q", "C"):
             points = [
                 (value(command[i]) * scale_x, value(command[i + 1]) * scale_y)
