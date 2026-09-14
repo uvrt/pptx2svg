@@ -162,6 +162,25 @@ def test_last_eof_wins_for_an_incrementally_updated_pdf():
     assert preview.data == updated
 
 
+def test_a_pdf_with_no_end_marker_is_still_returned():
+    """A truncated trailer usually still renders -- pdfium rebuilds the cross-reference
+    table from the object offsets -- so giving up would put a grey placeholder in place
+    of artwork that would have drawn."""
+    truncated = MINI_PDF[: MINI_PDF.index(b"%%EOF")]
+    emf = build_emf([comment_record(COMMENT_MULTIFORMATS, truncated)])
+    preview = extract_metafile_preview(emf)
+    assert preview is not None
+    assert preview.mime_type == "application/pdf"
+    assert preview.data.startswith(b"%PDF")
+
+
+def test_a_comment_holding_only_a_pdf_marker_is_not_mistaken_for_a_pdf():
+    """Without a length floor, four stray bytes anywhere in a comment would be carved
+    out and handed to the rasteriser as a document."""
+    emf = build_emf([comment_record(COMMENT_MULTIFORMATS, b"%PDF")])
+    assert extract_metafile_preview(emf) is None
+
+
 def test_comment_without_the_gdic_identifier_is_ignored():
     """An application-private comment is not ours to interpret, whatever it contains."""
     emf = build_emf([comment_record(COMMENT_MULTIFORMATS, MINI_PDF, identifier=0x11223344)])

@@ -230,8 +230,14 @@ def _bitmap_area(bitmap: tuple[bytes, bytes]) -> int:
 def _find_pdf(data: bytes) -> bytes | None:
     """Carve ``%PDF`` ... ``%%EOF`` out of the accumulated comment payload.
 
-    The last ``%%EOF`` is used, not the first: an incrementally-updated PDF has one per
-    revision and only the final one closes the file.
+    The *last* ``%%EOF`` is used, not the first: an incrementally-updated PDF carries one
+    per revision and only the final one closes the file.
+
+    When there is no ``%%EOF`` at all the rest of the buffer is taken instead, rather
+    than giving up.  A PDF whose trailer was truncated is usually still renderable --
+    pdfium rebuilds the cross-reference table from the object offsets -- and any trailing
+    bytes from later records are junk a PDF reader skips.  The alternative is a grey
+    placeholder in place of artwork that would have rendered, which is worse.
     """
     if not data:
         return None
@@ -239,7 +245,5 @@ def _find_pdf(data: bytes) -> bytes | None:
     if start < 0:
         return None
     end = data.rfind(b"%%EOF")
-    if end < start:
-        return None
-    pdf = data[start : end + len(b"%%EOF")]
+    pdf = data[start : end + len(b"%%EOF")] if end >= start else data[start:]
     return pdf if len(pdf) >= MIN_PDF_BYTES else None
