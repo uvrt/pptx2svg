@@ -56,16 +56,6 @@ def _regular_polygon(w: float, h: float, sides: int) -> str:
     return f'<polygon points="{_pts(*points)}"/>'
 
 
-def _star_polygon(w: float, h: float, points: int, inner_ratio: float) -> str:
-    cx, cy = w / 2, h / 2
-    coords = []
-    for i in range(points * 2):
-        angle = math.tau * i / (points * 2) - math.pi / 2
-        radius = 1.0 if i % 2 == 0 else inner_ratio
-        coords.append((cx + cx * radius * math.cos(angle), cy + cy * radius * math.sin(angle)))
-    return f'<polygon points="{_pts(*coords)}"/>'
-
-
 
 # --------------------------------------------------------------------------------------
 # Basic shapes
@@ -115,11 +105,6 @@ def _hexagon(w, h, adj):
         f'<polygon points="{_pts((offset, 0), (w - offset, 0), (w, h/2), (w - offset, h), (offset, h), (0, h/2))}"/>'
     )
 
-
-def _star4(w, h, adj):
-    cx, cy = w / 2, h / 2
-    ir = 0.38
-    return f'<polygon points="{_pts((cx, 0), (cx + cx*ir, cy - cy*ir), (w, cy), (cx + cx*ir, cy + cy*ir), (cx, h), (cx - cx*ir, cy + cy*ir), (0, cy), (cx - cx*ir, cy - cy*ir))}"/>'
 
 
 def _right_arrow(w, h, adj):
@@ -1106,16 +1091,6 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "dodecagon": lambda w, h, adj: _regular_polygon(w, h, 12),
     "line": _line,
     # Stars and seals
-    "star4": _star4,
-    "star5": lambda w, h, adj: _star_polygon(w, h, 5, 0.38),
-    "star6": lambda w, h, adj: _star_polygon(w, h, 6, 0.5),
-    "star7": lambda w, h, adj: _star_polygon(w, h, 7, 0.38),
-    "star8": lambda w, h, adj: _star_polygon(w, h, 8, 0.38),
-    "star10": lambda w, h, adj: _star_polygon(w, h, 10, 0.38),
-    "star12": lambda w, h, adj: _star_polygon(w, h, 12, 0.38),
-    "star16": lambda w, h, adj: _star_polygon(w, h, 16, 0.38),
-    "star24": lambda w, h, adj: _star_polygon(w, h, 24, 0.38),
-    "star32": lambda w, h, adj: _star_polygon(w, h, 32, 0.38),
     "irregularSeal1": _irregular_seal1,
     "irregularSeal2": _irregular_seal2,
     # Arrows

@@ -9,8 +9,15 @@
 -- Then rasterise per page with pypdfium2.
 --
 -- Constraints discovered on PowerPoint 16.x / macOS:
---   * PowerPoint is sandboxed. Both paths must be somewhere it can reach -- the user's
---     home tree works, /tmp and /private/tmp fail with error -9074.
+--   * PowerPoint is sandboxed, and being under the user's home is NOT sufficient. Both
+--     paths must be in a directory PowerPoint has already been granted access to; a
+--     freshly created one -- even directly under $HOME, even under ~/Documents -- is
+--     refused with error -9074, and so are /tmp and /private/tmp. The failure is silent
+--     in the worst way: the deck opens (a ~$ lock file appears) and only the save fails,
+--     so it reads as a broken deck rather than a path that was never approved. Reuse the
+--     directory previous exports went to rather than making a tidy new one. How a new
+--     directory gets approved was not established -- only that having one already is
+--     what separates a working export from a failing one.
 --   * Paths must be absolute; the presentation is matched by its exact full name so a
 --     concurrently open deck is never exported by mistake.
 --   * `save as PNG` exists in the dictionary but silently produces nothing. PDF is the

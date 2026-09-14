@@ -119,6 +119,19 @@ SPEC_DRIVEN = [
     "mathDivide",
     "mathEqual",
     "mathNotEqual",
+    # Stars.  Held back until PowerPoint could be asked directly, because the spec's
+    # defaults looked too shallow to be right.  Measured against its own PDF export they
+    # match at 0.975-0.999 silhouette overlap; the hand-written ones managed 0.42-0.75.
+    "star4",
+    "star5",
+    "star6",
+    "star7",
+    "star8",
+    "star10",
+    "star12",
+    "star16",
+    "star24",
+    "star32",
 ]
 
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
