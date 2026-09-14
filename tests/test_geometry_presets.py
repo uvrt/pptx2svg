@@ -440,3 +440,75 @@ def test_guides_only_refer_to_names_already_defined(name):
 def test_lineInv_is_the_other_diagonal():
     """The one preset ECMA-376 defines that we had no implementation for at all."""
     assert path_data(preset_geometry_svg("lineInv", 200.0, 100.0, {})) == ["M 0 100 L 200 0"]
+
+
+# --------------------------------------------------------------------------------------
+# Stars
+#
+# The one family held back from the specification, because ECMA-376 gives `star10` an
+# inner radius 85% of its outer one and that looked far too shallow to be what PowerPoint
+# draws.  Asking PowerPoint settled it: a probe deck of all ten at their default
+# adjustments, exported to PDF by PowerPoint 16.106 and rasterised, then scored by
+# silhouette overlap against both candidates.
+#
+#   star    hand-written    specification
+#   star4       0.466           0.992
+#   star5       0.686           0.984
+#   star6       0.750           0.994
+#   star7       0.508           0.991
+#   star8       0.507           0.989
+#   star10      0.424           0.999
+#   star12      0.505           0.995
+#   star16      0.506           0.991
+#   star24      0.505           0.985
+#   star32      0.507           0.975
+#
+# The specification was right in all ten and the doubt was unfounded.  The hand-written
+# generator used a single inner ratio of 0.38 for every star but `star6` -- a value only
+# correct for `star5` -- so every star above five points came out far too spiky.  The
+# residual is antialiasing along the silhouette edge.
+# --------------------------------------------------------------------------------------
+
+STARS = {
+    # preset: (points, inner/outer radius ratio)
+    "star4": (4, 0.25000),
+    "star5": (5, 0.28394),
+    "star6": (6, 0.53748),
+    "star7": (7, 0.61931),
+    "star8": (8, 0.75000),
+    "star10": (10, 0.81683),
+    "star12": (12, 0.75000),
+    "star16": (16, 0.75000),
+    "star24": (24, 0.75000),
+    "star32": (32, 0.75000),
+}
+
+
+def star_radii(name: str) -> tuple[float, float, int]:
+    """(smallest, largest, vertex count) about the centre of a 200x200 box."""
+    visited = points(path_data(preset_geometry_svg(name, 200.0, 200.0, {}))[0])
+    radii = [math.hypot(x - 100.0, y - 100.0) for x, y in visited]
+    return min(radii), max(radii), len(visited)
+
+
+@pytest.mark.parametrize("name", sorted(STARS))
+def test_a_star_has_two_vertices_per_point(name):
+    expected_points, _ = STARS[name]
+    assert star_radii(name)[2] == expected_points * 2
+
+
+@pytest.mark.parametrize("name", sorted(STARS))
+def test_the_star_is_as_deep_as_powerpoint_draws_it(name):
+    """The measurement above, one number per shape.  A regression to a fixed inner ratio
+    -- the bug this replaced -- moves every star except `star5` and fails here."""
+    _, expected_ratio = STARS[name]
+    inner, outer, _ = star_radii(name)
+    assert inner / outer == pytest.approx(expected_ratio, abs=5e-5)
+
+
+def test_stars_get_shallower_as_they_gain_points():
+    """The pattern the old generator missed: more points means a shallower star, up to
+    `star8`, after which the specification holds the ratio at 0.75."""
+    ratios = [STARS[f"star{n}"][1] for n in (4, 5, 6, 7, 8)]
+    assert ratios == sorted(ratios)
+    assert {STARS[f"star{n}"][1] for n in (8, 12, 16, 24, 32)} == {0.75}
