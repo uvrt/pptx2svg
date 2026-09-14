@@ -32,7 +32,7 @@ after it needs a way to tell "better" from "different".
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
-| Charts | `barChart` read and drawn, **verified against PowerPoint** across 18 probe charts and 3 real ones; every other chart type warns and draws an empty frame |
+| Charts | `barChart` and `lineChart` read and drawn with their data labels, **verified against PowerPoint** across 30 probe charts and 4 real ones; every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -260,6 +260,8 @@ image = page.render(scale=1280 / page.get_size()[0]).to_pil()
 | --- | --- |
 | PowerPoint is sandboxed | Paths must be in a directory PowerPoint has **already been granted**. Under `$HOME` is *not* sufficient: a freshly created `~/pptx2svg-star/`, and a fresh directory under `~/Documents/`, both fail with **−9074** exactly as `/tmp` does, while the directory earlier exports used keeps working. The deck opens (a `~$` lock file appears) and only the save fails, so it reads as a broken deck rather than an unapproved path — which cost most of a session. Reuse the directory that already works. |
 | **−9074 has a second cause** | A file PowerPoint wants to repair raises an app-modal dialog, and *every* export then fails −9074 until it is cleared — including known-good files. Check for a dialog before suspecting the path; one bad input otherwise looks exactly like a broken environment. |
+| **−9074 has a third cause, and `pkill` is the fix** | After one export failed on a malformed deck, *every* subsequent export failed −9074 — including the corpus decks that had exported minutes earlier, so it reads as a revoked sandbox grant rather than a wedged app. AppleScript `quit saving no` returns `missing value` and does nothing, because PowerPoint is stuck on the half-open deck. `pkill -x "Microsoft PowerPoint"` clears it and the very next export succeeds. Before concluding the directory lost its grant, kill the app and retry — it turns a dead end into ten seconds. Remember to delete the `~$` lock the failed attempt left behind. |
+| **A third input defect with the hang signature** | Two series in one plot group both claiming `<c:idx val="0"/><c:order val="0"/>`. PowerPoint opens the deck and then never returns, exactly like the non-standard preset name and the partial `avLst` already listed. Out-of-order children of `c:ser` and `c:lineChart` (the schema's sequence is strict: `marker` before `dLbls`, the group-level `marker` *after* every `ser`) cost an earlier −9074 the same way. When a generated probe deck hangs, validate it against the schema sequence before suspecting the oracle. |
 | The export script cannot clear that dialog | It is blocked inside `open` and never regains control. Dismissal has to run in a separate process, and **Escape does not work** — only a real button click does, matched across localisations (`Annuleren` on a Dutch install). |
 | `count of presentations` is not a health check | A wedged PowerPoint answers `0` while still refusing every file. |
 | Restarting re-raises the dialog | PowerPoint reopens the document it was killed over. Dismiss rather than restart; and after any restart, poll until it answers — an `open` sent mid-launch is refused instantly with −9074. |
@@ -642,14 +644,16 @@ Three things the obvious reading gets wrong, each found in a fixture:
 mapping. Both **[pptx-renderer]** and this roadmap flagged it; it is invisible until a
 deck does both at once.
 
-### 3.2 Renderer — `barChart` **done**, the rest not started
+### 3.2 Renderer — `barChart` and `lineChart` **done**, the rest not started
 
 1. ✅ `barChart` — clustered, stacked, percentStacked, `barDir` col and bar
-2. `lineChart`
+2. ✅ `lineChart` — markers, smoothing, blanks, the real fixture on slide 2
 3. `pieChart` / `doughnutChart`
 4. `areaChart`
 5. `scatterChart` / `bubbleChart`
 6. `radarChart`, `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
+
+Data labels are drawn for both, at all four `c:dLblPos` values plus a line chart's `r`.
 
 Anything else warns `chart-unsupported-type` and draws an empty frame rather than a wrong
 picture. The shared infrastructure — value domain, tick selection, number formatting,
@@ -712,13 +716,48 @@ measurements across two faces and three sizes fit none of half the cap height, h
 x-height, half the line box, or the centre of the digits' own ink. The constant is the
 fitted mean and its worst residual is 0.61 pt.
 
-#### Not done for `barChart`
+#### The value axis' tick density is measured but **not solved**
+
+`real-financial-report.pptx`'s line chart is the case that exposes it: 43 of data on a
+73.6 pt plot, where PowerPoint draws **0..60 by 20** and the rule above gives 0..50 by 10.
+Short plots draw fewer ticks, and the rule that decides how many is not known.
+
+A six-cell probe, identical data (`3, 4, 5`) and 10 pt labels, shrinking frame:
+
+| plot height | PowerPoint | intervals | spacing |
+| --- | --- | --- | --- |
+| 145.0 pt | 0..6 by 1 | 6 | 24.2 pt |
+| 82.0 pt | 0..6 by 2 | 3 | 27.3 pt |
+| 50.5 pt | 0..6 by 2 | 3 | 16.8 pt |
+| 30.9 pt | 0..10 by 10 | 1 | 30.9 pt |
+| 19.1 pt | 0..10 by 10 | 1 | 19.1 pt |
+| 11.2 pt | 0..10 by 10 | 1 | 11.2 pt |
+
+Those six alone are reproduced by "step the unit up the 1-2-5 ladder until the ticks are
+at least 1.58 em apart", bracketed to (1.543, 1.610) by the 30.9 pt cell refusing 15.43 pt
+and the 14 pt probe accepting 22.53 pt. **And the stacked probe refutes it**: a 0..10 axis
+on a 145.0 pt plot with the same 10 pt font takes *ten* intervals at 14.5 pt spacing —
+finer than the 15.43 pt the 30.9 pt cell rejected, on the same axis range and the same
+font. No monotone spacing threshold produces both, so at least one more variable is
+involved that this sweep did not vary.
+
+A rule was written, measured against all of it, found to contradict the stacked case, and
+**reverted rather than shipped**. Today's behaviour is "no density limit", which is right
+everywhere except short plots. Whoever picks this up starts from the table above; the
+discriminating pair is the 30.9 pt cell and the stacked probe.
+
+#### Not done for `barChart` and `lineChart`
 
 Each of these is known-missing rather than merely absent:
 
-* **Data labels.** `c:dLbls` is read in full — `showVal`, `showCatName`, `showSerName`,
-  `showPercent`, `dLblPos`, per-point `c:dLbl` overrides, text and box styling — and
-  nothing is drawn from it. No chart in the corpus switches any of them on.
+* **Data-label wrapping.** PowerPoint wraps a long category name onto two lines inside a
+  multi-part label; we draw it on one. `c:separator`, `c:leaderLines` and a data label's
+  own `c:layout` are read or ignored but never drawn.
+* **A line chart's legend key.** PowerPoint draws a line with its marker on it; we draw
+  the bar chart's square swatch.
+* **`c:smooth`'s tension.** Drawn as a Catmull-Rom spline, which has the right shape —
+  the probe's control points are not collinear with its vertices, so it is a real spline —
+  but PowerPoint's own tension was not measured and the curves will not coincide.
 * **Rotated category labels.** PowerPoint rotates them 45° when they will not fit, which
   is what `real-financial-report.pptx` slide 3 does; we draw them horizontally and they
   overlap. That deck's chart3 is the one place our layout is badly wrong (bottom inset
@@ -728,7 +767,8 @@ Each of these is known-missing rather than merely absent:
 * **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
   list, which is the hard part and is done; a second value axis is then mostly drawing.
 * **Log scales** and `c:tickLblSkip` / `c:tickMarkSkip`. `c:crosses` and `c:crossesAt`
-  move the category axis but have only been measured at zero.
+  move the category axis but have only been measured at zero. `c:crossBetween="midCat"`
+  is implemented from the schema; nothing measured here uses it.
 * **`dispBlanksAs="span"`** is treated as `gap`, which is right for a bar chart and will
   not be for a line one.
 * The chart frame's rounded corners (`c:roundedCorners`) and effects.

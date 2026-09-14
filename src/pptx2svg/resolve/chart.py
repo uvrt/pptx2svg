@@ -133,6 +133,36 @@ DEFAULT_CHART_FONT_PT = 10.0
 DEFAULT_AXIS_LINE_EMU = 6350.0
 DEFAULT_AXIS_COLOR = "#000000"
 
+#: A line series' stroke when its ``a:ln`` states no width -- 1.5 pt, measured.  A series
+#: that *does* state one is taken literally: the real line chart in
+#: ``real-financial-report.pptx`` says ``w="25400"`` and PowerPoint drew 2 pt.
+DEFAULT_LINE_SERIES_WIDTH_EMU = 19050.0
+
+#: A line series' marker outline when it states none -- 0.5 pt in the series' own colour.
+DEFAULT_MARKER_OUTLINE_EMU = 6350.0
+
+#: Marker symbols a line series cycles through when it states no ``c:marker`` of its own.
+#: Measured only for series 0, which came out a **diamond** -- not the circle most
+#: implementations assume.  The rest of the cycle is from the specification and is
+#: **not measured**.
+DEFAULT_MARKER_CYCLE = ("diamond", "square", "triangle", "x", "star", "dot")
+
+#: Marker side when ``c:size`` is absent, in points (ECMA-376's default).
+DEFAULT_MARKER_SIZE_PT = 7.0
+
+#: Gap between a bar's edge and the *line box* of the data label beside it, in points.
+#: Measured 4.86 pt at 10 pt and 4.70 pt at 14 pt for ``outEnd``, and 4.91 pt at 10 pt for
+#: ``inBase`` -- so it is a fixed distance and **not** proportional to the font.
+DATA_LABEL_GAP_PT = 4.85
+
+#: The same for ``inEnd``, which sits closer to the bar's end.  One measurement, at 10 pt.
+DATA_LABEL_INNER_GAP_PT = 4.05
+
+#: Gap between a line chart's marker edge and its data label, in ems.  The label is
+#: centred on the point vertically and sits to its right -- ECMA's ``r`` default, which is
+#: what PowerPoint drew.  Measured once, with a 7 pt marker.
+DATA_LABEL_LINE_GAP_EM = 0.6
+
 #: The outline on a negative bar drawn hollow by ``c:invertIfNegative`` -- 0.75 pt.
 INVERTED_BAR_OUTLINE_EMU = 9525.0
 
@@ -507,6 +537,26 @@ class _Rect:
 
 
 @dataclass
+class _Labels:
+    """``c:dLbls`` resolved down to what actually gets printed."""
+
+    show_value: bool = False
+    show_category: bool = False
+    show_series: bool = False
+    show_percent: bool = False
+    position: str | None = None
+    number_format: str | None = None
+    font: "ChartFont | None" = None
+    color: m.ResolvedColor | None = None
+
+    @property
+    def anything(self) -> bool:
+        return (
+            self.show_value or self.show_category or self.show_series or self.show_percent
+        )
+
+
+@dataclass
 class _Series:
     name: str | None
     values: list[float | None]
@@ -521,6 +571,16 @@ class _Series:
     point_outlines: dict[int, m.Outline] = field(default_factory=dict)
     #: ``c:varyColors`` fills, one per point.  Not a `c:dPt`, so inversion still applies.
     vary_fills: list[m.Fill] = field(default_factory=list)
+    #: Line-chart only: the stroke along the points, and the marker drawn at each.
+    line: m.Outline | None = None
+    marker_symbol: str | None = None
+    marker_size: float = DEFAULT_MARKER_SIZE_PT
+    marker_fill: m.Fill | None = None
+    marker_outline: m.Outline | None = None
+    smooth: bool = False
+    labels: _Labels | None = None
+    #: ``c:dLbl`` overrides, keyed by point index.
+    point_labels: dict[int, _Labels] = field(default_factory=dict)
 
 
 class ChartBuilder:
@@ -576,7 +636,10 @@ class ChartBuilder:
         self._draw_background(plot_rect)
         self._draw_title()
         self._draw_gridlines(plot_rect, scale, value_axis)
-        self._draw_bars(plot_rect, series, categories, scale)
+        if self._is_line:
+            self._draw_lines(plot_rect, series, categories, scale)
+        else:
+            self._draw_bars(plot_rect, series, categories, scale)
         self._draw_axis_lines(plot_rect, scale, value_axis, category_axis)
         self._draw_labels(
             plot_rect,
@@ -588,6 +651,7 @@ class ChartBuilder:
             value_font,
             category_font,
         )
+        self._draw_data_labels(plot_rect, series, categories, scale)
         self._draw_legend(plot_rect, series)
 
         data = m.ChartData(
@@ -655,6 +719,14 @@ class ChartBuilder:
                     m.SolidFill(color=self.style.accents[index % len(self.style.accents)])
                     for index in range(len(item.values))
                 ]
+            if self._is_line:
+                self._read_line_style(item, source, index)
+            item.labels = self._read_labels(source.data_labels, self.plot.data_labels)
+            if source.data_labels is not None:
+                for point_index, override in source.data_labels.overrides.items():
+                    item.point_labels[point_index] = self._read_labels(
+                        override, source.data_labels, self.plot.data_labels
+                    )
             for point in source.data_points:
                 point_fill = self._resolve_fill(point.fill)
                 if point_fill is not None:
@@ -664,6 +736,93 @@ class ChartBuilder:
                     item.point_outlines[point.index] = point_outline
             out.append(item)
         return out
+
+    def _read_labels(self, *sources: c.SourceChartDataLabels | None) -> _Labels:
+        """``c:dLbls`` innermost first: a point's, then its series', then the group's.
+
+        Every flag is optional at every level, so each is resolved separately rather than
+        taking the first block whole.  ``c:delete`` on a point silences it outright.
+        """
+        present = [source for source in sources if source is not None]
+        if any(source.delete for source in present):
+            return _Labels()
+
+        def flag(name: str) -> bool:
+            for source in present:
+                value = getattr(source, name)
+                if value is not None:
+                    return value
+            return False
+
+        def first(name: str):
+            for source in present:
+                value = getattr(source, name)
+                if value:
+                    return value
+            return None
+
+        labels = _Labels(
+            show_value=flag("show_value"),
+            show_category=flag("show_category_name"),
+            show_series=flag("show_series_name"),
+            show_percent=flag("show_percent"),
+            position=first("position"),
+            number_format=first("number_format"),
+        )
+        if labels.anything:
+            labels.font = self._font(*(source.text_properties for source in present))
+            labels.color = self.style.color
+        return labels
+
+    @property
+    def _is_line(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) == "lineChart"
+
+    def _read_line_style(
+        self, item: _Series, source: c.SourceChartSeries, index: int
+    ) -> None:
+        """A line series' stroke and marker.
+
+        **A line's colour comes from its ``a:ln``, not from ``a:solidFill``.**  Measured:
+        a probe series stating only ``<a:solidFill><a:srgbClr val="F97316"/></a:solidFill>``
+        was drawn by PowerPoint in accent1, its bare fill ignored -- so a bar chart's
+        colour rule cannot simply be reused here.
+        """
+        outline = self._resolve_outline(source.outline)
+        if outline is not None and isinstance(outline.fill, m.SolidFill):
+            item.color = outline.fill.color
+        elif self.style.accents:
+            item.color = self.style.accents[index % len(self.style.accents)]
+        if outline is None or outline.fill is None:
+            outline = m.Outline(
+                width=DEFAULT_LINE_SERIES_WIDTH_EMU,
+                fill=m.SolidFill(color=item.color),
+            )
+        if outline.line_cap is None:
+            # Measured: PowerPoint strokes a line series with `1 J`, a round cap, whether
+            # or not the `a:ln` says so.
+            outline = replace(outline, line_cap="round")
+        item.line = outline
+
+        marker = source.marker
+        if marker is None:
+            # No `c:marker` at all: PowerPoint draws one anyway, from a per-series cycle.
+            item.marker_symbol = DEFAULT_MARKER_CYCLE[index % len(DEFAULT_MARKER_CYCLE)]
+        elif marker.symbol in (None, "auto"):
+            item.marker_symbol = DEFAULT_MARKER_CYCLE[index % len(DEFAULT_MARKER_CYCLE)]
+        elif marker.symbol != "none":
+            item.marker_symbol = marker.symbol
+        if marker is not None and marker.size:
+            item.marker_size = marker.size
+        item.marker_fill = (
+            self._resolve_fill(marker.fill) if marker is not None else None
+        ) or m.SolidFill(color=item.color)
+        item.marker_outline = (
+            self._resolve_outline(marker.outline) if marker is not None else None
+        ) or m.Outline(
+            width=DEFAULT_MARKER_OUTLINE_EMU, fill=m.SolidFill(color=item.color)
+        )
+        item.smooth = bool(source.smooth)
 
     def _series_color(self, fill: m.Fill | None, index: int) -> m.ResolvedColor:
         """One flat colour for the series, for its legend swatch and its fallback fill.
@@ -1127,6 +1286,74 @@ class ChartBuilder:
                 offset = centre - cluster / 2 + slot * step
                 self._bar(rect, item, point, offset, bar_size, start, end, scale, horizontal)
 
+    def _draw_lines(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """One polyline per series, with a marker at each point.
+
+        Points sit at the **centre of their category band**, exactly where a bar would be
+        -- measured on both the probe and the real line chart, whose `c:crossBetween` says
+        ``between``.  ``midCat`` would put them on the band edges; no chart measured here
+        uses it, so that spelling is **implemented from the schema and unverified**.
+        """
+        if not categories:
+            return
+        band = rect.width / len(categories)
+        midcat = self._cross_between() == "midCat"
+        blanks = self.chart.display_blanks_as or "gap"
+
+        for item in series:
+            points: list[tuple[float, float] | None] = []
+            for index in range(len(categories)):
+                value = _at(item.values, index)
+                if value is None:
+                    if blanks == "zero":
+                        value = 0.0
+                    elif blanks == "span":
+                        # "span" bridges the gap: the point is dropped and its neighbours
+                        # join up, which is what leaving it out of the run does.
+                        continue
+                    else:
+                        points.append(None)
+                        continue
+                x = (
+                    rect.left + index * (rect.width / max(len(categories) - 1, 1))
+                    if midcat
+                    else rect.left + (index + 0.5) * band
+                )
+                points.append((x, self._value_to_y(rect, value, scale)))
+
+            for run in _split_runs(points):
+                if len(run) > 1 and item.line is not None:
+                    self._polyline(run, item.line, smooth=item.smooth)
+            for point in points:
+                if point is not None and item.marker_symbol:
+                    self._marker(point, item)
+
+    def _cross_between(self) -> str:
+        axis = self._axis_for(1) or self._axis_of_kind("valAx")
+        return (axis.cross_between if axis is not None else None) or "between"
+
+    def _marker(self, centre: tuple[float, float], item: _Series) -> None:
+        """One marker, centred on its data point.
+
+        ``c:size`` is the marker's **diameter in points** -- a 7 pt circle measured 6.96 pt
+        across in the probe.
+        """
+        half = item.marker_size / 2
+        x, y = centre
+        box = _Rect(x - half, y - half, x + half, y + half)
+        self._rect(
+            box,
+            fill=item.marker_fill,
+            outline=item.marker_outline,
+            preset=_MARKER_PRESETS.get(item.marker_symbol or "", "ellipse"),
+        )
+
     def _bar(
         self,
         rect: _Rect,
@@ -1346,6 +1573,221 @@ class ChartBuilder:
                 box=box,
             )
 
+    def _draw_data_labels(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """Print `c:dLbls` beside each point.
+
+        Positions are measured against a probe: ``outEnd`` (the bar default) puts the
+        label's line box one :data:`DATA_LABEL_GAP_PT` beyond the bar's end, ``inBase``
+        the same distance inside its base, ``inEnd`` just inside its end, and ``ctr`` on
+        the bar's middle.  A line chart's default is ECMA's ``r``: centred on the point
+        vertically, one marker radius plus a gap to its right.
+        """
+        if not categories:
+            return
+        horizontal = (self.plot.bar_direction or "col") == "bar"
+        percent_totals = _percent_totals(series)
+
+        for order, item in enumerate(series):
+            for point in range(len(categories)):
+                labels = item.point_labels.get(point, item.labels)
+                if labels is None or not labels.anything or labels.font is None:
+                    continue
+                value = _at(item.values, point)
+                if value is None:
+                    continue
+                text = self._label_text(
+                    labels, item, categories, point, value, percent_totals
+                )
+                if not text:
+                    continue
+                geometry = self._label_anchor(
+                    rect, series, order, item, point, value, scale, horizontal
+                )
+                if geometry is None:
+                    continue
+                self._place_label(text, labels, geometry, horizontal)
+
+    def _label_text(
+        self,
+        labels: _Labels,
+        item: _Series,
+        categories: list[str],
+        point: int,
+        value: float,
+        percent_totals: list[float],
+    ) -> str:
+        """The label's lines, top to bottom.
+
+        Measured on the multi-part probe: PowerPoint stacks series name, category name and
+        value on **separate lines**, in that order, rather than joining them with the
+        ``c:separator`` a single-line label would use.
+        """
+        parts: list[str] = []
+        if labels.show_series and item.name:
+            parts.append(item.name)
+        if labels.show_category and point < len(categories) and categories[point]:
+            parts.append(categories[point])
+        if labels.show_percent:
+            total = percent_totals[point] if point < len(percent_totals) else 0.0
+            parts.append(format_number(value / total if total else 0.0, "0%"))
+        if labels.show_value:
+            parts.append(
+                format_number(value, labels.number_format or item.format_code)
+            )
+        return "\n".join(parts)
+
+    def _label_anchor(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        order: int,
+        item: _Series,
+        point: int,
+        value: float,
+        scale: tuple[float, float, float],
+        horizontal: bool,
+    ) -> "tuple[float, float, str] | None":
+        """``(x, y, placement)`` for one label, in frame points."""
+        if self._is_line:
+            band = rect.width / max(len(item.values), 1)
+            x = rect.left + (point + 0.5) * band
+            return x + item.marker_size / 2, self._value_to_y(rect, value, scale), "right"
+
+        box = self._bar_box(rect, series, order, item, point, value, scale, horizontal)
+        if box is None:
+            return None
+        position = (item.labels.position if item.labels else None) or "outEnd"
+        centre_x = (box.left + box.right) / 2
+        centre_y = (box.top + box.bottom) / 2
+        if horizontal:
+            # The bar runs sideways, so "end" is its far edge in x.
+            end, base = (box.right, box.left) if value >= 0 else (box.left, box.right)
+            if position == "ctr":
+                return centre_x, centre_y, "centre"
+            if position == "inEnd":
+                return end, centre_y, "inside-x"
+            if position == "inBase":
+                return base, centre_y, "outside-x-flip"
+            return end, centre_y, "outside-x"
+        end, base = (box.top, box.bottom) if value >= 0 else (box.bottom, box.top)
+        if position == "ctr":
+            return centre_x, centre_y, "centre"
+        if position == "inEnd":
+            return centre_x, end, "inside-y"
+        if position == "inBase":
+            return centre_x, base, "inside-base-y"
+        return centre_x, end, "outside-y"
+
+    def _place_label(
+        self,
+        text: str,
+        labels: _Labels,
+        geometry: tuple[float, float, str],
+        horizontal: bool,
+    ) -> None:
+        x, y, placement = geometry
+        font = labels.font
+        assert font is not None
+        box = font.box
+        lines = text.split("\n")
+        width = max((font.width(line) for line in lines), default=0.0) + box.size
+        block = box.line_height * len(lines)
+
+        if placement == "centre":
+            baseline = y + box.ink_centre - block + box.line_height
+            left, align = x - width / 2, "ctr"
+        elif placement == "outside-y":
+            baseline = y - DATA_LABEL_GAP_PT - box.descent
+            left, align = x - width / 2, "ctr"
+        elif placement == "inside-y":
+            baseline = y + DATA_LABEL_INNER_GAP_PT + box.ascent
+            left, align = x - width / 2, "ctr"
+        elif placement == "inside-base-y":
+            baseline = y - DATA_LABEL_GAP_PT - box.descent
+            left, align = x - width / 2, "ctr"
+        elif placement == "right":
+            baseline = y + box.ink_centre
+            left = x + DATA_LABEL_LINE_GAP_EM * box.size
+            align = "l"
+        elif placement == "inside-x":
+            baseline = y + box.ink_centre
+            left = x - DATA_LABEL_INNER_GAP_PT - width
+            align = "r"
+        elif placement == "outside-x-flip":
+            baseline = y + box.ink_centre
+            left = x + DATA_LABEL_GAP_PT
+            align = "l"
+        else:  # outside-x
+            baseline = y + box.ink_centre
+            left = x + DATA_LABEL_GAP_PT
+            align = "l"
+
+        # Multi-line labels stack upwards from the anchor, so the *last* line is the one
+        # nearest the bar; walk them in order from the first baseline.
+        first = baseline - box.line_height * (len(lines) - 1)
+        for index, line in enumerate(lines):
+            self._text(
+                self._label_body(line, font, align=align),
+                left=left,
+                width=width,
+                baseline=first + index * box.line_height,
+                box=box,
+            )
+
+    def _bar_box(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        order: int,
+        item: _Series,
+        point: int,
+        value: float,
+        scale: tuple[float, float, float],
+        horizontal: bool,
+    ) -> "_Rect | None":
+        """The rectangle one bar occupies, recomputed for the label that sits on it."""
+        categories = max((len(other.values) for other in series), default=0)
+        if categories <= 0:
+            return None
+        grouping = self.plot.grouping or "clustered"
+        stacked = grouping in ("stacked", "percentStacked")
+        band = (rect.height if horizontal else rect.width) / categories
+        gap_width = self.plot.gap_width
+        if gap_width is None:
+            gap_width = DEFAULT_GAP_WIDTH
+        slots = 1 if stacked else len(series)
+        size = band / max(slots + gap_width / 100.0, MIN_BAR_SLOTS)
+        overlap = self.plot.overlap if self.plot.overlap is not None else 0.0
+        step = size * (1.0 - overlap / 100.0)
+        cluster = size + step * (slots - 1)
+        band_start = (rect.top if horizontal else rect.left) + (
+            (categories - 1 - point) if horizontal else point
+        ) * band
+        centre = band_start + band / 2
+        offset = centre - cluster / 2 + (0 if stacked else order) * step
+
+        start = 0.0
+        if stacked:
+            for earlier in series[:order]:
+                earlier_value = _at(earlier.values, point) or 0.0
+                if (earlier_value >= 0) == (value >= 0):
+                    start += earlier_value
+        end = start + value
+
+        if horizontal:
+            x0 = self._value_to_x(rect, start, scale)
+            x1 = self._value_to_x(rect, end, scale)
+            return _Rect(min(x0, x1), offset, max(x0, x1), offset + size)
+        y0 = self._value_to_y(rect, start, scale)
+        y1 = self._value_to_y(rect, end, scale)
+        return _Rect(offset, min(y0, y1), offset + size, max(y0, y1))
+
     def _draw_legend(self, rect: _Rect, series: list[_Series]) -> None:
         position = self._legend_position()
         if position is None or not series:
@@ -1456,7 +1898,14 @@ class ChartBuilder:
             fill=m.SolidFill(color=m.ResolvedColor(hex=DEFAULT_AXIS_COLOR)),
         )
 
-    def _rect(self, box: _Rect, *, fill: m.Fill | None, outline: m.Outline | None) -> None:
+    def _rect(
+        self,
+        box: _Rect,
+        *,
+        fill: m.Fill | None,
+        outline: m.Outline | None,
+        preset: str = "rect",
+    ) -> None:
         self.elements.append(
             m.ShapeElement(
                 transform=m.Transform(
@@ -1465,8 +1914,49 @@ class ChartBuilder:
                     extent_width=box.width * EMU_PER_POINT,
                     extent_height=box.height * EMU_PER_POINT,
                 ),
-                geometry=m.PresetGeometry(preset="rect"),
+                geometry=m.PresetGeometry(preset=preset),
                 fill=fill,
+                outline=outline,
+            )
+        )
+
+    def _polyline(
+        self, points: list[tuple[float, float]], outline: m.Outline, *, smooth: bool
+    ) -> None:
+        """A series' line, as one custom-geometry path in the frame's own space.
+
+        Emitted as a single element rather than a segment per pair so the join between
+        segments is a real line join -- drawing them separately leaves a notch at every
+        vertex once the stroke is 2 pt wide, which is what a real chart uses.
+        """
+        left = min(x for x, _ in points)
+        top = min(y for _, y in points)
+        right = max(x for x, _ in points)
+        bottom = max(y for _, y in points)
+        width = max(right - left, 1e-6)
+        height = max(bottom - top, 1e-6)
+
+        local = [((x - left), (y - top)) for x, y in points]
+        commands = _path_commands(local, smooth)
+        self.elements.append(
+            m.ShapeElement(
+                transform=m.Transform(
+                    offset_x=left * EMU_PER_POINT,
+                    offset_y=top * EMU_PER_POINT,
+                    extent_width=width * EMU_PER_POINT,
+                    extent_height=height * EMU_PER_POINT,
+                ),
+                geometry=m.CustomGeometry(
+                    paths=[
+                        # The path's own space, which the renderer scales onto the shape
+                        # box: the commands below are in points, so the extents must be
+                        # too.  Giving them in EMU collapses the line to nothing.
+                        m.CustomGeometryPath(
+                            width=width, height=height, commands=commands
+                        )
+                    ]
+                ),
+                fill=m.NoFill(),
                 outline=outline,
             )
         )
@@ -1559,6 +2049,66 @@ def _labels_shown(axis: c.SourceChartAxis | None) -> bool:
     if axis.delete:
         return False
     return (axis.tick_label_position or "nextTo") != "none"
+
+
+#: ``c:symbol`` -> the preset geometry that draws it.  PowerPoint's marker shapes are
+#: simple enough that the preset catalogue already has every one.
+_MARKER_PRESETS = {
+    "circle": "ellipse",
+    "dot": "ellipse",
+    "square": "rect",
+    "diamond": "diamond",
+    "triangle": "triangle",
+    "x": "mathMultiply",
+    "plus": "mathPlus",
+    "star": "star5",
+    "dash": "rect",
+}
+
+
+def _split_runs(
+    points: list["tuple[float, float] | None"],
+) -> list[list[tuple[float, float]]]:
+    """Split a series at its blanks, so ``dispBlanksAs="gap"`` really leaves a gap."""
+    runs: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = []
+    for point in points:
+        if point is None:
+            if current:
+                runs.append(current)
+            current = []
+        else:
+            current.append(point)
+    if current:
+        runs.append(current)
+    return runs
+
+
+def _path_commands(points: list[tuple[float, float]], smooth: bool) -> str:
+    """SVG path data for one run of points, straight or smoothed.
+
+    ``c:smooth`` is drawn as a Catmull-Rom spline converted to cubic Béziers, which is
+    what PowerPoint's own curve through the points looks like; the probe's smoothed line
+    has control points that are *not* collinear with its vertices, so it is a real spline
+    and not a polyline.  The exact tension PowerPoint uses was **not** measured.
+    """
+    parts = [f"M {points[0][0]:.4f} {points[0][1]:.4f}"]
+    if not smooth or len(points) < 3:
+        for x, y in points[1:]:
+            parts.append(f"L {x:.4f} {y:.4f}")
+        return " ".join(parts)
+
+    for index in range(len(points) - 1):
+        p0 = points[index - 1] if index > 0 else points[index]
+        p1 = points[index]
+        p2 = points[index + 1]
+        p3 = points[index + 2] if index + 2 < len(points) else p2
+        c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
+        c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
+        parts.append(
+            f"C {c1[0]:.4f} {c1[1]:.4f} {c2[0]:.4f} {c2[1]:.4f} {p2[0]:.4f} {p2[1]:.4f}"
+        )
+    return " ".join(parts)
 
 
 def _at(values: list[float | None], index: int) -> float | None:
