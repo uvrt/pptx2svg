@@ -789,9 +789,10 @@ geometry. Both would bite on a real deck.
 
 #### What is left here
 
-The 134 hand-written presets are *approximations*, and 85 of them differ from the
-specification by more than 2% of their silhouette. 27 were promoted after checking each
-side by side; the rest are ranked and waiting. Regenerate the ranking with the harness
+The hand-written presets are *approximations*, and 85 of them differed from the
+specification by more than 2% of their silhouette. 37 have been promoted — 27 after
+checking each side by side, then the ten stars after asking PowerPoint directly; the rest
+are ranked and waiting. Regenerate the ranking with the harness
 described in the Phase 5.1 commits, or just add a name to `SPEC_DRIVEN` and re-run the
 tool — promotion is one line plus a visual check.
 
@@ -800,15 +801,42 @@ Worst offenders still hand-drawn, by silhouette divergence:
 | Divergence | Presets |
 | --- | --- |
 | 0.6–0.7 | `bentUpArrow`, `uturnArrow`, `leftUpArrow`, `bentArrow` |
-| 0.3–0.5 | `star4`–`star32`, `quadArrow`, `leftRightUpArrow`, `leftRightArrow`, `irregularSeal1/2`, `flowChartOr`, `flowChartSummingJunction`, `chevron`, `halfFrame` |
+| 0.3–0.5 | `quadArrow`, `leftRightUpArrow`, `leftRightArrow`, `irregularSeal1/2`, `flowChartOr`, `flowChartSummingJunction`, `chevron`, `halfFrame` |
 | 0.2–0.3 | `cloud`, `notchedRightArrow`, `stripedRightArrow`, `ribbon`, `ribbon2`, `flowChartMultidocument`, `flowChartPunchedTape`, `leftArrow`, `rightArrow`, `cloudCallout`, `octagon` |
 | 0.1–0.2 | `heart`, `wave`, `corner`, `pentagon`, `trapezoid`, `parallelogram`, `plus`, `hexagon`, `diagStripe`, four more flowchart shapes, `cube`, `can` |
 
-**The stars are held back deliberately.** ECMA-376's `star10` defaults to an inner radius
-85% of the outer, which renders as a barely-pointed decagon and does not look like
-PowerPoint's. Either the spec, our approximation, or my memory is wrong, and without the
-oracle there is no way to tell. **This is the single most useful thing to put in front of
-PowerPoint.**
+**The stars were held back, and asking PowerPoint settled it against me.** The doubt was
+that ECMA-376 gives `star10` an inner radius 85% of the outer, which renders as a
+barely-pointed decagon and did not look like PowerPoint's. It is exactly PowerPoint's. A
+probe deck of all ten at their default adjustments, exported to PDF by PowerPoint 16.106
+and scored by silhouette overlap:
+
+| star | hand-written | specification |
+| --- | --- | --- |
+| `star4` | 0.466 | **0.992** |
+| `star5` | 0.686 | **0.984** |
+| `star6` | 0.750 | **0.994** |
+| `star7` | 0.508 | **0.991** |
+| `star8` | 0.507 | **0.989** |
+| `star10` | 0.424 | **0.999** |
+| `star12` | 0.505 | **0.995** |
+| `star16` | 0.506 | **0.991** |
+| `star24` | 0.505 | **0.985** |
+| `star32` | 0.507 | **0.975** |
+
+The specification wins in all ten; the residual is antialiasing along the silhouette
+edge. All ten are now compiled from it.
+
+The hand-written generator used a single inner ratio of 0.38 for every star but `star6`,
+a value only correct for `star5`, so every star above five points came out far too spiky.
+What it missed is that a star gets *shallower* as it gains points — 0.25, 0.284, 0.537,
+0.619, then 0.75 from `star8` upward, with `star10` an outlier at 0.817. A test pins that
+pattern, so a regression to any fixed ratio moves nine of the ten and fails.
+
+**The wider lesson is about the doubt, not the stars.** "That does not look like what
+PowerPoint draws" was, on this occasion, worth nothing against a measurement — and the
+remaining 48 entries in the table above were ranked by the same kind of eye. Measure them
+against the oracle before promoting or rejecting any of them.
 
 Shapes that should *stay* hand-written regardless: `rect`, `ellipse`, `line`, `roundRect`
 and friends emit a native `<rect>`/`<ellipse>`/`<line>`, which is smaller and strokes
