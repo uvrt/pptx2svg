@@ -107,22 +107,6 @@ def _hexagon(w, h, adj):
 
 
 
-def _right_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 50000) * h
-    head_l = _adj(adj, "adj2", 50000) * w
-    top = (h - head_w) / 2
-    bottom = h - top
-    shaft = w - head_l
-    return f'<polygon points="{_pts((0, top), (shaft, top), (shaft, 0), (w, h/2), (shaft, h), (shaft, bottom), (0, bottom))}"/>'
-
-
-def _left_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 50000) * h
-    head_l = _adj(adj, "adj2", 50000) * w
-    top = (h - head_w) / 2
-    bottom = h - top
-    return f'<polygon points="{_pts((head_l, top), (head_l, 0), (0, h/2), (head_l, h), (head_l, bottom), (w, bottom), (w, top))}"/>'
-
 
 def _up_arrow(w, h, adj):
     head_w = _adj(adj, "adj1", 50000) * w
@@ -199,13 +183,6 @@ def _irregular_seal2(w, h, adj):
 # --------------------------------------------------------------------------------------
 
 
-def _left_right_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 50000) * h
-    head_l = _adj(adj, "adj2", 50000) * w
-    top = (h - head_w) / 2
-    bottom = h - top
-    return f'<polygon points="{_pts((head_l, top), (head_l, 0), (0, h/2), (head_l, h), (head_l, bottom), (w - head_l, bottom), (w - head_l, h), (w, h/2), (w - head_l, 0), (w - head_l, top))}"/>'
-
 
 def _up_down_arrow(w, h, adj):
     head_w = _adj(adj, "adj1", 50000) * w
@@ -215,34 +192,6 @@ def _up_down_arrow(w, h, adj):
     return f'<polygon points="{_pts((left, head_l), (0, head_l), (w/2, 0), (w, head_l), (right, head_l), (right, h - head_l), (w, h - head_l), (w/2, h), (0, h - head_l), (left, h - head_l))}"/>'
 
 
-def _notched_right_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 50000) * h
-    head_l = _adj(adj, "adj2", 50000) * w
-    top = (h - head_w) / 2
-    bottom = h - top
-    shaft = w - head_l
-    notch = head_l * 0.5
-    return f'<polygon points="{_pts((0, top), (shaft, top), (shaft, 0), (w, h/2), (shaft, h), (shaft, bottom), (0, bottom), (notch, h/2))}"/>'
-
-
-def _striped_right_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 50000) * h
-    head_l = _adj(adj, "adj2", 50000) * w
-    top = (h - head_w) / 2
-    bottom = h - top
-    shaft = w - head_l
-    sw = w * 0.05
-    return (
-        f'<path d="M 0 {_n(top)} L {_n(sw)} {_n(top)} L {_n(sw)} {_n(bottom)} L 0 {_n(bottom)} Z '
-        f'M {_n(sw*1.5)} {_n(top)} L {_n(sw*2.5)} {_n(top)} L {_n(sw*2.5)} {_n(bottom)} L {_n(sw*1.5)} {_n(bottom)} Z '
-        f'M {_n(sw*3)} {_n(top)} L {_n(shaft)} {_n(top)} L {_n(shaft)} 0 L {_n(w)} {_n(h/2)} '
-        f'L {_n(shaft)} {_n(h)} L {_n(shaft)} {_n(bottom)} L {_n(sw*3)} {_n(bottom)} Z"/>'
-    )
-
-
-def _chevron(w, h, adj):
-    offset = _adj(adj, "adj", 50000) * w
-    return f'<polygon points="{_pts((0, 0), (w - offset, 0), (w, h/2), (w - offset, h), (0, h), (offset, h/2))}"/>'
 
 
 def _home_plate(w, h, adj):
@@ -250,75 +199,7 @@ def _home_plate(w, h, adj):
     return f'<polygon points="{_pts((0, 0), (w - offset, 0), (w, h/2), (w - offset, h), (0, h))}"/>'
 
 
-def _left_right_up_arrow(w, h, adj):
-    side = min(w, h)
-    head_w = _adj(adj, "adj1", 25000) * side
-    head_l = _adj(adj, "adj2", 25000) * side
-    body_w = _adj(adj, "adj3", 25000) * side
-    cx = w / 2
-    bh = body_w / 2
-    body_mid = h - head_l - body_w
-    arm_y = h / 2 + body_mid / 2
-    return f'<polygon points="{_pts((cx, 0), (cx + head_w/2, head_l), (cx + bh, head_l), (cx + bh, body_mid), (w - head_l, body_mid), (w - head_l, arm_y - head_w/2), (w, arm_y), (w - head_l, arm_y + head_w/2), (w - head_l, body_mid + body_w), (cx - bh, body_mid + body_w), (head_l, body_mid + body_w), (head_l, arm_y + head_w/2), (0, arm_y), (head_l, arm_y - head_w/2), (head_l, body_mid), (cx - bh, body_mid), (cx - bh, head_l), (cx - head_w/2, head_l))}"/>'
 
-
-def _quad_arrow(w, h, adj):
-    side = min(w, h)
-    head_w = _adj(adj, "adj1", 22500) * side
-    head_l = _adj(adj, "adj2", 22500) * side
-    body_w = _adj(adj, "adj3", 11250) * side
-    cx, cy = w / 2, h / 2
-    bh = body_w / 2
-    return f'<polygon points="{_pts((cx, 0), (cx + head_w/2, head_l), (cx + bh, head_l), (cx + bh, cy - bh), (w - head_l, cy - bh), (w - head_l, cy - head_w/2), (w, cy), (w - head_l, cy + head_w/2), (w - head_l, cy + bh), (cx + bh, cy + bh), (cx + bh, h - head_l), (cx + head_w/2, h - head_l), (cx, h), (cx - head_w/2, h - head_l), (cx - bh, h - head_l), (cx - bh, cy + bh), (head_l, cy + bh), (head_l, cy + head_w/2), (0, cy), (head_l, cy - head_w/2), (head_l, cy - bh), (cx - bh, cy - bh), (cx - bh, head_l), (cx - head_w/2, head_l))}"/>'
-
-
-def _bent_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 25000) * h
-    head_l = _adj(adj, "adj2", 25000) * w
-    body_w = _adj(adj, "adj3", 25000) * h
-    shaft = w - head_l
-    top = head_w / 2 - body_w / 2
-    bottom = head_w / 2 + body_w / 2
-    return f'<polygon points="{_pts((shaft, top), (shaft, 0), (w, head_w/2), (shaft, head_w), (shaft, bottom), (body_w, bottom), (body_w, h), (0, h), (0, h - body_w))}"/>'
-
-
-def _bend_up_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 25000) * w
-    head_l = _adj(adj, "adj2", 25000) * h
-    body_w = _adj(adj, "adj3", 25000) * w
-    cx = w - head_w / 2
-    left = cx - body_w / 2
-    right = cx + body_w / 2
-    return f'<polygon points="{_pts((cx - head_w/2, head_l), (cx, 0), (cx + head_w/2, head_l), (right, head_l), (right, h - body_w), (body_w, h - body_w), (body_w, h), (0, h), (0, h - body_w), (left, h - body_w), (left, head_l))}"/>'
-
-
-def _left_up_arrow(w, h, adj):
-    side = min(w, h)
-    head_w = _adj(adj, "adj1", 25000) * side
-    head_l = _adj(adj, "adj2", 25000) * side
-    body_w = _adj(adj, "adj3", 25000) * side
-    bh = body_w / 2
-    top_cx = w - head_w / 2
-    left_cy = h - head_w / 2
-    return f'<polygon points="{_pts((top_cx, 0), (top_cx + head_w/2, head_l), (top_cx + bh, head_l), (top_cx + bh, left_cy - bh), (head_l, left_cy - bh), (head_l, left_cy - head_w/2), (0, left_cy), (head_l, left_cy + head_w/2), (head_l, left_cy + bh), (top_cx - bh, left_cy + bh), (top_cx - bh, head_l), (top_cx - head_w/2, head_l))}"/>'
-
-
-def _uturn_arrow(w, h, adj):
-    head_w = _adj(adj, "adj1", 25000) * w
-    head_l = _adj(adj, "adj2", 25000) * h
-    body_w = _adj(adj, "adj3", 25000) * w
-    arc_r = w * 0.35
-    cx = w / 2
-    arrow_start = h - head_l
-    body_right = w - (head_w / 2 - body_w / 2)
-    body_left = w - (head_w / 2 + body_w / 2)
-    return (
-        f'<path d="M {_n(w - head_w)} {_n(arrow_start)} L {_n(w - head_w/2)} {_n(h)} '
-        f'L {_n(w)} {_n(arrow_start)} L {_n(body_right)} {_n(arrow_start)} L {_n(body_right)} {_n(arc_r)} '
-        f'A {_n(arc_r)} {_n(arc_r)} 0 0 0 {_n(body_w)} {_n(arc_r)} L {_n(body_w)} {_n(arrow_start)} '
-        f'L 0 {_n(arrow_start)} L 0 {_n(arc_r)} A {_n(cx)} {_n(cx)} 0 0 1 {_n(body_left)} {_n(arc_r)} '
-        f'L {_n(body_left)} {_n(arrow_start)} Z"/>'
-    )
 
 
 # --------------------------------------------------------------------------------------
@@ -828,29 +709,6 @@ def _double_wave(w, h, adj):
     )
 
 
-def _ribbon(w, h, adj):
-    tab_h = _adj(adj, "adj1", 16667) * h
-    tab_w = _adj(adj, "adj2", 50000) * w
-    fold = tab_w * 0.3
-    return (
-        f'<path d="M 0 {_n(tab_h)} L {_n(fold)} {_n(tab_h*1.5)} L {_n(fold)} {_n(h)} '
-        f'L {_n(tab_w)} {_n(h-tab_h)} L {_n(w-tab_w)} {_n(h-tab_h)} L {_n(w-fold)} {_n(h)} '
-        f'L {_n(w-fold)} {_n(tab_h*1.5)} L {_n(w)} {_n(tab_h)} L {_n(w)} 0 L {_n(w-tab_w)} 0 '
-        f'L {_n(w-tab_w)} {_n(tab_h)} L {_n(tab_w)} {_n(tab_h)} L {_n(tab_w)} 0 L 0 0 Z"/>'
-    )
-
-
-def _ribbon2(w, h, adj):
-    tab_h = _adj(adj, "adj1", 16667) * h
-    tab_w = _adj(adj, "adj2", 50000) * w
-    fold = tab_w * 0.3
-    return (
-        f'<path d="M 0 {_n(h-tab_h)} L {_n(fold)} {_n(h - tab_h*1.5)} L {_n(fold)} 0 '
-        f'L {_n(tab_w)} {_n(tab_h)} L {_n(w-tab_w)} {_n(tab_h)} L {_n(w-fold)} 0 '
-        f'L {_n(w-fold)} {_n(h - tab_h*1.5)} L {_n(w)} {_n(h-tab_h)} L {_n(w)} {_n(h)} '
-        f'L {_n(w-tab_w)} {_n(h)} L {_n(w-tab_w)} {_n(h-tab_h)} L {_n(tab_w)} {_n(h-tab_h)} '
-        f'L {_n(tab_w)} {_n(h)} L 0 {_n(h)} Z"/>'
-    )
 
 
 # --------------------------------------------------------------------------------------
@@ -1103,23 +961,10 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "irregularSeal1": _irregular_seal1,
     "irregularSeal2": _irregular_seal2,
     # Arrows
-    "rightArrow": _right_arrow,
-    "leftArrow": _left_arrow,
     "upArrow": _up_arrow,
     "downArrow": _down_arrow,
-    "leftRightArrow": _left_right_arrow,
     "upDownArrow": _up_down_arrow,
-    "notchedRightArrow": _notched_right_arrow,
-    "stripedRightArrow": _striped_right_arrow,
-    "chevron": _chevron,
     "homePlate": _home_plate,
-    "leftRightUpArrow": _left_right_up_arrow,
-    "quadArrow": _quad_arrow,
-    "bentArrow": _bent_arrow,
-    "bentUpArrow": _bend_up_arrow,
-    "bendUpArrow": _bend_up_arrow,
-    "leftUpArrow": _left_up_arrow,
-    "uturnArrow": _uturn_arrow,
     # Connectors
     "straightConnector1": _straight_connector1,
     # Flowchart
@@ -1187,14 +1032,21 @@ PRESET_GEOMETRIES: dict[str, Generator] = {
     "teardrop": _teardrop,
     "wave": _wave,
     "doubleWave": _double_wave,
-    "ribbon": _ribbon,
-    "ribbon2": _ribbon2,
 }
 
 
 # Specification-derived presets are registered last so that, if a name ever appears in
 # both tables, the exact geometry wins over the hand-written approximation.
 PRESET_GEOMETRIES.update({name: _spec_generator(name) for name in SPEC_PRESETS})
+
+#: Misspellings that appear in real files, pointed at the shape they meant.  Resolving
+#: them here rather than giving them their own entry means an alias cannot drift away
+#: from the geometry it aliases -- which it did: promoting `bentUpArrow` to the
+#: specification left `bendUpArrow` still drawing the old approximation.
+PRESET_ALIASES = {"bendUpArrow": "bentUpArrow"}
+PRESET_GEOMETRIES.update(
+    {alias: PRESET_GEOMETRIES[target] for alias, target in PRESET_ALIASES.items()}
+)
 
 def preset_geometry_svg(preset: str, width: float, height: float, adjust: dict) -> str:
     """One SVG element for a preset shape; unknown presets fall back to a rectangle."""

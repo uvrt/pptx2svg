@@ -132,6 +132,21 @@ SPEC_DRIVEN = [
     "star16",
     "star24",
     "star32",
+    # Arrows and ribbons: measured against PowerPoint at two aspect ratios, ours 0.32-0.78, the specification 0.99-1.00.
+    "bentArrow",
+    "bentUpArrow",
+    "chevron",
+    "leftArrow",
+    "leftRightArrow",
+    "leftRightUpArrow",
+    "leftUpArrow",
+    "notchedRightArrow",
+    "quadArrow",
+    "ribbon",
+    "ribbon2",
+    "rightArrow",
+    "stripedRightArrow",
+    "uturnArrow",
 ]
 
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
