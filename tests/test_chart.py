@@ -1758,7 +1758,9 @@ def test_the_real_line_chart_renders():
     chart = charts[0]
     assert len(chart.chart.series) == 3
     assert len(_polylines(chart.children)) == 3
-    assert len(_markers(chart.children)) == 9
+    # Nine data points, plus one more marker per series in the legend: a line chart's
+    # legend key is a rule with the series' marker on its midpoint, not a swatch.
+    assert len(_markers(chart.children)) == 9 + 3
 
 
 # -- Data labels -----------------------------------------------------------------------
@@ -3010,3 +3012,312 @@ def test_labels_that_float_inside_the_plot_do_not_turn():
         if isinstance(child, m.ShapeElement) and child.text_body is not None
     }
     assert set(cats) <= labels
+
+
+# -- Wrapped category labels -------------------------------------------------------------
+#
+# Three probe decks of 57 bar charts in the same 220.4724 x 181.1024 pt frame as the
+# rotation sweep, five categories each, exported by PowerPoint 16.106 and read back out of
+# the PDF as exact vector coordinates.  The category labels are pinned to Arial except
+# where a row names another face, because the question these ask is what PowerPoint does
+# with a *face's* line box and Aptos alone cannot answer that.
+#
+# What they establish, in order of how much they change:
+#
+# * **Wrapping comes before rotation.**  `MMM MM` is 44.43 pt on a 37.761 pt band and came
+#   back level on two lines; `MMMMM` is 41.65 pt on the same band and turned.  The rule is
+#   the widest *unbreakable token*, not the widest label.
+# * **A label breaks at a space and nowhere else.**  Hyphen, slash, comma, underscore, en
+#   dash and CJK are all not break opportunities; U+00A0 is.
+# * **The band grows by one line box per extra line**, measured on a four-rung ladder in
+#   five faces.
+# * **One label that must turn turns all of them**, wrappable neighbours included.
+
+#: The band every chart in these decks has, read off the axis rule: 188.807 / 5.
+WRAP_BAND_PT = 37.761
+
+
+def wrap_chart_xml(cats, face="Arial", size=10.0, values=None):
+    """The rotation sweep's chart with its label face and size pinned."""
+    text = (
+        f"<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz='{int(size * 100)}'>"
+        f"<a:latin typeface='{face}'/><a:cs typeface='{face}'/></a:defRPr></a:pPr>"
+        "</a:p></c:txPr>"
+    )
+    value_text = text.replace(f"sz='{int(size * 100)}'", "sz='1000'")
+    body = rotation_chart_xml(cats, values=values)
+    body = body.replace("<c:lblOffset val='100'/>", f"{text}<c:lblOffset val='100'/>")
+    return body.replace(
+        "<c:crossBetween val='between'/>", f"{value_text}<c:crossBetween val='between'/>"
+    )
+
+
+def _wrap_probe(cats, **kwargs):
+    return _build(wrap_chart_xml(cats, **kwargs), width=220.4724, height=181.1024)[0]
+
+
+def _label_rows(children):
+    """Every level category label's text, grouped by baseline, top row first.
+
+    Taken as "below the plot", which is what separates a category label from a value one
+    without having to know either font.
+    """
+    floor = _pt(_plot_bottom(children))
+    rows: dict[float, list[str]] = {}
+    for child in children:
+        if not isinstance(child, m.ShapeElement) or child.text_body is None:
+            continue
+        if child.transform.rotation or _pt(child.transform.offset_y) < floor:
+            continue
+        text = "".join(run.text for p in child.text_body.paragraphs for run in p.runs)
+        rows.setdefault(round(_pt(child.transform.offset_y), 3), []).append(text)
+    return [rows[key] for key in sorted(rows)]
+
+
+#: name -> (categories, the widest unbreakable token in pt, does PowerPoint turn them).
+#: Every row is one probe chart.  The two that bracket the threshold are `token-under` and
+#: `token-over`: 37.22 pt wrapped and 38.33 pt turned on a 37.761 pt band, which puts the
+#: ratio inside (0.9857, 1.0151] -- and one band width is the only value that is also
+#: inside the unbroken sweep's (0.972, 1.024].
+WRAP_DECISION = {
+    # Wrapping wins whenever breaking the label saves it.
+    "space-break": (("MMM MM",) * 5, 24.99, False),
+    "three-lines": (("MM MM MM MM MM MM",) * 5, 16.66, False),
+    "just-over": (("MMMM m",) * 5, 33.32, False),
+    "just-under": (("MMM m",) * 5, 24.99, False),
+    "one-wraps": (("Aa", "Bb", "MMM MM", "Cc", "Dd"), 24.99, False),
+    "widest-wraps": (("MMM MM",) * 4 + ("MMMM MMMM",), 33.32, False),
+    "token-under": (("xxxxxxxi M",) * 5, 37.22, False),
+    # A no-break space breaks.  It is the one character here that surprises.
+    "nbsp": (("MMM\u00a0MM",) * 5, 24.99, False),
+    # Rotation is what is left when breaking does not help.
+    "single-token": (("MMMMM",) * 5, 41.65, True),
+    "token-over": (("HHHHHi M",) * 5, 38.33, True),
+    "all-tokens-wide": (("MMMMM MMMMM",) * 5, 41.65, True),
+    "one-rotates": (("Aa", "Bb", "MMMMM", "Cc", "Dd"), 41.65, True),
+    # The case that separates "widest token" from every other candidate rule: two spaces
+    # in it, and PowerPoint turned it anyway because the middle token is 99.96 pt.
+    "wide-token-and-space": (("Fiscal MMMMMMMMMMMM 2012",) * 5, 99.96, True),
+    # Not break opportunities.
+    "hyphen": (("MMM-MM",) * 5, 44.98, True),
+    "slash": (("MMM/MM",) * 5, 44.43, True),
+    "comma": (("MMM,MM",) * 5, 44.43, True),
+    "underscore": (("MMM_MM",) * 5, 47.21, True),
+    "en-dash": (("MMM–MM",) * 5, 47.21, True),
+    "cjk": (("プラットフォーム",) * 5, 80.00, True),
+}
+
+
+@pytest.mark.parametrize("name", list(WRAP_DECISION))
+def test_a_label_is_broken_before_it_is_turned(name):
+    """Twenty probes: PowerPoint wraps where it can and turns only where it cannot."""
+    cats, token, turns = WRAP_DECISION[name]
+    children = _wrap_probe(cats)
+    assert bool(_turned(children)) is turns, (
+        f"{name}: widest token {token:.2f} pt on a {WRAP_BAND_PT:.2f} pt band, "
+        f"{token / WRAP_BAND_PT:.4f} of it"
+    )
+
+
+def test_one_label_that_must_turn_turns_the_ones_that_could_have_wrapped():
+    """Rotation is a decision for the axis, not for each label.
+
+    Four ``MMM MM`` -- which wrap on their own -- beside one ``MMMMM``, and PowerPoint
+    turned all five, none of them broken.
+    """
+    children = _wrap_probe(("MMM MM", "MMM MM", "MMMMM", "MMM MM", "MMM MM"))
+    turned = _turned(children)
+    assert len(turned) == 5
+    assert {shape.transform.rotation for shape in turned} == {-45.0}
+    assert _label_rows(children) == []
+
+
+#: name -> (face, categories, lines PowerPoint used, the band it reserved in pt).  One
+#: token per line by construction, so the token count is the line count.  Read off the
+#: axis rule against the frame's foot.
+WRAP_LADDER = {
+    "arial-1": ("Arial", ("MMM",) * 5, 1, 23.712),
+    "arial-2": ("Arial", ("MMM MMM",) * 5, 2, 35.212),
+    "arial-3": ("Arial", ("MMM MMM MMM",) * 5, 3, 46.712),
+    "arial-4": ("Arial", ("MMM MMM MMM MMM",) * 5, 4, 58.212),
+    "calibri-1": ("Calibri", ("MMM",) * 5, 1, 25.052),
+    "calibri-2": ("Calibri", ("MMM MMM",) * 5, 2, 37.257),
+    "calibri-3": ("Calibri", ("MMM MMM MMM",) * 5, 3, 49.462),
+    "calibri-4": ("Calibri", ("MMM MMM MMM MMM",) * 5, 4, 61.667),
+    "aptos-1": ("Aptos", ("MMM",) * 5, 1, 24.965),
+    "aptos-2": ("Aptos", ("MMM MMM",) * 5, 2, 37.170),
+    "aptos-3": ("Aptos", ("MMM MMM MMM",) * 5, 3, 49.375),
+    "aptos-4": ("Aptos", ("MMM MMM MMM MMM",) * 5, 4, 61.580),
+    "times-1": ("Times New Roman", ("MMM",) * 5, 1, 23.515),
+    "times-2": ("Times New Roman", ("MMM MMM",) * 5, 2, 34.590),
+    "times-3": ("Times New Roman", ("MMM MMM MMM",) * 5, 3, 45.665),
+    "times-4": ("Times New Roman", ("MMM MMM MMM MMM",) * 5, 4, 56.740),
+    "courier-1": ("Courier New", ("MMMMM",) * 5, 1, 23.380),
+    "courier-2": ("Courier New", ("MMMMM MMMMM",) * 5, 2, 34.710),
+    "courier-3": ("Courier New", ("MMMMM MMMMM MMMMM",) * 5, 3, 46.040),
+    "courier-4": ("Courier New", ("MMMMM MMMMM MMMMM MMMMM",) * 5, 4, 57.370),
+}
+
+#: Every face here but Arial lands inside this at every rung.  What it allows is the level
+#: band's own pre-existing bias, which runs from 0.11 pt light on Arial to 0.60 pt heavy on
+#: Courier New and was fitted long before this sweep; what the test is really asserting is
+#: that the *slope* is right, which is why the residual is flat across all four rungs
+#: instead of fanning out.
+WRAP_BAND_TOLERANCE_PT = 0.65
+
+#: How far short of PowerPoint our band falls for each line after the first, in Arial only.
+#: This is Arial's ``hhea`` lineGap -- 67 units of 2048, 0.0327 em -- which PowerPoint adds
+#: to the line box and :mod:`pptx2svg.text.metrics` does not carry.  See
+#: ``_bottom_label_band`` for why adding it is not the improvement it looks like.
+ARIAL_LINE_GAP_PT_PER_LINE = 0.328
+
+
+@pytest.mark.parametrize("name", list(WRAP_LADDER))
+def test_the_wrapped_band_grows_by_one_line_box_a_line(name):
+    """Four rungs in five faces, and the slope is the face's own line box.
+
+    PowerPoint's band grew by exactly the same amount from one line to two, two to three
+    and three to four in every face, so the residual is flat rather than fanning -- which
+    is what says the per-line term is right and the constant is the level band's older fit.
+    """
+    face, cats, lines, expected = WRAP_LADDER[name]
+    children = _wrap_probe(cats, face=face)
+    assert not _turned(children), f"{name} turned; it should have wrapped"
+    assert len(_label_rows(children)) == lines
+    allowance = WRAP_BAND_TOLERANCE_PT + (
+        ARIAL_LINE_GAP_PT_PER_LINE * (lines - 1) if face == "Arial" else 0.0
+    )
+    assert _bottom_inset(children) == pytest.approx(expected, abs=allowance)
+
+
+def test_arial_is_short_by_its_line_gap_and_nothing_else():
+    """The one face the line box alone does not fit, pinned so it cannot drift.
+
+    Arial is the only one of the five probe faces whose ``hhea`` lineGap is not zero, and
+    PowerPoint adds it: 67 units of 2048 is 0.328 pt at 10 pt, which is exactly how far our
+    band falls short per extra line.  Recorded rather than corrected -- the substitute we
+    would read a lineGap from carries 87 where Office's own ``times.ttf`` carries 0, so
+    adding it would trade this error for a bigger one on Times New Roman.
+    """
+    for name in ("arial-1", "arial-2", "arial-3", "arial-4"):
+        _, cats, lines, expected = WRAP_LADDER[name]
+        residual = _bottom_inset(_wrap_probe(cats)) - expected
+        predicted = 0.110 - ARIAL_LINE_GAP_PT_PER_LINE * (lines - 1)
+        assert residual == pytest.approx(predicted, abs=0.05), name
+
+
+def test_the_label_needing_the_most_lines_sets_the_band():
+    """One three-line label among four that fit lifts the whole band to three lines.
+
+    Measured: the band came out 46.712 pt, the same as a chart where every label needed
+    three lines, and the four short ones sat on the *first* row with nothing under them.
+    """
+    cats = ("MM MM", "MM MM", "MM MM MM MM MM MM", "MM MM", "MM MM")
+    children = _wrap_probe(cats)
+    assert _bottom_inset(children) == pytest.approx(
+        46.712, abs=WRAP_BAND_TOLERANCE_PT + 2 * ARIAL_LINE_GAP_PT_PER_LINE
+    )
+    rows = _label_rows(children)
+    assert [len(row) for row in rows] == [5, 1, 1]
+
+
+def test_a_wrapped_block_hangs_from_the_top_like_a_one_line_label():
+    """Adding lines does not move the first baseline; the lines are added below it.
+
+    The Arial ladder put the first baseline 15.03, 15.05 and 15.07 pt under the axis at
+    one, two and three lines -- one number inside PowerPoint's 0.12 pt output grid.
+    """
+    tops = [
+        _first_label_top(_wrap_probe(cats))
+        for cats in (("MMM",) * 5, ("MMM MMM",) * 5, ("MMM MMM MMM",) * 5)
+    ]
+    assert tops[1] == pytest.approx(tops[0], abs=0.01)
+    assert tops[2] == pytest.approx(tops[0], abs=0.01)
+
+
+def _first_label_top(children):
+    """Where the first row of the category-label block sits, relative to the plot."""
+    floor = _pt(_plot_bottom(children))
+    return min(
+        _pt(child.transform.offset_y) - floor
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and child.text_body is not None
+        and _pt(child.transform.offset_y) >= floor
+    )
+
+
+def test_the_band_stops_growing_where_the_measurements_stop():
+    """Six lines is the last rung PowerPoint laid out; past it, it stops wrapping.
+
+    An eight-token label came back on **two** lines, each four band widths wide and
+    overlapping its neighbours, in a 35.212 pt band -- and a twelve- and a twenty-four-token
+    label did exactly the same.  No rule reproduces the linear part and that collapse, so
+    the band stops where the ladder stops, and this test records how far the disagreement
+    goes rather than leaving it latent.
+    """
+    six = _bottom_inset(_wrap_probe((" ".join(["MMM"] * 6),) * 5))
+    assert six == pytest.approx(
+        81.212, abs=WRAP_BAND_TOLERANCE_PT + 5 * ARIAL_LINE_GAP_PT_PER_LINE
+    )
+    for tokens in (8, 12, 24):
+        children = _wrap_probe((" ".join(["MMM"] * tokens),) * 5)
+        assert len(_label_rows(children)) == 6
+        # PowerPoint reserved 35.212 pt for all three of these.  We are 44 pt over, and
+        # that is the recorded price of not extrapolating a rule it refutes.
+        assert _bottom_inset(children) == pytest.approx(six, abs=0.01)
+
+
+def test_a_label_breaks_only_where_powerpoint_breaks_it():
+    """The break set, straight off the probes, without going through the band."""
+    from pptx2svg.resolve.chart import ChartFont, font_box, wrap_label
+
+    font = ChartFont(family="Arial", box=font_box("Arial", 10.0))
+    assert wrap_label("MMM MM", font, WRAP_BAND_PT) == ["MMM", "MM"]
+    # The no-break space breaks, which is the one character here that surprises.
+    assert wrap_label("MMM\u00a0MM", font, WRAP_BAND_PT) == ["MMM", "MM"]
+    for unbroken in ("MMM-MM", "MMM/MM", "MMM,MM", "MMM_MM", "MMM\u2013MM"):
+        assert wrap_label(unbroken, font, WRAP_BAND_PT) == [unbroken]
+    # Greedy, and a token too wide to sit alone still gets its own line rather than
+    # being split -- the state `_labels_rotate` has already turned the axis for.
+    assert wrap_label("MM MM MM", font, WRAP_BAND_PT) == ["MM MM", "MM"]
+    assert wrap_label("Fiscal MMMMMMMMMMMM 2012", font, WRAP_BAND_PT) == [
+        "Fiscal",
+        "MMMMMMMMMMMM",
+        "2012",
+    ]
+
+
+# -- A line chart's legend key -----------------------------------------------------------
+
+
+def test_a_line_chart_legends_with_a_rule_and_its_marker():
+    """Confirmed on four line-chart legends after the radar measured it once.
+
+    19.200 pt of rule with the series' marker on its midpoint, then 2.025 pt before the
+    text -- the same on a right-hand legend and a bottom one, the same for a series whose
+    marker is ``none``, and **the same at 14 pt**, which is what says these are points and
+    not the ems the radar's single 10 pt measurement was carried as.
+    """
+    from pptx2svg.resolve.chart import (
+        LINE_LEGEND_KEY_GAP_PT,
+        LINE_LEGEND_KEY_PT,
+        ChartBuilder,
+        ChartFont,
+        font_box,
+    )
+
+    for size in (10.0, 14.0):
+        font = ChartFont(family="Arial", box=font_box("Arial", size))
+        key, gap = ChartBuilder._legend_key_size(_FakeLine(), font)
+        assert (key, gap) == (LINE_LEGEND_KEY_PT, LINE_LEGEND_KEY_GAP_PT)
+        assert (key, gap) == (19.200, 2.025)
+
+
+class _FakeLine:
+    """Just enough of a builder for `_legend_key_size` to answer "a line chart"."""
+
+    _is_line = True
+    _is_radar = False
+    _radar_style = "marker"
+

@@ -64,7 +64,7 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8759,
+    "histogram": 0.8753,
     "slides": [
       {
         "coverage": 0.9828,
@@ -94,13 +94,13 @@
         "ssim": 0.7627
       },
       {
-        "coverage": 0.187,
-        "histogram": 0.995,
-        "mean_abs": 12.997,
-        "over10": 10.677,
-        "over64": 7.325,
+        "coverage": 0.1826,
+        "histogram": 0.9899,
+        "mean_abs": 12.33,
+        "over10": 10.116,
+        "over64": 6.836,
         "sparse": false,
-        "ssim": 0.369
+        "ssim": 0.3721
       },
       {
         "coverage": 0.5657,
@@ -148,7 +148,7 @@
         "ssim": 1.0
       }
     ],
-    "ssim": 0.8
+    "ssim": 0.8003
   },
   "real-financial-report": {
     "fonts": {

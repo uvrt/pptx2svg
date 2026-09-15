@@ -32,7 +32,7 @@ after it needs a way to tell "better" from "different".
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
-| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 72 probe charts and all 6 real ones; every other chart type warns and draws an empty frame |
+| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 133 probe charts and all 7 real ones; every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -771,8 +771,11 @@ Two smaller measurements that belong to other chart types too:
 
 * **A line-style radar's legend key is a line with its marker on it**, not a swatch:
   19.200 pt of rule then 2.025 pt before the text, at 10 pt — against the swatch's
-  5.492 + 2.371. That is 13.4 pt of band width, and it is almost certainly the same key
-  PowerPoint draws for a `lineChart`, which is still on the list below.
+  5.492 + 2.371. That is 13.4 pt of band width. Four line-chart legends have since
+  confirmed both numbers and refuted the *scaling*: they were carried as 1.920 and
+  0.2025 ems on the assumption that a single 10 pt measurement scaled, and a 14 pt legend
+  came back at the same 19.200 and 2.025. They are absolute points, and a `lineChart`
+  now draws them too.
 * **A radar series stating no `c:size` gets a 6 pt marker**, not ECMA-376's 7. The probe's
   second series measured 6.0 pt square; its first measured 5.76 pt across, which is the
   same 6 pt box with a diamond's tips falling inside PowerPoint's 0.24 pt output grid.
@@ -817,12 +820,15 @@ vector coordinates. One deck sweeps the label from a fifth of its band to four t
 the other straddles exactly one band, which is what turns the threshold from a guess into
 a window.
 
-* **The rule is that the widest label is wider than its own band.** On a 37.68 pt band a
-  36.62 pt label stayed level and a 38.59 pt one turned, so the threshold is inside
-  (0.972, 1.024] and one band width is the middle of it rather than a round number picked
-  for tidiness. The *widest* label is what counts, not the first: the deck whose five
-  labels differ only by a trailing letter left a 0.73 pt residual until that was fixed,
-  which is exactly the 1.01 pt difference between Aptos' `A` and its `D` times sin 45.
+* **The rule is that the widest label is wider than its own band** — and, once
+  *Wrapped category labels* below is taken into account, specifically the widest
+  unbreakable **token**, which is the same thing for every label in this sweep because
+  none of them contains a space. On a 37.68 pt band a 36.62 pt label stayed level and a
+  38.59 pt one turned, so the threshold is inside (0.972, 1.024] and one band width is
+  the middle of it rather than a round number picked for tidiness. The *widest* label is
+  what counts, not the first: the deck whose five labels differ only by a trailing letter
+  left a 0.73 pt residual until that was fixed, which is exactly the 1.01 pt difference
+  between Aptos' `A` and its `D` times sin 45.
 * **The angle snaps to 45°.** Everything from 1.02 band widths to 4.18 came out at
   exactly 45, reading up to the right — `rot="-2700000"` in DrawingML terms. No
   intermediate angle appears anywhere in that range and nothing goes to 90. The corpus
@@ -839,7 +845,9 @@ a window.
 And a contrast worth keeping, because it says this is a *category-axis* behaviour rather
 than a general label one: **a radar facing the same problem wraps instead of rotating.**
 Every `rot` in the radar long-label probe is zero and "Category Three" came back split
-over two lines as "Category" / "Three".
+over two lines as "Category" / "Three". That observation turned out to be the thread
+worth pulling: a bar chart wraps first too, and rotates only when wrapping cannot save
+the label. See *Wrapped category labels* below.
 
 Two pieces are measured and **not** shipped, both because a probe refutes the obvious
 rule:
@@ -865,6 +873,100 @@ radar's radius has on the same deck, and the largest single error left in any ch
 `authoring-integration` holds at 0.9327 and `table-test` at 0.9734, unchanged to four
 decimals: neither has a label wide enough to turn, so nothing this work did moves a
 scored number. The probe decks that measured it are throwaway and were deleted.
+
+#### Wrapped category labels, and why the rotation rule was right in the wrong domain
+
+The rotation sweep above measured a real behaviour but measured it on labels built from
+one repeated character. `MMMMM` has nowhere to break, so rotation was the only move
+PowerPoint had, and the rule that came out — *turn when the widest label is wider than
+its band* — is only half of what it does. `real-college-template.pptx` slide 4 is where
+that showed: its eleventh category is `2012 (Proj)`, 54.41 pt on a 54.14 pt band, so
+every one of its eleven labels turned, and PowerPoint's own export leaves all eleven
+level and breaks that one over two lines.
+
+**Wrapping comes first; rotation is the last resort.** Three throwaway decks, 57 bar
+charts, same 220.4724 x 181.1024 pt frame and five categories as the rotation sweep, on a
+37.761 pt band read off the axis rule.
+
+* **The test is the widest unbreakable token, not the widest label.** `MMM MM` is
+  44.43 pt — 1.18 bands — and came back level on two lines; `MMMMM` is 41.65 pt, 1.10
+  bands, and turned. Straddling the band with a token instead of a label gives
+  (0.9857, 1.0151] — `xxxxxxxi M` at 37.22 pt wrapped, `HHHHHi M` at 38.33 pt turned —
+  and one band width is the only value inside both that window and the unbroken sweep's
+  (0.972, 1.024].
+* **The case that separates it from every other candidate rule** is
+  `Fiscal MMMMMMMMMMMM 2012`. It has two spaces in it, so "any break opportunity means
+  wrap" predicts level; PowerPoint turned it, because breaking it still leaves a 99.96 pt
+  token. (It also truncated it to `Fiscal…`, which is its own unmeasured behaviour.)
+* **The break set is whitespace, not Unicode line breaking.** `MMM-MM`, `MMM/MM`,
+  `MMM,MM`, `MMM_MM` and `MMM–MM` were each 44–47 pt on that band and PowerPoint turned
+  all five rather than breaking them, and `プラットフォーム` — 80 pt of CJK, which any
+  line-breaking algorithm would break anywhere — turned as well. The surprise is U+00A0:
+  `MMM<nbsp>MM` broke at the no-break space exactly as the plain space did. Tab and the
+  rest of `str.split`'s whitespace are **not measured**.
+* **One label that must turn turns all of them.** Four `MMM MM` beside one `MMMMM` came
+  back with all five at 45°, none of them broken. Rotation is a decision for the axis.
+* **A label that fits stays on one line** while its neighbour wraps, and sits on the
+  *first* row of the block: the block is top-aligned, and the first baseline is where a
+  one-line label's would be — 15.03, 15.05 and 15.07 pt under the axis at one, two and
+  three lines, one number inside PowerPoint's 0.12 pt grid.
+* **The band is the level band plus one line box per extra line.** A four-rung ladder in
+  five faces, one token per line by construction. PowerPoint's band grew by the same
+  amount from one line to two, two to three and three to four in every face, so this is a
+  straight line rather than a fit:
+
+  | face | per extra line | our line box | residual |
+  | --- | --- | --- | --- |
+  | Calibri | 12.205 | 12.207 | −0.002 |
+  | Aptos | 12.205 | 12.207 | −0.002 |
+  | Courier New | 11.330 | 11.328 | +0.002 |
+  | Times New Roman | 11.075 | 11.074 | +0.001 |
+  | Arial | 11.500 | 11.172 | **+0.328** |
+
+**Arial is the one refutation, and it has a name.** PowerPoint's pitch is the face's full
+`hhea` line spacing — ascender plus descender plus *lineGap* — and Arial is the only one
+of the five whose lineGap is not zero: 67 units of 2048 is 0.328 pt at 10 pt, exactly the
+residual. That rule is **not** shipped, because `text/metrics.py` carries no lineGap and
+the file it would be generated from disagrees with the file PowerPoint used: our Tinos
+substitute has 87 where Office's own `times.ttf`, inside the app bundle, has 0. Adding
+the gap would trade a 0.33 pt error on Arial for a 0.42 pt one on Times New Roman, so the
+line box alone is shipped and the Arial shortfall is pinned by a test.
+
+Two more things measured and deliberately not shipped:
+
+* **Past six lines PowerPoint stops wrapping.** Six tokens gave six lines and an 81.212 pt
+  band, on the same straight line as one through four. Eight, twelve and twenty-four
+  tokens all came back on **two** lines in a 35.212 pt band, each line four band widths
+  wide and overlapping its neighbours. No rule reproduces both the linear part and that
+  collapse, so the band stops growing at six and a test records that we are then 44 pt
+  over. This is the same shape of problem as the rotated band's cap past 90 pt of label.
+* **An explicit orientation on `a:bodyPr` forbids the turn, and PowerPoint drops labels
+  instead.** `<a:bodyPr rot="0" vert="horz"/>` and `<a:bodyPr vert="horz"/>` both left
+  `MMMMM` level on a band it does not fit — and PowerPoint printed only every *other*
+  label, three of five, at twice the band pitch, rather than turning or overlapping them.
+  With a break available (`MMM MM`) the same axis wrapped exactly as a free one did. So
+  there is a third strategy under there — skipping to a wider tick-label interval — that
+  no corpus deck reaches and that is not implemented. Note that
+  `real-college-template.pptx`'s own chart carries `rot="0"`, so its labels would stay
+  level under this rule too; the wrap rule above is what actually reproduces its output,
+  and the two agree there.
+
+**What it bought.** `real-college-template.pptx` slide 4 goes 0.3484 → **0.3721** SSIM
+against the 0.3690 it scored before rotation existed, and its bottom band 59.9 → 37.8
+against PowerPoint's own two-line block. Its histogram goes 0.9694 → **0.9899** against
+0.9950, and it does not get all the way back: 0.9950 is reproduced *exactly* by reserving
+one line instead of two, which is 11.5 pt shorter than the band PowerPoint drew. The
+metric is not monotone in geometric accuracy on this slide — setting the plot bottom to
+PowerPoint's own, to the pixel, scores 0.4704 SSIM and 0.9842 histogram — so the last
+0.005 of histogram is only available by keeping a band that is measurably wrong. What is
+actually left on that slide is the **manual legend layout**: its `c:legend` carries a
+`c:manualLayout` we ignore, which is worth 4.8 pt of plot height and 9.5 pt of legend
+baseline, and no rule was found that composes the plot area around a manually placed
+legend (PowerPoint's plot bottom sits 13.4 pt above the legend's declared top, which is
+neither the declared height nor our band).
+
+`authoring-integration` holds at 0.9327 and `table-test` at 0.9895, unchanged to four
+decimals. The probe decks are throwaway and were deleted.
 
 #### The tick-density question, with four more observations that refute one more rule
 
@@ -993,15 +1095,13 @@ Each of these is known-missing rather than merely absent:
 * **Data-label wrapping.** PowerPoint wraps a long category name onto two lines inside a
   multi-part label; we draw it on one. `c:separator`, `c:leaderLines` and a data label's
   own `c:layout` are read or ignored but never drawn.
-* **A line chart's legend key.** PowerPoint draws a line with its marker on it; we draw
-  the bar chart's square swatch — worth about 11 pt of band width on
-  `real-financial-report.pptx`'s line chart, which is the whole of that chart's residual
-  legend error. **The radar work measured that key**: 19.200 pt of rule with the marker
-  at its midpoint, then 2.025 pt before the text, at 10 pt, against the swatch's
-  5.492 + 2.371. `_legend_key_size` already draws it for a line-style radar, so making
-  a `lineChart` use it is one condition — but it would be the radar's measurement
-  applied to a chart type that has not been measured, so confirm it on a line probe
-  first. This is the cheapest remaining item and the one with a number already in hand.
+* ~~**A line chart's legend key.**~~ — done. Four line-chart legend probes confirm the
+  radar's 19.200 pt of rule with the marker at its midpoint and 2.025 pt before the text,
+  and add that a series with `c:symbol val="none"` still gets the rule, and that the
+  numbers are **points, not ems**: a 14 pt legend measured the same 19.200 and 2.025 as a
+  10 pt one. `real-financial-report.pptx`'s line chart is the deck that wanted it, and it
+  is skipped by the scorer on this machine for want of Noto Sans JP, so the improvement is
+  not in a scored number.
 * **Where a wrapped legend's rows sit.** The band cap and the opened row pitch are
   measured; how PowerPoint places the block vertically is not. Ours centres the rows and
   comes out about 5 pt high on chart4, whose measured baselines are 26.46, 43.50, 56.70,
@@ -1013,9 +1113,13 @@ Each of these is known-missing rather than merely absent:
   the probe's control points are not collinear with its vertices, so it is a real spline —
   but PowerPoint's own tension was not measured and the curves will not coincide.
 * ~~**Rotated category labels.**~~ — done and measured; see *Rotated category labels,
-  measured* below. Two pieces of it are **not** done and are named there: PowerPoint caps
-  the band it reserves past about 90 pt of label in a way no clamp reproduces, and it
-  widens the *left* inset by up to 33 pt, which three measurements do not fit.
+  measured* and *Wrapped category labels* below. Labels wrap at spaces before they turn,
+  and the band grows a line box for every extra line. Four pieces are **not** done and
+  are named there: PowerPoint caps the band it reserves past about 90 pt of a turned
+  label in a way no clamp reproduces; it widens the *left* inset by up to 33 pt, which
+  three measurements do not fit; it stops wrapping past six lines and lets the label
+  overflow; and an explicit orientation on `a:bodyPr` makes it drop every other label
+  rather than turn them, which nothing here implements.
 * **Axis titles**, **minor gridlines and minor ticks**, **`c:dTable`**, and manual
   `c:layout` for the plot area or the legend.
 * **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
@@ -1375,18 +1479,20 @@ the corpus warns `chart-unsupported-type` any more. The shared infrastructure th
 need -- value domain, tick selection, number formatting, gridlines, legend layout,
 plot-area rectangle, polar region -- is built. What is left, cheapest first:
 
-1. **A line chart's legend key**, whose number is already measured (19.200 pt of rule
-   plus 2.025 pt of gap, off the radar legend probe) and whose code already exists in
-   `_legend_key_size`. Confirm on a line probe rather than assuming the radar's
-   measurement transfers. Still the cheapest thing on this list.
-2. **The CJK label width.** Now the largest single error left in any chart: on
+1. **The CJK label width.** Now the largest single error left in any chart: on
    `real-financial-report.pptx`'s chart3 it is 19.8 pt of the 19.8 pt that remains after
    rotation, and on its radar it is the whole 6.8 pt of radius error. `font_box` and
    `text_width` measure a Japanese label through the `<a:latin>` face its axis names
    rather than the CJK face it will actually be drawn in. It lives in `text/` and
    `fonts/`, not in `resolve/chart.py`.
+2. **A manually laid out legend.** `real-college-template.pptx` slide 4 carries a
+   `c:legend/c:layout/c:manualLayout` we ignore, and it is now the whole of that slide's
+   remaining chart error: 4.8 pt of plot height and 9.5 pt of legend baseline. Reading
+   the element is trivial; what is not known is how PowerPoint composes the plot area
+   around it, and one deck is not enough to fit that.
 3. **Data-label wrapping**, **`bestFit` actually moving a label**, and **three-or-more
    line legend entries** -- each a known-missing detail with a named symptom above.
+   Category-label wrapping is done; the data-label kind is a separate path.
 4. **Combo charts** and **`areaChart` / `scatterChart`** -- new drawing rather than
    corrections, and the largest of what remains.
 
