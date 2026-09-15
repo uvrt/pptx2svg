@@ -166,7 +166,12 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     resolved = convert_pptx_to_model(source, options)
 
     font_mapping = create_font_mapping(options.font_mapping)
-    jpan_fallback = resolved.font_scheme.major_font_jpan or resolved.font_scheme.minor_font_jpan
+    # Minor before major, which is the opposite of what this used to do.  Measured:
+    # `real-financial-report.pptx`'s theme offers `游ゴシック Light` as its major Jpan face
+    # and `游ゴシック` as its minor, and PowerPoint's own PDF export drew every Japanese
+    # chart label in **YuGothic-Regular**.  Preferring the major entry picked a light
+    # weight for body copy.
+    jpan_fallback = resolved.font_scheme.minor_font_jpan or resolved.font_scheme.major_font_jpan
 
     if options.warn_on_font_substitution:
         options.warnings.extend(_font_warnings(resolved))

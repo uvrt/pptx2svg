@@ -613,3 +613,86 @@ def test_synthetic_bold_widens_a_cjk_face_with_no_bold_cut():
     upright = measurer.measure_text_width(text, 32, False, None, "Noto Sans JP")
     bold = measurer.measure_text_width(text, 32, True, None, "Noto Sans JP")
     assert bold == pytest.approx(upright, abs=0.01)
+
+
+# -- The East Asian cascade --------------------------------------------------------------
+#
+# Read out of PowerPoint's own PDF export of `real-financial-report.pptx`, which is the
+# one place in the corpus where every competing explanation is ruled out: its charts name
+# `<a:latin typeface="Arial"/>` and no `<a:ea>` at all, its theme writes
+# `<a:ea typeface=""/>` in both font collections, and its `<a:font script="Jpan"/>` says
+# 游ゴシック.  The export embeds YuGothic-Regular for the Japanese and ArialMT for the
+# Latin, inside the same labels.
+
+
+def test_the_east_asian_cascade_takes_the_script_face_over_the_latin_one():
+    """An empty `<a:ea>` falls through to the theme's script list, not to `<a:latin>`."""
+    from pptx2svg.text.fontmap import east_asian_family
+
+    assert east_asian_family("", "游ゴシック", "Arial") == "游ゴシック"
+    assert east_asian_family(None, "游ゴシック", "Arial") == "游ゴシック"
+    # A run that names one of its own keeps it.
+    assert east_asian_family("ＭＳ Ｐ明朝", "游ゴシック", "Arial") == "ＭＳ Ｐ明朝"
+    # An unexpanded theme pointer is not a face name; `+` cannot start a CSS identifier
+    # either, so letting one through costs the whole `font-family` declaration.
+    assert east_asian_family("+mn-ea", None, None) is None
+    # Nothing East Asian anywhere: the first real name, so the stack is never empty.
+    assert east_asian_family(None, None, "Arial") == "Arial"
+    assert east_asian_family(None, None, None) is None
+
+
+def test_a_latin_face_named_as_the_east_asian_one_loses_to_the_script_face():
+    """`real-basic-theme.pptx` writes `<a:ea typeface="Raleway"/>` on nine of its runs.
+
+    PowerPoint drew their Japanese in MS Gothic and MS Mincho -- not in Raleway, which has
+    no kana at all.  Taking the name at face value measured every one of those glyphs at
+    Raleway's `cjk_width`, and that number is 1.0 em only because
+    `tools/extract_font_metrics.py` writes `units_per_em` when the probe kanji is missing
+    from the face.  It is the absence of a measurement, dressed as one.
+    """
+    from pptx2svg.text.fontmap import covers_east_asian, east_asian_family
+
+    assert not covers_east_asian("Raleway")
+    assert not covers_east_asian("Arial")
+    assert covers_east_asian("游ゴシック")
+    assert covers_east_asian("ＭＳ ゴシック")
+    assert east_asian_family("Raleway", "ＭＳ Ｐゴシック", "Raleway") == "ＭＳ Ｐゴシック"
+
+
+def test_covers_east_asian_cannot_be_read_off_the_metric_tables():
+    """The reason the flag lives on `Substitution` rather than being derived.
+
+    `cjk_width` is 1.0 em in every table, Latin ones included, and a per-character row is
+    written only where the advance *disagrees* with it -- so the two monospaced MS faces
+    carry no East Asian rows while Cambria carries four, its bracket forms.  Counting rows
+    would call Cambria Japanese and ＭＳ ゴシック not.
+    """
+    from pptx2svg.text.fontmap import covers_east_asian
+    from pptx2svg.text.measure import is_cjk
+
+    for table in METRICS.values():
+        assert table.cjk_width == table.units_per_em
+
+    rows = {
+        name: sum(1 for char in table.widths if is_cjk(ord(char)))
+        for name, table in METRICS.items()
+    }
+    assert rows["Cambria"] > 0 and not covers_east_asian("Cambria")
+    assert rows["ＭＳ ゴシック"] == 0 and covers_east_asian("ＭＳ ゴシック")
+
+
+def test_a_mixed_run_is_measured_face_by_face():
+    """`DX投資額` is two faces in one label, and PowerPoint drew it that way.
+
+    Its export puts `DX` in ArialMT and `投資額` in YuGothic-Regular: D advances 8.665 pt
+    and X 8.004 pt at 12 pt, then three ideographs at a full em each.  52.669 pt in total,
+    which is what the measurer has to return for a *single* string carrying both faces.
+    """
+    from pptx2svg.units import PX_PER_PT
+
+    measurer = DefaultTextMeasurer()
+    width = measurer.measure_text_width("DX投資額", 12, False, "Arial", "游ゴシック")
+    assert width / PX_PER_PT == pytest.approx(52.669, abs=0.01)
+    # CO2削減 on the same axis: 8.666 + 9.334 + 6.674 of Arial, then two ideographs.
+    width = measurer.measure_text_width("CO2削減", 12, False, "Arial", "游ゴシック")
+    assert width / PX_PER_PT == pytest.approx(48.674, abs=0.01)

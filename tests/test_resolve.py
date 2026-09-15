@@ -343,3 +343,60 @@ def test_a_known_table_style_id_raises_no_warning(authoring):
     """The guard against a warning that fires on every deck in the corpus."""
     _, warnings = table_naming(authoring, "{793D81CF-94F2-401A-BA57-92F5A7B2D0C5}")
     assert not [w for w in warnings if w.code == "table-style-unknown"]
+
+
+# -- The East Asian typeface cascade -----------------------------------------------------
+
+
+def test_a_run_naming_no_east_asian_face_inherits_the_themes_script_face(financial):
+    """`<a:ea typeface=""/>` in the theme means "no face named", not "the empty face".
+
+    Every theme in this corpus writes one, so before this a run that named no `<a:ea>` of
+    its own reached the measurer with `font_family_ea=None` and had its kana and
+    ideographs measured through the *Latin* table -- a face with no East Asian glyph in
+    it, whose answer is therefore `FontMetrics.cjk_width`, which is 1.0 em in every table
+    because `tools/extract_font_metrics.py` writes `units_per_em` when the probe kanji is
+    absent.  Layout came from a constant while the rasteriser drew with a real face.
+
+    `real-financial-report.pptx`'s table cells state no typeface anywhere, so they take
+    the theme: Calibri for Latin, and `<a:font script="Jpan" typeface="游ゴシック"/>` for
+    the rest.
+    """
+    _, resolved = resolve(financial)
+    runs = [
+        run
+        for element in walk(resolved.slides[3].elements)
+        if isinstance(element, m.TableElement)
+        for row in element.table.rows
+        for cell in row.cells
+        if cell.text_body is not None
+        for paragraph in cell.text_body.paragraphs
+        for run in paragraph.runs
+    ]
+    assert runs
+    assert {run.properties.font_family for run in runs} == {"Calibri"}
+    assert {run.properties.font_family_ea for run in runs} == {"游ゴシック"}
+
+
+def test_a_latin_face_named_as_the_east_asian_one_does_not_win(basic_theme):
+    """`real-basic-theme.pptx` writes `<a:ea typeface="Raleway"/>` on its master.
+
+    Raleway has no kana.  PowerPoint's own export of the deck drew the Japanese in MS
+    Gothic and MS Mincho, so it did not honour the name either; taking it at face value
+    measured every glyph at Raleway's 1.0 em `cjk_width`, which is the absence of a
+    measurement rather than one.  The theme's `<a:font script="Jpan"/>` is the next
+    candidate that can actually draw the text.
+    """
+    _, resolved = resolve(basic_theme)
+    runs = [
+        run
+        for slide in resolved.slides
+        for element in walk(slide.elements)
+        if getattr(element, "text_body", None) is not None
+        for paragraph in element.text_body.paragraphs
+        for run in paragraph.runs
+        if run.text
+    ]
+    assert runs
+    assert {run.properties.font_family for run in runs} >= {"Raleway", "Lato"}
+    assert {run.properties.font_family_ea for run in runs} == {"ＭＳ Ｐゴシック"}

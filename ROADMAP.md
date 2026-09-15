@@ -78,7 +78,7 @@ rendering approaches.
 | Shape identity on output (`data-pptx-id`) | Complete |
 | Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
 
-1,968 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
+2,059 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
 independently testable, and every phase below slots into exactly one of them.
 
 ### Shape identity
@@ -162,10 +162,19 @@ purchasable by being measurably wrong, so it was left unbought.
 
 With fonts eliminated as a variable, what remains is layout, and it is concentrated:
 
-* **CJK label width** is the largest single error in any chart, and it is not a chart bug:
-  `font_box` and `text_width` measure a Japanese label through the `<a:latin>` face its
-  axis names rather than the CJK face it will be drawn in. On
-  `real-financial-report.pptx`'s chart3 that is 19.8 pt. It lives in `text/` and `fonts/`.
+* ~~**CJK label width**~~ — the East Asian face now reaches measurement, and the item
+  that used to head this list was **half right about the cause and wrong about the
+  number**. See *The East Asian face cascade* below: the face was genuinely being
+  dropped, and fixing it takes 6.83 pt off the corpus radar's radius — but the 19.8 pt
+  attributed to chart3's *width* is not a width error at all. PowerPoint's own export
+  draws `プラットフォーム` at 12.000 pt a glyph, which is the 96 pt we measure.
+* **The rotated-label reserve has no cap**, and PowerPoint's does. That is what chart3's
+  19.8 pt actually is, and there is now a candidate rule for it (below) that one probe
+  deck would settle.
+* **PowerPoint ellipsis-truncates a category label that will not fit** and nothing here
+  does. Measured on `real-financial-report.pptx`: its rotated bar axis drew `プラット…`
+  for an eight-character category, and its radar drew `海外売上…` and `従業員満…` for
+  six-character ones. We draw all three in full.
 * **A manually laid out legend** is the whole of slide 4's remaining chart error.
 * **Text displacement of 1–2 px** on body copy is what slides 6 and 7 are made of, and
   `tools/fidelity.py`'s own docstring warns that SSIM is unusually sensitive to exactly
@@ -175,6 +184,142 @@ The bold/italic and paragraph-spacing defects that used to head this list are **
 bold now inherits through the placeholder cascade, `spcBef` and `spcAft` add rather than
 collapse, and `spcPct` is a share of the line height rather than the font size. Slide 6
 went 0.0977 → 0.7372 on the spacing fix alone.
+
+### The East Asian face cascade
+
+The question a run has to answer before anything can measure it: *which face draws the
+kana?* Three names compete — the run's `<a:ea>`, the theme font collection's `<a:ea>` and
+its `<a:font script="Jpan"/>` list — and until now the answer was **none of them** unless
+the run named one itself. Where it did not, `RunProperties.font_family_ea` came through as
+`None` and `DefaultTextMeasurer` measured every ideograph with the *Latin* table.
+
+That is worse than it sounds, and the reason is in `text/metrics.py`: **`cjk_width` is
+1.0 em in every table, Latin ones included**, because `tools/extract_font_metrics.py`
+writes `units_per_em` when the face has no glyph for its probe kanji. So a Latin face
+never says "I cannot draw this". It answers "one em" and the layout is computed from a
+constant while the rasteriser draws with whatever it finds.
+
+Three places dropped it, and they had to be fixed together:
+
+| where | what it dropped |
+| --- | --- |
+| `resolve/text.py` | `font_family_ea` was the run's own `<a:ea>` and nothing else |
+| `render/text.py` | `_needs_script_split` needs *both* families, so a run with no `<a:ea>` never split — and the East Asian chunk is the only place `jpan_fallback_font` was ever consulted |
+| `resolve/chart.py` | `ChartFont`, `font_box` and `text_width` carried one family, and `_label_body` emitted `RunProperties` with no `font_family_ea` at all |
+
+#### What the precedence actually is
+
+Read out of **PowerPoint's own PDF export of `real-financial-report.pptx`**, which is the
+one place in the corpus where every competing explanation is ruled out. Its five charts
+name `<a:latin typeface="Arial"/>` and stop; its theme writes `<a:ea typeface=""/>` in
+both collections with `<a:font script="Jpan" typeface="游ゴシック"/>` beside it. The
+export embeds **YuGothic-Regular** for every Japanese category label and **ArialMT** for
+the Latin runs *inside the same labels*.
+
+1. the run's `<a:ea>`, when it names a face that can draw East Asian text;
+2. the theme collection's `<a:ea>`, same condition;
+3. the theme's `<a:font script="Jpan"/>` (then `Hans`, `Hant`, `Hang`);
+4. the Latin face, as a last resort so the emitted stack is never empty.
+
+Two rules in there are measured rather than read off the spec:
+
+* **An empty `typeface=""` is not a name.** Every theme in this corpus writes one.
+* **A name with no East Asian glyphs loses to one that has them.**
+  `real-basic-theme.pptx` writes `<a:ea typeface="Raleway"/>` on nine of its runs and
+  PowerPoint drew their Japanese in MS Gothic and MS Mincho — so it did not honour the
+  name either. `covers_east_asian` is the test, and it is a field on `Substitution`
+  rather than something derived: `cjk_width` cannot distinguish a face that draws a kanji
+  at one em from one that cannot draw it, and counting per-character rows calls Cambria
+  Japanese (four bracket forms) and ＭＳ ゴシック not (monospace, so no row disagrees with
+  `cjk_width`).
+
+**Body before heading**, also measured: the theme offers `游ゴシック Light` as its major
+Jpan face and `游ゴシック` as its minor, and the export used the Regular. `jpan_fallback`
+in `__init__.py` had it the other way round and put a light weight behind body copy.
+
+#### Before and after, against PowerPoint's own export
+
+The oracle is the *pen span* — first glyph origin to last glyph origin — read out of the
+PDFs with `pypdfium2`, which needs no knowledge of the final glyph's advance and is
+therefore exact.
+
+| string | face PowerPoint drew | drawn | ours before | ours after |
+| --- | --- | --- | --- | --- |
+| `デジタル` (12 pt) | YuGothic-Regular | 48.000 | 48.000 | 48.000 |
+| `グローバル` (12 pt) | YuGothic-Regular | 60.000 | 60.000 | 60.000 |
+| `その他` (12 pt) | YuGothic-Regular | 36.000 | 36.000 | 36.000 |
+| `DX投資額` (12 pt) | ArialMT + YuGothic | 52.669 | 52.669 | 52.669 |
+| `CO2削減` (12 pt) | ArialMT + YuGothic | 48.674 | 48.674 | 48.674 |
+| `前年同期` (10 pt) | YuGothic-Regular | 30.000 | 30.000 | 30.000 |
+
+**Every CJK string on every chart in that deck already measured to 0.000 pt, before and
+after.** That is the refutation, and it is worth stating plainly because this file
+asserted the opposite for two sections: `プラットフォーム` was said to come out 96 pt
+where PowerPoint "laid it out in a substituted CJK face at about 68". The 68 was
+`ROTATED_LABEL_INSET_PT + width · sin 45` inverted through PowerPoint's 69.538 pt inset —
+our own formula run backwards, never a measurement. PowerPoint draws all eight glyphs at
+exactly 12.000 pt, one em of Yu Gothic, for 96 pt.
+
+The widths coincided because Arimo's `cjk_width` is 1.0 em and Yu Gothic's kana and
+ideographs are too. The *line box* did not, and that is the part the fix collects:
+
+| | line box at 12 pt | radar reserve | radius |
+| --- | --- | --- | --- |
+| Arial, as read before | 13.406 (1.117 em) | 11.61 | 52.39 |
+| 游ゴシック → Noto Sans JP's table | 17.376 (1.448 em) | 16.61 | **47.39** |
+| PowerPoint | — | 18.44 | **45.56** |
+
+6.83 pt of radius error becomes 1.83. The residual is the fitted reserve, not the face:
+`RADAR_LABEL_RESERVE_LINES`/`_PT` were fitted to five Latin probes, and reproducing 18.44
+exactly wants a 1.5696 em line box, which is neither our Noto Sans JP table's 1.448 nor Yu
+Gothic's own `hhea` figure. Whether the reserve has a term only CJK exercises is
+unmeasured — one CJK radar in the corpus and no probe deck for it.
+
+Where the face choice *does* move a width is `real-basic-theme.pptx`, whose `<a:ea>` is a
+Latin face. Its kana went from Raleway's 1.0 em guess to ＭＳ Ｐゴシック's real
+proportional advances: `かじょうがき１` at 13 pt goes 78.000 → 65.559, `たいとる` at 42 pt
+goes 126.000 → 110.953. PowerPoint's export of that deck drew MS **Gothic** at a flat
+1.0 em, so our numbers move *away* from that PDF — which is exactly why the harness skips
+the deck: the exporting machine had no MS PGothic either. This is the same trade the
+`text/fontmap.py` docstring already commits to for `sample.pptx`, and it is the one that
+keeps measure-equals-draw true: the stack we emit now starts at a face we ship and can
+draw, instead of at one with no kana in it.
+
+#### What this turned up and did not fix
+
+* **PowerPoint truncates, we overflow.** `プラット…`, `海外売上…`, `従業員満…` — a
+  category label wider than its allowance is cut and ellipsised, not wrapped, because
+  `wrap_label` breaks at whitespace and CJK has none. The radar's allowance looks like the
+  `RADAR_LABEL_MAX_FRACTION` cap we already carry: 0.25 × 243.243 pt region = 60.8 pt, and
+  both truncated labels came back at five cells (60.0 pt) where the full string is six
+  (72.0). We wrap onto a second line instead.
+* **A candidate cap for the rotated reserve, on three observations.** Inverting
+  `ROTATED_LABEL_INSET_PT + width · sin 45` through PowerPoint's insets gives an implied
+  label width of 90.85 and 91.88 pt for the two probes that exceeded the cap (frame
+  181.1024 pt tall) and 68.09 pt for chart3 (frame 135 pt). Both ratios are 0.505 of the
+  frame height, and a straight line through them has an intercept of 0.01. It is **not
+  implemented**: three points with a 1.03 pt spread in two of them, and the two probes
+  should be *equal* under a pure cap and are not. One probe deck sweeping frame height
+  would settle it; this is exactly the shape of the Caladea claim, so it is recorded
+  rather than shipped.
+* **`lang` may select between the script list and an application default.**
+  `real-financial-report.pptx`'s table cells name no typeface, inherit `+mn-ea` → 游ゴシック
+  — and PowerPoint drew them in **MS Gothic**, not Yu Gothic, on a machine that has both.
+  Every one of those runs is `lang="en-US"`. The chart text, which has no `lang` at all,
+  went to the script list; so does `sample.pptx`, which has no `lang` anywhere and whose
+  Japanese resolved through its theme's Jpan entry. The theory fits all three and cannot
+  be acted on: "PowerPoint's default Japanese font for a non-Japanese run language" is a
+  property of the machine, not of the deck, and the script list is the only deck-derived
+  answer available. Recorded because the alternative is to pretend the cascade explains a
+  case it does not.
+* **`ascender_ratio` still prefers the Latin face** even for a run with no Latin character
+  in it (`text/measure.py`), and chart `first_baseline` follows it deliberately so the two
+  stay in step. Changing one without the other would unstitch measure-equals-draw.
+* **The legend band still reads the Latin line box.** `ChartFont.box_for` is consulted by
+  `_bottom_label_band` and `_radar_geometry` only. `real-financial-report.pptx`'s doughnut
+  legends in Japanese, but its entries are laid out down a right-hand band where the line
+  box is not what sets the width, and no probe measures a CJK legend.
+
 
 ---
 
@@ -990,13 +1135,22 @@ Two smaller measurements that belong to other chart types too:
 
 What is wrong or unmeasured in the radar path:
 
-* **The corpus radar's radius is 6.8 pt too large, and the cause is measured.** Its
-  category labels are Japanese; PowerPoint laid them out in a substituted CJK face whose
-  line box is about 1.57 em, while `font_box` reads the `<a:latin typeface="Arial"/>` the
-  axis names, whose line box is 1.117 em. Feeding the fitted reserve the CJK line height
-  reproduces PowerPoint's 18.44 pt exactly; feeding it Arial's gives 11.61. Fixing it
-  means `font_box` knowing which face a CJK run actually resolves to, which is a
-  `text/`-and-`fonts/` question, not a chart one.
+* **The corpus radar's radius was 6.83 pt too large; 5.00 of that is fixed.** Its
+  category labels are Japanese, and `font_box` read the `<a:latin typeface="Arial"/>` the
+  axis names — a face with no kana in it — for a label made of nothing else. PowerPoint's
+  export embeds **YuGothic-Regular** for them, which is the theme's
+  `<a:font script="Jpan"/>`; `ChartFont` now carries it, and its 1.448 em line box takes
+  the reserve from 11.61 to 16.61 and the radius from 52.39 to 47.39 against PowerPoint's
+  45.56. See *The East Asian face cascade*. **The 1.83 pt left is the reserve, not the
+  face**: `RADAR_LABEL_RESERVE_LINES`/`_PT` were fitted to five Latin probes, and
+  reproducing 18.44 exactly wants a 1.5696 em line box, which is neither our Noto Sans JP
+  table's 1.448 nor Yu Gothic's own `hhea` figure. One CJK radar and no probe deck, so
+  whether the reserve has a term only CJK exercises stays unmeasured.
+* **A radar category label that will not fit is truncated by PowerPoint and wrapped by
+  us.** Its export draws `海外売上…` and `従業員満…` where the categories are six
+  characters. Five cells (60.0 pt) against the `RADAR_LABEL_MAX_FRACTION` allowance of
+  0.25 × 243.243 = 60.8 pt, so the cap we already carry looks like the right one and the
+  response to it is not: `wrap_label` breaks at whitespace and CJK has none.
 * **Radar data labels are not measured.** The corpus radar's `c:dLbls` sets every
   `c:show*` to 0 and no probe turned one on, so where PowerPoint puts one is unknown. They
   are drawn — pushed radially out from the point, one marker clear — because silently
@@ -1071,11 +1225,18 @@ rule:
   out wider than PowerPoint's on the two most crowded probes.
 
 **What it bought.** On chart3 the bottom inset goes 27.29 -> 89.3 against PowerPoint's
-69.538, so the error more than halves and the labels stop colliding. The 19.8 pt left is
-not this rule: it is the width we measure a CJK label at. `プラットフォーム` comes out
-96 pt through the `<a:latin typeface="Arial"/>` the axis names, where PowerPoint laid it
-out in a substituted CJK face at about 68 — the same `font_box`/`text_width` gap the
-radar's radius has on the same deck, and the largest single error left in any chart.
+69.538, so the error more than halves and the labels stop colliding.
+
+**What the 19.8 pt left is — corrected.** This paragraph used to say it was the width:
+that `プラットフォーム` came out 96 pt through the `<a:latin typeface="Arial"/>` the axis
+names where PowerPoint laid it out "in a substituted CJK face at about 68". **The 68 was
+this very formula inverted through PowerPoint's 69.538 pt inset, not a measurement.**
+PowerPoint's own export draws all eight glyphs at exactly 12.000 pt — one em of the
+YuGothic-Regular it embeds — so the label is 96 pt drawn and 96 pt measured, and
+`デジタル`, `グローバル` and `その他` match to 0.000 pt as well. The error is this rule's
+missing cap, and the export adds a clue the probes could not: **PowerPoint truncated the
+label to `プラット…`**. See *The East Asian face cascade* for the implied-width numbers
+and the 0.505-of-frame-height candidate they suggest.
 
 `authoring-integration` holds at 0.9327 and `table-test` at 0.9734, unchanged to four
 decimals: neither has a label wide enough to turn, so nothing this work did moves a
@@ -2492,12 +2653,13 @@ the corpus warns `chart-unsupported-type` any more. The shared infrastructure th
 need -- value domain, tick selection, number formatting, gridlines, legend layout,
 plot-area rectangle, polar region -- is built. What is left, cheapest first:
 
-1. **The CJK label width.** Now the largest single error left in any chart: on
-   `real-financial-report.pptx`'s chart3 it is 19.8 pt of the 19.8 pt that remains after
-   rotation, and on its radar it is the whole 6.8 pt of radius error. `font_box` and
-   `text_width` measure a Japanese label through the `<a:latin>` face its axis names
-   rather than the CJK face it will actually be drawn in. It lives in `text/` and
-   `fonts/`, not in `resolve/chart.py`.
+1. ~~**The CJK label width.**~~ Done, and the diagnosis was half wrong — see *The East
+   Asian face cascade*. `ChartFont` now carries the East Asian face as well as the Latin
+   one, measures per character and names both in the emitted `font-family`, which takes
+   5.00 pt of the radar's 6.83 pt radius error. Chart3's 19.8 pt turned out not to be a
+   width at all: PowerPoint draws `プラットフォーム` at the same 96 pt we measure. What
+   is left there is **the rotated reserve's missing cap**, with a candidate rule on three
+   observations and a probe deck needed to settle it.
 2. **A manually laid out legend.** `real-college-template.pptx` slide 4 carries a
    `c:legend/c:layout/c:manualLayout` we ignore, and it is now the whole of that slide's
    remaining chart error: 4.8 pt of plot height and 9.5 pt of legend baseline. Reading

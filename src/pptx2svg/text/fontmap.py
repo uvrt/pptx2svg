@@ -52,7 +52,9 @@ __all__ = [
     "DEFAULT_FONT_MAPPING",
     "SUBSTITUTIONS",
     "Substitution",
+    "covers_east_asian",
     "create_font_mapping",
+    "east_asian_family",
     "family_key",
     "font_family_value",
     "generic_family",
@@ -82,6 +84,10 @@ class Substitution:
     #: a rasteriser asked for one draws upright and PowerPoint's slant has to be
     #: synthesised.  See :data:`pptx2svg.render.text.SYNTHETIC_OBLIQUE_SHEAR`.
     has_italic_cut: bool = True
+    #: True when the face draws kana and ideographs, so a CJK run may resolve to it.
+    #: See :func:`covers_east_asian` for why this is a field rather than something read
+    #: off the metric table.
+    east_asian: bool = False
     #: Anything a caller should know that the flags above cannot say.  Surfaced verbatim
     #: by ``pptx2svg fonts --check``, so it is written for a human reading a table.
     caveat: str = ""
@@ -171,6 +177,7 @@ def _entries() -> list[Substitution]:
             Substitution(
                 office, "Noto Sans JP", table,
                 metric_compatible=(office in ("Noto Sans JP", "Noto Sans CJK JP")),
+                east_asian=True,
                 # No Japanese face here has an italic cut -- not MS Gothic or MS Mincho
                 # inside Office's .ttc files, and not the Noto Sans JP we ship, which is
                 # a weight-axis variable font with no slant axis and no oblique sibling.
@@ -192,7 +199,7 @@ def _entries() -> list[Substitution]:
         rows.append(
             Substitution(
                 office, "Noto Sans JP", table,
-                metric_compatible=False, has_italic_cut=False,
+                metric_compatible=False, has_italic_cut=False, east_asian=True,
             )
         )
 
@@ -394,6 +401,69 @@ def metrics_for(font_family: str | None) -> FontMetrics | None:
     """Metrics table for a PPTX font name, or ``None`` when we have no data for it."""
     substitution = substitution_for(font_family)
     return METRICS.get(substitution.metrics) if substitution else None
+
+
+def covers_east_asian(font_family: str | None) -> bool:
+    """Whether this family can actually draw Japanese, Chinese or Korean text.
+
+    ``False`` for a face we know nothing about as well as for a Latin one, and the two
+    cases want the same treatment: the East Asian answer would be a guess rather than a
+    measurement, so the caller should try the next name in its cascade.
+
+    **It cannot be derived from the metric tables, and finding that out is the useful
+    part.**  ``FontMetrics.cjk_width`` is 1.0 em in every table, Latin ones included,
+    because ``tools/extract_font_metrics.py`` writes ``units_per_em`` when the face has
+    no glyph for its probe kanji -- "one em" is what a face says whether it draws the
+    character beautifully or not at all.  Nor do the per-character rows help: only the
+    two *proportional* MS faces earn any, because a row is written only where the advance
+    disagrees with ``cjk_width``, so ＭＳ ゴシック -- a genuine Japanese face -- carries
+    none while Cambria carries four (its four bracket forms).  Counting rows would have
+    called Cambria Japanese and MS Gothic not.
+
+    So it is a property of the *face*, recorded beside the other two in
+    :class:`Substitution` where the Japanese rows already sit together.
+    """
+    substitution = substitution_for(font_family)
+    return substitution is not None and substitution.east_asian
+
+
+def east_asian_family(*candidates: str | None) -> str | None:
+    """The face East Asian characters are actually drawn in, given a cascade of names.
+
+    Call it with the names in OOXML's own order of precedence -- the run's ``<a:ea>``,
+    then the theme font collection's ``<a:ea>``, then its ``<a:font script="Jpan"/>``,
+    then the Latin face -- and it answers with the one that will draw the glyphs.
+
+    **The precedence was read out of PowerPoint's own PDF export of
+    ``real-financial-report.pptx``.**  Its charts name ``<a:latin typeface="Arial"/>``
+    and nothing else, and its theme writes ``<a:ea typeface=""/>`` in both collections
+    with ``<a:font script="Jpan" typeface="游ゴシック"/>`` beside it.  PowerPoint drew
+    every Japanese category label in **YuGothic-Regular** and the Latin runs of the same
+    labels (``DX``, ``CO2``) in **ArialMT** -- so an empty ``<a:ea>`` falls through to the
+    script list, the script list beats the Latin face, and the two faces split *within*
+    one label rather than one of them winning the whole of it.
+
+    Two rules that are not obvious from the spec, and both are measured:
+
+    * **An empty ``typeface=""`` is not a name.**  Every theme in this corpus writes one,
+      and it means "this collection names no East Asian face", not "the empty face".
+    * **A name with no East Asian glyphs loses to one that has them.**
+      ``real-basic-theme.pptx`` writes ``<a:ea typeface="Raleway"/>`` -- a Latin face --
+      on 9 of its runs, and PowerPoint drew their Japanese in MS Gothic and MS Mincho
+      rather than in Raleway.  Taking the name at face value measures kana with Raleway's
+      1.0 em ``cjk_width``, which is a guess wearing a measurement's clothes.
+
+    The last resort is the first real name, whatever it is: a cascade that resolved to
+    nothing would leave the emitted ``font-family`` empty, and a named face we have no
+    table for still tells the rasteriser something.
+    """
+    named = [
+        name for name in candidates if name and name.strip() and not name.startswith("+")
+    ]
+    for name in named:
+        if covers_east_asian(name):
+            return name
+    return named[0] if named else None
 
 
 def synthesises_italic(font_family: str | None) -> bool:

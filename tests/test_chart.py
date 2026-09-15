@@ -2701,13 +2701,23 @@ def test_a_blank_leaves_the_radar_ring_open():
 def test_the_real_radar_matches_powerpoints_geometry():
     """chart5 of `real-financial-report.pptx`, the only radar in the corpus.
 
-    PowerPoint's own export puts the centre at (132.72, 75.60) with a radius of 45.56 pt.
-    The centre lands within 0.1 pt.  **The radius does not**, and the reason is measured:
-    the category labels are Japanese, PowerPoint laid them out in a CJK face whose line
-    box is about 1.57 em, and our `font_box` reads the `<a:latin typeface="Arial"/>` the
-    axis names, whose line box is 1.117 em.  Feeding the fitted reserve the CJK line
-    height reproduces PowerPoint's 18.44 pt exactly; feeding it Arial's gives 11.61.  So
-    this asserts what is actually right today and records the gap.
+    PowerPoint's own export puts the centre at (132.72, 75.60) with a radius of 45.56 pt,
+    so its label reserve is 18.44 pt of the 64 pt half-region.
+
+    **The radius was 6.83 pt out and most of that is now gone.**  The category labels are
+    Japanese; the chart names `<a:latin typeface="Arial"/>` and no `<a:ea>` at all, and
+    `font_box` used to read the Latin face for a label the Latin face cannot draw a single
+    glyph of.  Arial's line box is 1.117 em, which the fitted reserve turns into 11.61 pt.
+    The face PowerPoint actually drew those labels in is the theme's
+    `<a:font script="Jpan" typeface="游ゴシック"/>` -- its export embeds YuGothic-Regular
+    for them -- and our table for it has a 1.448 em line box, giving 16.61 pt and a radius
+    of 47.39.
+
+    The 1.83 pt left is the fitted reserve itself, not the face: `RADAR_LABEL_RESERVE_*`
+    was fitted to five Latin probes and reproducing PowerPoint's 18.44 exactly would want
+    a 1.5696 em line box, which is neither Noto Sans JP's 1.448 nor Yu Gothic's own hhea
+    figure.  Whether the reserve has a term that only CJK exercises is unmeasured; there
+    is one CJK radar in the corpus and no probe deck for it.
     """
     from tests.conftest import FIXTURE_DIR
 
@@ -2729,6 +2739,10 @@ def test_the_real_radar_matches_powerpoints_geometry():
     ys = [y for _, y in points]
     assert (min(xs) + max(xs)) / 2 == pytest.approx(132.720, abs=0.2)
     assert (min(ys) + max(ys)) / 2 == pytest.approx(75.600, abs=0.7)
+    # The outer ring is the 100 % series, so its half-height is the drawn radius.
+    radius = (max(ys) - min(ys)) / 2
+    assert radius == pytest.approx(47.39, abs=0.1)
+    assert abs(radius - 45.56) < abs(52.39 - 45.56)
 
     # Two filled series, both stroked because the file states `a:ln w="25400"`, and six
     # spokes because its category axis states a #888888 line.
@@ -2964,12 +2978,22 @@ def test_the_real_bar_chart_with_long_labels_turns_them():
     is 8.4853 at 12 pt, which is ``12 * cos 45`` -- and reserves **69.538 pt** under the
     plot.  We turn them too, which we did not before, and reserve 89.3.
 
-    The remaining 19.8 pt is not the rotation rule: it is the width we measure the labels
-    at.  ``プラットフォーム`` comes out 96 pt through the ``<a:latin typeface="Arial"/>``
-    the axis names, where PowerPoint laid it out in a substituted CJK face at about 68.
-    That is the same ``font_box``/``text_width`` gap the radar's radius has on this deck,
-    and it lives in `text/` and `fonts/` rather than here.  Before this work the inset was
-    27.29 pt, so the error more than halved.
+    **The remaining 19.8 pt is not the width, and that was the standing diagnosis until
+    PowerPoint's own export was read.**  This file used to say ``プラットフォーム`` came
+    out 96 pt where PowerPoint laid it out "at about 68"; the 68 was this formula inverted
+    through PowerPoint's inset, never a measurement.  The export settles it: every glyph
+    of every Japanese label on this chart advances exactly 12.000 pt -- one em of the
+    YuGothic-Regular it embeds for them -- so the string is 96 pt drawn and 96 pt
+    measured, and ``デジタル`` (48), ``グローバル`` (60) and ``その他`` (36) match to
+    0.000 pt as well.
+
+    What the export does show is something nothing here models: **PowerPoint truncated the
+    label.**  It drew ``プラット…`` -- four katakana and an ellipsis -- where the category
+    is eight characters, and it did the same to two of the radar's six.  The reserve it
+    kept, 69.538 pt, implies a label width of 68.09 through this formula, which is 1.06 of
+    the 64.39 pt band; the real label is 1.49 bands.  That is the same unidentified cap
+    ``_bottom_label_band`` already records for a 4.18-band probe, seen from the other side.
+    Before the rotation work the inset was 27.29 pt, so the error more than halved.
     """
     from tests.conftest import FIXTURE_DIR
 
@@ -3321,3 +3345,88 @@ class _FakeLine:
     _is_radar = False
     _radar_style = "marker"
 
+
+
+def test_a_chart_measures_and_draws_its_japanese_in_the_themes_script_face():
+    """The defect this file used to attribute to the label width, and where it lived.
+
+    `real-financial-report.pptx`'s charts name `<a:latin typeface="Arial"/>` and nothing
+    else; its theme writes `<a:ea typeface=""/>` in both collections and
+    `<a:font script="Jpan" typeface="游ゴシック"/>` beside it.  PowerPoint's own export
+    embeds **YuGothic-Regular** for every Japanese category label and **ArialMT** for the
+    Latin runs inside the same labels, so the script list beats the Latin face and the two
+    split within one label.
+
+    `ChartFont` used to carry one face, which left a label measured through Arial -- which
+    has no Japanese glyph at all -- and drawn in whatever the rasteriser happened to find.
+    Both halves are asserted here: the resolved run names the East Asian face, and the
+    widths are the ones PowerPoint drew, 48.000, 96.000, 60.000 and 36.000 pt.
+    """
+    from tests.conftest import FIXTURE_DIR
+
+    deck = convert_pptx_to_model(
+        (FIXTURE_DIR / "real-financial-report.pptx").read_bytes()
+    )
+    charts = [
+        element
+        for element in deck.slides[2].elements
+        if isinstance(element, m.ChartElement) and element.chart.kind == "barChart"
+    ]
+    assert len(charts) == 1
+    labels = {
+        run.text: run.properties
+        for shape in _turned(charts[0].children)
+        for paragraph in shape.text_body.paragraphs
+        for run in paragraph.runs
+    }
+    assert set(labels) == {"デジタル", "プラットフォーム", "グローバル", "その他"}
+    for properties in labels.values():
+        assert properties.font_family == "Arial"
+        assert properties.font_family_ea == "游ゴシック"
+
+    from pptx2svg.resolve.chart import ChartFont, font_box
+
+    font = ChartFont(
+        family="Arial",
+        box=font_box("Arial", 12.0),
+        family_ea="游ゴシック",
+        box_ea=font_box("游ゴシック", 12.0),
+    )
+    for text, drawn in (
+        ("デジタル", 48.0),
+        ("プラットフォーム", 96.0),
+        ("グローバル", 60.0),
+        ("その他", 36.0),
+    ):
+        assert font.width(text) == pytest.approx(drawn, abs=0.001), text
+    # The radar's two mixed labels, from the same export: Arial for the Latin half.
+    assert font.width("DX投資額") == pytest.approx(52.669, abs=0.01)
+    assert font.width("CO2削減") == pytest.approx(48.674, abs=0.01)
+    # A Latin-only label is untouched by any of it.
+    assert font.width("Q1") == pytest.approx(16.008, abs=0.001)
+    # And the line box the reserves read is the face that draws the label, per label.
+    assert font.box_for("Q1").line_height == pytest.approx(13.406, abs=0.001)
+    assert font.box_for("その他").line_height == pytest.approx(17.376, abs=0.001)
+
+
+def test_a_chart_label_that_mixes_scripts_is_drawn_in_two_chunks():
+    """resvg falls back per text chunk, not per glyph, so the split has to be in the SVG.
+
+    One `<tspan>` naming both faces would be drawn entirely in whichever one the
+    rasteriser settles on, at a width nothing computed.  `ChartFont.width` measures
+    `DX投資額` as Arial plus 游ゴシック, so the emitted markup has to say the same thing.
+    """
+    from pptx2svg import convert_pptx_to_svg
+    from tests.conftest import FIXTURE_DIR
+
+    svg = convert_pptx_to_svg(
+        str(FIXTURE_DIR / "real-financial-report.pptx"),
+        ConvertOptions(warn_on_font_substitution=False),
+    )[3]
+    chunks = re.findall(
+        r'<tspan[^>]*font-family="([^"]*)"[^>]*>(DX|投資額)</tspan>', svg
+    )
+    assert [text for _, text in chunks] == ["DX", "投資額"]
+    latin, east_asian = (family for family, _ in chunks)
+    assert latin.startswith("Arial")
+    assert east_asian.startswith("游ゴシック")

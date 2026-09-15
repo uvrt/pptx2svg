@@ -27,7 +27,13 @@ from ..text.measure import DefaultTextMeasurer, TextMeasurer
 class RenderContext:
     measurer: TextMeasurer = field(default_factory=DefaultTextMeasurer)
     font_mapping: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_FONT_MAPPING))
-    #: Final fallback typeface for CJK text, from the theme's ``Jpan`` script font.
+    #: Last-resort typeface for East Asian text, from the theme's ``Jpan`` script font.
+    #:
+    #: A backstop rather than the rule: the cascade that picks an East Asian face now runs
+    #: at resolution time (``pptx2svg.resolve.text._theme_east_asian``) and reaches the
+    #: measurer as ``RunProperties.font_family_ea``, so measurement and drawing cannot
+    #: disagree about it.  This stays for a caller who builds a ``RenderContext`` by hand
+    #: and for a model that predates that.
     jpan_fallback_font: str | None = None
     #: Emit text as ``<text>``/``<tspan>``.  (Text-to-path would need embedded fonts.)
     defs: list[str] = field(default_factory=list)
