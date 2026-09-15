@@ -905,18 +905,34 @@ def test_the_variant_sweep_reproduces_powerpoints_axis(name, variant_deck):
     )
 
 
-def test_a_negative_bar_is_drawn_hollow_unless_the_file_opts_out(variant_deck):
-    """Measured: white fill, black 0.75 pt outline -- and the series colour at val="0"."""
+def test_a_negative_bar_is_drawn_hollow_only_when_the_file_asks(variant_deck):
+    """Measured: white fill, dark 0.75 pt outline -- and *only* at ``val="1"``.
+
+    This assertion used to be the other way round, on the reading that ECMA-376's
+    CT_Boolean defaults `val` to 1 and therefore an absent `c:invertIfNegative` means
+    inversion.  `real-college-template.pptx` is the first deck in the corpus with a
+    negative datum and no such element, and PowerPoint drew that bar solid.
+
+    Probed properly rather than inferred, because the deck differs from the sweep in two
+    ways at once -- stacked rather than clustered, and no `c:spPr` on the series rather
+    than an explicit fill.  Four variants of that chart were built by rewriting its
+    `ppt/charts/chart1.xml` and exported through PowerPoint:
+
+        stacked   + automatic accent fill -> solid #C00000 (the theme's accent1)
+        stacked   + explicit #2563EB      -> solid #2563EB
+        clustered + automatic accent fill -> solid #C00000
+        clustered + explicit #2563EB      -> solid #2563EB
+
+    Neither axis matters; the element's absence is what decides.  The same chart with
+    `<c:invertIfNegative val="1"/>` added came out white with a dark outline in both
+    fill variants, which is the case this test now pins.
+    """
     default = _bars(variant_deck["negative-default"])
     assert [bar.fill.color.hex.upper() for bar in default] == [
         "#F97316",
-        "#FFFFFF",
+        "#F97316",
         "#F97316",
     ]
-    inverted = next(bar for bar in default if bar.fill.color.hex.upper() == "#FFFFFF")
-    assert inverted.outline is not None
-    assert inverted.outline.fill.color.hex.upper() == "#000000"
-    assert inverted.outline.width == 9525
 
     kept = _bars(variant_deck["negative-noinvert"])
     assert {bar.fill.color.hex.upper() for bar in kept} == {"#F97316"}
@@ -1243,6 +1259,33 @@ def test_barDir_decides_which_axis_line_is_which():
     assert remaining[0].transform.extent_width == 0
 
 
+def test_an_axis_whose_spPr_says_noFill_draws_no_line():
+    """`<a:ln><a:noFill/></a:ln>` is "no line", not "no opinion".
+
+    `real-college-template`'s chart says it on the value axis -- ``<a:ln w="25400">
+    <a:noFill/></a:ln>`` -- and PowerPoint draws nothing up the left of that plot.  We
+    drew the default black axis line, full plot height, because
+    ``resolve.view._resolve_outline`` collapses "noFill" and "absent" to the same
+    ``None``.  Its category axis, which *does* state a stroke, still draws.
+    """
+    body = (
+        "<c:chart><c:plotArea><c:barChart><c:barDir val='col'/>"
+        "<c:axId val='1'/><c:axId val='2'/>"
+        "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>3</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+        "</c:barChart>"
+        "<c:catAx><c:axId val='1'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/>{spPr}</c:valAx></c:plotArea></c:chart>"
+    )
+    both = _lines(_build(body.format(spPr=""))[0])
+    assert len(both) == 2
+
+    quiet = _lines(_build(body.format(spPr="<c:spPr><a:ln w='25400'><a:noFill/></a:ln></c:spPr>"))[0])
+    # Only the category axis is left, and a column chart draws that one horizontally.
+    assert len(quiet) == 1
+    assert quiet[0].transform.extent_height == 0
+
+
 def test_a_negative_gap_width_does_not_divide_by_zero():
     """`c:gapWidth` is schema-bounded to 0..500 and a file need not obey.
 
@@ -1354,11 +1397,75 @@ def test_a_series_longer_than_the_labelled_one_still_draws_every_bar():
     assert len(bars) == 6
 
 
+def _filled_bars(series: str):
+    """Every filled rectangle a bare `c:barChart` draws, left to right.
+
+    No `c:legend` in these bodies, so nothing but the bars themselves is filled.
+    """
+    children, _ = _build(bar(series))
+    return sorted(
+        (
+            child
+            for child in children
+            if isinstance(child, m.ShapeElement)
+            and isinstance(child.fill, m.SolidFill)
+            and child.text_body is None
+        ),
+        key=lambda bar: bar.transform.offset_x,
+    )
+
+
+def test_an_explicit_invert_if_negative_draws_the_bar_hollow():
+    """The other half of the probe above: `val="1"` really is white-with-an-outline.
+
+    Measured on `probe-invert-on-auto` / `probe-invert-on-fill` -- the deck's own chart
+    with `<c:invertIfNegative val="1"/>` added to the series carrying the -1.0.  Both
+    came out white, so the hollow drawing survives; only its default changed.
+    """
+    bars = _filled_bars(
+        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+        "<c:spPr><a:solidFill><a:srgbClr val='F97316'/></a:solidFill></c:spPr>"
+        "<c:invertIfNegative val='1'/><c:val><c:numRef><c:numCache>"
+        "<c:ptCount val='3'/><c:pt idx='0'><c:v>3</c:v></c:pt>"
+        "<c:pt idx='1'><c:v>-2</c:v></c:pt><c:pt idx='2'><c:v>5</c:v></c:pt>"
+        "</c:numCache></c:numRef></c:val></c:ser>"
+    )
+    assert [bar.fill.color.hex.upper() for bar in bars] == [
+        "#F97316",
+        "#FFFFFF",
+        "#F97316",
+    ]
+    inverted = bars[1]
+    assert inverted.outline is not None
+    assert inverted.outline.fill.color.hex.upper() == "#000000"
+    assert inverted.outline.width == 9525
+
+
+def test_a_series_takes_the_accent_its_c_idx_names_not_its_position():
+    """`real-college-template`'s chart: (idx 2, order 0) then (idx 0, order 1).
+
+    The second series states no fill and PowerPoint drew it in accent1, not accent2 --
+    so the accent cycle is indexed by `c:idx`.  Every probe before this deck had
+    idx == order, which is why the two readings were indistinguishable.
+    """
+    bars = _filled_bars(
+        "<c:ser><c:idx val='2'/><c:order val='0'/><c:val><c:numRef><c:numCache>"
+        "<c:ptCount val='1'/><c:pt idx='0'><c:v>3</c:v></c:pt>"
+        "</c:numCache></c:numRef></c:val></c:ser>"
+        "<c:ser><c:idx val='0'/><c:order val='1'/><c:val><c:numRef><c:numCache>"
+        "<c:ptCount val='1'/><c:pt idx='0'><c:v>4</c:v></c:pt>"
+        "</c:numCache></c:numRef></c:val></c:ser>"
+    )
+    # Accents are [#4472C4, #ED7D31, #A5A5A5]: idx 2 is the third, idx 0 the first.
+    assert [bar.fill.color.hex.upper() for bar in bars] == ["#A5A5A5", "#4472C4"]
+
+
 def test_vary_colors_does_not_suppress_the_negative_bar_inversion():
     """A varyColors fill is not a `c:dPt`, so `c:invertIfNegative` still applies to it."""
     children, _ = _build(
         bar(
-            "<c:varyColors val='1'/><c:ser><c:val><c:numRef><c:numCache>"
+            "<c:varyColors val='1'/><c:ser><c:invertIfNegative val='1'/>"
+            "<c:val><c:numRef><c:numCache>"
             "<c:ptCount val='3'/><c:pt idx='0'><c:v>3</c:v></c:pt>"
             "<c:pt idx='1'><c:v>-2</c:v></c:pt><c:pt idx='2'><c:v>5</c:v></c:pt>"
             "</c:numCache></c:numRef></c:val></c:ser>"
