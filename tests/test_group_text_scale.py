@@ -99,14 +99,22 @@ def test_nested_group_scales_compound():
 
 
 def test_a_non_uniform_group_does_not_stretch_the_glyphs():
-    """``ext``/``chExt`` differing per axis cancels per axis, so nothing is stretched.
+    """``ext``/``chExt`` differing per axis leaves the glyphs alone on both axes.
 
     Measured: in a group scaling 4x horizontally and 1x vertically, PowerPoint drew the
     probe string 58.67 pt wide -- exactly what the ungrouped control drew.
+
+    A non-uniform scale is no longer emitted as an SVG ``scale()`` at all, because one
+    around a rotated child composes to a shear that PowerPoint never draws (see
+    :func:`~pptx2svg.render.svg.swaps_group_axes`); it is folded into each child's own
+    box instead.  So there is no counter-scale left to assert, and the consequence --
+    the same markup as an ungrouped box of the on-slide size -- is asserted directly,
+    which is the stronger check anyway.
     """
     tall = m.Transform(offset_x=0, offset_y=0, extent_width=500000, extent_height=400000)
     svg = render(grouped(tall, text_shape(tall)))
-    assert 'transform="scale(0.25, 1)"' in svg
+    assert text_markup(svg) == text_markup(render(text_shape(OUTER)))
+    assert "scale(" not in svg
 
 
 def test_a_group_that_shrinks_its_children_leaves_the_text_alone():
