@@ -1695,11 +1695,11 @@ frame grown by the accumulated scale, at the authored size, and the result wrapp
 transform that cancels the scale. `RenderContext.group_scale` carries the factor;
 `tests/test_group_text_scale.py` holds the cases.
 
-**Known limitation:** a rotated group with a *non-uniform* scale composes to a shear, and a
-pair of per-axis factors cannot express that. Nothing in the corpus does it. The same probe
-also showed our geometry wrong for that case — a rotated shape in a 4:1 group draws a
-differently-skewed parallelogram than PowerPoint's — which is a separate, pre-existing bug
-in the group transform itself, not in the text.
+**That limitation is closed; see §5.5.** It was recorded here as "a rotated group with a
+non-uniform scale composes to a shear, and a pair of per-axis factors cannot express
+that", alongside the geometry half — "a rotated shape in a 4:1 group draws a
+differently-skewed parallelogram than PowerPoint's". Both halves rested on an assumption
+that turned out to be wrong: **PowerPoint never composes a shear at all.**
 
 **A second defect surfaced on the same slide.** `_render_custom_path` emitted the path's
 scale through the coordinate formatter, which rounds to three decimals. A custom path
@@ -1710,6 +1710,102 @@ corpus because the committed fixtures author custom paths in small path units, a
 suite because the unit test used `w="100"`. On the sales template this was worth more than
 the text fix: mean SSIM against PowerPoint's export went 0.7912 → 0.8015 with the group
 rule alone and 0.7912 → 0.9101 with both.
+
+### 5.5 A group's scale is not a matrix — **measured, and fixed**
+
+§5.4 left one case open and framed it as "the composite is a shear and we cannot express
+it". SVG *can* express a shear, with `matrix()`, so that framing made the work sound like
+a notation problem. It was not. **PowerPoint does not draw a shear. There is no shear to
+express.**
+
+Three probe decks — 82 probes over 82 slides, built by `tools/make_group_shear_probe.py`
+and exported by PowerPoint 16.x — were read back not by rasterising but by walking the
+PDF's path objects for the drawn vertices (`tools/read_group_shear_probe.py`). The
+discriminator is a square rotated 45° inside a 4:1 group. Scale-after-rotate gives a
+rhombus with diagonals 178.2 and 44.5 pt and corners at 28° and 152°. PowerPoint drew a
+**31.496 × 125.984 pt rectangle with an interior angle of 90.000°**, and so did all 43
+sweep probes at every angle, ratio, flip and nesting order tried:
+
+| authored | drawn | |
+| --- | --- | --- |
+| square, 4:1 group, rot 0 | 125.984 × 31.496, corner 90.000° | the control |
+| square, 4:1 group, rot 30 | 125.984 × 31.496 at 30° | the 4 is on the width |
+| square, 4:1 group, rot 44.9 | 125.984 × 31.496 | still the width |
+| square, 4:1 group, rot 45 | 31.496 × 125.984 | the two factors change places |
+| square, 4:1 group, rot 60 | 31.496 × 125.984, long side at 150° | an authored 60° draws at −30° |
+| square, 4:1 group, rot 90 | 125.984 × 31.496, axis-aligned | identical to rot 0 |
+
+So the rule is: **the group hands each of its two factors to one of the child's own axes,
+choosing by which slide axis that axis currently lies nearer to, and rotates the grown box
+afterwards.** The centre is still mapped by the plain scale — it landed on
+`origin + S·(centre − chOff)` to the hundredth of a point on all 43. The rest of the deck
+pins the rule down:
+
+* **The crossing is at 45° and is a switch, not a blend.** 44.9 and 45.0 both drew exactly
+  1× and 4× the authored side, nothing in between.
+* **It does not move with the ratio.** 2:1 and 10:1 both flipped between 44 and 45.
+* **It repeats every 90°, signed.** 134 swapped and 135 did not; 180 behaved as 0, 225 as
+  45, 270 as 90, 315 as 135, 405 as 45, −30 as 150, −60 as 120.
+* **Neither factor need be 1**, and the child need not be square: a 4:2 group put 4 and 2
+  on a 400000 × 200000 child's own axes and swapped them past 45°.
+* **Nesting composes.** A rotated nested *group* is treated exactly like a rotated shape,
+  and a 2:1 inside a 4:1 scaled a rotated child by 8 — 251.968 pt against the authored
+  31.496 — so the assignment sees the product.
+
+**A reading the measurements refuted.** Since |sin| and |cos| cross at exactly 45°, the
+obvious rule is "swap when |sin| > |cos|", and flips would be irrelevant because that test
+takes magnitudes. Twenty-six flipped probes at 30° and 60° agree with it. The ties do not:
+at exactly 45° an unflipped child swaps and one carrying `flipH` *or* `flipV` does not, and
+at exactly 135° it is the other way round. One flip negates the angle the test is made on;
+two flips cancel. The rule is therefore stated on a signed angle — `swaps_group_axes` in
+`render/svg.py`.
+
+**What text does inside it.** Glyphs never skew, and they never take the geometry's
+effective angle either. Every character of an 18 pt Arial run in a 4:1, 1:4 or 2:1 group
+came out with a text matrix of exactly `18 · R(θ)` for the **authored** θ — byte-identical
+to the ungrouped control's matrix, no skew term, size untouched. Only the frame moves: the
+first baseline of a run in a 4:1 group at 45° was predicted from the *swapped*
+31.496 × 62.992 pt frame to within 0.07 pt, where the unswapped frame predicts a point
+50 pt away. So text needs no counter-transform once the scale is folded into the box;
+`RenderContext.group_scale` now carries the uniform case only.
+
+**The fix.** A uniform scale commutes with rotation and stays an SVG `scale()` around the
+subtree, byte-identical to before. A non-uniform one is folded into each child's own box.
+The exception is a table, whose column widths and row heights are authored in EMU and do
+not follow its frame; it keeps the wrapper, and with it the old approximation.
+
+Uniformity is tested with a tolerance and a real deck says why: Google Slides rounds one
+scale into two EMU pairs that no longer divide to the same number — 3.796875 across against
+3.7968797 down in the meal planning template, and 0.75 against 0.7499996 — so four groups
+that are uniform by intent would otherwise fold on float noise. 1e-4 is three orders of
+magnitude above that and far below any deliberate stretch.
+
+**Before and after, on the probe decks:** 14/72 → **72/72** drawn quads matching
+PowerPoint's vertices to 0.05 pt, and 4/10 → **9/10** text baselines within a point at the
+same angle and size. By mean SSIM: `group-shear` 0.7971 → 0.9968, `group-sweep`
+0.6435 → 0.9997, `group-tie` 0.5115 → 0.9423. The scored corpus did not move at all
+(`authoring-integration` 0.9327, `table-test` 0.9895, `real-college-template` 0.8003), nor
+did either template deck in `scratch/`, which render byte-identically.
+
+Only one deck anywhere changed: `real-basic-theme`, whose layouts hold a 0.7006 × 1.8185
+group with children at −90°. Its pixels did not move, and the reason is worth recording —
+at an exact multiple of 90° the scale and the rotation commute, `S·R(90) = R(90)·D`, so the
+old code was accidentally right there. That is why the corpus never caught this.
+
+**Found and not fixed: a group's scale does not reach the pen either.** A 6 pt outline drew
+6.00 pt in every case measured — ungrouped, in a 4:1 group, in a *uniform* 4:4 group, and
+on a rotated child. Line width is absolute the way font size is. Folding a non-uniform
+group now gets this right as a side effect, but the uniform path still multiplies the
+stroke by the scale: `group-tie` slide 9 scores 0.4702 against 0.9862+ for every other
+slide on that deck, drawing a 6 pt pen at 24 pt. Fixing it means folding uniform groups
+too, which changes every grouped fixture and contradicts four of the nine cases in
+`tests/test_group_text_scale.py` that deliberately pin the `scale()` mechanism, so it is a
+separate piece of work.
+
+**Found and not fixed: we mirror text inside a flipped shape and PowerPoint does not.** The
+`flipH` text probe drew unmirrored at its authored +45°; we emit `scale(-1, 1)` around the
+`<text>` and draw it at −135°. This is independent of groups — any flipped text box does it
+— and predates this work.
 
 ---
 

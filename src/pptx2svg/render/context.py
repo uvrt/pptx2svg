@@ -10,6 +10,9 @@ Three things need to be threaded through every renderer:
   makes the output diffable and snapshot-testable.
 * **The enclosing groups' coordinate scale.** Geometry inside a group is scaled by the
   group's ``ext``/``chExt`` ratio and text is *not*; see :attr:`RenderContext.group_scale`.
+  This carries the *uniform* case only -- a non-uniform ratio is folded into the
+  children's own boxes instead, for the reason in
+  :func:`~pptx2svg.render.svg.swaps_group_axes`.
 """
 
 from __future__ import annotations
@@ -55,9 +58,14 @@ class RenderContext:
     #: the same on-slide width, so wrapping happens at the scaled width and the authored
     #: size.
     #:
-    #: Kept per-axis because the non-uniform probe proves the two are independent.  The
-    #: known limitation is a *rotated* group with a non-uniform scale: the true composite
-    #: is then a shear rather than a scale, and a pair of factors cannot express it.
+    #: Kept per-axis because the non-uniform probe proves the two are independent -- but
+    #: in practice the two entries are now always equal.  A *non-uniform* group no longer
+    #: emits an SVG ``scale()`` at all: one around a rotated child would compose to a
+    #: shear, and PowerPoint draws a rotated rectangle instead, so the ratio is folded
+    #: into each child's own box by :func:`~pptx2svg.render.svg.render_group`.  A folded
+    #: child's frame is already in the enclosing space, so it needs no counter-transform
+    #: and this attribute is left alone for it.  Only a uniform scale -- which commutes
+    #: with rotation and is therefore exact as a ``scale()`` -- still lands here.
     group_scale: tuple[float, float] = (1.0, 1.0)
     _next_id: int = 0
 
