@@ -162,8 +162,17 @@ DEFAULT_MARKER_OUTLINE_EMU = 6350.0
 #: **not measured**.
 DEFAULT_MARKER_CYCLE = ("diamond", "square", "triangle", "x", "star", "dot")
 
-#: Marker side when ``c:size`` is absent, in points (ECMA-376's default).
-DEFAULT_MARKER_SIZE_PT = 7.0
+#: Marker side when ``c:size`` is absent, in points.  **Six, not ECMA-376's seven.**
+#:
+#: This was carried as 7 with a note that it had never been measured either way, while the
+#: radar path already used 6 from a probe whose diamond came out 5.76 pt across -- a
+#: diamond, so the reading depended on the tips landing inside PowerPoint's 0.24 pt output
+#: grid.  Two probes settle it with an axis-aligned shape and no such argument: the
+#: scatter two-series probe's second series states no ``c:marker`` and its **square**
+#: measured exactly 6.000 x 6.000, and a line chart with an explicit ``c:size val="6"``
+#: square measured the same 6.000.  The line chart's own default diamond measured 5.76,
+#: the radar's number, on the same export.
+DEFAULT_MARKER_SIZE_PT = 6.0
 
 #: Gap between a bar's edge and the *line box* of the data label beside it, in points.
 #: Measured 4.86 pt at 10 pt and 4.70 pt at 14 pt for ``outEnd``, and 4.91 pt at 10 pt for
@@ -241,6 +250,24 @@ POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart", "radarChart"})
 
 #: The polar kinds that are a web of spokes rather than a ring of slices.
 RADAR_CHART_KINDS = frozenset({"radarChart"})
+
+#: Filled to the zero line rather than stroked through the points.
+AREA_CHART_KINDS = frozenset({"areaChart"})
+
+#: The one Cartesian kind with **two value axes and no category axis**.
+SCATTER_CHART_KINDS = frozenset({"scatterChart"})
+
+#: ``c:crossBetween`` decides whether the points sit at the centres of the category bands
+#: or on the band edges, and it is optional.  **An area chart that states none draws as
+#: ``midCat``** -- the first vertex on the plot's left edge and the last on its right.
+#: Measured: a probe with `<c:crossBetween
+#: val="between"/>` put its three vertices at 52.473 / 115.292 / 178.072 on a
+#: 21.073..209.472 plot, which are the band centres; one with `val="midCat"` and one with
+#: **no element at all** were byte-identical to each other at 26.433 / 108.015 / 189.632,
+#: which are the plot's edges and midpoint.  A line chart's absent case is *not* measured
+#: -- every line chart in the corpus and in every probe states ``between`` -- so the
+#: default below stays ``between`` for everything but an area.
+DEFAULT_AREA_CROSS_BETWEEN = "midCat"
 
 #: How far the drawn radius falls short of half the plot region, as a function of the
 #: category labels' line height.  Fitted to five probes -- Aptos at 8, 10 and 14 pt and
@@ -352,15 +379,53 @@ ACCENT_KEYS = ("accent1", "accent2", "accent3", "accent4", "accent5", "accent6")
 #: Below this many major units of span, the plain power of ten is halved.  See
 #: :func:`nice_axis_scale`; the threshold is somewhere in (1.842, 4.285] and 2 is the
 #: round number inside it.
+#:
+#: **A ladder was written to replace this and reverted.**  A scatter probe of 120..160
+#: came back 0..180 **by 20** where one halving gives 0..200 by 50, and stepping the unit
+#: down the 1-2-5 ladder while the span holds fewer than ~3.5 units reproduces that *and*
+#: all five observations this constant was fitted to.  Then the corpus radar refutes it:
+#: `real-financial-report.pptx`'s chart5 has 65..100 of data and PowerPoint's own export
+#: draws **two** rings, at radii 22.8 and 45.6 -- 0..100 by 50, a ratio of exactly 2.0
+#: accepted, where the scatter refused 3.2 on the same kind of axis.  No monotone ratio
+#: threshold produces both.
+#:
+#: What separates them is **axis length**, which makes both of these observations belong
+#: to the unsolved tick-density question rather than to unit selection: the radar's axis
+#: is 45.6 pt and takes 22.8 pt steps, the scatter's is 145.0 pt and takes 16.1 pt steps
+#: where 36.3 pt was available.  A target band of roughly 16 to 24 pt fits those two and
+#: every cell of the density table in ROADMAP.md -- and then dies on the same stacked
+#: probe that killed the last candidate, which accepts 14.5 pt.  See ROADMAP.md.
 AXIS_HALVING_RATIO = 2.0
 
-#: A horizontal bar chart's value axis comes out coarser than a vertical one's for the
-#: same data and the same axis length, so once the interval is chosen it is stepped up
-#: until the axis holds no more than this many of them.  **One measurement only** -- the
-#: horizontal probe, whose 0..5 data PowerPoint drew as 0..6 by 2 where the identical
-#: data on a vertical axis of almost the same length (151.4 pt against 145.0 pt) came out
-#: 0..6 by 1.  It is therefore not a density limit, and what it really is remains unknown.
-HORIZONTAL_MAX_INTERVALS = 5
+#: Data that sits this far up its own range does not get an axis pulled back to zero.
+#:
+#: A **bar** must start at its axis -- a bar that does not is a different picture -- so
+#: `nice_axis_scale` anchors at zero for every type but one.  A **scatter** does not: a
+#: decade of years against a measurement would be destroyed by it, and PowerPoint agrees.
+#: Measured on six probes, and the threshold is Excel's folklore 5/6 = 0.8333 with the
+#: bracket [0.80, 0.84) around it: x of 40..50 came back **0..60** (40/50 = 0.80) and
+#: x of 42..50 came back **40..55** (42/50 = 0.84).  The other four agree -- 2010..2020
+#: -> 2005..2025, 100..104 -> 98..106, 120..160 -> 0..180, 10..50 -> 0..60 -- and the
+#: all-negative case mirrors it: -50..-10 came back -60..0.
+#:
+#: **Only a scatter is measured.**  A line chart of temperatures has the same problem and
+#: no probe has ever shown what PowerPoint does with one, so it keeps the zero anchor.
+AXIS_ZERO_ANCHOR_RATIO = 5.0 / 6.0
+
+#: A value axis **along the bottom** comes out coarser than one up the side for the same
+#: data and the same axis length, so once the interval is chosen it is stepped up until
+#: the axis holds no more than this many of them.  What it really is remains unknown --
+#: it is not a density limit, because the horizontal probe's 0..5 data came out 0..6 by 2
+#: where the identical data on a *vertical* axis of almost the same length (151.4 pt
+#: against 145.0 pt) came out 0..6 by 1.
+#:
+#: **Four, not five.**  It was five on that one horizontal-bar observation, which only
+#: bounds it below six.  Four scatter probes -- whose x axis is the same bottom axis --
+#: bracket it properly, and the discriminating one is ``x-float``: x from 0.5 to 4.5
+#: rounds to a 0..5 axis at unit 1, which is *five* intervals, and PowerPoint coarsened it
+#: to 0..6 by 2 anyway.  ``x-neg``'s -4..4 by 2 is **four** intervals and PowerPoint kept
+#: it, so the bracket is [4, 5).  The other two, 1..5 and 10..50, agree at either value.
+HORIZONTAL_MAX_INTERVALS = 4
 
 
 # --------------------------------------------------------------------------------------
@@ -373,6 +438,7 @@ def nice_axis_scale(
     data_maximum: float,
     horizontal: bool = False,
     strict: bool = True,
+    anchor_zero: bool = True,
 ) -> tuple[float, float, float]:
     """``(minimum, maximum, major_unit)`` for a value axis PowerPoint would draw itself.
 
@@ -391,19 +457,28 @@ def nice_axis_scale(
     0..4285      0..5000 by 1000 5
     ===========  ==============  ==========
 
-    The domain always includes zero -- a bar that does not start at its axis is a
-    different picture -- and both ends are rounded *strictly* outwards, so a series
-    topping out at exactly 5 gets an axis to 6 rather than one whose last bar touches the
-    frame.  Both bumps are measured: the first is what ``authoring-integration.pptx``
-    does, the second is the -3 on the negative-value probe whose data floor is -2.
+    A sixth observation -- 120..160 of scatter data drawn 0..180 **by 20** on a 145 pt
+    axis, where this gives 0..200 by 50 -- is **not** reproduced, and deliberately so: the
+    rule that reproduces it contradicts the corpus radar.  See :data:`AXIS_HALVING_RATIO`.
+
+    Both ends are rounded *strictly* outwards, so a series topping out at exactly 5 gets
+    an axis to 6 rather than one whose last bar touches the frame.  Both bumps are
+    measured: the first is what ``authoring-integration.pptx`` does, the second is the -3
+    on the negative-value probe whose data floor is -2.
 
     ``strict=False`` turns that outward bump off, which is what a **radar** wants: the
     same 0..5 data a bar chart takes to 6 stopped at exactly 5 on every radar probe, five
     rings with the outermost passing through the largest point.  One discriminating
     observation, and it is the whole of the difference -- the unit is chosen identically.
+
+    ``anchor_zero=False`` lets the domain leave zero out when the data sits far enough up
+    its own range; see :data:`AXIS_ZERO_ANCHOR_RATIO`.  Only a **scatter** passes it, and
+    only a scatter has been measured.
     """
-    low = min(0.0, data_minimum)
-    high = max(0.0, data_maximum)
+    low, high = min(0.0, data_minimum), max(0.0, data_maximum)
+    if not anchor_zero and _floats_away_from_zero(data_minimum, data_maximum):
+        low, high = data_minimum, data_maximum
+    anchored = low <= 0.0 <= high
     span = high - low
 
     if span <= 0 or not math.isfinite(span):
@@ -420,7 +495,9 @@ def nice_axis_scale(
     if span / unit < AXIS_HALVING_RATIO:
         unit /= 2
 
-    minimum, maximum = _axis_extent(unit, low, high, data_minimum, data_maximum, strict)
+    minimum, maximum = _axis_extent(
+        unit, low, high, data_minimum, data_maximum, strict, anchored
+    )
     if horizontal:
         # Counted on the *rounded* extent, not the data span: 0..5 of data becomes a
         # 0..6 axis, and it is the six intervals in that which PowerPoint coarsens.
@@ -430,7 +507,7 @@ def nice_axis_scale(
                 break
             unit = stepped
             minimum, maximum = _axis_extent(
-                unit, low, high, data_minimum, data_maximum, strict
+                unit, low, high, data_minimum, data_maximum, strict, anchored
             )
     if not (math.isfinite(minimum) and math.isfinite(maximum) and maximum > minimum):
         return 0.0, 1.0, 1.0
@@ -444,18 +521,42 @@ def _axis_extent(
     data_minimum: float,
     data_maximum: float,
     strict: bool = True,
+    anchored: bool = True,
 ) -> tuple[float, float]:
     """Round the domain outwards to whole units, strictly past the data at both ends.
 
     ``strict=False`` rounds to a whole unit and stops there, which is the radar rule.
+
+    ``anchored`` says the domain is held at zero, which is what stops the strict bump
+    from pushing a 0..5 axis down to -1: zero is the floor, not a datum to clear.  An
+    **unanchored** axis has no such floor and its low end bumps like its high end --
+    measured on the scatter probes, where 100..104 came back **98**..106 and 2010..2020
+    came back **2005**..2025, both a whole unit clear of the data at each end.
     """
     maximum = math.ceil(high / unit) * unit
     if strict and maximum <= data_maximum:
         maximum += unit
     minimum = math.floor(low / unit) * unit
-    if strict and data_minimum < 0 and minimum >= data_minimum:
+    bump_low = data_minimum < 0 if anchored else True
+    if strict and bump_low and minimum >= data_minimum:
         minimum -= unit
     return minimum, maximum
+
+
+def _floats_away_from_zero(data_minimum: float, data_maximum: float) -> bool:
+    """Whether the data sits far enough up its own range to leave zero off the axis.
+
+    Both ends must be on the same side of zero, and the near end must be past
+    :data:`AXIS_ZERO_ANCHOR_RATIO` of the far one.  Data that straddles zero always keeps
+    it, because zero is already inside the domain.
+    """
+    if not (math.isfinite(data_minimum) and math.isfinite(data_maximum)):
+        return False
+    if data_minimum > 0 and data_maximum > 0:
+        return data_minimum > AXIS_ZERO_ANCHOR_RATIO * data_maximum
+    if data_minimum < 0 and data_maximum < 0:
+        return data_maximum < AXIS_ZERO_ANCHOR_RATIO * data_minimum
+    return False
 
 
 def _next_nice_unit(unit: float) -> float:
@@ -884,6 +985,14 @@ class ChartBuilder:
         return c.flat_chart_kind(self.plot.kind) in RADAR_CHART_KINDS
 
     @property
+    def _is_area(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in AREA_CHART_KINDS
+
+    @property
+    def _is_scatter(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in SCATTER_CHART_KINDS
+
+    @property
     def _radar_style(self) -> str:
         """``c:radarStyle``, normalised to what PowerPoint actually draws.
 
@@ -899,6 +1008,8 @@ class ChartBuilder:
             return self._build_radar()
         if self._is_polar:
             return self._build_polar()
+        if self._is_scatter:
+            return self._build_scatter()
         return self._build_cartesian()
 
     def _build_polar(self) -> tuple[list[m.SlideElement], m.ChartData]:
@@ -1333,7 +1444,9 @@ class ChartBuilder:
         self._draw_background(plot_rect)
         self._draw_title()
         self._draw_gridlines(plot_rect, scale, value_axis)
-        if self._is_line:
+        if self._is_area:
+            self._draw_areas(plot_rect, series, categories, scale)
+        elif self._is_line:
             self._draw_lines(plot_rect, series, categories, scale)
         else:
             self._draw_bars(plot_rect, series, categories, scale)
@@ -1373,6 +1486,377 @@ class ChartBuilder:
             legend_position=self._legend_position(),
         )
         return self.elements, data
+
+    def _build_scatter(self) -> tuple[list[m.SlideElement], m.ChartData]:
+        """A scatter: **both axes are value axes and there is no category axis at all.**
+
+        That is the one structural difference from every other Cartesian chart here, and it
+        is why this does not go through :meth:`_build_cartesian`.  Almost everything the
+        bottom of a chart does is written for a *category* axis -- the band a label is laid
+        into, the wrap that fills it, the 45 degree turn when it will not, the reserve
+        those together ask for -- and none of it applies to a row of numbers.  What a
+        scatter's bottom band actually is, measured, is the *horizontal bar chart's*: one
+        plain line of value labels centred on their ticks, with half of the last one
+        hanging past the plot's right edge.
+
+        Every constant below is shared with a chart that already draws.  The x axis is the
+        same coarse one a horizontal bar chart gets -- 1..5 of data came back 0..6 **by
+        two** where the y axis over the same span takes ones -- which is
+        :data:`HORIZONTAL_MAX_INTERVALS`, measured here for the second time.
+        """
+        series = self._series()
+        x_axis, y_axis = self._scatter_axes()
+
+        x_values = [self._x_values(index, item) for index, item in enumerate(series)]
+        xs = [value for column in x_values for value in column if value is not None]
+        ys = [value for item in series for value in item.values if value is not None]
+        # **Neither axis is anchored at zero**, which every other type here is.  A bar has
+        # to start at its axis; a scatter of years against a measurement would be destroyed
+        # by it, and PowerPoint agrees -- see :data:`AXIS_ZERO_ANCHOR_RATIO`.
+        x_scale = _apply_axis_limits(
+            nice_axis_scale(*_span(xs), horizontal=True, anchor_zero=False), x_axis
+        )
+        y_scale = _apply_axis_limits(
+            nice_axis_scale(*_span(ys), horizontal=False, anchor_zero=False), y_axis
+        )
+
+        x_font = self._label_font(x_axis)
+        y_font = self._label_font(y_axis)
+        x_ticks = self._tick_texts(x_scale, x_axis)
+        y_ticks = self._tick_texts(y_scale, y_axis)
+
+        rect = self._scatter_plot_rect(x_ticks, y_ticks, x_font, y_font, x_scale, y_scale)
+        # Where each axis is drawn: at the *other* axis' zero, clamped into the plot.
+        # Measured on the negative-x probe, whose value axis is drawn at 111.088 pt -- the
+        # x = 0 tick -- and not at the plot's left edge 95.7 pt away.
+        #
+        # `c:crosses` belongs to the axis it is written on and says where **that** axis
+        # crosses the perpendicular one, which is how the sibling
+        # :meth:`_category_axis_position` reads it.  So the vertical line's position is a
+        # question for the *y* axis even though the answer is an x coordinate.  Only
+        # `autoZero` is measured; the rest follow the category axis' reading rather than a
+        # second one invented here.
+        cross_x = self._crossing(
+            rect.left, rect.right, y_axis, x_scale, self._value_to_x, rect
+        )
+        cross_y = self._crossing(
+            rect.bottom, rect.top, x_axis, y_scale, self._value_to_y, rect
+        )
+
+        self._draw_background(rect)
+        self._draw_title()
+        if y_axis is not None and y_axis.major_gridlines:
+            outline = self._axis_outline(y_axis.major_gridline_outline)
+            for value in self._tick_values(y_scale):
+                y = self._value_to_y(rect, value, y_scale)
+                if abs(y - cross_y) >= 0.01:
+                    self._line(rect.left, y, rect.right, y, outline)
+        if x_axis is not None and x_axis.major_gridlines:
+            outline = self._axis_outline(x_axis.major_gridline_outline)
+            for value in self._tick_values(x_scale):
+                x = self._value_to_x(rect, value, x_scale)
+                if abs(x - cross_x) >= 0.01:
+                    self._line(x, rect.top, x, rect.bottom, outline)
+
+        for index, item in enumerate(series):
+            self._draw_scatter_series(rect, item, x_values[index], x_scale, y_scale)
+
+        if y_axis is not None and not y_axis.delete:
+            outline = self._axis_outline(y_axis.outline)
+            self._line(cross_x, rect.top, cross_x, rect.bottom, outline)
+        if x_axis is not None and not x_axis.delete:
+            outline = self._axis_outline(x_axis.outline)
+            self._line(rect.left, cross_y, rect.right, cross_y, outline)
+
+        if _labels_shown(y_axis):
+            placed = [
+                (self._value_to_y(rect, value, y_scale), text) for value, text in y_ticks
+            ]
+            self._labels_down_left(rect, placed, y_font, axis_x=cross_x)
+        if _labels_shown(x_axis):
+            placed = [
+                (self._value_to_x(rect, value, x_scale), text) for value, text in x_ticks
+            ]
+            self._labels_along_bottom(
+                rect, placed, x_font, axis_y=cross_y, centred_on_position=True
+            )
+
+        self._draw_scatter_labels(rect, series, x_values, x_scale, y_scale)
+        self._draw_legend(rect, series)
+
+        return self.elements, m.ChartData(
+            kind=c.flat_chart_kind(self.plot.kind),
+            series=[
+                m.ChartSeries(
+                    name=item.name,
+                    values=list(item.values),
+                    # A scatter has no categories; the x values stand in for them, which is
+                    # also what the reader caches into `c:cat` when there is no `c:cat`.
+                    categories=[
+                        "" if value is None else format_number(value, None)
+                        for value in x_values[index]
+                    ],
+                    color=item.color,
+                    format_code=item.format_code,
+                )
+                for index, item in enumerate(series)
+            ],
+            categories=[],
+            title=self._title_text(),
+            grouping=self.plot.grouping,
+            bar_direction=None,
+            value_axis=m.ChartAxisScale(
+                minimum=y_scale[0], maximum=y_scale[1], major_unit=y_scale[2]
+            ),
+            legend_position=self._legend_position(),
+        )
+
+    def _scatter_axes(self) -> "tuple[c.SourceChartAxis | None, c.SourceChartAxis | None]":
+        """``(x, y)``.  Both are ``c:valAx``, so they are told apart by position.
+
+        The group's own ``c:axId`` list is authoritative and lists x first; ``c:axPos`` is
+        the fallback for a file that names ids no axis declares.
+        """
+        x_axis, y_axis = self._axis_for(0), self._axis_for(1)
+        if x_axis is None or y_axis is None:
+            by_position = {axis.position: axis for axis in self.chart.axes}
+            x_axis = x_axis or by_position.get("b") or by_position.get("t")
+            y_axis = y_axis or by_position.get("l") or by_position.get("r")
+        return x_axis, y_axis
+
+    def _x_values(self, index: int, item: _Series) -> list[float | None]:
+        """One series' ``c:xVal``, padded to the length of its ``c:yVal``.
+
+        ``c:xVal`` is optional and a short one is legal, so the tail is filled with the
+        1-based position -- which is what a spreadsheet's implicit x column would hold.
+        **Not measured**: every probe states a full ``c:xVal``, and no corpus deck has a
+        scatter at all.
+        """
+        source = self.plot.series[index] if index < len(self.plot.series) else None
+        xs = list(source.x_values) if source is not None and source.x_values else []
+        if len(xs) < len(item.values):
+            xs += [float(position + 1) for position in range(len(xs), len(item.values))]
+        return xs[: len(item.values)]
+
+    def _crossing(
+        self,
+        low: float,
+        high: float,
+        axis: "c.SourceChartAxis | None",
+        scale: tuple[float, float, float],
+        to_position,
+        rect: _Rect,
+    ) -> float:
+        """Where ``axis`` is drawn along the perpendicular axis, in frame points.
+
+        ``low`` and ``high`` are that perpendicular axis' two ends; ``scale`` and
+        ``to_position`` are *its* domain and mapping, because `c:crossesAt` is a value on
+        the axis being crossed.  The reading is :meth:`_category_axis_position`'s, kept in
+        step with it deliberately: a scatter's two value axes are the category axis and the
+        value axis of a bar chart with the category names taken away.
+        """
+        if axis is not None and axis.tick_label_position == "low":
+            return low
+        crosses = axis.crosses if axis is not None else None
+        if crosses == "max":
+            return high
+        if crosses == "min":
+            return low
+        value = axis.crosses_at if axis is not None and crosses == "val" else 0.0
+        if value is None:
+            value = 0.0
+        along = to_position(rect, value, scale)
+        return min(max(along, min(low, high)), max(low, high))
+
+    def _scatter_plot_rect(
+        self,
+        x_ticks: list[tuple[float, str]],
+        y_ticks: list[tuple[float, str]],
+        x_font: ChartFont,
+        y_font: ChartFont,
+        x_scale: tuple[float, float, float],
+        y_scale: tuple[float, float, float],
+    ) -> _Rect:
+        """The plot rectangle, from the same four measurements a bar chart's comes from.
+
+        The left column, the top allowance, the title band and the legend band are the bar
+        chart's own formulae; what is new is that **the bottom holds value labels rather
+        than category ones**, so the band is one plain line and the last label overhangs
+        the right edge by half its width.  Six probes: ``bare`` 21.073 / 13.670 / 11.102 /
+        24.965, ``font14`` 26.907 / 14.740 / 13.545 / 32.353, ``title`` top 40.802, and
+        ``x-deleted`` -- no x labels at all -- 209.472 and 11.102, all within 0.02 pt.
+
+        Two corners mirror what a bar chart already does with negative values.  When the x
+        range goes below zero the value axis floats into the plot and the y labels go with
+        it, so the left column reserves nothing and the inset is the first x label's
+        overhang instead: 15.373 pt measured against 15.373 predicted.  When the *y* range
+        does, the x labels move up beside the zero line and the bottom band disappears.
+        """
+        frame = self.frame
+        x_axis, y_axis = self._scatter_axes()
+        show_x = _labels_shown(x_axis)
+        show_y = _labels_shown(y_axis)
+        x_labels = [text for _, text in x_ticks]
+        y_labels = [text for _, text in y_ticks]
+
+        left = frame.left + EDGE_INSET_PT
+        if show_y and x_scale[0] >= 0:
+            widest = max((y_font.width(text) for text in y_labels), default=0.0)
+            left = (
+                frame.left
+                + FRAME_PADDING_PT
+                + widest
+                + y_font.box.descent
+                + VALUE_LABEL_GAP_EM * y_font.size
+            )
+        overhang = 0.0
+        if show_x and x_labels:
+            left = max(left, frame.left + EDGE_INSET_PT + x_font.width(x_labels[0]) / 2)
+            overhang = x_font.width(x_labels[-1]) / 2
+
+        right = frame.right - EDGE_INSET_PT - overhang
+        top = frame.top + self._top_inset(y_font.box)
+        title = self._title_box()
+        if title is not None:
+            top += TITLE_BAND_LINES * title.line_height
+
+        legend_bottom = 0.0
+        legend = self._legend_position()
+        if legend is not None and not self._legend_overlays():
+            legend_font = self._legend_font()
+            band = LEGEND_BAND_LINES * legend_font.box.line_height
+            if legend == "b":
+                legend_bottom = band
+            elif legend in ("t", "tr"):
+                top += band
+            elif legend == "r":
+                right = frame.right - self._legend_side_width(legend_font) - overhang
+            elif legend == "l":
+                left += self._legend_side_width(legend_font) - EDGE_INSET_PT
+
+        if right - left < 1.0:
+            right = left + 1.0
+        if show_x and y_scale[0] >= 0:
+            bottom = frame.bottom - legend_bottom - self._bottom_label_band(
+                x_font, [], right - left
+            )
+        else:
+            bottom = frame.bottom - legend_bottom - self._top_inset(y_font.box)
+        if bottom - top < 1.0:
+            bottom = top + 1.0
+        return _Rect(left, top, right, bottom)
+
+    def _scatter_points(
+        self,
+        rect: _Rect,
+        item: _Series,
+        xs: list[float | None],
+        x_scale: tuple[float, float, float],
+        y_scale: tuple[float, float, float],
+    ) -> list[tuple[float, float] | None]:
+        """The drawn points, in data order, with ``None`` where the run breaks.
+
+        **A blank breaks a scatter exactly as it breaks a line**, and the probe says so in
+        a way the vertex list alone does not: the path through a missing middle y has four
+        points, which reads as unbroken, but its *segment kinds* are move, line, move,
+        line -- two disjoint strokes with a gap where the blank is.  Reading coordinates
+        without reading the operators is how that gets missed.
+
+        The points are joined **in the order the file lists them**, not sorted by x: the
+        unsorted-x probe's path runs 3, 1, 5, 2, 4.
+        """
+        blanks = self.chart.display_blanks_as or "gap"
+        points: list[tuple[float, float] | None] = []
+        for index, value in enumerate(item.values):
+            x = xs[index] if index < len(xs) else None
+            if value is None or x is None:
+                if blanks == "zero" and x is not None:
+                    value = 0.0
+                elif blanks == "span":
+                    # Unmeasured for a scatter; the line chart's reading is reused.
+                    continue
+                else:
+                    points.append(None)
+                    continue
+            points.append(
+                (self._value_to_x(rect, x, x_scale), self._value_to_y(rect, value, y_scale))
+            )
+        return points
+
+    def _draw_scatter_series(
+        self,
+        rect: _Rect,
+        item: _Series,
+        xs: list[float | None],
+        x_scale: tuple[float, float, float],
+        y_scale: tuple[float, float, float],
+    ) -> None:
+        points = self._scatter_points(rect, item, xs, x_scale, y_scale)
+        for run in _split_runs(points):
+            if len(run) > 1 and item.line is not None:
+                self._polyline(run, item.line, smooth=item.smooth)
+        for point in points:
+            if point is not None and item.marker_symbol:
+                self._marker(point, item)
+
+    def _draw_scatter_labels(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        x_values: list[list[float | None]],
+        x_scale: tuple[float, float, float],
+        y_scale: tuple[float, float, float],
+    ) -> None:
+        """``c:dLbls`` beside each point.
+
+        All five placements ECMA-376 allows a scatter are measured on one probe each, and
+        every one of them is the line chart's own geometry read off a different edge of the
+        marker: ``r`` and ``l`` put the label's near edge a marker radius plus 0.6 em from
+        the point (9.000 pt measured, 9.000 predicted, both sides); ``t`` and ``b`` put its
+        line box a radius plus :data:`DATA_LABEL_GAP_PT` away, which lands within 0.15 pt
+        above and 0.70 pt below; ``ctr`` is the ink centre, 0.23 pt out.  The 0.70 pt is
+        the one loose number and it is the same slack the roadmap records elsewhere --
+        PowerPoint's line box runs about a point taller than our metrics give.
+        """
+        categories = [
+            ["" if value is None else format_number(value, None) for value in column]
+            for column in x_values
+        ]
+        totals = _percent_totals(series)
+        for order, item in enumerate(series):
+            xs = x_values[order]
+            for point, value in enumerate(item.values):
+                labels = item.point_labels.get(point, item.labels)
+                if labels is None or not labels.anything or labels.font is None:
+                    continue
+                x = xs[point] if point < len(xs) else None
+                if value is None or x is None:
+                    continue
+                # The x values *are* the categories -- `parse/chart` already caches them
+                # into `c:cat` when a scatter states none -- so `c:showCatName` prints
+                # something rather than nothing.
+                text = self._label_text(
+                    labels, item, categories[order], point, value, totals
+                )
+                if not text:
+                    continue
+                centre = (
+                    self._value_to_x(rect, x, x_scale),
+                    self._value_to_y(rect, value, y_scale),
+                )
+                position = (labels.position or self._label_default()).lower()
+                radius = item.marker_size / 2
+                if position == "ctr":
+                    geometry = (centre[0], centre[1], "centre")
+                elif position == "l":
+                    geometry = (centre[0] - radius, centre[1], "left")
+                elif position == "t":
+                    geometry = (centre[0], centre[1] - radius, "outside-y")
+                elif position == "b":
+                    geometry = (centre[0], centre[1] + radius, "below")
+                else:
+                    geometry = (centre[0] + radius, centre[1], "right")
+                self._place_label(text, labels, geometry, False)
 
     # -- model --------------------------------------------------------------------------
 
@@ -1437,7 +1921,16 @@ class ChartBuilder:
                     m.SolidFill(color=self.style.accents[index % len(self.style.accents)])
                     for index in range(len(item.values))
                 ]
-            if self._is_line or (self._is_radar and self._radar_style != "filled"):
+            if (
+                self._is_line
+                or self._is_scatter
+                or (self._is_radar and self._radar_style != "filled")
+            ):
+                # **A scatter series is styled exactly like a line series, and
+                # ``c:scatterStyle`` decides nothing.**  Probes at `marker`, `line` and
+                # `lineMarker` came back byte-identical -- line *and* markers in all three
+                # -- so what turns either off is the series' own markup: `<a:ln><a:noFill/>`
+                # for the line, `<c:symbol val="none"/>` for the marker, each measured.
                 self._read_line_style(item, source, source.index)
                 if self._is_radar and (source.marker is None or not source.marker.size):
                     # Measured on the probe: a radar series stating no `c:size` draws a
@@ -1541,6 +2034,18 @@ class ChartBuilder:
             item.color = outline.fill.color
         elif self.style.accents:
             item.color = self.style.accents[index % len(self.style.accents)]
+        # **``<a:ln><a:noFill/></a:ln>`` is an explicit *no line*, not "use the default".**
+        # `_resolve_outline` collapses it to None exactly as it collapses an absent
+        # `c:spPr`, so the source element has to be asked -- the same trap
+        # :meth:`_axis_outline` exists for.  Measured: it is how a marker-only scatter is
+        # spelled, and the probe that states it drew five markers and no line at all;
+        # substituting the default here drew a line PowerPoint does not.
+        if isinstance(source.outline, s.SourceOutline) and isinstance(
+            source.outline.fill, s.SourceNoFill
+        ):
+            item.line = None
+            self._read_marker_style(item, source, index)
+            return
         if outline is None or outline.fill is None:
             outline = m.Outline(
                 width=DEFAULT_LINE_SERIES_WIDTH_EMU,
@@ -1551,7 +2056,19 @@ class ChartBuilder:
             # or not the `a:ln` says so.
             outline = replace(outline, line_cap="round")
         item.line = outline
+        self._read_marker_style(item, source, index)
+        # **An absent `c:smooth` smooths.**  It is a chart boolean, so the element being
+        # missing is not the same as `val="0"` -- exactly the trap `parse/chart._flag`
+        # exists for, and this reader used `bool(None) == False`.  Three probes: a line
+        # chart with `<c:smooth val="1"/>`, one with the element absent and one with
+        # `val="0"` came back as, respectively, four cubics, the *same* four cubics, and a
+        # four-segment polyline.  A scatter behaves identically.  PowerPoint's own writer
+        # always emits the element, so no corpus deck moves; a hand-written one does.
+        item.smooth = source.smooth is not False
 
+    def _read_marker_style(
+        self, item: _Series, source: c.SourceChartSeries, index: int
+    ) -> None:
         marker = source.marker
         if marker is None:
             # No `c:marker` at all: PowerPoint draws one anyway, from a per-series cycle.
@@ -1570,7 +2087,6 @@ class ChartBuilder:
         ) or m.Outline(
             width=DEFAULT_MARKER_OUTLINE_EMU, fill=m.SolidFill(color=item.color)
         )
-        item.smooth = bool(source.smooth)
 
     def _series_color(self, fill: m.Fill | None, index: int) -> m.ResolvedColor:
         """One flat colour for the series, for its legend swatch and its fallback fill.
@@ -1655,16 +2171,7 @@ class ChartBuilder:
             strict=not self._is_radar,
         )
 
-        if axis is not None:
-            if axis.minimum is not None:
-                minimum = axis.minimum
-            if axis.maximum is not None:
-                maximum = axis.maximum
-            if axis.major_unit is not None and axis.major_unit > 0:
-                unit = axis.major_unit
-        if maximum <= minimum:
-            maximum = minimum + (unit or 1.0)
-        return minimum, maximum, unit
+        return _apply_axis_limits((minimum, maximum, unit), axis)
 
     def _tick_texts(
         self, scale: tuple[float, float, float], axis: c.SourceChartAxis | None
@@ -1788,7 +2295,20 @@ class ChartBuilder:
                 + VALUE_LABEL_GAP_EM * left_font.size
             )
 
-        right = frame.right - EDGE_INSET_PT
+        # **``midCat`` centres the first and last category label on the plot's own edges**,
+        # so half of each hangs outside it and the plot narrows to make room.  Measured on
+        # the area probe, whose 21.073 / 209.472 plot became 26.433 / 189.632: ``Reader``
+        # is 30.859 pt and half of it plus the 11.0 pt edge inset is 26.433, and
+        # ``Renderer`` is 39.673 pt and half of it inside the same inset is 189.636.  Both
+        # to 0.01 pt.  A line chart stating ``midCat`` is *not* measured; the same rule is
+        # applied because the label placement it follows from is the same.
+        overhang_left = overhang_right = 0.0
+        if show_categories and categories and not horizontal and self._points_on_ticks:
+            overhang_left = category_font.width(categories[0]) / 2
+            overhang_right = category_font.width(categories[-1]) / 2
+            left = max(left, frame.left + EDGE_INSET_PT + overhang_left)
+
+        right = frame.right - EDGE_INSET_PT - overhang_right
         if horizontal and show_values:
             # The value axis runs along the bottom now, and its last label is centred on
             # the plot's right edge, so half of it hangs outside.  Measured 13.67 pt
@@ -1818,7 +2338,7 @@ class ChartBuilder:
                 # it already ends in its own trailing pad.  Measured on
                 # real-financial-report's two bar charts, whose legends are Japanese and
                 # of different lengths -- both were over by exactly 11.0 pt, the inset.
-                right = frame.right - self._legend_side_width(legend_font)
+                right = frame.right - self._legend_side_width(legend_font) - overhang_right
             elif legend == "l":
                 # On the left the value-label column follows the legend instead of the
                 # frame edge, so the band contributes one edge inset less.  Measured:
@@ -1833,10 +2353,13 @@ class ChartBuilder:
         # the label's width against the band it has to fit, and the band is `right - left`
         # -- which the legend has only just finished moving.
         if labels_under_plot:
+            # A `midCat` label is centred on a tick rather than laid into a band, so the
+            # band rules -- wrapping and the 45 degree turn -- do not apply to it and the
+            # reserve is one plain line.  Measured: the midCat probe's bottom inset is
+            # 24.965 pt, the same one-line band as the `between` probe beside it.
+            banded = [] if horizontal or self._points_on_ticks else categories
             bottom = frame.bottom - legend_bottom - self._bottom_label_band(
-                bottom_font,
-                categories if not horizontal else [],
-                right - left,
+                bottom_font, banded, right - left
             )
         else:
             bottom = frame.bottom - legend_bottom - self._top_inset(value_font.box)
@@ -2413,6 +2936,90 @@ class ChartBuilder:
                 offset = centre - cluster / 2 + slot * step
                 self._bar(rect, item, point, offset, bar_size, start, end, scale, horizontal)
 
+    def _draw_areas(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """One filled band per series, closed back along the line beneath it.
+
+        An area chart is a line chart that fills, and every difference from one is
+        measured on an eighteen-chart probe:
+
+        * **it closes to the zero line, not to the plot's floor.**  The negative probe's
+          polygon runs along y = 117.069, which is where its value axis puts 0, with the
+          plot's own bottom 53 pt lower.  Where the line crosses zero the polygon crosses
+          itself, and PowerPoint leaves the bow tie exactly as it falls -- its fill rule is
+          **nonzero winding**, which is what the renderer's default already is.
+        * **the series are painted in series order, first at the back.**  Two probes
+          settle that it is order and not size: swapping the two series' values swapped
+          which one was hidden, and a probe whose first series covers the second entirely
+          still emitted the first path first.  The fills are fully opaque -- every one of
+          the eighteen came back at alpha 255 -- so the front series really does hide what
+          is behind it, and that is PowerPoint's picture rather than an omission here.
+        * **no outline unless the file asks.**  A probe stating ``<a:ln w="25400"/>`` got a
+          second, stroked copy of the same closed path; the eight probes stating none got a
+          bare fill.
+        * **a blank splits the run and a run of one point draws nothing.**  The
+          ``dispBlanksAs="gap"`` probe, whose middle value is missing, drew **no area at
+          all**: both surviving runs are a single point, which has no area.
+
+        Stacked and percent-stacked accumulate exactly as a stacked bar does, with each
+        band's lower edge the running total *without* this series -- traced backwards, so
+        the polygon is the strip between two lines rather than a fill to the axis.
+
+        **A negative value inside a stack is not measured.**  A stacked *bar* runs its
+        positive and negative halves away from zero independently; this keeps one running
+        total, so a negative dips the band below the line beneath it.  No probe has a
+        negative in a stacked area, and :meth:`_label_anchor` uses the same single total so
+        the label cannot disagree with the band it sits in.
+        """
+        if not categories or not series:
+            return
+        xs = self._category_positions(rect, len(categories))
+        blanks = self.chart.display_blanks_as or "gap"
+        grouping = self.plot.grouping or "standard"
+        stacked = grouping in ("stacked", "percentStacked")
+        percent = grouping == "percentStacked"
+        totals = _percent_totals(series) if percent else None
+        zero = self._value_to_y(rect, 0.0, scale)
+
+        bases = [0.0] * len(categories)
+        for item in series:
+            # ``(x, top, bottom)`` per point, or None where the run breaks.
+            run: list[tuple[float, float, float] | None] = []
+            for index in range(len(categories)):
+                value = _at(item.values, index)
+                if value is None:
+                    if blanks == "zero":
+                        value = 0.0
+                    elif blanks == "span":
+                        continue
+                    else:
+                        run.append(None)
+                        continue
+                if percent and totals is not None:
+                    total = totals[index]
+                    value = 0.0 if total == 0 else value / total
+                if stacked:
+                    start = bases[index]
+                    bases[index] = start + value
+                    top = self._value_to_y(rect, start + value, scale)
+                    bottom = self._value_to_y(rect, start, scale)
+                else:
+                    top = self._value_to_y(rect, value, scale)
+                    bottom = zero
+                run.append((xs[index], top, bottom))
+
+            for stretch in _split_runs(run):
+                if len(stretch) < 2:
+                    continue
+                points = [(x, top) for x, top, _ in stretch]
+                points += [(x, bottom) for x, _, bottom in reversed(stretch)]
+                self._polygon(points, fill=item.fill, outline=item.outline)
+
     def _draw_lines(
         self,
         rect: _Rect,
@@ -2429,8 +3036,7 @@ class ChartBuilder:
         """
         if not categories:
             return
-        band = rect.width / len(categories)
-        midcat = self._cross_between() == "midCat"
+        xs = self._category_positions(rect, len(categories))
         blanks = self.chart.display_blanks_as or "gap"
 
         for item in series:
@@ -2447,12 +3053,7 @@ class ChartBuilder:
                     else:
                         points.append(None)
                         continue
-                x = (
-                    rect.left + index * (rect.width / max(len(categories) - 1, 1))
-                    if midcat
-                    else rect.left + (index + 0.5) * band
-                )
-                points.append((x, self._value_to_y(rect, value, scale)))
+                points.append((xs[index], self._value_to_y(rect, value, scale)))
 
             for run in _split_runs(points):
                 if len(run) > 1 and item.line is not None:
@@ -2462,8 +3063,39 @@ class ChartBuilder:
                     self._marker(point, item)
 
     def _cross_between(self) -> str:
+        """``between`` puts a point at its band's centre, ``midCat`` on the band edge.
+
+        See :data:`DEFAULT_AREA_CROSS_BETWEEN` for why an area's default is the other one.
+        """
         axis = self._axis_for(1) or self._axis_of_kind("valAx")
-        return (axis.cross_between if axis is not None else None) or "between"
+        stated = axis.cross_between if axis is not None else None
+        if stated:
+            return stated
+        return DEFAULT_AREA_CROSS_BETWEEN if self._is_area else "between"
+
+    @property
+    def _points_on_ticks(self) -> bool:
+        """Whether this chart's marks sit on the category ticks rather than in the bands.
+
+        **Only a type that draws through :meth:`_category_positions` may answer yes.**  A
+        bar chart still lays its bars into bands whatever `c:crossBetween` says, and Excel
+        writes `midCat` on a column chart's value axis for the "Axis position: on tick
+        marks" checkbox -- so reading it here without moving the bars too put every label
+        up to 41 pt off the bar it names and the first one outside the plot.  What
+        PowerPoint does with a `midCat` bar chart is **not measured**; leaving the bars and
+        their labels in the bands together is the reading that cannot be self-contradictory.
+        """
+        return (self._is_area or self._is_line) and self._cross_between() == "midCat"
+
+    def _category_positions(self, rect: _Rect, count: int) -> list[float]:
+        """Where each category sits along the plot's width, in frame points."""
+        if count <= 0:
+            return []
+        if self._points_on_ticks:
+            step = rect.width / max(count - 1, 1)
+            return [rect.left + index * step for index in range(count)]
+        band = rect.width / count
+        return [rect.left + (index + 0.5) * band for index in range(count)]
 
     def _marker(self, centre: tuple[float, float], item: _Series) -> None:
         """One marker, centred on its data point.
@@ -2648,7 +3280,20 @@ class ChartBuilder:
                 # into space nothing set aside -- and no probe measured what PowerPoint
                 # does in that corner anyway.
                 in_band = abs(axis_y - rect.bottom) < 0.01
-                if in_band and self._labels_rotate(
+                if self._points_on_ticks:
+                    # **A ``midCat`` label is centred on its tick**, not in a band -- the
+                    # area probe's three labels came back centred on the plot's left edge,
+                    # its midpoint and its right edge, to 0.01 pt.  Rotation and wrapping
+                    # are band rules and no probe exercises either here, so the level,
+                    # unbroken placement is what is drawn.
+                    self._labels_along_bottom(
+                        rect,
+                        list(zip(self._category_positions(rect, len(categories)), categories)),
+                        category_font,
+                        axis_y=axis_y,
+                        centred_on_position=True,
+                    )
+                elif in_band and self._labels_rotate(
                     category_font, categories, rect.width
                 ):
                     self._rotated_labels_along_bottom(
@@ -2721,11 +3366,25 @@ class ChartBuilder:
             )
 
     def _labels_down_left(
-        self, rect: _Rect, labels: list[tuple[float, str]], font: ChartFont
+        self,
+        rect: _Rect,
+        labels: list[tuple[float, str]],
+        font: ChartFont,
+        *,
+        axis_x: float | None = None,
     ) -> None:
-        """Right-aligned in the column left of the plot, each centred on its own y."""
+        """Right-aligned in the column left of the plot, each centred on its own y.
+
+        ``axis_x`` is where the labels' own axis sits when it is not the plot's left edge.
+        ``tickLblPos="nextTo"`` means next to the *axis*, and a scatter whose x range goes
+        below zero has its value axis standing inside the plot: the negative-x probe's
+        labels are right-aligned 9.23 pt left of the axis at 111.088 pt, which is the same
+        ``descent + 0.645 em`` this column always uses -- just measured from the axis
+        rather than from the frame.
+        """
         box = font.box
-        width = rect.left - self.frame.left - box.descent - VALUE_LABEL_GAP_EM * box.size
+        edge = rect.left if axis_x is None else axis_x
+        width = edge - self.frame.left - box.descent - VALUE_LABEL_GAP_EM * box.size
         for y, text in labels:
             if not text:
                 continue
@@ -2820,7 +3479,8 @@ class ChartBuilder:
                 if not text:
                     continue
                 geometry = self._label_anchor(
-                    rect, series, order, item, point, value, scale, horizontal
+                    rect, series, order, item, point, value, scale, horizontal,
+                    len(categories),
                 )
                 if geometry is None:
                     continue
@@ -2865,14 +3525,50 @@ class ChartBuilder:
         value: float,
         scale: tuple[float, float, float],
         horizontal: bool,
+        count: int,
     ) -> "tuple[float, float, str] | None":
-        """``(x, y, placement)`` for one label, in frame points."""
+        """``(x, y, placement)`` for one label, in frame points.
+
+        ``count`` is the *category* count the series were drawn against, not the longest
+        series' length: a label has to land on the mark its own chart drew, and
+        :meth:`_categories` pads the label list past the data when a file labels more
+        categories than any series fills.
+        """
+        if self._is_area:
+            # **An area label sits at the vertical centre of its own band** -- between the
+            # series' own line and whatever is beneath it, which is the zero line for an
+            # unstacked series and the running total for a stacked one.  Measured on two
+            # probes: an unstacked 3/4/5 put its labels at 1.5, 2.0 and 2.5 on the value
+            # axis, and a stacked pair put Beta's at 4, 6.5 and 5.5 -- the midpoints of its
+            # segments, not of the stack.  Horizontally they are centred on the point.
+            #
+            # There is nothing to choose: **PowerPoint refuses a `c:dLblPos` on an area
+            # chart outright**, opening the deck `[Repaired]` and declining to export it,
+            # for `ctr` as much as for anything else.
+            xs = self._category_positions(rect, count)
+            if point >= len(xs):
+                return None
+            start = 0.0
+            if (self.plot.grouping or "standard") in ("stacked", "percentStacked"):
+                for earlier in series[:order]:
+                    start += _at(earlier.values, point) or 0.0
+            totals = _percent_totals(series)
+            if (self.plot.grouping or "") == "percentStacked":
+                total = totals[point] if point < len(totals) else 0.0
+                if total == 0:
+                    return None
+                start /= total
+                value = value / total
+            middle = self._value_to_y(rect, start + value / 2, scale)
+            return xs[point], middle, "centre"
         if self._is_line:
-            band = rect.width / max(len(item.values), 1)
-            x = rect.left + (point + 0.5) * band
+            xs = self._category_positions(rect, max(count, 1))
+            x = xs[point] if point < len(xs) else rect.left
             return x + item.marker_size / 2, self._value_to_y(rect, value, scale), "right"
 
-        box = self._bar_box(rect, series, order, item, point, value, scale, horizontal)
+        box = self._bar_box(
+            rect, series, order, item, point, value, scale, horizontal, count
+        )
         if box is None:
             return None
         position = (item.labels.position if item.labels else None) or self._label_default()
@@ -2908,6 +3604,14 @@ class ChartBuilder:
         white.  Drawing them at ``outEnd`` put ours above the whole stack in eleven
         places.
         """
+        if self._is_area:
+            # The only one it has; PowerPoint repairs a file that names another.
+            return "ctr"
+        if self._is_scatter:
+            # Measured: a scatter stating no `c:dLblPos` put its label's left edge 9.000 pt
+            # right of the point, which is the marker's radius plus the line chart's own
+            # 0.6 em gap -- ECMA's `r`, drawn exactly as a line chart's is.
+            return "r"
         if self._is_line or self._is_polar:
             return "outEnd"
         stacked = (self.plot.grouping or "clustered") in ("stacked", "percentStacked")
@@ -2940,10 +3644,19 @@ class ChartBuilder:
         elif placement == "inside-base-y":
             baseline = y - DATA_LABEL_GAP_PT - box.descent
             left, align = x - width / 2, "ctr"
+        elif placement == "below":
+            # A scatter's `b`: the mirror of `t` about the point, measured 0.70 pt loose.
+            baseline = y + DATA_LABEL_GAP_PT + box.ascent
+            left, align = x - width / 2, "ctr"
         elif placement == "right":
             baseline = y + box.ink_centre
             left = x + DATA_LABEL_LINE_GAP_EM * box.size
             align = "l"
+        elif placement == "left":
+            # A scatter's `l`: the mirror of `r`, the same 0.6 em off the marker's edge.
+            baseline = y + box.ink_centre
+            left = x - DATA_LABEL_LINE_GAP_EM * box.size - width
+            align = "r"
         elif placement == "inside-x":
             baseline = y + box.ink_centre
             left = x - DATA_LABEL_INNER_GAP_PT - width
@@ -2958,8 +3671,12 @@ class ChartBuilder:
             align = "l"
 
         # Multi-line labels stack upwards from the anchor, so the *last* line is the one
-        # nearest the bar; walk them in order from the first baseline.
-        first = baseline - box.line_height * (len(lines) - 1)
+        # nearest the bar; walk them in order from the first baseline.  `below` is the one
+        # placement that hangs *under* its anchor, so its block grows downward and the
+        # baseline computed above is already the first line's.
+        first = baseline
+        if placement != "below":
+            first -= box.line_height * (len(lines) - 1)
         for index, line in enumerate(lines):
             self._text(
                 self._label_body(line, font, align=align, color=labels.color),
@@ -2979,9 +3696,13 @@ class ChartBuilder:
         value: float,
         scale: tuple[float, float, float],
         horizontal: bool,
+        categories: int,
     ) -> "_Rect | None":
-        """The rectangle one bar occupies, recomputed for the label that sits on it."""
-        categories = max((len(other.values) for other in series), default=0)
+        """The rectangle one bar occupies, recomputed for the label that sits on it.
+
+        ``categories`` is the count :meth:`_draw_bars` laid the bands out against, so the
+        two cannot drift when a file labels more categories than any series fills.
+        """
         if categories <= 0:
             return None
         grouping = self.plot.grouping or "clustered"
@@ -3140,7 +3861,11 @@ class ChartBuilder:
         points.  A series with ``c:symbol val="none"`` still gets the rule, without the
         marker.
         """
-        if self._is_line or (self._is_radar and self._radar_style != "filled"):
+        if (
+            self._is_line
+            or self._is_scatter
+            or (self._is_radar and self._radar_style != "filled")
+        ):
             return LINE_LEGEND_KEY_PT, LINE_LEGEND_KEY_GAP_PT
         return LEGEND_SWATCH_EM * font.size, LEGEND_SWATCH_GAP_EM * font.size
 
@@ -3164,7 +3889,7 @@ class ChartBuilder:
     ) -> None:
         box = font.box
         centre = baseline - box.ink_centre
-        if item.line is not None and (self._is_line or self._is_radar):
+        if item.line is not None and (self._is_line or self._is_scatter or self._is_radar):
             # A line key: the stroke across the whole swatch width with the series'
             # marker centred on it.  Measured on the radar legend probe and confirmed on
             # a line chart's, where the marker's centre landed 0.17 pt off the midpoint.
@@ -3519,10 +4244,18 @@ def _split_runs(
 def _path_commands(points: list[tuple[float, float]], smooth: bool) -> str:
     """SVG path data for one run of points, straight or smoothed.
 
-    ``c:smooth`` is drawn as a Catmull-Rom spline converted to cubic Béziers, which is
-    what PowerPoint's own curve through the points looks like; the probe's smoothed line
-    has control points that are *not* collinear with its vertices, so it is a real spline
-    and not a polyline.  The exact tension PowerPoint uses was **not** measured.
+    ``c:smooth`` is drawn as a Catmull-Rom spline converted to cubic Béziers, and
+    **PowerPoint's tension is now measured: it is the plain 1/6**.  A smoothed five-point
+    series exports as four cubics whose control points reproduce
+    ``c1 = p1 + (p2 - p0) / 6`` and ``c2 = p2 - (p3 - p1) / 6`` to the 0.001 pt the PDF
+    prints, on a line chart and on a scatter alike.
+
+    **The ends were wrong and the same probe says so.**  Duplicating the terminal point --
+    ``p0 = p1`` at the start -- puts the first control a *sixth* of the chord along it;
+    PowerPoint's is a **third**: 87.073 against the 90.527 duplication gives, on a chord
+    of 20.72 pt.  Reflecting the terminal point instead (``p0 = 2*p1 - p2``) makes the
+    one-sided tangent the whole chord and reproduces both ends exactly, at 93.980 → 87.073
+    and 31.822 → 59.447.
     """
     parts = [f"M {points[0][0]:.4f} {points[0][1]:.4f}"]
     if not smooth or len(points) < 3:
@@ -3530,11 +4263,14 @@ def _path_commands(points: list[tuple[float, float]], smooth: bool) -> str:
             parts.append(f"L {x:.4f} {y:.4f}")
         return " ".join(parts)
 
+    def _reflect(inner, edge):
+        return (2 * edge[0] - inner[0], 2 * edge[1] - inner[1])
+
     for index in range(len(points) - 1):
-        p0 = points[index - 1] if index > 0 else points[index]
         p1 = points[index]
         p2 = points[index + 1]
-        p3 = points[index + 2] if index + 2 < len(points) else p2
+        p0 = points[index - 1] if index > 0 else _reflect(p2, p1)
+        p3 = points[index + 2] if index + 2 < len(points) else _reflect(p1, p2)
         c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
         c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
         parts.append(
@@ -3638,6 +4374,30 @@ def _percent_shares(values: list[float]) -> list[int]:
     for index in order[:max(remainder, 0)]:
         floors[index] += 1
     return floors
+
+
+def _span(numbers: list[float]) -> tuple[float, float]:
+    """``(min, max)`` over the numbers, or ``(0, 0)`` when there are none."""
+    if not numbers:
+        return 0.0, 0.0
+    return min(numbers), max(numbers)
+
+
+def _apply_axis_limits(
+    scale: tuple[float, float, float], axis: "c.SourceChartAxis | None"
+) -> tuple[float, float, float]:
+    """``c:min`` / ``c:max`` / ``c:majorUnit`` over a computed scale, and a usable span."""
+    minimum, maximum, unit = scale
+    if axis is not None:
+        if axis.minimum is not None:
+            minimum = axis.minimum
+        if axis.maximum is not None:
+            maximum = axis.maximum
+        if axis.major_unit is not None and axis.major_unit > 0:
+            unit = axis.major_unit
+    if maximum <= minimum:
+        maximum = minimum + (unit or 1.0)
+    return minimum, maximum, unit
 
 
 def _at(values: list[float | None], index: int) -> float | None:

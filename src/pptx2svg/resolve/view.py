@@ -97,7 +97,15 @@ METAFILE_MIME_TYPES = frozenset({"image/emf", "image/wmf", "image/x-emf", "image
 #: Chart groups the renderer can draw.  Everything else warns and draws an empty frame
 #: rather than a wrong picture.
 DRAWABLE_CHART_KINDS = frozenset(
-    {"barChart", "lineChart", "pieChart", "doughnutChart", "radarChart"}
+    {
+        "barChart",
+        "lineChart",
+        "areaChart",
+        "scatterChart",
+        "pieChart",
+        "doughnutChart",
+        "radarChart",
+    }
 )
 
 DIAGRAM_DRAWING_REL_TYPES = (
