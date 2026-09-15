@@ -178,12 +178,44 @@ DATA_LABEL_INNER_GAP_PT = 4.05
 #: what PowerPoint drew.  Measured once, with a 7 pt marker.
 DATA_LABEL_LINE_GAP_EM = 0.6
 
-#: Category labels rotate when the widest of them is wider than the band it has to sit
-#: in.  Bracketed to (0.972, 1.024] by a six-chart probe whose labels straddle exactly one
-#: band -- a 36.62 pt label on a 37.68 pt band stayed horizontal and a 38.59 pt one turned
-#: -- so 1.0 is not a round guess, it is the middle of a 5% window.  Neither fixture
-#: carries an explicit ``rot=`` on ``a:bodyPr``, so this is PowerPoint's own decision.
+#: Category labels rotate when the widest **unbreakable token** in them is wider than the
+#: band it has to sit in.  Wrapping comes first: PowerPoint turns a label only when
+#: breaking it would not save it.
+#:
+#: Two probes straddle exactly one band and both give the same ratio, one for a label with
+#: no break in it and one for a label whose break does not help:
+#:
+#: * whole label, no space: 36.62 pt level against 38.59 pt turned on a 37.68 pt band --
+#:   (0.972, 1.024];
+#: * widest token, with a space after it: ``xxxxxxxi M`` at 37.22 pt wrapped and
+#:   ``HHHHHi M`` at 38.33 pt turned on a 37.761 pt band -- (0.9857, 1.0151].
+#:
+#: One band width is the only value in both windows.  ``Fiscal MMMMMMMMMMMM 2012`` is the
+#: case that separates this from every other candidate rule: it has two spaces in it and
+#: PowerPoint turned it anyway, because its middle token is 99.96 pt on that same band.
+#: Neither fixture carries an explicit ``rot=`` on ``a:bodyPr``, so this is PowerPoint's
+#: own decision.
 ROTATED_LABEL_RATIO = 1.0
+
+# A category label breaks at a space and nowhere else.  `MMM-MM`, `MMM/MM`, `MMM,MM`,
+# `MMM_MM` and `MMM<en dash>MM` were each 44-47 pt on a 37.76 pt band and PowerPoint
+# turned all five rather than breaking them, and a CJK label with no space in it turned
+# too -- so this is *not* Unicode line breaking, it is whitespace.  The one surprise is
+# U+00A0: `MMM<nbsp>MM` broke at the no-break space exactly as a plain space did, which is
+# why `wrap_label` splits with `str.split` rather than on `" "`.  Tab and the other
+# whitespace `str.split` honours are **not measured**; only U+0020 and U+00A0 are.
+#
+# This is a category-axis rule, not a general one: a radar facing the same problem wraps
+# but never turns.
+
+#: How many lines a wrapped category label may take.  Measured linear through six: on the
+#: Arial ladder the band grew by exactly one line height for every extra line up to six.
+#: Past that PowerPoint stops wrapping altogether -- an eight-token label came back on
+#: **two** lines, each one four band widths wide and overlapping its neighbours, and a
+#: twelve- and a twenty-four-token label did the same.  No rule reproduces both the
+#: linear part and that collapse, so the band stops growing where the measurements stop
+#: rather than extrapolating into a corner PowerPoint does not agree with.
+WRAPPED_LABEL_MAX_LINES = 6
 
 #: And the angle it turns to.  **It snaps.**  Twelve probes from a label 1.02 band widths
 #: wide to one 4.18 wide all came out at exactly 45 degrees, reading up to the right --
@@ -264,14 +296,23 @@ RADAR_VALUE_LABEL_DIGITS = 2.0
 #: measured for a line chart either way.
 RADAR_MARKER_SIZE_PT = 6.0
 
-#: A ``standard`` or ``marker`` radar's legend key -- a line of the series' own stroke
-#: with its marker at the middle, rather than a bar chart's square swatch -- and the gap
-#: after it, in ems.  Measured once, at 10 pt: a 19.200 pt line from the band's left edge
-#: with the marker centred on it, then 2.025 pt before the entry's text.  A ``filled``
-#: radar legends with the ordinary swatch instead, which is what
-#: ``real-financial-report.pptx``'s own radar draws.
-RADAR_LEGEND_KEY_EM = 1.920
-RADAR_LEGEND_KEY_GAP_EM = 0.2025
+#: A line chart's legend key -- a line of the series' own stroke with its marker at the
+#: middle, rather than a bar chart's square swatch -- and the gap after it, **in points**.
+#: A ``standard`` or ``marker`` radar takes the same key; a ``filled`` radar legends with
+#: the ordinary swatch instead, which is what ``real-financial-report.pptx``'s own radar
+#: draws.
+#:
+#: Measured first on the radar legend probe at 10 pt, then on four line-chart legends:
+#: 19.200 pt of rule and 2.025 pt before the text at 10 pt on a right-hand legend, the
+#: same on a bottom one, the same for a series with no marker, and **the same at 14 pt**.
+#: That last one is the refutation: the radar's single 10 pt measurement was carried as
+#: 1.920 and 0.2025 *ems* on the assumption that it scaled, and it does not.
+#:
+#: Read off a stroked path's bounding box, which a 3 pt round cap makes 3 pt longer than
+#: the rule: 22.200 pt of box is 19.200 pt of line, and the marker centre landed within
+#: 0.17 pt of its midpoint.
+LINE_LEGEND_KEY_PT = 19.200
+LINE_LEGEND_KEY_GAP_PT = 2.025
 
 #: ``c:holeSize`` when the element is absent.  ECMA-376 documents a default of 10; what
 #: PowerPoint *draws* for a `c:doughnutChart` stating no `c:holeSize` is a **solid pie**,
@@ -628,6 +669,31 @@ def font_box(family: str | None, size: float) -> FontBox:
         ascent=metrics.ascender / units * size,
         descent=abs(metrics.descender) / units * size,
     )
+
+
+def wrap_label(text: str, font: ChartFont, band: float) -> list[str]:
+    """One category label, broken to fit its band the way PowerPoint breaks it.
+
+    Greedy, at whitespace only, and a token that will not fit alone is left to overflow
+    rather than split -- which is the state :meth:`ChartBuilder._labels_rotate` has
+    already ruled out by turning the whole axis.  See :data:`ROTATED_LABEL_RATIO` for the
+    probes behind the break set: a hyphen, a slash, a comma, an underscore, an en dash
+    and CJK are all *not* break opportunities, and U+00A0 is.
+    """
+    tokens = text.split()
+    if not tokens or band <= 0:
+        return [text] if text else []
+    lines: list[str] = []
+    current = tokens[0]
+    for token in tokens[1:]:
+        candidate = f"{current} {token}"
+        if font.width(candidate) <= band:
+            current = candidate
+        else:
+            lines.append(current)
+            current = token
+    lines.append(current)
+    return lines[:WRAPPED_LABEL_MAX_LINES]
 
 
 def text_width(text: str, family: str | None, size: float) -> float:
@@ -1719,41 +1785,95 @@ class ChartBuilder:
     ) -> bool:
         """Whether the category labels turn 45 degrees rather than staying level.
 
-        **The rule is that the widest label is wider than its own band**, and the probe
-        that says so straddles it by 5%: on a 37.68 pt band a 36.62 pt label stayed level
-        and a 38.59 pt one turned.  A radar facing the same problem *wraps* instead, so
-        this is specifically what the category axis does.
+        **The rule is that the widest unbreakable token is wider than its own band.**
+        Wrapping comes first and rotation is the last resort: ``MMM MM`` at 44.43 pt on a
+        37.76 pt band came back level on two lines, while ``MMMMM`` at 41.65 pt on the
+        same band turned.  The case that separates "widest token" from every other
+        candidate is ``Fiscal MMMMMMMMMMMM 2012``, which has two spaces in it and turned
+        anyway, because breaking it still leaves a 99.96 pt token.
+
+        **One label that must turn turns all of them**, wrappable neighbours included: a
+        chart of four ``MMM MM`` and one ``MMMMM`` came back with all five at 45 degrees
+        and none of them broken.  So this is a decision for the axis, not per label.
+
+        A radar facing the same problem wraps and never turns, so this is specifically
+        what the *category* axis does.
         """
         if not categories:
             return False
         band = plot_width / len(categories)
         if band <= 0:
             return False
-        widest = max((font.width(text) for text in categories), default=0.0)
+        widest = max(
+            (font.width(token) for text in categories for token in text.split()),
+            default=0.0,
+        )
         return widest > band * ROTATED_LABEL_RATIO
+
+    def _label_line_count(
+        self, font: ChartFont, categories: list[str], plot_width: float
+    ) -> int:
+        """How many lines the tallest of the level category labels takes."""
+        if not categories:
+            return 1
+        band = plot_width / len(categories)
+        return (
+            max((len(wrap_label(text, font, band)) for text in categories), default=1)
+            or 1
+        )
 
     def _bottom_label_band(
         self, font: ChartFont, categories: list[str], plot_width: float
     ) -> float:
         """How much of the frame the labels under the plot take.
 
-        Level, that is one line plus its gap.  Turned, it is
+        Level and on one line, that is one line box plus its gap.  Turned, it is
         :data:`ROTATED_LABEL_INSET_PT` plus the widest label's own width times sin 45,
-        which fits six probes to within 0.03 pt.
+        which fits six probes to within 0.03 pt.  **Wrapped, it is the level band plus one
+        line box for every line after the first** -- and the line that sets it is the one
+        needing the most lines, not the widest string, although no probe separates those
+        two because in all twenty they were the same label.
 
-        **Not capped, and PowerPoint's is.**  A probe whose label is 4.18 band widths wide
-        reserved 85.63 pt where the formula asks for 113.95 -- but it reserved *less* than
-        the probe one step below it, whose 2.92-band label took 86.36 pt, so no clamp on
-        the width reproduces both. Whatever PowerPoint does past about 90 pt of label was
-        not identified, and a rule that fitted the rest and broke there is exactly what
-        this file does not ship.
+        The extra line is the face's own line box, measured on a four-rung ladder in five
+        faces at 10 pt.  The band grew by exactly the same amount from one line to two, two
+        to three and three to four in every face, so this is a straight line and not a fit:
+
+        ====================  ==========  ===========  =========
+        face                  per line    line box     residual
+        ====================  ==========  ===========  =========
+        Calibri               12.205      12.207       -0.002
+        Aptos                 12.205      12.207       -0.002
+        Courier New           11.330      11.328       +0.002
+        Times New Roman       11.075      11.074       +0.001
+        Arial                 11.500      11.172       **+0.328**
+        ====================  ==========  ===========  =========
+
+        **Arial is the one refutation, and it has a name.**  PowerPoint's pitch is the
+        face's full ``hhea`` line spacing -- ascender plus descender plus *lineGap* -- and
+        Arial is the only one of the five whose lineGap is not zero: 67 units of 2048,
+        which is 0.328 pt at 10 pt, exactly the residual above.  We cannot use that rule,
+        because :mod:`pptx2svg.text.metrics` carries no lineGap and the substitute we
+        would read one from disagrees with the face PowerPoint used: Tinos' is 87 where
+        Office's own ``times.ttf`` is 0, so adding the gap would trade this 0.33 pt error
+        on Arial for a 0.42 pt one on Times New Roman.  The line box alone is the better
+        of the two, and the error it leaves is recorded rather than hidden.
+
+        **Not capped for a turned label, and PowerPoint's is.**  A probe whose label is
+        4.18 band widths wide reserved 85.63 pt where the formula asks for 113.95 -- but it
+        reserved *less* than the probe one step below it, whose 2.92-band label took
+        86.36 pt, so no clamp on the width reproduces both. Whatever PowerPoint does past
+        about 90 pt of label was not identified, and a rule that fitted the rest and broke
+        there is exactly what this file does not ship.
         """
         box = font.box
         if self._labels_rotate(font, categories, plot_width):
             widest = max(font.width(text) for text in categories)
             return ROTATED_LABEL_INSET_PT + widest * _SIN_45
+        lines = self._label_line_count(font, categories, plot_width)
         return (
-            FRAME_PADDING_PT + box.line_height + CATEGORY_LABEL_GAP_EM * box.size
+            FRAME_PADDING_PT
+            + box.line_height * lines
+            + CATEGORY_LABEL_GAP_EM * box.size
         )
 
     def _polar_region(self) -> _Rect:
@@ -2547,7 +2667,7 @@ class ChartBuilder:
         width: float | None = None,
         centred_on_position: bool = False,
     ) -> None:
-        """One line below the axis: category labels centred in their band, ticks on theirs.
+        """Below the axis: category labels centred in their band, ticks on theirs.
 
         The baseline hangs off the *category axis*, not the frame, because ``nextTo`` means
         what it says: on a chart with negative values the axis floats above the plot's
@@ -2555,6 +2675,13 @@ class ChartBuilder:
         measurements -- Aptos at 8/10/14 pt, Arial at 12 pt, and the negative probe --
         with a worst residual of 0.63 pt, and is the same number as hanging the line's
         descender one frame padding above the frame whenever the axis *is* at the foot.
+
+        A label too wide for its band is broken across lines, each one centred in the band
+        under the one above.  **The block is top-aligned**, so the first baseline is where
+        it would be for a one-line label however many lines follow: the Arial ladder put
+        it 15.03 to 15.07 pt under the axis at one, two and three lines, and a chart whose
+        one long label wrapped left every short label sitting on the *first* line with
+        nothing beneath it.
         """
         box = font.box
         baseline = axis_y + box.ascent + CATEGORY_LABEL_GAP_EM * box.size
@@ -2566,15 +2693,18 @@ class ChartBuilder:
                 # either side of it and the text centred in that.
                 span = font.width(text) + box.size
                 left, box_width = position - span / 2, span
+                lines = [text]
             else:
                 left, box_width = position, width or box.size
-            self._text(
-                self._label_body(text, font, align="ctr"),
-                left=left,
-                width=box_width,
-                baseline=baseline,
-                box=box,
-            )
+                lines = wrap_label(text, font, box_width)
+            for index, line in enumerate(lines):
+                self._text(
+                    self._label_body(line, font, align="ctr"),
+                    left=left,
+                    width=box_width,
+                    baseline=baseline + index * box.line_height,
+                    box=box,
+                )
 
     def _draw_data_labels(
         self,
@@ -2919,14 +3049,19 @@ class ChartBuilder:
     def _legend_key_size(self, font: ChartFont) -> tuple[float, float]:
         """The legend key's width and the gap after it.
 
-        A bar, a pie and a ``filled`` radar all take the square swatch.  A radar drawn as
-        lines takes a **line with its marker on it** instead, which is 13.4 pt wider at
-        10 pt -- measured on the legend probe: a 19.200 pt rule from the band's left edge,
-        then 2.025 pt before the text.  The same key is what PowerPoint draws for a line
-        chart, which this does not yet do; see ROADMAP.md.
+        A bar, a pie and a ``filled`` radar all take the square swatch.  A **line chart**
+        and a radar drawn as lines take a line with the series' marker on it instead,
+        which is 13.4 pt wider at 10 pt.
+
+        The radar's 19.200 pt of rule and 2.025 pt of gap were measured once, at 10 pt, and
+        assumed to scale with the font.  A line chart confirms the numbers and **refutes
+        the scaling**: a right-hand legend gave 19.200 and 2.025 at 10 pt and the same
+        19.200 and 2.025 at 14 pt, and a bottom legend the same again.  They are absolute
+        points.  A series with ``c:symbol val="none"`` still gets the rule, without the
+        marker.
         """
-        if self._is_radar and self._radar_style != "filled":
-            return RADAR_LEGEND_KEY_EM * font.size, RADAR_LEGEND_KEY_GAP_EM * font.size
+        if self._is_line or (self._is_radar and self._radar_style != "filled"):
+            return LINE_LEGEND_KEY_PT, LINE_LEGEND_KEY_GAP_PT
         return LEGEND_SWATCH_EM * font.size, LEGEND_SWATCH_GAP_EM * font.size
 
     def _legend_entry_lines(self, name: str, font: ChartFont, x: float) -> int:
@@ -2949,9 +3084,10 @@ class ChartBuilder:
     ) -> None:
         box = font.box
         centre = baseline - box.ink_centre
-        if item.line is not None and self._is_radar:
+        if item.line is not None and (self._is_line or self._is_radar):
             # A line key: the stroke across the whole swatch width with the series'
-            # marker centred on it.  Measured on the legend probe.
+            # marker centred on it.  Measured on the radar legend probe and confirmed on
+            # a line chart's, where the marker's centre landed 0.17 pt off the midpoint.
             self._line(x, centre, x + swatch, centre, item.line)
             if item.marker_symbol:
                 self._marker((x + swatch / 2, centre), item)
