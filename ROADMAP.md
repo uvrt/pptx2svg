@@ -1831,6 +1831,351 @@ that distinction is how the Caladea 4.5 % error got in.
 
 ---
 
+## The clone landscape — survey, measured
+
+Phase 6 ends by deferring one question: "finding which have open equivalents is a real and
+separate piece of work." This is that work. Nothing here is a plan; it is a survey with a
+shortlist attached, and the decision about what the bundle ships is not made here.
+
+It is done the way the Caladea finding was done — by reading the faces Office installed on
+this machine and comparing advance widths character by character — because that is the only
+method this project has any reason to trust. **A claim of metric compatibility with no
+measurement behind it is exactly what this project does not ship.** Every row below either
+carries a measurement or says plainly that it does not. No Microsoft font file was copied
+anywhere; `/Applications/Microsoft PowerPoint.app/Contents/Resources/DFonts` was read in
+place, and candidate clones were downloaded outside the repository, measured, and left
+there. Measured advance widths are facts and are recorded; font files are not.
+
+### The inventory, and why two different counts are both right
+
+PowerPoint 16.106 ships its fonts in `Contents/Resources/DFonts`: **280 files, 322 faces**.
+That is not an estimate — the app carries its own manifest at
+`Contents/Resources/applicationfontmetadata.json`, whose header reads `"fc": 322`, and
+enumerating the files with fontTools reproduces it exactly. **An earlier note on this page
+put the face count at 388; that number is wrong and 322 replaces it.** The family counts in
+it survive scrutiny: 238 distinct `name` id-1 strings across all languages, collapsing to
+**186** once the 52 localised CJK aliases are dropped.
+
+The manifest also answers a question the id-1 count cannot. Microsoft's own `fa` field —
+the GDI-collapsed family, which is what the PowerPoint font menu shows — yields **155
+families**. The two numbers differ because GDI folds weight and width variants into their
+parent: the menu has one "Arial" holding Arial, Arial Black and Arial Narrow, and one
+"Aptos" holding Light through Black.
+
+**186 is the number that matters here**, because `text/fontmap.py` is keyed on the string a
+deck writes into `a:latin/@typeface`, and a deck writes `Arial Narrow`, not `Arial`. The
+bundle's eight families answer 16 of those 186 names. The other 170 reach the 0.6 em
+per-character guess.
+
+### What has to be true for a row to say "metric-compatible"
+
+Two things, and conflating them is how Caladea got in.
+
+1. **Same advance widths**, so line breaks, autofit and centring land where PowerPoint put
+   them. This is measurable and is measured below.
+2. **Nothing else.** Shape, colour, hinting and x-height are all irrelevant to layout. A
+   face can look nothing like the original and still be a perfect substitute for our
+   purposes, and a face can be a scholarly revival of the very same design and still
+   reflow every line.
+
+Two measurement conventions are used throughout. Differences of one design unit are
+**quantisation, not design**: a Microsoft face is 2048 upem and most clones are 1000 or
+2048, so a 0.05 % discrepancy means the clone was drawn to the same number and rounded
+differently. And ASCII is reported in two slices — all 95 printable characters, and the 74
+that are letters, digits and ordinary punctuation. The gap between those two slices is
+almost always `#`, `|`, brackets and the math operators, which real slide text uses far
+less than the 95-character count implies.
+
+### Measured: families that do have a true metric clone
+
+Each "differ" column counts characters differing by more than one design unit. "Text"
+is the 74-character letters-digits-punctuation slice.
+
+| Family | Clone | Kind | Licence | Evidence | Size |
+| --- | --- | --- | --- | --- | --- |
+| Arial Narrow | Nimbus Sans Narrow (URW) | **metric** | AGPL-3.0 + PS/PDF exception | 0/95 ASCII against Arial Narrow regular, italic and bold-italic | 617 kB /4 |
+| Arial Narrow | TeX Gyre Heros Cn | **metric** | GUST (LPPL 1.3c) | 0/95 beyond rounding; max deviation 0.14 %, all of it 1000-upem quantisation | 467 kB /4 |
+| Book Antiqua | URW P052 | **metric** | AGPL + exception | 0/74 text; 1/95 ASCII (`#`, 0.606 → 0.500) | 882 kB /4 |
+| Palatino Linotype | URW P052 | **metric on text** | AGPL + exception | 0/74 text; 10/95 ASCII — Microsoft regularised `+ / < = > ^ \| ~` to 0.5 em, URW kept Palatino's | (same file) |
+| Century Schoolbook | URW C059 | **metric** | AGPL + exception | 0/74 text; the 3 ASCII "differences" are one unit in 2048 | 838 kB /4 |
+| Century | URW C059 | **metric** | AGPL + exception | Century and Century Schoolbook have identical ASCII advances; same result | (same file) |
+| Century Gothic | URW Gothic | **metric** | AGPL + exception | 0/74 text; 2/95 ASCII (`#`, `^`) | 601 kB /4 |
+| Bookman Old Style | URW Bookman Light/Demi | **metric** | AGPL + exception | 1/74 text (`Q`, +2.5 %); `#` also differs | 803 kB /4 |
+| Monotype Corsiva | URW Z003 (Zapf Chancery) | **metric** | AGPL + exception | 0/74 text; 1/95 (`#`). Surprising, and checked twice | 215 kB /1 |
+| Symbol | **Symbol Neu** (croscore) | **metric** | Apache-2.0 | **0/188 by legacy code and 0/189 by glyph name, mean 1.0000** | 69 kB /1 |
+| Symbol | URW Standard Symbols PS | **metric** | AGPL + exception | 0/188 by code *and* by glyph name, mean 1.0001 — the same result under a worse licence | 24 kB /1 |
+| Monotype Sorts | URW D050000L (Dingbats) | **near-metric** | AGPL + exception | 9/202 differ, mean 0.9938 | 37 kB /1 |
+| Comic Sans MS | Comic Relief | **metric** | OFL-1.1 | **0/95 ASCII, regular and bold.** The cleanest result in the survey | 171 kB /2 |
+| MS Gothic, MS Mincho, SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS, BatangChe, GulimChe, DotumChe, GungsuhChe | Noto Sans Mono CJK JP | **metric** | OFL-1.1 | **0 differing over 1,106–2,264 shared codepoints each**, ideographs, kana and ASCII together | 16.0 MB /1 |
+| MingLiU-ExtB, SimSun-ExtB | Noto Sans Mono CJK JP | metric on ASCII only | OFL-1.1 | 0/95 ASCII; the Ext-B ideographs they exist for are not in the JP font, so only ASCII was measurable | (same file) |
+
+That is **26 of the 186 names** with a genuine metric-compatible open face, 11 of them
+Latin or symbol and 15 CJK.
+
+### Measured: what the usual suggestions actually do
+
+These are the faces a search engine offers, measured rather than repeated. Every one of
+them reflows. The mean ratio is over all 95 ASCII characters.
+
+| Family | Suggested face | Verdict | Measurement |
+| --- | --- | --- | --- |
+| Franklin Gothic Book | Libre Franklin | approximate | 94/95 differ, mean 1.0508, range 0.534–1.524 |
+| Franklin Gothic Medium | Libre Franklin | approximate | 94/95 differ, mean 1.0325 |
+| Garamond | EB Garamond | approximate | 91/95 differ, mean 0.9722 |
+| Century Gothic | Josefin Sans | approximate | 95/95 differ, mean 0.9093 — the URW row above is the answer here |
+| Tw Cen MT | Josefin Sans | approximate | 95/95 differ, mean 1.0105, range 0.423–1.536 |
+| Gill Sans MT | Libre Franklin | approximate | 95/95 differ, mean 1.0774 |
+| Verdana | DejaVu Sans | approximate | 57/95 differ, mean 0.9613. The Bitstream Vera lineage is a design influence, not shared metrics |
+| Tahoma | DejaVu Sans Condensed | approximate | 93/95 differ; mean 0.9994 is a coincidence of averaging, range 0.637–1.191 |
+| Trebuchet MS | Arimo | approximate | 94/95 differ, mean 1.0216, range 0.495–1.515 |
+| Candara | Carlito | approximate | 92/95 differ, mean 0.9950 |
+| Corbel | Carlito | approximate | 94/95 differ, mean 0.9883 |
+| Constantia | Caladea | approximate | 93/95 differ, mean 0.9574 — the same 4 % Caladea misses Cambria by |
+| Rockwell | URW Bookman | approximate | 94/95 differ, mean 1.0658 |
+| Perpetua | Nimbus Roman | approximate | 87/95 differ, mean 1.0782 |
+| Lucida Bright | Nimbus Roman | approximate | 94/95 differ, mean 0.9207 |
+| Arial Black | Nimbus Sans Bold | approximate | 85/95 differ, mean 0.8924 |
+| Nyala (Ethiopic) | Abyssinica SIL | approximate | 355/358 differ, mean 1.1446. Noto Sans Ethiopic: 353/358, mean 1.1033 |
+| David (Hebrew) | David Libre | approximate | 36/55 differ, mean 1.1223, and it covers only 55 of David's 88 Hebrew codepoints |
+| Mangal (Devanagari) | Noto Sans Devanagari | approximate | 94/112 differ, mean 0.9455 |
+| Latha (Tamil) | Noto Sans Tamil | approximate | 70/72 differ, mean 0.9943 |
+| Gautami (Telugu) | Noto Sans Telugu | approximate | 82/93 differ, mean 1.0596 |
+| Tunga (Kannada) | Noto Sans Kannada | approximate | 85/86 differ, mean 1.0150 |
+| Kartika (Malayalam) | Noto Sans Malayalam | approximate | 95/98 differ, mean 0.8887 |
+| TH SarabunPSK | Sarabun (Google Fonts) | approximate | 71/87 differ in the Thai block, **mean 1.5299** — Sarabun is drawn at a completely different optical size within the em |
+| Angsana New | Noto Sans Thai | approximate | 71/87 differ, mean 1.3950 |
+| Mongolian Baiti | Noto Sans Mongolian | approximate | 155/156 differ, mean 1.9053 |
+| Dubai (Arabic) | Cairo | approximate | 86/101 differ, mean 1.1120 |
+
+### None known
+
+No open face claims, and none measured within reach of, the following. They are listed so
+the next person does not re-search them: the Monotype and ITC display and script faces
+(Abadi MT, Baskerville Old Face, Bauhaus 93, Bell MT, Bernard MT, Braggadocio, Britannic,
+Calisto MT, Colonna MT, Cooper, Copperplate Gothic, Curlz MT, Desdemona, Edwardian Script
+ITC, Engravers MT, Eurostile, Footlight MT, Gabriola, Gill Sans Ultra Bold, Gloucester MT,
+Goudy Old Style, Haettenschweiler, Harrington, Imprint MT Shadow, Kino MT, Matura MT,
+Mistral, Modern No. 20, News Gothic MT, Onyx, Perpetua Titling MT, Segoe Print, Segoe
+Script, Stencil, Wide Latin); the whole Lucida family, which is Bigelow & Holmes and has
+never been cloned; the Microsoft symbol and dingbat fonts (Bookshelf Symbol 7, Marlett, MS
+Reference Specialty, MT Extra, Webdings, Wingdings 1/2/3, Segoe UI Symbol, Segoe UI
+Historic) — **Wingdings against D050000L differs on all 202 shared codes, mean 0.8632**,
+which is the measurement behind "Wingdings is not Dingbats"; Cambria Math, where STIX Two
+Math is the free stand-in and shares nothing but purpose; the minority-script faces
+(Microsoft Himalaya, Tai Le, New Tai Lue, Yi Baiti, Myanmar Text); and the nine HG* faces,
+which are Ricoh designs bundled for Japanese Office.
+
+### Four things that turned up that were not the question
+
+* **Verdana and MS Reference Sans Serif are the same metrics.** 0 differing over all 191
+  Latin-1 characters. Neither has a clone, so this changes nothing today, but any future
+  Verdana clone answers two names, and any substitution rule written for one must be
+  written for both.
+* **TeX Gyre is not URW, and the difference is exactly 14 characters.** The TeX Gyre
+  families are redrawn from the URW base-35 and are usually described as metric-compatible
+  with them. Measured, Bonum and Heros are byte-identical to URW Bookman and Nimbus Sans;
+  Pagella, Schola, Adventor and Termes are identical on letters and digits and **deliberately
+  rewidened on `( ) [ ] { } + < = > | / \ *`** — `(` goes from 0.333 to 0.456 em in Pagella,
+  0.333 to 0.483 in Schola. On a realistic sentence the cost is small and quantified:
+  "Revenue grew 18% in Q3 (year on year), driven by EMEA." measures **1.0092** in TeX Gyre
+  Pagella against Book Antiqua and **1.0000** in URW P052; sentences without brackets come
+  back 0.9996–1.0001. So TeX Gyre is metric-compatible for prose and carries roughly a 0.9 %
+  penalty per parenthetical. That is a fifth of the error that disqualified Caladea, and it
+  is a real error rather than none.
+* **TeX Gyre Chorus is not Zapf Chancery.** All 95 ASCII differ from Z003 by a uniform
+  1.081, so it is the same proportions at a different design size — which still reflows.
+  Monotype Corsiva's only metric clone is the AGPL one.
+* **Selawik is metric-compatible with Segoe UI — for three of its five cuts.** Microsoft's
+  own OFL release claims the compatibility flatly. Measured against the Segoe UI that
+  Microsoft Remote Desktop installs: Regular 0/188 over Latin-1, Light 0/95 — exact.
+  **Semilight is not: 51 of 95 differ, and `1` is 19 % out.** Bold and Semibold could not be
+  measured, no Segoe UI Bold being present on this machine. It is also a 352-glyph font,
+  which is Latin-1 and little else. So the claim is true where it is most used and false
+  where nobody checked, which is the shape of every finding in this survey.
+
+### CJK compatibility is nearly free, and mostly already held
+
+The single most useful structural finding in the survey. **Every Microsoft CJK face gives
+every ideograph and every kana an advance of exactly 1.000 em** — MS Gothic, MS Mincho,
+Meiryo, Yu Gothic, Yu Mincho, DengXian, Microsoft YaHei, JhengHei, Malgun Gothic, SimSun,
+SimHei, MingLiU, Batang, Gulim, all of them — and so does the Noto Sans JP the bundle
+already ships. Measured over 1,570 shared ideographs and kana, Noto Sans JP differs from
+Meiryo, Yu Gothic, Microsoft YaHei, Malgun Gothic and DengXian on **zero** codepoints.
+
+So the comment in `text/fontmap.py` that reads "Noto Sans JP is not metric-compatible with
+any of these (nothing is; the MS faces are proprietary and were never cloned)" is too
+strong, and the survey contradicts it. For the CJK portion of a CJK run it *is* exactly
+compatible, and has been all along. The divergence is confined to the Latin sub-run, which
+is 0.83 of Meiryo's widths and 0.90 of Yu Gothic's. Three faces are the exception and they
+prove the rule: **MS PGothic makes kana proportional too** (176 kana differ, which is why its
+own table already exists and is right), and Gungsuh and STZhongsong do the same.
+
+The fixed-pitch families are the strong case. MS Gothic, MS Mincho, SimSun, NSimSun, SimHei,
+KaiTi, FangSong, MingLiU, MingLiU_HKSCS, BatangChe, GulimChe, DotumChe and GungsuhChe are all
+(1.0 em ideograph, 1.0 em kana, 0.5 em ASCII), which is precisely Noto Sans Mono CJK JP's
+profile, and the measurement is 0 differing codepoints for every one of them.
+
+**Which makes the cheapest fix on this page a metrics-only one.** Those thirteen families
+need no font file at all: their entire advance table is three constants. `fonts/` already
+draws them with Noto Sans JP, and the only thing missing is a measured table, which costs
+nothing to carry and does not enlarge the wheel by a byte. The same trick works for the
+monospaced Latin faces, where the whole table is one number:
+
+| Family | Advance | Nearest shippable | Drawn-width error |
+| --- | --- | --- | --- |
+| Lucida Console | 0.602539 em | Cousine (0.600098, already bundled) | **0.41 %** |
+| Lucida Sans Typewriter | 0.602539 em | Cousine | **0.41 %** |
+| Consolas | 0.549805 em | Anonymous Pro (0.545898) | 0.71 %, but needs a new four-cut family (158 kB regular) |
+| Consolas | 0.549805 em | Cousine | 9.1 % — too wide to draw with |
+
+Inconsolata is 0.5 and JetBrains Mono, Source Code Pro and Noto Sans Mono are all 0.6; no
+open monospace was found at Consolas's 1126/2048.
+
+### Licence: the URW result is the best measurement and the worst licence
+
+The URW base-35 set produces the strongest numbers in this survey and is the one candidate
+group that **cannot be adopted without a deliberate decision about the package licence.**
+Read first-hand from `LICENSE` in `ArtifexSoftware/urw-base35-fonts`:
+
+> The font and related files in this directory are distributed under the GNU AFFERO GENERAL
+> PUBLIC LICENSE Version 3 [...] with the following exemption: As a special exception,
+> permission is granted to include these font programs in a Postscript or PDF file [...]
+
+**The exception covers embedding a glyph in a PS or PDF document. It does not cover
+redistributing the font files.** This is narrower than the GPL font exception people assume
+when they see "URW fonts are basically free". `pptx2svg-fonts` currently declares
+`MIT AND OFL-1.1`; shipping URW would make it `MIT AND OFL-1.1 AND AGPL-3.0-only`, with the
+network clause attached, inside a wheel that an MIT library pulls in as an extra. It also
+would not help Phase 6's eventual SVG font embedding, since SVG is neither PostScript nor
+PDF. **Flagged, not decided** — it is a licensing judgement, not a technical one, and it
+belongs to whoever owns the project's licence policy.
+
+The alternative is TeX Gyre. Its GUST Font License is LPPL 1.3c plus a *request* (explicitly
+"not legally required") to rename derived works — permissive, non-copyleft, and compatible
+with an MIT distribution as long as the licence text travels with the files. Its cost is the
+14 rewidened punctuation characters measured above.
+
+Licences confirmed by reading the shipped text: URW (AGPL + the quoted exception), GUST
+(fetched from gust.org.pl), Symbol Neu (Apache-2.0, from its own `name` id 13), Selawik
+(OFL-1.1, from `LICENSE.txt` in `microsoft/Selawik`), and Comic Relief and the Noto/Google
+Fonts candidates (OFL-1.1, the `OFL.txt` beside each family in `google/fonts`).
+
+### What the reference implementation does about this, which is almost nothing
+
+`aiden0z/pptx-renderer` is this project's standing reference and was checked for a mapping
+table worth borrowing. It has one, in `src/renderer/fontResolver.ts`, and it is eleven
+entries long: `FONT_FAMILY_ALIASES` maps `calibri`, `calibri light`, `aptos`, `aptos
+display` and seven CJK spellings (`microsoft yahei`, `微软雅黑`, `dengxian`, `等线`,
+`simhei`, `黑体`, `heiti sc`) to **CSS font stacks**, not to faces it ships. The only
+Western clone named anywhere in it is **Carlito**, third in Calibri's stack behind Calibri
+and Aptos; there is no Arimo, Tinos, Cousine, Caladea or Liberation, and no concept of
+metric compatibility at all. Everything else falls through `cssFontFamilyStack()` to
+`sans-serif` and whatever the browser has.
+
+That is not a criticism of it — a browser renderer cannot measure, so a font stack is the
+only tool it has — but it does mean **there is no table here to copy.** It also makes the
+same point the Fonts section opens with from the other direction: aiden0z solved its font
+problem by reading `<p:embeddedFontLst>`, which is Phase 6, and left the clone problem to
+the user's machine.
+
+Two further negatives, so they are not re-searched. **Liberation Sans Narrow exists only in
+the 1.x GPL-with-font-exception line**; the 2.x OFL releases ship Sans, Serif and Mono and
+no Narrow, and the ChangeLog does not mention one. It is moot either way — URW Nimbus Sans
+Narrow and TeX Gyre Heros Cn both measure exact against Arial Narrow above. And croscore has **a sixth face that this project has never heard of**:
+**Symbol Neu**, Google's Apache-2.0 metric clone of Microsoft Symbol, which measures 0/188
+against the installed `symbol.ttf` by legacy code and 0/189 by glyph name. It is not in any
+current package — Google dropped it after croscore 1.23.0 on the reasoning that browsers
+map Symbol themselves, and Debian dropped it with them — so it has to come out of the
+archived `croscorefonts-1.23.0.tar.gz` on `chromeos-localmirror`, which is a supply-chain
+caveat rather than a licensing one. Beyond it, croscore and crosextra hold only the five
+faces already bundled (Arimo, Tinos, Cousine; Carlito, Caladea).
+
+### The shortlist
+
+Ranked by names rescued from the width guess per megabyte added to a bundle that is
+currently 11 MB packed and 20.5 MB on disk for eight families. The bundle's inclusion rule
+— every family is there because Office will draw with it — is respected: everything below
+is a clone of a face PowerPoint installs.
+
+**Ship. No licence question, measured exact, and cheap.**
+
+| | Adds | Rescues | kB per name |
+| --- | --- | --- | --- |
+| 1 | **Metrics-only CJK and mono tables** (0 kB) | MS Gothic, MS Mincho, SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS, BatangChe, GulimChe, DotumChe, GungsuhChe, Lucida Console, Lucida Sans Typewriter | **0** |
+| 2 | **Symbol Neu** (Apache-2.0, 1 file, 69 kB) | Symbol | 69 |
+| 3 | **Comic Relief** (OFL, 2 cuts, 171 kB) | Comic Sans MS | 171 |
+| 4 | **TeX Gyre Heros Cn** (GUST, 4 cuts, 467 kB) | Arial Narrow | 467 |
+| 5 | **TeX Gyre Bonum** (GUST, 4 cuts, 524 kB) | Bookman Old Style | 524 |
+| 6 | **TeX Gyre Adventor** (GUST, 4 cuts, 693 kB) | Century Gothic | 693 |
+| 7 | **TeX Gyre Pagella** (GUST, 4 cuts, 875 kB) | Book Antiqua, Palatino Linotype | 438 |
+| 8 | **TeX Gyre Schola** (GUST, 4 cuts, 813 kB) | Century Schoolbook, Century | 407 |
+
+Rows 1–8 together are **3.6 MB on disk for 24 names**, against 20.5 MB for the 16 the
+bundle answers today. Rows 1–5 carry no caveat at all: the metrics-only tables and Symbol
+Neu are exact, Comic Relief is exact, and Heros Cn and Bonum are metrically identical to
+the URW originals. Rows 6–8 carry the 0.9 %-per-parenthetical note, which `Substitution`
+already has a field for — this is what `caveat` is for, and they should still grade
+`compatible`, because we would measure and draw with the same face.
+
+Row 1 is first on the list because it is free, and it is free for a reason worth stating
+plainly: **for a fixed-pitch face the advance table is a constant, and a constant is a fact
+about a design, not a copy of it.** The same argument that lets `METRICS` carry Aptos's
+widths lets it carry MS Gothic's — and MS Gothic's is one number repeated. Nothing has to
+be downloaded, licensed or shipped.
+
+**Decide, do not drift into.** With Symbol Neu taking Symbol, two AGPL rows are left that
+have no alternative anywhere: **D050000L** (37 kB) for Monotype Sorts and **Z003** (215 kB)
+for Monotype Corsiva, TeX Gyre Chorus having been measured out of contention above. 252 kB
+for two more names is a good ratio *and* it is the AGPL. Worth putting to whoever owns the
+licence question precisely because the amount is small enough that it would otherwise get
+waved through.
+
+**Do not ship.**
+
+* **Noto Sans Mono CJK JP, 16 MB.** It is exactly right for thirteen families, and the
+  metrics-only row above already captures most of that value for nothing. Sixteen megabytes
+  — enough to double the bundle — buys only the correct *drawn* Latin inside a fixed-pitch
+  CJK run. Wrong trade at this size.
+* **Every "approximate" row in the second table.** Libre Franklin, EB Garamond, Josefin Sans,
+  DejaVu Sans, Abyssinica SIL, the Noto Indic set. Shipping one of these would mean drawing
+  a face that reflows and grading it `approximate`, which is the Aptos arrangement — and
+  Aptos earns that arrangement by being Office's *default*, which Tw Cen MT is not. For
+  everything else, a `font-substituted` warning naming the truth beats a substitute that
+  quietly moves every line break.
+* **Gelasio and Selawik**, despite both measuring exact — Gelasio 0/95 against Georgia,
+  Selawik 0/188 against Segoe UI — because **neither Georgia nor Segoe UI is in `DFonts`**.
+  macOS supplies Georgia, as it supplies Courier New, Trebuchet MS and the Comic Sans
+  regular cut; Segoe UI is a Windows system face that Office draws with there and that
+  PowerPoint for Mac carries only as `.woff` add-in chrome under `Resources/sdx/`. Both are
+  out of scope for a survey of what PowerPoint *ships* and are recorded so the results are
+  not re-derived.
+
+  **Selawik is the strongest argument for widening that rule**, and should be put to whoever
+  owns it rather than settled here. It is 216 kB for five cuts, OFL, published by Microsoft,
+  and Segoe UI is named by real decks far more often than Bookman Old Style is. The rule it
+  fails — "Office ships it" — is already stretched by Lato and Raleway, which are in the
+  bundle because Office *offers* them from the cloud. If the rule becomes "Office will draw
+  with it", Selawik is the first row and Gelasio the second.
+
+### What could not be settled
+
+* **Whether the URW AGPL exception's reach can be argued wider.** The text is unambiguous
+  about what it *grants*; whether ordinary aggregation of unmodified font files in a wheel
+  needs the exception at all is a legal question this survey is not competent to answer,
+  and guessing at it would be the licensing version of asserting metric compatibility.
+* **Coverage beyond Latin-1 for the TeX Gyre and URW candidates.** All the numbers above are
+  ASCII, Latin-1 or the relevant script block. A deck in Book Antiqua with Greek or Cyrillic
+  in it has not been measured.
+* **Whether `Century` and `Century Schoolbook` being metrically identical is by design.**
+  They are two menu entries with the same 95 ASCII advances. Both map to C059 either way, so
+  nothing depends on the answer.
+* **Kerning, everywhere.** This survey compares `hmtx` advances only. `pptx2svg` does not
+  apply kerning and PowerPoint does, which is a pre-existing gap and not one the clone
+  choice changes — but a clone with different kern pairs will diverge from PowerPoint by
+  more than these tables suggest once that gap is closed.
+
+---
+
 ## Suggested order
 
 ```
