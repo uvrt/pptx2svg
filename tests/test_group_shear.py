@@ -204,8 +204,14 @@ def test_the_centre_moves_by_the_plain_scale():
     and with every flip.
     """
     box = drawn(render(group(4, 1, square(rotation=45))))
-    assert box["centre"] == (round(CHILD / 2 * 4 / EMU_PER_POINT, 3),
-                             round(CHILD / 2 / EMU_PER_POINT, 3))
+    # To the hundredth of a point, which is what was measured -- not to the thousandth,
+    # which is only an artefact of how `drawn` rounds.  The y centre here lands on
+    # 39.3705, right on the 3-decimal boundary, and the rotation puts `math.sin`/`cos`
+    # in front of it: Windows composed 39.371 where macOS composed 39.370, and an
+    # exact comparison turned a half-thousandth of a point into a red build.
+    assert box["centre"] == pytest.approx(
+        (CHILD / 2 * 4 / EMU_PER_POINT, CHILD / 2 / EMU_PER_POINT), abs=0.01
+    )
 
 
 def test_an_unrotated_child_is_scaled_the_obvious_way():
