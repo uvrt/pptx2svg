@@ -1801,8 +1801,33 @@ that distinction is how the Caladea 4.5 % error got in.
 - `fsType` is checked, and a restricted font is refused with a warning that names the
   restriction.
 - A deck whose embedded font cannot be decoded still renders, and says why.
-- The two template decks in `scratch/` render without a single "no substitute known"
-  warning, which is the observable this phase exists to move.
+- **A synthetic deck exercising the uncompressed path** decodes correctly. Nothing in
+  `scratch/` covers non-MTX, so without this the cheap half of the format ships untested.
+  This one is additional to the real decks below, never a replacement for them: a fixture
+  we write ourselves tests our EOT writer against our EOT reader, and those two can agree
+  perfectly while both disagree with PowerPoint. It pins the branch; it proves nothing
+  about the format.
+- **The two template decks render without a single "no substitute known" warning.** This
+  is the observable the phase exists to move, and it is deliberately named rather than
+  generalised, even though neither deck is in the repository.
+
+  | deck | sha256 |
+  | --- | --- |
+  | `nutrition_templates-Meal Planning Slides.pptx` | `0f50e1c0f786abbaa459512cf602cc5992115741f275182265455103e013ef81` |
+  | `sales_templates-IT Software Sales Proposal Slides.pptx` | `7b95c1f168d6102c8296aed23d7b58f26cdb3f4d8c5414d5197fad414c004204` |
+
+  Both are third-party stock templates and **not committed**, on the same footing as
+  `real-college-template.pptx` — see `tests/fixtures/README.md` and the `college_template`
+  fixture in `tests/conftest.py` for the pattern a test should follow, which is to skip
+  where the file is absent rather than to fail.
+
+  Between them they embed Anton, Arimo, Literata, Merriweather Sans, Merriweather Sans
+  Light and Inclusive Sans, and both carry EOT flags `0x00000004`. **Their provenance is
+  not recorded**: they arrived in `scratch/` during the investigation and no source URL or
+  download date was captured, which is a gap by the standard
+  `tests/fixtures/README.md` sets for every other outside input. Whoever picks this phase
+  up should either recover the provenance or substitute two template decks whose source is
+  known, rather than treating the hashes above as sufficient on their own.
 
 ---
 
