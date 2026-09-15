@@ -9,7 +9,12 @@ each one lands.
 Four outcomes, in decreasing order of trust:
 
 ``exact``
-    The deck asked for a face we ship (Lato, Raleway) and we will draw with it.
+    The deck asked for a face we ship and we will draw with it.  Lato and Raleway, and
+    equally Carlito, Arimo, Tinos, Cousine, Caladea and Noto Sans JP when a deck names
+    one of those directly -- which decks authored on Linux or round-tripped through
+    LibreOffice do, since Carlito and Caladea are LibreOffice's own Calibri and Cambria
+    substitutes.  Every one of those used to report ``missing`` with "no substitute
+    known", which was exactly backwards: we ship the file and measured the table.
 ``compatible``
     The deck asked for an Office face and we will draw a clone built to the same advance
     widths.  Glyph outlines differ from PowerPoint's; nothing else does.

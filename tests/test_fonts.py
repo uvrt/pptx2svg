@@ -26,7 +26,13 @@ from pptx2svg.fonts import (
     font_dirs,
 )
 from pptx2svg.fonts.check import check_deck, check_families
-from pptx2svg.text.fontmap import SUBSTITUTIONS, font_family_value, typographic_family
+from pptx2svg.text.fontmap import (
+    SUBSTITUTIONS,
+    font_family_value,
+    generic_family,
+    substitution_for,
+    typographic_family,
+)
 from pptx2svg.text.measure import DefaultTextMeasurer
 from pptx2svg.text.metrics import METRICS
 
@@ -64,6 +70,217 @@ def test_every_substitution_points_at_a_family_we_can_draw():
 def test_every_substitution_points_at_a_metrics_table_that_exists():
     for substitution in SUBSTITUTIONS.values():
         assert substitution.metrics in METRICS, substitution.office
+
+
+# --------------------------------------------------------------------------------------
+# The other direction: a family we ship, named by a deck
+# --------------------------------------------------------------------------------------
+#
+# The table was written from the Office side -- "a deck asked for Calibri, what do we
+# draw?" -- and for a long time that was the only direction it worked in.  A family was a
+# legal *input* only if some Office face happened to be spelled that way, so the five
+# faces we ship, measure and draw with were names we did not recognise.  Every test below
+# is the same assertion as the ones above, arriving from the other side: what we can draw,
+# we can be asked for.
+
+#: Names a deck may spell that must reach the bundle, beyond the bundled families
+#: themselves.  Liberation 2.x is built from the Chrome OS core fonts, which is why
+#: ``tools/install-fonts-debian.sh`` installs ``fonts-liberation2`` deliberately.
+LIBERATION_ALIASES = {
+    "Liberation Sans": "Arimo",
+    "Liberation Serif": "Tinos",
+    "Liberation Mono": "Cousine",
+}
+
+#: The generic fallback width for this string at this size: 21 characters of
+#: NORMAL_RATIO/NARROW_RATIO guess at 18 pt, which is what *every* unrecognised face
+#: measures.  Hard-coded rather than computed so that a change to the heuristic does not
+#: quietly make the assertions below vacuous.
+PROBE = "Hamburgefonstiv 12345"
+PROBE_SIZE_PT = 18.0
+PROBE_GENERIC_WIDTH = 280.800
+
+
+def test_the_generic_fallback_width_is_what_we_think_it_is():
+    """The control for the three tests after it -- an assertion about nothing real."""
+    measurer = DefaultTextMeasurer()
+    width = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, False, "Nonexistent Face")
+    assert width == pytest.approx(PROBE_GENERIC_WIDTH, abs=0.001)
+
+
+def test_a_bundled_family_named_by_a_deck_is_measured_not_guessed():
+    """The bug: Carlito measured identically to a face that does not exist.
+
+    Decks really do name these.  Carlito and Caladea exist because LibreOffice ships them
+    as its Calibri and Cambria substitutes, so anything round-tripped through LibreOffice
+    names them directly, and Arimo/Tinos/Cousine are the Chrome OS core fonts that Debian
+    packages as ``fonts-croscore``.  All five, plus the three Liberation aliases, came
+    back at exactly 280.800 px -- the generic guess -- while their own tables were sitting
+    in ``METRICS`` all along.
+    """
+    measurer = DefaultTextMeasurer()
+    for family in sorted(BUNDLED_FAMILIES) + sorted(LIBERATION_ALIASES):
+        width = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, False, family)
+        assert width != pytest.approx(PROBE_GENERIC_WIDTH, abs=0.001), family
+
+
+def test_a_substitute_measures_the_same_by_its_own_name_as_by_the_office_name():
+    """Two routes to one table.  If they disagree, one of them is not using the table."""
+    measurer = DefaultTextMeasurer()
+    pairs = (
+        ("Calibri", "Carlito"), ("Arial", "Arimo"), ("Times New Roman", "Tinos"),
+        ("Courier New", "Cousine"),
+        # ...and the aliases of the substitutes, which are the same designs again.
+        ("Arial", "Liberation Sans"), ("Times New Roman", "Liberation Serif"),
+        ("Courier New", "Liberation Mono"),
+    )
+    for office, own in pairs:
+        for bold in (False, True):
+            by_office = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, bold, office)
+            by_own = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, bold, own)
+            assert by_office == pytest.approx(by_own, abs=0.001), (office, own, bold)
+
+    # Cambria is deliberately *not* in that list: Caladea runs 4.5% narrow, so the deck
+    # asking for Cambria is measured from Cambria's own table and the deck asking for
+    # Caladea is measured from Caladea's.  Both are right; they are different faces.
+    cambria = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, False, "Cambria")
+    caladea = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, False, "Caladea")
+    assert cambria != pytest.approx(caladea, abs=0.001)
+
+
+def test_a_bundled_family_named_by_a_deck_reports_as_faithful():
+    report = check_families(sorted(BUNDLED_FAMILIES))
+    if report.mode != "bundled":
+        pytest.skip("pptx2svg-fonts is not importable")
+    assert report.faithful
+    assert {face.verdict for face in report.faces} == {"exact"}
+    # The old verdict said the opposite of the truth: "no substitute known" for a face
+    # whose file is in the wheel and whose widths are in METRICS.
+    for face in report.faces:
+        assert "no substitute known" not in face.reason, face.requested
+
+
+def test_the_liberation_aliases_report_as_compatible_and_name_the_design():
+    report = check_families(sorted(LIBERATION_ALIASES))
+    if report.mode != "bundled":
+        pytest.skip("pptx2svg-fonts is not importable")
+    assert report.faithful
+    for face in report.faces:
+        assert face.verdict == "compatible"
+        assert face.substitute == LIBERATION_ALIASES[face.requested]
+        assert "same design" in face.reason
+
+
+def test_a_bundled_family_is_named_first_in_its_own_font_stack():
+    """A correct width behind a wrong ``font-family`` still renders wrong.
+
+    resvg resolves per text chunk, so the two halves have to be checked separately: the
+    measurement can be right while the stack sends the chunk somewhere else entirely.
+    """
+    for family in sorted(BUNDLED_FAMILIES):
+        names = font_family_value([family]).split(", ")
+        assert names[0].strip("'") == family, family
+        assert names[-1] in ("sans-serif", "serif", "monospace"), family
+    for alias, design in sorted(LIBERATION_ALIASES.items()):
+        names = font_family_value([alias]).split(", ")
+        assert names[0].strip("'") == alias, alias
+        assert design in names, alias
+
+
+def test_the_generic_behind_a_bundled_family_matches_its_design():
+    """Nothing in "Tinos" or "Cousine" says serif or monospace, so guessing gets it wrong.
+
+    It is the last resort in the stack, which is exactly where it matters: in ``system``
+    mode a deck set in Tinos used to end its stack in ``sans-serif`` and degrade to
+    resvg's sans default.
+    """
+    assert generic_family("Tinos") == "serif"
+    assert generic_family("Caladea") == "serif"
+    assert generic_family("Cousine") == "monospace"
+    assert generic_family("Carlito") == "sans-serif"
+    assert generic_family("Arimo") == "sans-serif"
+    # Case-folded like every other lookup in the module.
+    assert generic_family("cousine") == "monospace"
+    # Hand-written, unlike the identity rows, so it needs a guard against drift: a ninth
+    # bundled family would otherwise fall back to reading its name.
+    from pptx2svg.text.fontmap import _BUNDLED_GENERICS
+
+    assert set(_BUNDLED_GENERICS) == {family.lower() for family in BUNDLED_FAMILIES}
+
+
+def test_a_family_name_resolves_however_the_deck_spells_it():
+    """OOXML puts no constraint on the capitalisation of a ``typeface`` attribute.
+
+    A name we fail to match does not fail loudly -- it becomes the 0.6 em guess -- so the
+    lookup is deliberately forgiving.  Inner whitespace is deliberately *not* normalised;
+    see ``_key``.
+    """
+    measurer = DefaultTextMeasurer()
+    expected = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, False, "Carlito")
+    for spelling in ("carlito", "CARLITO", "Carlito ", " carlito"):
+        width = measurer.measure_text_width(PROBE, PROBE_SIZE_PT, False, spelling)
+        assert width == pytest.approx(expected, abs=0.001), spelling
+        # ...and the stack still names the canonical spelling, so the chunk resolves.
+        assert "Carlito" in font_family_value([spelling]).split(", ")
+
+
+def test_every_family_we_can_draw_is_a_family_we_can_be_asked_for():
+    """The invariant, stated once.  A ninth bundled family cannot ship without a row."""
+    for family in BUNDLED_FAMILIES:
+        substitution = substitution_for(family)
+        assert substitution is not None, family
+        assert substitution.substitute == family, family
+        assert substitution.exact, family
+        assert substitution.metrics in METRICS, family
+
+
+#: A 24 pt line of Carlito in a 250 px box with no insets.  Carlito's own advance widths
+#: put "Hamburgefonstiv" at 225.078 px, so it fits; the 0.6 em per-character guess puts it
+#: at 278.400 px, so it does not.  The deck is derived rather than committed -- no font
+#: file, and nothing opaque, enters the corpus.
+CARLITO_PROBE_XML = """
+<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+      xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:nvSpPr>
+    <p:cNvPr id="9001" name="Carlito probe"/>
+    <p:cNvSpPr txBox="1"/>
+    <p:nvPr/>
+  </p:nvSpPr>
+  <p:spPr>
+    <a:xfrm><a:off x="0" y="0"/><a:ext cx="2381250" cy="914400"/></a:xfrm>
+    <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+  </p:spPr>
+  <p:txBody>
+    <a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0"><a:noAutofit/></a:bodyPr>
+    <a:lstStyle/>
+    <a:p><a:r><a:rPr lang="en-US" sz="2400"><a:latin typeface="Carlito"/></a:rPr>
+      <a:t>Hamburgefonstiv</a:t></a:r></a:p>
+  </p:txBody>
+</p:sp>
+"""
+
+
+def test_a_deck_naming_a_bundled_face_lays_out_from_its_own_widths(authoring):
+    """End to end, because the unit widths being right is only half of it.
+
+    This is the failure as a reader of the output would meet it, which is to say not at
+    all: the text still drew, in the right family, at the right size -- and broke
+    "Hamburgefonstiv" across two lines mid-word, because the layout had been computed
+    from a per-character guess 23.7% wider than Carlito.  The first baseline moved too
+    (y=32 from the no-metrics default, against y=29.806 from Carlito's own descender).
+    Nothing in the SVG says the widths were invented.
+    """
+    from deckbuilder import derive_deck
+
+    deck = derive_deck(authoring, shapes_xml=CARLITO_PROBE_XML)
+    (svg,) = convert_pptx_to_svg(deck, ConvertOptions(warn_on_font_substitution=False))
+
+    elements = re.findall(r"<text[^>]*>.*?</text>", svg, re.S)
+    (text,) = [element for element in elements if "Hamburge" in element]
+    assert text.count("<tspan") == 1, text
+    assert ">Hamburgefonstiv</tspan>" in text
+    # ...and the chunk is sent to the family the widths came from.
+    assert 'font-family="Carlito, sans-serif"' in text
 
 
 #: Faces measured from one font and drawn with another, listed by name so that adding a

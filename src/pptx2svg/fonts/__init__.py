@@ -66,6 +66,14 @@ wants Lato.  Arimo, Tinos and Cousine are the Chrome OS core fonts; Liberation
 Sans/Serif/Mono are derived from them and measure identically (checked character by
 character: 0 of 191 differ), so a host with ``fonts-liberation2`` is equally correct.
 
+The right-hand column is also a legal *left*-hand column.  A deck may name Carlito or
+Liberation Serif directly -- LibreOffice writes the first, and ``fonts-croscore`` /
+``fonts-liberation2`` put both in front of Linux authors -- so every family here, and the
+three Liberation aliases, resolves through :data:`pptx2svg.text.fontmap.SUBSTITUTIONS` to
+itself.  It did not always: those names fell past the table to a per-character width
+guess, which is the same silent-wrong-widths failure this module exists to prevent,
+arriving from the other direction.
+
 Aptos, Microsoft's Office default since 2023, has **no** metric-compatible open clone, and
 neither, despite the universal claim, does Cambria: Caladea's advance widths run 4.5%
 narrow.  See :mod:`pptx2svg.text.fontmap` for what happens to those two.

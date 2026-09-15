@@ -232,6 +232,14 @@ The first four are exact: measured character by character against the copies Off
 installs, the advance widths match to the unit, so substituting them changes glyph shapes
 and nothing else — not one line break moves.
 
+**The right-hand column is also a left-hand column.** A deck may name Carlito, Caladea,
+Arimo, Tinos or Cousine directly — LibreOffice ships the first two as *its* Calibri and
+Cambria substitutes, so anything round-tripped through it does, and Arimo/Tinos/Cousine
+are the Chrome OS core fonts that Debian packages as `fonts-croscore`. Each resolves to
+itself and reports `exact`. So do the three Liberation aliases: Liberation Sans → Arimo,
+Liberation Serif → Tinos, Liberation Mono → Cousine, which are the same designs under
+another name.
+
 † **Approximate, and reported as such.** Caladea is universally described as
 metric-compatible with Cambria; measured, it runs 4.5 % narrow. **Aptos**, Microsoft's
 Office default since 2023, has no open clone at all — we measure it with its own widths
