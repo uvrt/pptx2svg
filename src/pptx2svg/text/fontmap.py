@@ -27,12 +27,25 @@ anything we ship (-3.6% on a representative sentence, against Arimo's +5.2%).  L
 breaks then match PowerPoint's and each drawn line is a few percent short, which scores
 better than re-wrapping the paragraph somewhere else.  :func:`substitution_report` calls
 this out so it is visible rather than inferred.
+
+The table is indexed by *any name a deck may spell*, not only by Office's names, and that
+distinction was once a bug rather than a design.  Because every row was written from the
+Office side, a family was recognisable only if some Office face pointed at it: Carlito,
+Arimo, Tinos, Cousine and Caladea -- the five faces we ship, measure and draw with --
+were not names we accepted.  ``metrics_for("Carlito")`` returned ``None`` and the string
+was laid out from the 0.6 em per-character guess, measuring identically to a face that
+does not exist.  Decks name them: Carlito and Caladea are LibreOffice's Calibri and
+Cambria substitutes, and Arimo/Tinos/Cousine are the Chrome OS core fonts.  The identity
+rows in :func:`_entries` now come from :data:`pptx2svg.fonts.BUNDLED_FAMILIES` itself, so
+the invariant is structural: *every family we can draw is a family we can be asked for,
+and it resolves to itself.*
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..fonts import BUNDLED_FAMILIES
 from .metrics import METRICS, FontMetrics
 
 __all__ = [
@@ -181,10 +194,75 @@ def _entries() -> list[Substitution]:
                 metric_compatible=False, has_italic_cut=False,
             )
         )
+
+    # -- The substitutes, under their own names.  Every row above answers "a deck asked
+    #    for an Office face, what do we draw?", and for a long time that was the only
+    #    question the table could answer: a family was a legal *input* only if some deck
+    #    spelled it that way.  Carlito, Arimo, Tinos, Cousine and Caladea are therefore
+    #    families we ship, measure and draw with, which we did not recognise when a deck
+    #    named one of them -- ``substitution_for("Carlito")`` returned ``None`` and the
+    #    string fell through to the 0.6 em per-character guess in
+    #    :mod:`pptx2svg.text.measure`.  Measured at 18 pt on "Hamburgefonstiv 12345":
+    #    Carlito, Arimo, Tinos, Cousine and Caladea each came back 280.800 px -- the same
+    #    280.800 px as "Nonexistent Face" -- against the 235.055, 254.824, 233.965,
+    #    302.449 and 231.312 px their own tables hold.  Cousine is the one that shows how
+    #    little the guess is worth in either direction: monospaced, it is 7.7% *wider*
+    #    than the fallback assumed, while Caladea is 17.6% narrower.  Lato, Raleway and
+    #    Noto Sans JP escaped only because a deck spells them the way we bundle them, so
+    #    they already had rows of their own.
+    #
+    #    Decks really do name these.  Carlito and Caladea exist because LibreOffice
+    #    ships them as its Calibri and Cambria substitutes, so anything round-tripped
+    #    through LibreOffice names them directly; Arimo, Tinos and Cousine are the Chrome
+    #    OS core fonts, packaged on Debian as ``fonts-croscore``.
+    #
+    #    Derived from :data:`pptx2svg.fonts.BUNDLED_FAMILIES` rather than listed by hand,
+    #    so a ninth bundled family cannot ship without being reachable by its own name.
+    #    The guard skips a family that already has a row, which is how Noto Sans JP keeps
+    #    its ``has_italic_cut=False`` -- it is a weight-axis variable font with no slant
+    #    axis.  The five added here each ship an italic cut in the bundle
+    #    (``Carlito-Italic.ttf`` and siblings), so the default is right for them.
+    spoken_for = {row.office for row in rows}
+    for family in sorted(BUNDLED_FAMILIES - spoken_for):
+        rows.append(Substitution(family, family, family))
+
+    # -- Liberation.  The same three designs again under another name: Liberation 2.x is
+    #    built *from* the Chrome OS core fonts -- Sans from Arimo, Serif from Tinos, Mono
+    #    from Cousine -- which is why ``tools/install-fonts-debian.sh`` installs
+    #    ``fonts-liberation2`` deliberately, "because plenty of decks and themes name
+    #    Liberation Sans directly".  They did not resolve either, for the same reason the
+    #    five above did not: nothing made a name we can draw a name we can be asked for.
+    #
+    #    The width equality is inherited, not re-measured here: no Liberation file is
+    #    installed on this machine, and none may enter the repository.  It rests on two
+    #    measurements already recorded -- the character-by-character comparison in
+    #    ``README.md`` (0 of 191 advances differ) and resvg drawing Arimo at ``wght=700``
+    #    pixel-identically to static Liberation Sans Bold (``ROADMAP.md``).  Being built
+    #    from the same outlines, they are the strongest metric-compatibility claim in
+    #    this table rather than the weakest.
+    #
+    #    Only the three base families.  "Liberation Sans Narrow" is a genuinely different
+    #    condensed design with no counterpart in the bundle, and "narrow" is not in
+    #    :data:`_WEIGHT_SUFFIXES`, so it keeps falling through rather than being measured
+    #    as its un-condensed parent.
+    liberation = (
+        ("Liberation Sans", "Arimo"),
+        ("Liberation Serif", "Tinos"),
+        ("Liberation Mono", "Cousine"),
+    )
+    for office, substitute in liberation:
+        rows.append(
+            Substitution(
+                office, substitute, substitute,
+                caveat=f"{substitute} and {office} are the same design under two names",
+            )
+        )
     return rows
 
 
-#: Office family (as the deck spells it) -> what we measure and draw it with.
+#: Family name a deck may ask for -> what we measure and draw it with.  Keyed by the
+#: *requested* spelling, which includes Office's names, the open faces those are
+#: substituted by, and the aliases those in turn go by -- see :func:`_entries`.
 SUBSTITUTIONS: dict[str, Substitution] = {row.office: row for row in _entries()}
 
 #: Lower-cased, width-normalised index, so lookups need not normalise at every call site.
@@ -213,6 +291,21 @@ def _normalize_full_width(value: str) -> str:
 
 
 def _key(value: str) -> str:
+    """Normalise a requested family name to its index key.
+
+    Case-folded and outer-whitespace-stripped on purpose, so ``"carlito"``, ``"CARLITO"``
+    and ``"Carlito "`` all reach the same row: OOXML puts no constraint on how a
+    ``typeface`` attribute is capitalised, and a deck hand-edited or written by a
+    generator carries whatever its author typed.  A name we fail to match does not fail
+    loudly -- it silently becomes the 0.6 em guess -- so the lookup is deliberately the
+    forgiving end of this module.
+
+    *Inner* whitespace is left alone: ``"Times  New Roman"`` with two spaces does not
+    resolve, and that is the decision rather than an oversight.  Collapsing runs of
+    spaces would also have to collapse them in the :func:`font_family_value` output to
+    stay honest, and a rasteriser matches ``font-family`` on the exact string; no deck in
+    the corpus spells a family that way, so this buys a mismatch risk for nothing.
+    """
     return _normalize_full_width(value).strip().lower()
 
 
@@ -317,7 +410,31 @@ def metrics_fallback_font(font_family: str | None) -> str | None:
     return substitution.substitute if substitution else None
 
 
+#: The CSS generic each bundled family really belongs to.
+#:
+#: The heuristics below read a *name*, and these names say nothing: there is no "serif"
+#: in "Tinos" or "Caladea" and no "mono" in "Cousine", so all three used to end their
+#: stack in ``sans-serif``.  That is only the last resort in the stack, but the last
+#: resort is exactly where it bites -- in ``system`` mode, or with the bundle
+#: half-installed, a deck set in Tinos degraded to resvg's sans default.  Exact knowledge
+#: about the families we ship, so it is consulted ahead of the guesses rather than added
+#: to them.
+_BUNDLED_GENERICS = {
+    "arimo": "sans-serif",
+    "caladea": "serif",
+    "carlito": "sans-serif",
+    "cousine": "monospace",
+    "lato": "sans-serif",
+    "noto sans jp": "sans-serif",
+    "raleway": "sans-serif",
+    "tinos": "serif",
+}
+
+
 def generic_family(font_family: str) -> str:
+    known = _BUNDLED_GENERICS.get(_key(font_family))
+    if known is not None:
+        return known
     lowered = font_family.lower()
     if any(hint in lowered for hint in _SERIF_HINTS):
         return "serif"

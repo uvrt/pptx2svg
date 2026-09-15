@@ -197,6 +197,31 @@ Every one of these was believed to be true beforehand, on good authority, and wa
   to static Liberation Sans Bold, which is why the bundle ships one 1 MB variable Arimo
   instead of four static cuts.
 * **Debian does not package Raleway.** The obvious `fonts-raleway` does not exist.
+* **The substitution table only worked in one direction.** Every row was written from the
+  Office side — "a deck asked for Calibri, what do we draw?" — which made a family a legal
+  *input* only if some Office face happened to be spelled that way. The five faces the
+  bundle ships, measures and draws with were therefore names we did not recognise:
+  `metrics_for("Carlito")` returned `None` and the string was laid out from the 0.6 em
+  per-character guess. At 18 pt on "Hamburgefonstiv 12345", Carlito, Arimo, Tinos, Cousine
+  and Caladea each measured 280.800 px — the same 280.800 px as a face that does not exist
+  — against 235.055, 254.824, 233.965, 302.449 and 231.312 px in their own tables, which
+  were sitting in `METRICS` the whole time. Cousine shows the guess is not even wrong in a
+  consistent direction: monospaced, it is 7.7 % *wider* than the fallback assumed, while
+  Caladea is 17.6 % narrower. Decks reach these names by ordinary routes — Carlito and
+  Caladea are LibreOffice's own Calibri and Cambria substitutes, `fonts-croscore` and
+  `fonts-liberation2` put the rest in front of every Linux author — and `fonts --check`
+  called each of them "no substitute known", the exact opposite of the truth. The identity
+  rows now come from `BUNDLED_FAMILIES` itself, so a ninth family cannot ship without one.
+* **Two heuristics were hiding behind the same gap.** With no row to consult,
+  `generic_family` fell back to reading the *name*, and nothing in "Tinos", "Caladea" or
+  "Cousine" says serif or monospace — all three ended their font stack in `sans-serif`.
+  That is only the last resort in the stack, but the last resort is where it bites: in
+  `system` mode a deck set in Tinos degraded to resvg's sans default. And `ascender_ratio`
+  had no descender to work from either, so the first baseline came from
+  `DEFAULT_ASCENDER_RATIO` — y=32 against Carlito's own y=29.806 on the probe deck.
+* **Nothing in the corpus was affected, and that is the finding.** All seven fixtures
+  re-render byte-identically, because not one of them names a substitute face directly;
+  the fidelity scores cannot move. The bug was invisible precisely where it was measured.
 * **Five of seven fixtures resolved most runs to `font_family=None`.** Nothing in OOXML
   obliges anyone to name a typeface, and plenty of decks name one nowhere. That meant no
   `font-family` in the SVG *and* no metrics table, so strings were measured with a 0.6 em
