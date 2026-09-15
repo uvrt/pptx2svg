@@ -357,18 +357,42 @@ Liberation Sans/Serif/Mono are derived from Arimo/Tinos/Cousine and measure iden
 checked character by character — but apt gives you whatever version the distribution
 shipped, so two machines on different releases can still differ.
 
-The same script fetches the faces no bundle can legally contain, behind explicit flags:
+The same script reaches the faces no bundle can legally contain, behind explicit flags:
 
 ```bash
 tools/install-fonts-debian.sh                  # open substitutes from apt
+tools/install-fonts-debian.sh --clones         # + the rest of the open metric clones
 tools/install-fonts-debian.sh --aptos          # + Aptos, from Microsoft's own download
+tools/install-fonts-debian.sh --mscorefonts    # + Arial, Georgia, Verdana … (EULA)
 tools/install-fonts-debian.sh --ppviewer       # + Calibri, Cambria and the ClearType set
+tools/install-fonts-debian.sh --office-dir auto   # + everything else PowerPoint ships
 ```
 
-`--ppviewer` extracts them from the PowerPoint Viewer installer, the route documented at
-[wiki.debian.org/ppviewerFonts](https://wiki.debian.org/ppviewerFonts) (hash-pinned;
-needs `cabextract`). **These are non-free Microsoft fonts — you must already hold a
-licence to use them.** Nothing extracted is ever committed or shipped.
+`--clones` needs no licence from anyone. It adds `fonts-urw-base35`, `fonts-texgyre`,
+`fonts-liberation-sans-narrow` and two faces Debian does not package (Comic Relief and
+Symbol Neu, both hash-pinned), which between them cover Book Antiqua, Palatino Linotype,
+Century Schoolbook, Century, Century Gothic, Bookman Old Style, Arial Narrow, Monotype
+Corsiva, Symbol, Monotype Sorts and Comic Sans MS. Each of those pairings was measured
+character by character against the PowerPoint face it substitutes for; the numbers are in
+`ROADMAP.md` under *The clone landscape*. These are not in the wheel because the wheel
+*redistributes* and their licences (AGPL and GPL-2, both with document-embedding
+exceptions) do not permit that; installing them from Debian's archive is a different act.
+
+`--mscorefonts` installs Debian's `ttf-mscorefonts-installer` from **contrib**, which
+presents Microsoft's EULA through debconf — use `--accept-eula` to preseed it for a fleet.
+`--ppviewer` extracts the ClearType set from the PowerPoint Viewer installer, the route
+documented at [wiki.debian.org/ppviewerFonts](https://wiki.debian.org/ppviewerFonts)
+(hash-pinned; needs `cabextract`). **These are non-free Microsoft fonts — you must already
+hold a licence to use them.** Nothing extracted is ever committed or shipped.
+
+`--office-dir PATH` is for organisations that hold Office licences and want the ~150
+families nothing above reaches — Gill Sans MT, Rockwell, Franklin Gothic, Tw Cen MT,
+Perpetua, Garamond, the Lucida family, the CJK and Indic faces. **It downloads nothing.**
+It copies from a licensed Microsoft Office installation you point it at (`--office-dir
+auto` probes the usual places, including a mounted macOS `PowerPoint.app/Contents/
+Resources/DFonts` and `/mnt/c/Windows/Fonts`) into a directory fontconfig indexes, and
+then names what landed. Whether those files may be copied onto a given machine is your
+organisation's licensing decision; the script makes no part of it for you.
 
 ## Output notes
 
