@@ -1097,6 +1097,33 @@ an empty category list — and nothing else of that machinery is reached.
   `bare` 21.073 / 13.670 / 11.102 / 24.965 (the right inset is `11.0 + half of "6"`),
   `font14` 26.907 / 14.740 / 13.545 / 32.353, `x-deleted` 11.000 right and 11.102 bottom
   with no labels to reserve for. Worst residual **0.32 pt** over eighteen.
+* **Neither axis is anchored at zero, and a scatter is the only type that is not.**
+  `nice_axis_scale` forces `min(0, data)` because a bar that does not start at its axis is
+  a different picture. Applied to a scatter it destroys the chart: a decade of years
+  against a measurement collapses into a 1% sliver of a 0..3000 axis. Six probes bracket
+  when PowerPoint lets go — the near end has to sit past **5/6** of the far one, measured
+  to [0.80, 0.84) by the pair that straddles it:
+
+  | x data | near/far | PowerPoint |
+  | --- | --- | --- |
+  | 10..50 | 0.20 | 0..60 by 20 |
+  | 40..50 | 0.80 | **0..60 by 20** |
+  | 42..50 | 0.84 | **40..55 by 5** |
+  | 100..104 | 0.96 | 98..106 by 2 |
+  | 2010..2020 | 0.995 | 2005..2025 by 5 |
+  | −50..−10 | mirrored | −60..0 by 20 |
+
+  The unanchored extent rounds strictly outward at **both** ends where an anchored one
+  holds its low end at zero — 100..104 comes back 98..106, a whole unit clear each way —
+  and the unit and the four-interval cap are unchanged. Ten of the eleven scatter axes
+  measured now reproduce exactly. **Only a scatter is measured**: a line chart of
+  temperatures has the same problem and no probe has ever shown what PowerPoint does with
+  one, so every other type keeps the anchor.
+* **`c:crosses` belongs to the axis it is written on**, on a scatter as on a bar: it says
+  where *that* axis crosses the perpendicular one, so the vertical line's position is a
+  question for the y axis even though the answer is an x coordinate. Only `autoZero` is
+  measured, and the reading is `_category_axis_position`'s rather than a second one
+  invented for scatters — which is also how `c:crossesAt` comes along for free.
 * **The two negative corners mirror the bar chart's.** A negative *x* range floats the
   value axis into the plot — drawn at 111.088 pt, not at the plot's left edge 95.7 pt away
   — and the y labels go with it, right-aligned the same `descent + 0.645 em` from the axis
@@ -1167,6 +1194,12 @@ improvement is in the probe decks, scored the same way:
 | scatter (18 charts) | 0.0175 / −0.1142 | **0.8695 / 0.7945** |
 | tie-breakers (12) | 0.3148 / −0.0547 | **0.8921 / 0.8624** |
 | smooth (6) | 0.4291 / 0.3285 | **0.8768 / 0.6820** |
+| axis minimum (6) | 0.4870 / 0.9201 | **0.5806 / 0.8859** |
+
+The axis-minimum deck is the one that stays low, and the reason is named above: four of
+its six charts reproduce exactly and the other two are the 120..160 y axis, where we draw
+five gridlines against PowerPoint's nine. That is the unsolved density rule and not the
+zero anchor the deck was built to measure.
 
 The three that stay under 0.95 are decks of thin curves and markers on white, where SSIM
 is punishing about a pixel of antialiasing; put side by side at 1400 px the renders are
@@ -1470,6 +1503,34 @@ three cannot be ordered by spacing alone. Ours draws eleven labels where PowerPo
 six on the 120.95 pt probe, and that is the only visible difference between our render of
 the area deck and PowerPoint's.
 
+**A second rule was written against this and reverted, and the refutation is the corpus
+radar.** The scatter axis-minimum probe threw up a case the *unit* rule gets wrong rather
+than the density one: 120..160 of data on a 145 pt axis came back **0..180 by 20**, where
+halving the power of ten gives 0..200 by 50. Stepping the unit down the 1-2-5 ladder while
+the span holds fewer than about 3.5 units reproduces that **and** all five observations
+`AXIS_HALVING_RATIO` was fitted to — six for six, and it brackets the threshold to
+(3.2, 3.684] with 160/50 refused and 1842/500 accepted. Then `real-financial-report.pptx`
+kills it: its chart5 has 65..100 of data and PowerPoint's own export draws **two** rings,
+at radii 22.78 and 45.56, which is 0..100 by 50 — a ratio of exactly **2.0 accepted**
+where the scatter refused 3.2.
+
+What separates them is the **axis length**, which puts both observations back in this
+section rather than in unit selection:
+
+| chart | span | unit | intervals | axis | spacing |
+| --- | --- | --- | --- | --- | --- |
+| corpus radar | 100 | 50 | 2 | 45.56 pt | 22.78 pt |
+| scatter y | 160 | 20 | 9 | 145.03 pt | 16.11 pt |
+
+A target *band* of roughly 16 to 24 pt of spacing fits those two and every cell of the
+six-cell table above — the radar's alternatives are 9.1 pt and 45.6 pt, both outside it,
+and the scatter's are 8.1 pt and 36.3 pt — and then it dies on the same stacked probe that
+killed the last candidate, which accepts 14.5 pt. So the ladder is **not shipped**, the
+halving stays, and `test_the_axis_ladder_that_the_corpus_radar_refuted` pins what we
+actually draw so the divergence is recorded rather than latent. Whoever picks this up now
+has two long-axis observations to add to the six short-axis ones, and the discriminating
+set is the 30.9 pt cell, the stacked probe and the corpus radar.
+
 #### Not done for the seven types that draw
 
 Each of these is known-missing rather than merely absent:
@@ -1523,6 +1584,12 @@ Each of these is known-missing rather than merely absent:
   line chart's reading is reused.
 * **A scatter's `c:bubbleSize`** is read and ignored; `bubbleChart` still warns. A scatter
   series' `c:trendline` and `c:errBars` are neither read nor drawn.
+* **`c:crossBetween="midCat"` on a bar chart.** Excel writes it for the category axis'
+  "Axis position: on tick marks" checkbox, so an ordinary column chart carries it, and
+  `_draw_bars` still lays its bars into bands. Ours therefore keeps a `midCat` bar chart's
+  labels in the bands with its bars — the one reading that cannot contradict itself — and
+  what PowerPoint actually draws for that file is **not measured**. Only `areaChart` and
+  `lineChart` put their marks on the ticks.
 * **A scatter data label at `b` is 0.9 pt low**, the one loose number in the five
   placements. It is the slack this file records elsewhere: PowerPoint's line box runs about
   a point taller than our metrics give, so a placement hung off the *ascent* inherits all

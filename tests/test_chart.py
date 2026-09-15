@@ -4299,6 +4299,267 @@ def test_a_scatter_with_negative_x_puts_its_value_labels_beside_the_axis():
     assert right == pytest.approx(111.088 - 9.267, abs=0.6)
 
 
+#: ``(x data, PowerPoint's x axis)`` for the six probes that ask whether a scatter's axis
+#: has to start at zero.  The bracket on the threshold is [0.80, 0.84): 40/50 keeps zero
+#: and 42/50 does not, with Excel's folklore 5/6 = 0.8333 inside it.
+SCATTER_ZERO_ANCHOR = {
+    "years": ((2010, 2012, 2014, 2016, 2020), (2005.0, 2025.0, 5.0)),
+    "40-50-keeps-zero": ((40, 42, 44, 46, 50), (0.0, 60.0, 20.0)),
+    "42-50-drops-zero": ((42, 44, 46, 48, 50), (40.0, 55.0, 5.0)),
+    "tight-and-far": ((100, 101, 102, 103, 104), (98.0, 106.0, 2.0)),
+    "all-negative": ((-50, -40, -30, -20, -10), (-60.0, 0.0, 20.0)),
+    "near-zero-keeps-it": ((10, 20, 30, 40, 50), (0.0, 60.0, 20.0)),
+}
+
+
+@pytest.mark.parametrize("name", list(SCATTER_ZERO_ANCHOR))
+def test_a_scatters_axis_leaves_zero_out_when_the_data_sits_far_from_it(name):
+    """**A scatter is the one type whose axis is not anchored at zero.**
+
+    A bar must start at its axis -- a bar that does not is a different picture -- and
+    `nice_axis_scale` anchors every other type there.  Applied to a scatter it destroys the
+    chart: years 2010..2020 against a measurement collapse into a 1% sliver of a 0..3000
+    axis.  PowerPoint agrees, and the six probes here bracket when it lets go: the near end
+    has to be past 5/6 of the far one, measured to [0.80, 0.84) by the two that straddle
+    it.
+
+    The unanchored extent rounds strictly outward at **both** ends, where an anchored one
+    holds its low end at zero: 100..104 came back 98..106 and 2010..2020 came back
+    2005..2025, each a whole unit clear of the data.
+    """
+    from pptx2svg.resolve.chart import nice_axis_scale
+
+    xs, expected = SCATTER_ZERO_ANCHOR[name]
+    assert nice_axis_scale(
+        min(xs), max(xs), horizontal=True, anchor_zero=False
+    ) == pytest.approx(expected)
+
+    # And it reaches the drawing: the first and last x labels are the axis' own ends.
+    children, _ = _build(
+        scatter_chart_xml(series=((xs, SCATTER_YS),)), width=FRAME_W, height=FRAME_H
+    )
+    _, _, _, bottom = _rect_of(children)
+    along_bottom = sorted(
+        (
+            _pt(shape.transform.offset_x),
+            "".join(r.text for p in shape.text_body.paragraphs for r in p.runs),
+        )
+        for shape in children
+        if isinstance(shape, m.ShapeElement)
+        and shape.text_body is not None
+        and _pt(shape.transform.offset_y) > bottom
+    )
+    assert float(along_bottom[0][1]) == pytest.approx(expected[0])
+    assert float(along_bottom[-1][1]) == pytest.approx(expected[1])
+
+
+def test_the_zero_anchor_still_holds_for_every_other_chart_type():
+    """Only a scatter was measured, so only a scatter lets go.
+
+    `real-financial-report.pptx`'s radar has 65..100 of data and PowerPoint draws it from
+    zero; so does every bar in the corpus.  A line chart of temperatures has the same
+    problem a scatter does and **no probe has ever shown what PowerPoint does with one**.
+    """
+    from pptx2svg.resolve.chart import nice_axis_scale
+
+    assert nice_axis_scale(2010, 2020) == pytest.approx((0.0, 3000.0, 1000.0))
+    assert nice_axis_scale(2010, 2020, anchor_zero=False) == pytest.approx(
+        (2005.0, 2025.0, 5.0)
+    )
+
+
+def test_the_axis_ladder_that_the_corpus_radar_refuted():
+    """A measurement kept as a test because the rule it implies is **not** shipped.
+
+    A scatter probe of 120..160 came back 0..180 **by 20** on a 145 pt axis, where halving
+    the power of ten gives 0..200 by 50.  Stepping the unit down the 1-2-5 ladder while the
+    span holds fewer than about 3.5 units reproduces that *and* all five observations
+    `AXIS_HALVING_RATIO` was fitted to -- and then the corpus radar refutes it:
+    `real-financial-report.pptx`'s chart5 has 65..100 of data and PowerPoint's own export
+    draws **two** rings, at radii 22.78 and 45.56, which is 0..100 by 50 at a ratio of
+    exactly 2.0, where the scatter refused 3.2.
+
+    What separates them is axis length, so both belong to the unsolved tick-density
+    question rather than to unit selection.  This asserts what we actually draw, so the
+    divergence is recorded rather than latent.
+    """
+    from pptx2svg.resolve.chart import nice_axis_scale
+
+    assert nice_axis_scale(120, 160) == pytest.approx((0.0, 200.0, 50.0))
+    assert nice_axis_scale(65, 100, strict=False) == pytest.approx((0.0, 100.0, 50.0))
+
+
+def test_a_midcat_bar_chart_keeps_its_labels_in_the_bands_with_its_bars():
+    """Excel writes `midCat` on a column chart's value axis, and the bars do not move.
+
+    It is the "Axis position: on tick marks" checkbox, so a perfectly ordinary column chart
+    carries it.  Only `_draw_lines` and `_draw_areas` put their marks on the ticks, so
+    reading it on a bar chart would place every label up to 41 pt from the bar it names and
+    push the first one outside the plot.  What PowerPoint does with such a file is **not
+    measured**; keeping the bars and their labels in the bands together is the one reading
+    that cannot contradict itself.
+    """
+    body = bar(
+        "<c:ser><c:cat><c:strRef><c:strCache><c:ptCount val='3'/>"
+        "<c:pt idx='0'><c:v>Alpha</c:v></c:pt><c:pt idx='1'><c:v>Beta</c:v></c:pt>"
+        "<c:pt idx='2'><c:v>Gamma</c:v></c:pt></c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:ptCount val='3'/>"
+        "<c:pt idx='0'><c:v>3</c:v></c:pt><c:pt idx='1'><c:v>4</c:v></c:pt>"
+        "<c:pt idx='2'><c:v>5</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
+    ).replace("<c:valAx>", "<c:valAx><c:crossBetween val='midCat'/>")
+    children, _ = _build(body, width=FRAME_W, height=FRAME_H)
+    labels = _labels_by_text(children)
+    bars = sorted(
+        (
+            child
+            for child in children
+            if isinstance(child, m.ShapeElement)
+            and isinstance(child.fill, m.SolidFill)
+            and child.text_body is None
+        ),
+        key=lambda shape: shape.transform.offset_x,
+    )
+    assert len(bars) == 3
+    for shape, text in zip(bars, ("Alpha", "Beta", "Gamma")):
+        bar_centre = _pt(shape.transform.offset_x) + _pt(shape.transform.extent_width) / 2
+        box = labels[text].transform
+        label_centre = _pt(box.offset_x) + _pt(box.extent_width) / 2
+        assert label_centre == pytest.approx(bar_centre, abs=0.5), text
+    # And nothing is pushed outside the frame the way the tick placement would.
+    assert min(_pt(labels[t].transform.offset_x) for t in ("Alpha", "Beta", "Gamma")) > 10.0
+
+
+def test_an_axis_states_where_it_itself_crosses_the_other_one():
+    """`c:crosses` belongs to the axis it is written on, on a scatter as on a bar.
+
+    `<c:crosses val="max"/>` on the **bottom** axis moves the *horizontal* line to the top
+    of the plot, not the vertical line to the right of it -- which is how the sibling
+    `_category_axis_position` has always read it.  Reading each axis' own `c:crosses` for
+    the perpendicular line put the value axis at the plot's right edge and dragged the y
+    tick labels across the plot with it.  Only `autoZero` is measured; this pins the
+    reading rather than a second one invented for scatters.
+    """
+    xml = scatter_chart_xml()
+    at_max = xml.replace(
+        "<c:crossAx val='100003'/><c:crosses val='autoZero'/>",
+        "<c:crossAx val='100003'/><c:crosses val='max'/>",
+        1,
+    )
+    assert at_max != xml
+    children, _ = _build(at_max, width=FRAME_W, height=FRAME_H)
+    left, top, right, bottom = _rect_of(children)
+    vertical = [
+        c for c in children
+        if isinstance(c, m.ConnectorElement) and c.transform.extent_width == 0
+    ]
+    horizontal = [
+        c for c in children
+        if isinstance(c, m.ConnectorElement) and c.transform.extent_height == 0
+    ]
+    # The bottom axis said `max`, so the *horizontal* line went to the plot's top edge.
+    axis = min(horizontal, key=lambda c: c.transform.offset_y)
+    assert _pt(axis.transform.offset_y) == pytest.approx(top, abs=0.01)
+    # The vertical line stayed where the y axis' own `autoZero` puts it.
+    assert _pt(
+        min(vertical, key=lambda c: c.transform.offset_x).transform.offset_x
+    ) == pytest.approx(left, abs=0.01)
+
+
+def test_a_scatter_honours_crosses_at():
+    """`c:crossesAt` is a value on the axis being crossed.
+
+    `_category_axis_position` honours it and the scatter's own crossing used to drop it
+    silently.  Unmeasured -- no probe states it -- but implemented from the same schema
+    reading its sibling uses rather than from a second one.
+    """
+    xml = scatter_chart_xml().replace(
+        "<c:crossAx val='100003'/><c:crosses val='autoZero'/>",
+        "<c:crossAx val='100003'/><c:crosses val='val'/><c:crossesAt val='4'/>",
+        1,
+    )
+    children, _ = _build(xml, width=FRAME_W, height=FRAME_H)
+    left, top, right, bottom = _rect_of(children)
+    crossing = bottom - (bottom - top) * 4 / 7
+    # A gridline and the axis line are both black rules across the whole plot, so the axis
+    # cannot be told apart by geometry -- but its tick labels hang off it, and `nextTo`
+    # means next to the axis.  They move up with it.
+    assert any(
+        abs(_pt(c.transform.offset_y) - crossing) < 0.2
+        for c in children
+        if isinstance(c, m.ConnectorElement) and c.transform.extent_height == 0
+    )
+    zero = min(
+        (
+            shape
+            for shape in children
+            if isinstance(shape, m.ShapeElement)
+            and shape.text_body is not None
+            and "".join(r.text for p in shape.text_body.paragraphs for r in p.runs) == "0"
+            # The y axis has a "0" too, right-aligned in a column that starts at the
+            # frame's own left edge; the x axis' is centred on its tick.
+            and shape.transform.offset_x > 1.0
+        ),
+        key=lambda shape: shape.transform.offset_x,
+    )
+    assert _baseline(zero) == pytest.approx(crossing + 15.17, abs=0.6)
+
+
+def test_a_scatter_data_label_can_print_its_x_value_as_the_category_name():
+    """`parse/chart` already caches a scatter's `c:xVal` as its categories; this dropped it.
+
+    `<c:showCatName val="1"/>` printed nothing at all, because the label text was built
+    against an empty category list.
+    """
+    children, _ = _build(
+        scatter_chart_xml(dlbls=(scatter_dlbls("CatName"),)),
+        width=FRAME_W,
+        height=FRAME_H,
+    )
+    _, _, _, bottom = _rect_of(children)
+    inside = {
+        "".join(r.text for p in shape.text_body.paragraphs for r in p.runs)
+        for shape in children
+        if isinstance(shape, m.ShapeElement)
+        and shape.text_body is not None
+        and _pt(shape.transform.offset_x) > 30.0
+        and _pt(shape.transform.offset_y) < bottom
+    }
+    assert {"1", "2", "3", "4", "5"} <= inside
+
+
+def test_a_label_below_its_point_stacks_downward():
+    """`b` is the one placement that hangs *under* its anchor, so its block grows down.
+
+    Every other placement stacks upward, which for `b` put the first line back on the
+    marker it was supposed to clear.
+    """
+    children, _ = _build(
+        scatter_chart_xml(dlbls=(scatter_dlbls("SerName", "Val", position="b"),)),
+        width=FRAME_W,
+        height=FRAME_H,
+    )
+    def leftmost(text):
+        return min(
+            (
+                shape
+                for shape in children
+                if isinstance(shape, m.ShapeElement)
+                and shape.text_body is not None
+                and "".join(r.text for p in shape.text_body.paragraphs for r in p.runs)
+                == text
+                and _pt(shape.transform.offset_x) > 30.0
+            ),
+            key=lambda shape: shape.transform.offset_x,
+        )
+
+    # Point one is (52.027, 93.980); "Alpha" is the first line and "3" the second, so the
+    # block starts where a one-line `b` label would and grows *away* from the marker.
+    name, value = leftmost("Alpha"), leftmost("3")
+    assert _baseline(name) == pytest.approx(110.522, abs=1.0)
+    assert _baseline(value) == pytest.approx(_baseline(name) + 12.207, abs=0.1)
+    assert _baseline(name) > 93.980 + 3
+
+
 def test_area_and_scatter_draw_rather_than_warning():
     """The gate in `resolve/view.py`, which is what turns a warning into a picture."""
     from pptx2svg.resolve.view import DRAWABLE_CHART_KINDS
