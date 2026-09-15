@@ -28,6 +28,7 @@ resolved slide structure rather than markup.
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
@@ -37,6 +38,7 @@ from .opc import OpcPackage
 from .parse.parts import read_presentation
 from . import fonts
 from .fonts.check import FontReport, check_families, resolved_families
+from .fonts.embedded import EmbeddedFonts, extract_embedded_fonts
 from .png import RasterizerNotAvailable, available_backends, svg_to_png
 from .render.context import RenderContext
 from .render.svg import render_slide_to_svg
@@ -50,6 +52,7 @@ __all__ = [
     "ConvertOptions",
     "DEFAULT_FONT_MAPPING",
     "DefaultTextMeasurer",
+    "EmbeddedFonts",
     "FontReport",
     "FontToolsTextMeasurer",
     "OpcPackage",
@@ -99,6 +102,11 @@ class ConvertOptions:
     #: widths it measured.  On by default, because a substitution nobody is told about is
     #: how this library shipped wrong layout for months.
     warn_on_font_substitution: bool = True
+    #: Use the faces a deck carries in ``<p:embeddedFontLst>``, for both measurement and
+    #: drawing.  On by default: the deck's own font is what PowerPoint drew with, so it
+    #: beats any substitute.  Turn it off to reproduce pre-0.2 output, or when a deck's
+    #: embedded fonts are known to be damaged -- decoding costs about a second per face.
+    use_embedded_fonts: bool = True
 
 
 def _open_package(source) -> OpcPackage:
@@ -126,13 +134,35 @@ def convert_pptx_to_model(
         slide_numbers=options.slide_numbers,
         metafile_converter=options.metafile_converter,
     )
+    if options.use_embedded_fonts and presentation.embedded_fonts:
+        # After resolution, not during it: `resolved_families` is what tells us which of
+        # the embedded families a slide actually asks for, and decoding one costs about a
+        # second.  A template deck routinely embeds a family that no slide uses.
+        resolved.embedded_fonts = extract_embedded_fonts(
+            package,
+            presentation.embedded_fonts,
+            wanted_families=resolved_families(resolved),
+        )
+        resolved.warnings.extend(
+            Warning(code=code, message=message, part_path=presentation.part_path)
+            for code, message in resolved.embedded_fonts.problems
+        )
     options.warnings.extend(resolved.warnings)
     return resolved
 
 
 def convert_pptx_to_svg(source, options: ConvertOptions | None = None) -> list[str]:
     """Render a deck to one SVG document per slide."""
-    options = options or ConvertOptions()
+    return _render(source, options or ConvertOptions())[0]
+
+
+def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresentation]":
+    """The SVG pass, keeping the resolved model.
+
+    ``convert_pptx_to_png`` needs it: the deck's embedded faces have to be written to
+    disk for the rasteriser, and they live on the resolved presentation.  Re-parsing to
+    get them would decode every font a second time.
+    """
     resolved = convert_pptx_to_model(source, options)
 
     font_mapping = create_font_mapping(options.font_mapping)
@@ -141,11 +171,18 @@ def convert_pptx_to_svg(source, options: ConvertOptions | None = None) -> list[s
     if options.warn_on_font_substitution:
         options.warnings.extend(_font_warnings(resolved))
 
+    # The embedded faces have to reach *measurement*, not only the rasteriser: by the
+    # time `svg_to_png` sees a font file every line has already been wrapped, autofitted
+    # and centred.  Handing them to the measurer here is what keeps measure-equals-draw
+    # true for a face the deck brought with it.  A caller-supplied measurer wins, because
+    # it was asked for explicitly.
+    measurer = options.measurer or DefaultTextMeasurer(resolved.embedded_fonts.metrics)
+
     documents: list[str] = []
     for slide in resolved.slides:
         # A fresh context per slide keeps ids stable and defs scoped to their document.
         context = RenderContext(
-            measurer=options.measurer or DefaultTextMeasurer(),
+            measurer=measurer,
             font_mapping=font_mapping,
             jpan_fallback_font=jpan_fallback,
         )
@@ -158,7 +195,7 @@ def convert_pptx_to_svg(source, options: ConvertOptions | None = None) -> list[s
                 height=options.height,
             )
         )
-    return documents
+    return documents, resolved
 
 
 def _font_warnings(resolved: ResolvedPresentation) -> list[Warning]:
@@ -174,10 +211,16 @@ def _font_warnings(resolved: ResolvedPresentation) -> list[Warning]:
     not one per face.  With the bundle, the remaining gaps are per-face and worth naming
     individually.
     """
-    report = check_families(resolved_families(resolved))
+    embedded = resolved.embedded_fonts.families
+    report = check_families(resolved_families(resolved), embedded=embedded)
 
     if report.mode != "bundled":
-        names = ", ".join(face.requested for face in report.faces) or "none"
+        unsupplied = [face.requested for face in report.faces if not face.faithful]
+        if not unsupplied:
+            # Every face this deck draws with came out of the deck itself, so the bundle
+            # has nothing left to supply and saying it is missing would be noise.
+            return []
+        names = ", ".join(unsupplied)
         return [
             Warning(
                 code="font-bundle-missing",
@@ -220,7 +263,32 @@ def convert_pptx_to_png(
     appended to ``options.warnings``.
     """
     options = options or ConvertOptions()
-    documents = convert_pptx_to_svg(source, options)
+    documents, resolved = _render(source, options)
+
+    if not resolved.embedded_fonts:
+        return _rasterise(
+            documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts
+        )
+
+    # The rasteriser's font database indexes files, so the extracted faces have to touch
+    # disk.  That is not a workaround -- it is what LibreOffice does for the same reason
+    # (`EmbeddedFontsHelper::addEmbeddedFont` writes a temp file, then `AddTempDevFont`).
+    # The directory lives exactly as long as the rasterisation that needs it.
+    with tempfile.TemporaryDirectory(prefix="pptx2svg-fonts-") as directory:
+        extracted = resolved.embedded_fonts.write(directory)
+        return _rasterise(
+            documents,
+            backend,
+            font_dirs,
+            [*extracted, *(font_files or ())],
+            skip_system_fonts,
+            use_bundled_fonts,
+        )
+
+
+def _rasterise(
+    documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts
+) -> list[bytes]:
     return [
         svg_to_png(
             document,

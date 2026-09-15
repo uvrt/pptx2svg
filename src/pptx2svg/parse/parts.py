@@ -24,6 +24,7 @@ from .shapes import parse_shape_tree
 from .source import (
     SourceBackground,
     SourceColorMap,
+    SourceEmbeddedFont,
     SourceFontScheme,
     SourceFormatScheme,
     SourcePresentation,
@@ -89,6 +90,7 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         slide_height=num_attr(sld_sz, "cy") or 6858000,
         default_text_style=parse_text_style(child(root, "defaultTextStyle")),
         table_styles=read_table_styles(package, presentation_path),
+        embedded_fonts=read_embedded_fonts(root, presentation_path),
     )
 
     entries = _slide_paths(package, presentation_path, root)
@@ -100,6 +102,41 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         _ensure_ancestry(package, presentation, slide)
 
     return presentation
+
+
+#: ``<p:embeddedFont>`` children -> the field on :class:`SourceEmbeddedFont` they fill.
+EMBEDDED_FONT_SLOTS = {
+    "regular": "regular",
+    "bold": "bold",
+    "italic": "italic",
+    "boldItalic": "bold_italic",
+}
+
+
+def read_embedded_fonts(root: Element, part_path: str) -> list[SourceEmbeddedFont]:
+    """``<p:embeddedFontLst>`` -- the faces the author shipped inside the deck.
+
+    Only the family name and the four relationship ids; decoding the parts they point at
+    is :mod:`pptx2svg.fonts.embedded`'s job, and it costs about a second per face, which
+    is not a price the parser should make every caller pay.
+
+    An entry with no ``typeface`` is dropped: the family name is the key everything else
+    joins on -- the run's ``a:latin``, the metrics table, the ``font-family`` in the SVG --
+    and a nameless one can be joined to nothing.
+    """
+    fonts: list[SourceEmbeddedFont] = []
+    for node in children(child(root, "embeddedFontLst"), "embeddedFont"):
+        typeface = attr(child(node, "font"), "typeface")
+        if not typeface:
+            continue
+        slots = {
+            field_name: ns_attr(child(node, tag), "id")
+            for tag, field_name in EMBEDDED_FONT_SLOTS.items()
+        }
+        if not any(slots.values()):
+            continue
+        fonts.append(SourceEmbeddedFont(typeface=typeface, part_path=part_path, **slots))
+    return fonts
 
 
 def _slide_paths(

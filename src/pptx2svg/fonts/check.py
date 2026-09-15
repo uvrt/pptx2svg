@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..text.fontmap import substitution_for
+from ..text.fontmap import family_key, substitution_for
 from ..text.metrics import METRICS
 from . import INSTALL_HINT, available_families, bundle_mode
 
@@ -63,6 +63,9 @@ class FaceStatus:
     #: Family we will hand the rasteriser, or ``None`` when we have no answer at all.
     substitute: str | None
     #: Metrics table the layout was computed from, or ``None`` when it was guessed.
+    #: Normally a key into :data:`pptx2svg.text.metrics.METRICS`; for a face the deck
+    #: embedded it is the family name, because the table was built at render time from the
+    #: deck's own file and was never in ``METRICS`` to begin with.
     metrics: str | None
     #: One of :data:`VERDICTS`.
     verdict: str
@@ -105,7 +108,25 @@ class FontReport:
         return tuple(face for face in self.faces if face.verdict == verdict)
 
 
-def _status(requested: str, available: frozenset[str]) -> FaceStatus:
+def _status(
+    requested: str, available: frozenset[str], embedded: frozenset[str] = frozenset()
+) -> FaceStatus:
+    if family_key(requested) in embedded:
+        # The deck carried this face itself, and the layout was measured from the very
+        # file the rasteriser will draw with.  That is a stronger guarantee than any
+        # clone can offer -- no advance width is approximated, because none is
+        # substituted -- so it grades `exact` and takes precedence over the substitution
+        # table even where one exists.  Arimo is the case that proves it matters: it is
+        # bundled *and* embedded by one of the local template decks, and the deck's own
+        # copy is the one PowerPoint drew with.
+        return FaceStatus(
+            requested=requested,
+            substitute=requested,
+            metrics=requested,
+            verdict="exact",
+            reason="drawn with the face the deck embedded",
+        )
+
     substitution = substitution_for(requested)
 
     if substitution is None:
@@ -167,9 +188,16 @@ def _status(requested: str, available: frozenset[str]) -> FaceStatus:
 
 
 def check_families(
-    families: list[str] | tuple[str, ...], *, system_fonts: bool = False
+    families: list[str] | tuple[str, ...],
+    *,
+    system_fonts: bool = False,
+    embedded: frozenset[str] = frozenset(),
 ) -> FontReport:
-    """Report on an explicit list of face names."""
+    """Report on an explicit list of face names.
+
+    ``embedded`` holds normalised keys of families the deck supplies itself, from
+    :attr:`pptx2svg.fonts.embedded.EmbeddedFonts.families`.
+    """
     available = available_families()
     mode = bundle_mode()
     seen: set[str] = set()
@@ -181,7 +209,7 @@ def check_families(
         if not name or name.startswith("+") or name in seen:
             continue
         seen.add(name)
-        statuses.append(_status(name, available))
+        statuses.append(_status(name, available, embedded))
     statuses.sort(key=lambda face: (VERDICTS.index(face.verdict), face.requested))
     return FontReport(tuple(statuses), available, system_fonts, mode)
 
@@ -240,7 +268,14 @@ def resolved_families(resolved) -> list[str]:
 
 def check_deck(source, *, system_fonts: bool = False) -> FontReport:
     """Report on every face a deck asks for."""
-    return check_families(deck_families(source), system_fonts=system_fonts)
+    from .. import ConvertOptions, convert_pptx_to_model  # circular at module scope
+
+    resolved = convert_pptx_to_model(source, ConvertOptions())
+    return check_families(
+        resolved_families(resolved),
+        system_fonts=system_fonts,
+        embedded=resolved.embedded_fonts.families,
+    )
 
 
 def deck_families(source) -> list[str]:

@@ -31,6 +31,7 @@ REL_CHART = "http://schemas.openxmlformats.org/officeDocument/2006/relationships
 REL_DIAGRAM_DRAWING = (
     "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
 )
+REL_FONT = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font"
 REL_HYPERLINK = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
 REL_TABLE_STYLES = (
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles"

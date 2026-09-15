@@ -250,6 +250,42 @@ for a Gothic beats a Latin fallback.
 
 ‡ Debian does not package Raleway. Use the pip bundle, or Google Fonts.
 
+### Fonts the deck brought with it
+
+A deck saved with *Embed fonts in the file* carries its typefaces in `ppt/fonts/*.fntdata`,
+and pptx2svg reads them. They are used for **both measurement and drawing**, so an
+embedded face lays out at its own advance widths rather than at a substitute's — which is
+the entire point, and the half that handing font files to the rasteriser alone would miss.
+
+That beats any bundle, and not by a little. Template vendors pick arbitrary Google Fonts,
+of which there are roughly 1,800 families; two commercial templates measured here embed
+Anton, Arimo, Literata, Merriweather Sans, Merriweather Sans Light and Inclusive Sans, and
+every one of them used to report "no substitute known; widths guessed" while sitting
+inside the file being rendered. Scored against PowerPoint's own PDF export of those two
+decks, reading the embedded fonts raised SSIM on all twelve slides measured — the largest
+by 0.123, the mean by 0.058.
+
+It also beats a bundled face of the *same name*: `real-basic-theme.pptx` embeds Raleway
+4.026, 338 of 340 advance widths differ from the release the bundle ships, and the same
+string measures 3.9 % apart between them. The author laid the deck out with the file
+inside it, so that is the file to measure with.
+
+Three things this does not do:
+
+- **Use a font whose licence refuses.** Every face is checked against its OS/2 `fsType`
+  before it is touched — in the EOT header and again in the decoded font, because the
+  first is written by the embedder and the second by the foundry. A restricted-licence
+  face is refused with a `font-embedded-restricted` warning naming the restriction, and
+  the deck falls back to substitution. The rule is LibreOffice's
+  (`EmbeddedFontsHelper::sufficientTTFRights`).
+- **Fail.** A payload that cannot be decoded warns `font-embedded-undecodable` and the
+  deck renders as it did before.
+- **Cost nothing.** Decoding is 0.15–1.1 s per face, and only the families a slide
+  actually asks for are decoded. `--no-embedded-fonts` (or
+  `ConvertOptions(use_embedded_fonts=False)`) turns it off.
+
+No extra is needed: the MicroType Express decoder is pure Python and lives in the core.
+
 ### Will my deck render faithfully?
 
 ```bash
@@ -269,6 +305,10 @@ Aptos Display              approximate  Carlito        measured as Aptos Display
 
 2 of 3 faces will not be drawn at the widths they were measured at.
 ```
+
+A face the deck embeds grades `exact` — "drawn with the face the deck embedded" — because
+the layout was measured from the very file the rasteriser is handed. That is a stronger
+guarantee than any clone offers, so it wins even where a substitute exists.
 
 `exact` and `compatible` are faithful; `approximate` and `missing` are not, and `--check`
 exits non-zero on them so a deck that cannot be rendered faithfully fails a build instead
