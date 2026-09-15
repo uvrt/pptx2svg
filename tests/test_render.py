@@ -498,7 +498,7 @@ def test_the_renderer_reads_every_field_the_model_carries():
 
     root = Path(__file__).resolve().parent.parent / "src/pptx2svg"
     sources = "".join(
-        path.read_text()
+        path.read_text(encoding="utf-8")
         for directory in ("render", "text")
         for path in sorted((root / directory).glob("*.py"))
     )

@@ -430,13 +430,13 @@ def main() -> int:
         if not TARGET.exists():
             print(f"{TARGET} does not exist", file=sys.stderr)
             return 1
-        if TARGET.read_text() != generated:
+        if TARGET.read_text(encoding="utf-8") != generated:
             print(f"{TARGET} is stale; re-run without --check", file=sys.stderr)
             return 1
         print(f"{TARGET.name} is up to date ({len(SPEC_DRIVEN)} presets)")
         return 0
 
-    TARGET.write_text(generated)
+    TARGET.write_text(generated, encoding="utf-8")
     print(f"wrote {TARGET} ({len(SPEC_DRIVEN)} presets)")
     return 0
 

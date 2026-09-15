@@ -468,7 +468,9 @@ def write_profile() -> dict:
         ),
         "faces": faces,
     }
-    PROFILE_PATH.write_text(json.dumps(profile, indent=2, sort_keys=True) + "\n")
+    PROFILE_PATH.write_text(
+        json.dumps(profile, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return profile
 
 
@@ -588,7 +590,7 @@ def load_profile() -> dict | None:
     """
     if not PROFILE_PATH.exists():
         return None
-    profile = json.loads(PROFILE_PATH.read_text())
+    profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
     found = profile.get("schema")
     if found != PROFILE_SCHEMA:
         raise StaleProfile(
@@ -1150,11 +1152,13 @@ def main() -> int:
 
     baselines = None
     if BASELINE_PATH.exists() and not args.update:
-        baselines = json.loads(BASELINE_PATH.read_text())
+        baselines = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     failures = report(results, baselines)
 
     if args.update:
-        BASELINE_PATH.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+        BASELINE_PATH.write_text(
+            json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         print(f"\nwrote {BASELINE_PATH.relative_to(ROOT)}")
         return 0
     return 1 if failures else 0

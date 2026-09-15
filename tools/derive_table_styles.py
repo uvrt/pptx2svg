@@ -420,7 +420,7 @@ def read_swatches(index: dict[str, tuple[int, int]]) -> dict[str, list[str]]:
         table["#%02x%02x%02x" % rgb].append(name)
     for entries in table.values():
         entries.sort(key=simplicity)
-    (WORK / "swatches.json").write_text(json.dumps(table, indent=1))
+    (WORK / "swatches.json").write_text(json.dumps(table, indent=1), encoding="utf-8")
     return table
 
 
@@ -484,7 +484,7 @@ def build_probe(source: Path) -> dict:
             slides.append(xml)
             index[str(number)] = {"guid": guid, "name": name, "cells": cells}
         write_deck(source, WORK / f"probe-{backdrop}.pptx", slides, backdrop)
-    (WORK / "probe-index.json").write_text(json.dumps(index))
+    (WORK / "probe-index.json").write_text(json.dumps(index), encoding="utf-8")
     return index
 
 
@@ -643,7 +643,7 @@ def sample(index: dict, swatches: dict) -> dict:
         measured[slide_no] = record
         print(f"  slide {slide_no:>2}  {entry['name']}", flush=True)
 
-    (WORK / "measured.json").write_text(json.dumps(measured, indent=1))
+    (WORK / "measured.json").write_text(json.dumps(measured, indent=1), encoding="utf-8")
     return measured
 
 
@@ -853,10 +853,10 @@ def main() -> int:
     if args.probe or args.all:
         print("building the style probe")
         index = build_probe(args.source)
-        swatches = json.loads((WORK / "swatches.json").read_text())
+        swatches = json.loads((WORK / "swatches.json").read_text(encoding="utf-8"))
         sample(index, swatches)
     if args.emit or args.all:
-        measured = json.loads((WORK / "measured.json").read_text())
+        measured = json.loads((WORK / "measured.json").read_text(encoding="utf-8"))
         styles = {}
         for slide_no in sorted(measured, key=int):
             style = infer(measured[slide_no])

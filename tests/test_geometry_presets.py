@@ -407,7 +407,7 @@ def test_the_generated_table_records_the_source_it_was_compiled_from():
     which edition it came from -- and that has to be the edition the tool accepts."""
     tool = load_tool()
     source = Path(__file__).resolve().parent.parent / "src/pptx2svg/render/preset_specs.py"
-    assert tool.SOURCE_SHA256["presetShapeDefinitions.xml"] in source.read_text()
+    assert tool.SOURCE_SHA256["presetShapeDefinitions.xml"] in source.read_text(encoding="utf-8")
 
 
 def test_every_generated_preset_reaches_the_renderer():

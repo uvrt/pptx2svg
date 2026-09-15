@@ -228,7 +228,7 @@ def test_baselines_file_is_readable_and_carries_font_provenance():
     path = ROOT / "tests" / "fidelity-baselines.json"
     if not path.exists():
         pytest.skip("no baselines recorded yet")
-    baselines = json.loads(path.read_text())
+    baselines = json.loads(path.read_text(encoding="utf-8"))
     assert baselines
     for name, entry in baselines.items():
         assert entry["fonts"]["hash"], name
