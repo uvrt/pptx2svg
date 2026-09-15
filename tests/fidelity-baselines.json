@@ -50,6 +50,106 @@
     "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
     "slides": []
   },
+  "real-college-template": {
+    "fonts": {
+      "available": [
+        "Arial",
+        "Calibri",
+        "Wingdings"
+      ],
+      "conditional": [],
+      "hash": "8b5abc0fc1c0",
+      "instead": [],
+      "missing": [],
+      "substituted": [],
+      "uncovered": ""
+    },
+    "histogram": 0.8759,
+    "slides": [
+      {
+        "coverage": 0.9828,
+        "histogram": 1.0,
+        "mean_abs": 0.632,
+        "over10": 1.309,
+        "over64": 0.446,
+        "sparse": false,
+        "ssim": 0.9931
+      },
+      {
+        "coverage": 0.9958,
+        "histogram": 0.9998,
+        "mean_abs": 0.932,
+        "over10": 2.43,
+        "over64": 0.594,
+        "sparse": false,
+        "ssim": 0.987
+      },
+      {
+        "coverage": 0.0292,
+        "histogram": 0.1195,
+        "mean_abs": 1.139,
+        "over10": 2.488,
+        "over64": 0.634,
+        "sparse": false,
+        "ssim": 0.7627
+      },
+      {
+        "coverage": 0.187,
+        "histogram": 0.995,
+        "mean_abs": 12.997,
+        "over10": 10.677,
+        "over64": 7.325,
+        "sparse": false,
+        "ssim": 0.369
+      },
+      {
+        "coverage": 0.5657,
+        "histogram": 0.9997,
+        "mean_abs": 1.824,
+        "over10": 2.884,
+        "over64": 1.208,
+        "sparse": false,
+        "ssim": 0.9528
+      },
+      {
+        "coverage": 0.0473,
+        "histogram": 0.9611,
+        "mean_abs": 2.668,
+        "over10": 3.308,
+        "over64": 1.582,
+        "sparse": false,
+        "ssim": 0.7372
+      },
+      {
+        "coverage": 0.0745,
+        "histogram": 0.9715,
+        "mean_abs": 6.326,
+        "over10": 5.905,
+        "over64": 3.636,
+        "sparse": false,
+        "ssim": 0.5112
+      },
+      {
+        "coverage": 0.5786,
+        "histogram": 0.8365,
+        "mean_abs": 4.515,
+        "over10": 20.793,
+        "over64": 0.514,
+        "sparse": false,
+        "ssim": 0.8869
+      },
+      {
+        "coverage": 0.0062,
+        "histogram": 1.0,
+        "mean_abs": 0.157,
+        "over10": 0.389,
+        "over64": 0.101,
+        "sparse": true,
+        "ssim": 1.0
+      }
+    ],
+    "ssim": 0.8
+  },
   "real-financial-report": {
     "fonts": {
       "available": [
@@ -150,15 +250,15 @@
     "histogram": 0.9984,
     "slides": [
       {
-        "coverage": 0.2281,
+        "coverage": 0.2278,
         "histogram": 0.9984,
-        "mean_abs": 0.452,
-        "over10": 0.856,
-        "over64": 0.192,
+        "mean_abs": 0.301,
+        "over10": 0.818,
+        "over64": 0.128,
         "sparse": false,
-        "ssim": 0.9734
+        "ssim": 0.9895
       }
     ],
-    "ssim": 0.9734
+    "ssim": 0.9895
   }
 }
