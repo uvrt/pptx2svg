@@ -58,6 +58,12 @@ GRAPHIC_DATA_TABLE = "http://schemas.openxmlformats.org/drawingml/2006/table"
 GRAPHIC_DATA_CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 GRAPHIC_DATA_DIAGRAM = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
 GRAPHIC_DATA_OLE = "http://schemas.openxmlformats.org/presentationml/2006/ole"
+#: Office 2016's newer chart family -- treemap, sunburst, histogram, box-and-whisker,
+#: waterfall, funnel, map.  It is a ``cx:chartSpace`` part in its own namespace and shares
+#: no markup with ``c:chartSpace``, so it needs its own name here: its frame's first child
+#: is also called ``chart``, which without this would make it read as an ordinary chart
+#: that "names no chart part" -- a true statement about the wrong thing.
+GRAPHIC_DATA_CHARTEX = "http://schemas.microsoft.com/office/drawing/2014/chartex"
 
 
 def parse_shape_tree(sp_tree: Element | None) -> list[SourceShapeNode]:
@@ -246,6 +252,9 @@ def parse_graphic_frame(frame: Element) -> SourceShapeNode | None:
     elif uri == GRAPHIC_DATA_DIAGRAM:
         what = "diagram"
         fallback_rel_id = _diagram_drawing_rel_id(graphic_data)
+    elif uri == GRAPHIC_DATA_CHARTEX:
+        what = "chartex"
+        fallback_rel_id = None
     elif uri == GRAPHIC_DATA_OLE:
         what = "ole"
         fallback_rel_id = _ole_preview_rel_id(graphic_data)

@@ -949,8 +949,8 @@ appears.
 
 ## Phase 3 — Charts
 
-**Effort: XL. 3.1 is done and 3.2 has seven of its types; combo charts, the secondary
-axis and the bubble/stock/surface/ofPie tail are not.**
+**Effort: XL. 3.1 is done and 3.2 has ten of its types; combo charts, the secondary axis
+and `surfaceChart` are not.**
 
 No shortcut: unlike SmartArt, PowerPoint does *not* cache a rendered chart. The
 `c:chartSpace` part holds data plus styling, and the renderer must do axis scaling, tick
@@ -998,7 +998,7 @@ Three things the obvious reading gets wrong, each found in a fixture:
 mapping. Both **[pptx-renderer]** and this roadmap flagged it; it is invisible until a
 deck does both at once.
 
-### 3.2 Renderer — seven types **done**, the rest not started
+### 3.2 Renderer — ten types **done**, one deferred with its reasons
 
 1. ✅ `barChart` — clustered, stacked, percentStacked, `barDir` col and bar
 2. ✅ `lineChart` — markers, smoothing, blanks, the real fixture on slide 2
@@ -1006,15 +1006,17 @@ deck does both at once.
 4. ✅ `radarChart` — standard, marker and filled, the real fixture on slide 4
 5. ✅ `areaChart` — standard, stacked, percentStacked, negatives, `crossBetween`
 6. ✅ `scatterChart` — two value axes, all five `c:dLblPos`, splines
-7. `bubbleChart` — the reader already carries `c:bubbleSize`; nothing draws it
-8. `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
+7. ✅ `bubbleChart` — `c:bubbleSize`, `c:bubbleScale`, `c:sizeRepresents`,
+   `c:showNegBubbles`
+8. ✅ `ofPieChart` — both `c:ofPieType` forms, all five splits, `c:serLines`
+9. ✅ `stockChart` — `c:hiLowLines`, `c:upDownBars`, three and four series
+10. ⛔ `surfaceChart` / `surface3DChart` — **measured and deferred**; see below
 
-**Still warning `chart-unsupported-type`:** `bubbleChart`, `stockChart`,
-`surfaceChart`/`surface3DChart`, `ofPieChart`. Their 3-D spellings degrade through
-`parse/chart.flat_chart_kind` and then warn too. **No chart in the corpus warns**, and
-none ever did once 3.1 landed.
+**Still warning `chart-unsupported-type`:** `surfaceChart` / `surface3DChart`, and the
+whole ChartEx family. Their 3-D spellings degrade through `parse/chart.flat_chart_kind`
+and then warn too. **No chart in the corpus warns**, and none ever did once 3.1 landed.
 
-Data labels are drawn for all seven, at every `c:dLblPos` each type accepts — except
+Data labels are drawn for all ten, at every `c:dLblPos` each type accepts — except
 the radar's, whose placement no export has ever shown; see below.
 
 #### Polar layout, measured
@@ -1361,6 +1363,305 @@ indistinguishable apart from the tick density noted below. The probe decks are t
 and were deleted; their generators are `tests/test_chart.py`'s `area_chart_xml` and
 `scatter_chart_xml`.
 
+#### Bubble, measured
+
+Thirty probe charts across three decks in the same 220.4724 x 181.1024 pt frame as the
+scatter sweep, exported by PowerPoint 16.106 and read back as exact path vertices. Every
+drawn circle came back axis-aligned and square to 0.001 pt, so its bounding box *is* its
+diameter, and every number below is PowerPoint's own.
+
+**A bubble is a scatter plus a third dimension, and the "plus" is the whole of the work.**
+The plot rectangle, the unanchored axes, the coarse x axis, the blank handling and the
+`c:crosses` reading are the scatter's and were reused untouched: `bare` reproduces
+21.073 / 13.670 / 11.102 / 24.965, the scatter sweep's own row.
+
+* **The size-to-radius map is area-proportional, and the reference is the largest size.**
+  Sizes 1, 4, 9 drew 13.162, 26.323 and 39.485 — exactly 1:2:3, so the *area* is
+  proportional to the size and the diameter to its square root. `<c:sizeRepresents
+  val="w"/>` on the same data drew 4.387, 17.549 and 39.485, exactly 1:4:9. The largest
+  is 39.485 in **both**, and in four probes whose size distribution differs wildly
+  (1,2,3 / 1,4,9 / 5,5,5 / 1,2,100), so the reference is the maximum rather than the sum.
+  A two-series probe makes it **global**: a series topping out at 9 drew 27.920 beside
+  one topping out at 18, which is 39.485 × sqrt(9/18).
+
+* **What the largest bubble is sized against is not the plot rectangle.** This is the one
+  that would have been guessed wrong: `font14` and `font8` move all four plot edges and
+  draw the *same* 39.485 pt bubble, while a right legend (plot 137.805 x 145.035) draws
+  37.511 and a top or bottom one (185.729 x 120.952) draws 33.928. The region is the
+  **frame inset by 5 pt on every side**, less the title band and the legend band.
+
+  The 5 pt is solved, not fitted. The legend band is 24.083 pt and takes the diameter from
+  39.485 to 33.928, so the height it eats into is `24.083 / (1 − 33.928/39.485)` = 171.12,
+  which is the 181.102 pt frame less **9.98**. The side-legend probe then falls out with
+  no constant of its own: its reserve is the 47.924 pt the plot gives up, and
+  `(210.472 − 47.924) × 0.2308` is 37.513 against 37.511 drawn. So does the title probe:
+  `171.102 − 29.700 = 141.402`, times the same factor, is 32.631 against 32.631 drawn.
+
+* **`c:bubbleScale` does not scale the diameter.** It is a soft clamp,
+  `D = M · s / (s + 1000/3)` where `M` is the short side of that region — linear in *s*
+  while small, and approaching the region's own short side as *s* grows, so a bubble can
+  never fill more than the region no matter what the file asks for:
+
+  | scale | PowerPoint | predicted |
+  | --- | --- | --- |
+  | 1 | 0.512 | 0.5117 |
+  | 10 | 4.983 | 4.9836 |
+  | 25 | 11.937 | 11.9374 |
+  | 50 | 22.318 | 22.3177 |
+  | 75 | 31.427 | 31.4269 |
+  | 100 | 39.485 | 39.4851 |
+  | 150 | 53.101 | 53.1007 |
+  | 200 | 64.163 | 64.1634 |
+  | 300 | 81.048 | 81.0485 |
+
+  Worst residual **0.0005 pt** over nine observations. The obvious linear reading is
+  refuted at both ends — it predicts 19.74 at 50 where PowerPoint drew 22.318, and 78.97
+  at 200 where it drew 64.163 — and so is every power law: the implied exponent is 0.824
+  on one side of 100 and 0.701 on the other.
+
+* **A zero size draws nothing and a negative one draws hollow.** The `-4, 0, 9` probe
+  emitted **two** circles: the 9 in the series colour and the −4 at its magnitude, white
+  with a black 0.75 pt outline — the drawing a negative bar gets. `<c:showNegBubbles
+  val="0"/>` removes it; the element absent and `val="1"` are identical, so the default is
+  to draw it.
+
+* **No line, no marker, no outline.** Every disc on every probe came back filled and
+  unstroked, with no connecting stroke and no marker anywhere.
+
+* **The legend key is the square swatch, not the scatter's rule.** Both legend probes drew
+  a 5.492 pt key. This is not cosmetic: the legend reserve feeds the sizing region as well
+  as the plot, so reading the line key there put the plot 13.4 pt narrow *and* the drawn
+  bubble 3.1 pt small.
+
+* **A bubble's data label stands further off its mark than a marker's does.** `r` puts the
+  label box's near edge 8.494 pt past the **disc's** edge at 10 pt — 8.504, 8.484 and
+  8.494 on discs of radius 6.581, 13.162 and 19.742 once each digit's own side bearing is
+  taken out — against the scatter's 6.0 off a 3 pt marker; `t` and `b` put the line box
+  7.25 and 6.76 pt out against the scatter's 4.85. `ctr` is the ink centre, 0.22 pt out,
+  which is the same slack this file records everywhere else. One font size only, so
+  whether these are points or ems is **unmeasured**; they are carried as points because
+  the line chart's legend key turned out that way.
+
+Two things measured and **not** implemented:
+
+* **A label PowerPoint cannot fit is pushed back inside the frame.** The `t` probe's
+  largest bubble would have put its label above the frame's top edge, and PowerPoint drew
+  it at 4.140 pt instead of the 10.07 pt gap the other two took. Where it clamps to is not
+  identified from one observation, so ours goes where the rule says and off the top.
+* **`<c:bubble3D val="1"/>` hangs this PowerPoint.** Twice, reproducibly: the deck opens,
+  a `~$` lock appears, AppleEvents stop being serviced and the 600-second timeout fires
+  with no PDF written. So the 3-D bubble is not merely unmeasured — the oracle will not
+  produce an answer for it, and the recovery is to kill PowerPoint and delete the lock.
+
+#### Of-pie, measured
+
+Twenty-four probe charts across two decks. A wedge's path closes through the pie's centre,
+which is the second-to-last point PowerPoint emits, so the centre, the radius and both
+edge angles come out of the PDF exactly rather than by fitting.
+
+**The region is the pie's own** — `_polar_region`, edge insets plus the title and legend
+bands — and the two plots are packed across its full width: the first plot's left edge and
+the second's right edge land on the region's own edges in every probe, and both are
+centred on its middle row to 0.001 pt.
+
+* **The split rule, five spellings, four measured on 40/25/15/10/6/4.** `pos` moves the
+  **last** `c:splitPos` points (`val="4"` kept 40 and 25 and moved the other four); `val`
+  moves every point **below** `c:splitPos` (`val="12"` moved 10, 6 and 4 and kept 15);
+  `percent` is the same test on the point's share and it is **strict** (`val="15"` moved
+  10%, 6% and 4% and kept the 15%); `cust` moves exactly the `c:secondPiePt` indices, in
+  their original order, and leaves everything else — colours included — where it was.
+
+* **`auto`, which is also what an absent `c:splitType` means, moves the last ceil(n/3).**
+  This is the part the brief expected to be subtly wrong, and it is where reading the
+  schema would have left it wrong: ECMA-376 documents a `c:splitPos` default of 2, and a
+  six-point chart does indeed move two — but three points moved **one** and eight moved
+  **three**. Five counts, 3/4/6/7/8, moved 1/2/2/3/3. `round(n/3)` is refuted twice over,
+  at n=4 (it predicts 1) and n=7 (it predicts 2); `floor(n/3)` fails at n=8.
+
+* **The aggregated slice is centred at three o'clock**, pointing at the second plot, and
+  that fixes the rotation of the whole chart. Five probes: the slice runs 72..108, 27..153,
+  54..126, 0..180 and 54..126 degrees clockwise from twelve, every one centred on 90. The
+  second plot starts at the **same** angle the first one does.
+
+* **It takes the colour one past the last point.** Six points came out accent1..accent6
+  with the slice in the next cycle's accent1; a four-point chart put it in accent5 and a
+  three-point one in accent4.
+
+* **The packing law.** With the region width `W` and `s = secondPieSize/100`,
+  `r = W / (2 + 2s + g/100)` where `g` is `c:gapWidth` in percent — of the **first plot's
+  radius**, which is the part the schema does not say. Six probes, every one exact:
+  198.472/4.5 = 44.105 at the defaults, /4 = 49.618 at `secondPieSize=50`, /5 = 39.694 at
+  100, /3.5 = 56.706 at 25, /6.5 = 30.534 at `gapWidth=300` and /3.5 = 56.706 at
+  `gapWidth=0`. `c:secondPieSize` defaults to 75 and `c:gapWidth` to 100.
+
+* **The bar form packs by a different divisor**, `r = W / (2 + s + g/200)` — the gap
+  between the pie and the bar is **half** what it is between two pies. Two probes, both
+  exact: 61.068 at `s=0.75` and 66.157 at `s=0.5`. The bar is `s·r` wide and `2·s·r` tall,
+  the same vertical extent a second pie of that size would have, and it stacks the first
+  moved point on **top**. Only `gapWidth=100` was measured on the bar form, so the `/200`
+  is the natural reading of one observation rather than a fitted slope.
+
+* **`c:serLines` is two tangents, and its presence is the switch.** A probe with no
+  element drew no connector at all; a bare `<c:serLines/>` drew two lines in black at
+  0.5 pt — the axis default — and `<a:ln w="28575">` in red drew them red at 2.25 pt. Each
+  line leaves a **corner of the aggregated slice**, where its arc meets the circle, and is
+  **tangent to the second pie**: the upper line ran (97.051, 76.922) to (168.104, 58.528),
+  where the dot product of the second pie's radius and the line direction is 0.000 and the
+  drawn length 73.395 pt is exactly `sqrt(d² − r²)`. The upper corner takes the upper
+  tangent point. **The bar form is not measured** — no probe put `c:serLines` on one — so
+  its lines run to the bar's two left corners, which is the natural analogue and is marked
+  in the code as a guess rather than left undrawn.
+
+* **Past six colours the accent cycle stops being the plain accents**, and this is a
+  *pie-family* behaviour that an ofPie merely exposes, because an ofPie always needs one
+  colour more than it has points. A seven-slice chart came back with accent1..accent6
+  **darkened** and the seventh a light accent1; a nine-slice one repeated exactly the same
+  darkened six and then three light ones, so the variation is per **cycle** of six and not
+  a function of the count. Applied to the **linear-light** value of each channel —
+  `L × 0.76` for the first cycle and `L + 0.23 × (1 − L)` for the second — it reproduces
+  all 27 measured channels to the byte; the round numbers either side, 0.75 and 0.25, are
+  off by up to 1 and 5.
+
+  The colour *space* matters as much as the factor, and that is a second finding: the same
+  modulation done in HLS on sRGB, which is what `resolve/color._apply_luminance` does for
+  DrawingML's own `lumMod`, puts accent1's blue channel at 150 against the 173 PowerPoint
+  drew. **That is a real defect in the general colour transform and it is not fixed here**
+  — changing it moves every deck in the corpus — so the chart ramp carries its own
+  conversion and says why. A third cycle is unmeasured: no probe had more than twelve
+  points, and it repeats the second's tint.
+
+Two divergences, both measured rather than guessed at:
+
+* **PowerPoint shrinks both plots to make room for data labels and this does not.** The
+  label probe's first radius came out 37.981 against the 44.105 the same chart draws
+  without them, the same 0.861 factor on both plots. One observation does not say what the
+  reserve is a function of, so the plots keep their full size and the labels are laid over
+  them.
+* **A split that moves nothing leaves PowerPoint drawing a dark disc where the second plot
+  would be** — `#404040`, filled and stroked at 3 pt, at the radius the second plot would
+  have had. Ours draws nothing there. An empty circle of flat dark grey is not a picture
+  worth reproducing, and the *first* plot — which is the chart — is identical either way.
+
+#### Stock, measured
+
+Twelve probe charts. The plot rectangle, the axis, the category bands and the legend key
+came back a line chart's in every one of them.
+
+* **A stock chart with no decorations *is* a line chart.** This refutes the brief for this
+  work, which had it as "a lineChart with the lines suppressed": a `c:stockChart` with
+  neither `c:hiLowLines` nor `c:upDownBars` came back as one 1.5 pt polyline per series
+  with the ordinary diamond/square/triangle marker cycle on it, drawn at 6 pt. What a real
+  stock chart lacks is suppressed by the **file**, which writes `<a:ln><a:noFill/></a:ln>`
+  on each series; nothing in the renderer hides anything. So `_is_line` answers yes for a
+  stock chart and the two decorations are drawn on top, in that order — PowerPoint emitted
+  the series first, then the hi-low lines, then the bars.
+
+* **`c:upDownBars` takes the first and the last series, and the series *order* carries the
+  meaning while the labels carry none.** That is the question the brief asked, and the
+  discriminating probe is a three-series High/Low/Close chart with `c:upDownBars` on it:
+  PowerPoint drew all five bars **down**, from each category's High to its Close. A
+  four-series Open/High/Low/Close chart drew three up and two down, which is where close
+  exceeds open and where it does not. Neither reading of the *names* survives that pair;
+  `series[0]` and `series[-1]` reproduces both.
+
+* **The bar width is `band / (1 + gapWidth/100)` and the default `gapWidth` is 150.** On a
+  36.612 pt band the default drew 14.646, which is `36.612/2.5`; probes at 50 and 300 drew
+  24.410 and 9.154 against 24.408 and 9.153 predicted. An empty `<c:upDownBars/>` is the
+  default, byte-identical to `val="150"`.
+
+* **The default up and down fills are #F9F9F9 and #3F3F3F**, both with a black 0.5 pt
+  outline. They are **not** theme accents, which is what the brief suspected. One theme
+  measured — the Office scheme, whose `lt1` is white and `dk1` black — so whether they are
+  literal or derived from those two is unknown, and they are carried as literals rather
+  than as a derivation nothing has tested. An explicit `c:upBars`/`c:downBars` fill wins.
+
+* **`c:hiLowLines` is the vertical range at each category**, from the largest value there
+  to the smallest — 18 down to 8 on a 0..20 axis, drawn at 25.606 and 98.123 pt, both on
+  the axis to 0.001 pt — at the band centre, in black at 0.5 pt by default and in the
+  file's own `a:ln` when it states one. Presence is the switch. Only well-formed data was
+  probed, so "the largest and smallest of every series" and "the second and third series"
+  are not separated by any observation here; the former is implemented, because it is the
+  one that cannot pick the wrong pair when the series are ordered differently.
+
+* **The legend key is the line chart's rule with the marker on it**, 19.200 pt, confirmed
+  on the bottom-legend probe.
+
+#### Surface — measured, and deferred
+
+Six probe charts, exported and compared against our own render. **`surfaceChart` is not
+drawn and should not be**, and this is the reasoning rather than an absence of effort.
+
+What PowerPoint drew, on every one of the six:
+
+* **A lit 3-D mesh, in perspective, including for the spelling without "3D" in it.**
+  ECMA-376 calls `c:surfaceChart` a contour chart and `c:surface3DChart` a surface, and
+  the obvious reading is that the first is a flat 2-D map. It is not: with no `c:view3D`
+  the two spellings drew the **identical** projected 3-D surface, complete with a floor, a
+  back wall, gridlines drawn in perspective and three axis label runs positioned inside
+  that projection. Adding `<c:view3D><c:rotX val="15"/><c:rotY val="20"/></c:view3D>`
+  turned the whole picture, so the *view*, not the element name, is what decides.
+* **`c:wireframe val="1"` replaces the fill with a stroked mesh** and nothing else changes.
+* **The surface is coloured by value band, not by series** — accent1 for 0–5, accent2 for
+  5–10, accent3 for 10–15 — with each facet shaded by its orientation, so the same band
+  appears in two or three different tones depending on which way the quad faces.
+* **The legend is of those bands**, printed as `0-5`, `5-10`, `10-15`, which is a legend
+  model no other chart type here has.
+
+What that would take, none of which exists and none of which is shared with anything else:
+a projection from `c:view3D` (`rotX`, `rotY`, `perspective`, `rAngAx`, `depthPercent`,
+`heightPercent`), painter's-algorithm ordering of the quads, a lighting model to reproduce
+the per-facet shading, `c:bandFmts` for the value bands, a projected axis frame with walls
+and gridlines, axis labels placed in the projection, and a band legend. Each of those is
+itself a fitted, measured thing; a surface drawn without the lighting or without the
+hidden-surface ordering is not a rough version of the picture above, it is a different
+picture that reads as a bug.
+
+**What would close it**: the projection first, measured against the `view3d` probe, which
+is the only one of the six whose camera differs and therefore the only one that constrains
+the matrix. Until the projection reproduces that probe's floor and wall vertices, none of
+the rest can be checked at all. The empty frame plus `chart-unsupported-type` stays, which
+is the principle this file already applies everywhere else: a wrong picture is worse than
+an honest gap.
+
+#### What the new types cost the corpus, and what they bought
+
+No corpus deck holds a bubble, an ofPie or a stock chart, so nothing scored moves and that
+is the point: `authoring-integration` holds at 0.9327/0.9984, `table-test` at 0.9895/0.9984
+and `real-college-template` at 0.8003/0.8753, all unchanged to four decimals despite the
+accent ramp, the `_place_label` gap parameters and `_is_line` all being shared with chart
+types those decks *do* hold. The probe decks, scored the same way:
+
+| probe deck | before | after |
+| --- | --- | --- |
+| bubble 1 (12 charts) | 0.3640 / −0.0254 | **0.9338 / 0.9639** |
+| bubble 2a (6) | 0.4053 / −0.0232 | **0.9252 / 0.9762** |
+| bubble 2c (4) | 0.3605 / −0.0013 | **0.8900 / 0.9775** |
+| bubble 2d (1) | 1.0000 / 1.0000 | 1.0000 / 1.0000 |
+| bubble 3 (8) | 0.3677 / −0.0124 | **0.9246 / 0.9432** |
+| ofPie 1 (12) | 0.6767 / −0.0299 | **0.9910 / 0.9994** |
+| ofPie 2 (12) | 0.6638 / −0.0270 | **0.8949 / 0.9944** |
+| stock 1 (12) | 0.0894 / 0.0098 | **0.5733 / 0.8683** |
+
+The bubble decks sit where the scatter deck sits and for the same reason: circles on white
+are a pixel of antialiasing per edge and SSIM is punishing about that. Put side by side at
+1400 px they are indistinguishable.
+
+**The two that stay low are both explained, and neither is a bubble, ofPie or stock
+defect.**
+
+* **ofPie 2 is the wrapped legend.** Its `legb` chart has six entries; PowerPoint laid
+  them out as two rows of three and we lay them out as one row of six with the last name
+  broken over two lines, which moves both plots 8 pt down. That is the *Where a wrapped
+  legend's rows sit* gap already recorded below. Its `dlbl` chart is the label shrink
+  recorded above. Every other chart on the deck is exact.
+* **stock 1 is the unsolved value-axis rule**, and it adds one more observation to the
+  section below rather than being a stock defect: 8..18 of data on a 145.035 pt axis comes
+  back **0..20 by 2** — ten intervals at 14.504 pt — where the shipped rule gives 0..20 by
+  5. Every stock-specific number on that deck reproduces: the hi-low lines land within
+  0.07 pt, the bar widths within 0.005 pt, the bar tops and bottoms within 0.06 pt, the
+  up/down assignment on all five categories, and the default fills exactly. What costs the
+  SSIM is six missing gridlines and six missing axis labels on each of twelve charts.
+
 #### Rotated category labels, measured
 
 The category labels turn when they will not fit, and until this was measured it was the
@@ -1558,10 +1859,13 @@ says nothing; the flags have to be read, and then the per-point overrides on top
 
 Data-label rendering is therefore verified **entirely against probes**.
 
-Anything else warns `chart-unsupported-type` and draws an empty frame rather than a wrong
-picture. The shared infrastructure — value domain, tick selection, number formatting,
-gridlines, legend layout for all four `legendPos` values, plot-area rectangle — is built
-and is what the other chart types will reuse.
+`surfaceChart` and the ChartEx family warn `chart-unsupported-type` and draw an empty
+frame rather than a wrong picture. The shared infrastructure — value domain, tick
+selection, number formatting, gridlines, legend layout for all four `legendPos` values,
+plot-area rectangle, the polar region, markers, data labels — is built, and the three types
+that landed this week were mostly a matter of reusing it: the bubble is the scatter's
+layout with a disc per point, the ofPie is the pie's region with two plots packed into it,
+and the stock chart is the line chart with two decorations drawn over it.
 
 #### Every constant was measured, and the measurement kept correcting the reasoning
 
@@ -1692,7 +1996,22 @@ actually draw so the divergence is recorded rather than latent. Whoever picks th
 has two long-axis observations to add to the six short-axis ones, and the discriminating
 set is the 30.9 pt cell, the stacked probe and the corpus radar.
 
-#### Not done for the seven types that draw
+**The stock sweep adds a third long-axis observation, and it agrees with the stacked probe
+rather than with anything shipped.** Its twelve charts all carry 8..18 of data on a
+145.035 pt axis with 10 pt labels, and PowerPoint drew **0..20 by 2** on every one of them
+— ten intervals at 14.504 pt, the same spacing the stacked probe accepted. The shipped
+rule gives 0..20 by 5, four intervals at 36.26 pt, so we draw five gridlines where
+PowerPoint draws eleven. That is the whole of the stock deck's SSIM shortfall and it is
+not a stock behaviour: the same data on a line chart would do the same thing.
+
+It also sharpens what the missing variable is *not*. This case and the stacked probe share
+an axis length (145 pt), a font (10 pt) and an accepted spacing (14.5 pt); the area
+probe's 120.95 pt cell refused 12.095 pt and the six-cell table's 30.9 pt cell refused
+15.43 pt. So the accepted set now spans 14.50 to 27.3 pt and the refused set 12.10 to
+15.43 pt, and they **overlap** — no threshold on spacing alone, at any axis length, orders
+all nine observations. Whatever the rule is, it is not a spacing threshold.
+
+#### Not done for the ten types that draw
 
 Each of these is known-missing rather than merely absent:
 
@@ -1743,8 +2062,9 @@ Each of these is known-missing rather than merely absent:
 * **`dispBlanksAs="span"`** is treated as `gap`, which is right for a bar chart and will
   not be for a line one. It is unmeasured on an area chart and on a scatter, where the
   line chart's reading is reused.
-* **A scatter's `c:bubbleSize`** is read and ignored; `bubbleChart` still warns. A scatter
-  series' `c:trendline` and `c:errBars` are neither read nor drawn.
+* ~~**A scatter's `c:bubbleSize`.**~~ — done and measured; see *Bubble, measured*. A
+  scatter or bubble series' `c:trendline` and `c:errBars` are still neither read nor drawn,
+  and neither is `c:dropLines` on a line or stock chart.
 * **`c:crossBetween="midCat"` on a bar chart.** Excel writes it for the category axis'
   "Axis position: on tick marks" checkbox, so an ordinary column chart carries it, and
   `_draw_bars` still lays its bars into bands. Ours therefore keeps a `midCat` bar chart's
@@ -1762,6 +2082,21 @@ Each of these is known-missing rather than merely absent:
   `LEGEND_ENTRY_GAP_EM` gives 5.0. No single number produces both, so the constant fitted
   to the bar legends is left alone and the residual recorded.
 * The chart frame's rounded corners (`c:roundedCorners`) and effects.
+* **Three things the new types measured and did not ship**, each with one observation
+  behind it and named where it was measured: a bubble label PowerPoint pushes back inside
+  the frame rather than letting it overflow; the shrink an ofPie applies to both its plots
+  when it has data labels; and the dark disc PowerPoint draws where an empty second plot
+  would be. See *Bubble, measured* and *Of-pie, measured*.
+* **The ChartEx family** — treemap, sunburst, histogram, box-and-whisker, waterfall,
+  funnel and map, all new in Office 2016. They are a `cx:chartSpace` part in a different
+  namespace with a different data model, sharing no markup with `c:chartSpace`, so they are
+  not a missing case in the chart reader but a second format. They draw an empty positioned
+  frame and warn `chart-unsupported-type`. **They used to warn the wrong thing**: their
+  graphic frame's first child is also called `chart`, so `parse/shapes` fell through to the
+  ordinary chart path and reported "names no chart part" — true of the `c:` relationship
+  and false about the file. `GRAPHIC_DATA_CHARTEX` tells them apart now. The picture was
+  always right; only the diagnosis was wrong, and this is exactly the class of defect the
+  review note below is about.
 
 #### What the probe sweeps could not catch
 
@@ -2887,7 +3222,7 @@ Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrende
                                       ├─▶ Phase 2  (SmartArt — DONE)
                                       ├─▶ Phase 4  (EMF previews — DONE)
                                       ├─▶ Phase 5.1 DONE / 5.2  (small gaps)
-                                      ├─▶ Phase 3  (charts — reader + 7 types done)
+                                      ├─▶ Phase 3  (charts — reader + 10 types done)
                                       └─▶ Phase 6  (embedded fonts — DONE)
                                                               Phase 5.3 last
 ```
@@ -2911,11 +3246,14 @@ Revised quick wins, in order of payoff per day:
    like: it turned up two arc-conversion bugs that had been silently misdrawing
    custom geometry, and it replaced hand-transcription with a spec compiler.
 
-Phase 3 is well along: the reader and seven chart types -- `barChart`, `lineChart`,
-`areaChart`, `scatterChart`, `pieChart`, `doughnutChart` and `radarChart` -- are done
-and measured, and no chart in the corpus warns `chart-unsupported-type` any more. The shared infrastructure the rest
-need -- value domain, tick selection, number formatting, gridlines, legend layout,
-plot-area rectangle, polar region -- is built. What is left, cheapest first:
+Phase 3 is well along: the reader and ten chart types -- `barChart`, `lineChart`,
+`areaChart`, `scatterChart`, `bubbleChart`, `pieChart`, `doughnutChart`, `ofPieChart`,
+`radarChart` and `stockChart` -- are done and measured, and no chart in the corpus warns
+`chart-unsupported-type` any more. `surfaceChart` is measured and deliberately deferred;
+see *Surface -- measured, and deferred* for what PowerPoint actually draws and what would
+close it. The shared infrastructure -- value domain, tick selection, number formatting,
+gridlines, legend layout, plot-area rectangle, polar region -- is built, and the three
+types that landed this week reused nearly all of it. What is left, cheapest first:
 
 1. ~~**The CJK label width.**~~ Done, and the diagnosis was half wrong — see *The East
    Asian face cascade*. `ChartFont` now carries the East Asian face as well as the Latin
@@ -2932,15 +3270,17 @@ plot-area rectangle, polar region -- is built. What is left, cheapest first:
 3. **Data-label wrapping**, **`bestFit` actually moving a label**, and **three-or-more
    line legend entries** -- each a known-missing detail with a named symptom above.
    Category-label wrapping is done; the data-label kind is a separate path.
-4. **Combo charts**, and **`bubbleChart`** -- which is a scatter with a third value
-   per point and now has the whole of the scatter path under it -- then the long tail
-   of `stockChart`, `surfaceChart` and `ofPieChart`. New drawing rather than
-   corrections, and the largest of what remains.
-5. **The bottom-axis tick density.** Still unsolved, and the area sweep has narrowed
-   the contradiction rather than resolved it: 14.503 pt of tick spacing accepted,
-   12.095 pt refused and 15.43 pt refused, all at 10 pt on the same axis range. It is
-   the only visible difference between our render of the area probe deck and
-   PowerPoint's.
+4. **Combo charts and the secondary axis.** `bubbleChart`, `ofPieChart` and `stockChart`
+   have landed; `surfaceChart` is measured and deliberately deferred, and what would
+   close it is written down under *Surface -- measured, and deferred*. Drawing several
+   `c:*Chart` groups at once, and the second value axis that usually comes with them, is
+   now the largest chart item left.
+5. **The value-axis tick density.** Still unsolved, and the stock sweep has made it
+   firmer rather than looser: the accepted spacings now run 14.50 to 27.3 pt and the
+   refused ones 12.10 to 15.43 pt, and they **overlap**, so no threshold on spacing alone
+   orders the nine observations at any axis length. It is the whole of the stock probe
+   deck's shortfall and the only visible difference between our render of the area deck
+   and PowerPoint's.
 
 ## Non-goals
 

@@ -102,9 +102,12 @@ DRAWABLE_CHART_KINDS = frozenset(
         "lineChart",
         "areaChart",
         "scatterChart",
+        "bubbleChart",
         "pieChart",
         "doughnutChart",
+        "ofPieChart",
         "radarChart",
+        "stockChart",
     }
 )
 
@@ -835,6 +838,18 @@ def _resolve_unsupported(
             return drawn
         # _resolve_chart has already said which link failed; an empty frame plus a
         # second, vaguer warning would only bury it.
+        return _empty_graphic_frame(context, node)
+
+    if node.what == "chartex":
+        # Nothing here reads `cx:chartSpace`, and it is a different format rather than a
+        # missing case in the chart reader: a different namespace, a different data model
+        # and no `c:*Chart` group anywhere in it.
+        context.warn(
+            "chart-unsupported-type",
+            f"chart {node.name or node.shape_id or ''!r} is an Office 2016 chart "
+            "(treemap, sunburst, histogram, box-and-whisker, waterfall, funnel or map), "
+            "which is not rendered; drawing an empty frame",
+        )
         return _empty_graphic_frame(context, node)
 
     if node.what == "diagram":

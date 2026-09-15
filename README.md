@@ -143,11 +143,11 @@ table styles** — all 74 of them, measured out of PowerPoint itself, because it
 those definitions inside the application and never writes them into the file. A table
 that names one therefore renders banded and headed rather than as a bare grid.
 
-**Charts** — `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` — are
-read and drawn with their axis range, tick interval, gridlines, legend and data labels,
-laid out from constants measured out of PowerPoint's PDF export. The 3-D spellings
-(`bar3DChart` and friends) draw flat. No deck in the test corpus warns
-`chart-unsupported-type`.
+**Charts** — `barChart`, `lineChart`, `areaChart`, `scatterChart`, `bubbleChart`,
+`pieChart`, `doughnutChart`, `ofPieChart`, `radarChart` and `stockChart` — are read and
+drawn with their axis range, tick interval, gridlines, legend and data labels, laid out
+from constants measured out of PowerPoint's PDF export. The 3-D spellings (`bar3DChart`
+and friends) draw flat. No deck in the test corpus warns `chart-unsupported-type`.
 
 **SmartArt** renders from the DrawingML drawing PowerPoint caches beside the diagram —
 shapes, text, fills and geometry, each label placed by its own `dsp:txXfrm`. Where that
@@ -171,10 +171,14 @@ Four things, and each of them is a real gap rather than a rough edge:
   drawing records are not interpreted, so a metafile without a preview draws a
   placeholder and warns. `ConvertOptions(metafile_converter=...)` is the hook for
   shelling out to Inkscape or `libemf2svg` if you need the vectors.
-- **Chart types beyond the five above** — `areaChart`, `scatterChart`, `bubbleChart`,
-  `stockChart`, `surfaceChart`, `ofPieChart`. These warn `chart-unsupported-type` and
-  draw an empty positioned frame. A combo chart draws whichever of its groups is a type
-  we know and ignores the others.
+- **`surfaceChart`, and every chart in the ChartEx family.** A surface warns
+  `chart-unsupported-type` and draws an empty positioned frame: PowerPoint draws it as a
+  lit 3-D mesh coloured by value band — both spellings, with or without `c:view3D` — and
+  none of the projection, hidden-surface ordering or band legend that needs is built.
+  Office 2016's newer types (treemap, sunburst, histogram, box-and-whisker, waterfall,
+  funnel, map) live in a `cx:chartSpace` part in a different namespace with a different
+  data model; they draw an empty frame and warn `chart-unsupported-type`. A combo chart
+  draws whichever of its groups is a type we know and ignores the others.
 
 See [ROADMAP.md](ROADMAP.md) for what closing each of these involves.
 
