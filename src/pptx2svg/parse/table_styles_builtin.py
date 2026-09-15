@@ -21,11 +21,31 @@ into ``accent1 tint 40%``.
 
 A GUID PowerPoint does not recognise renders exactly like "No Style, Table Grid", which
 is how three candidates that turned out to be wrong were detected and dropped rather
-than shipped as plausible-looking guesses.  The catalogue is therefore incomplete by
-construction: "Light Style 1 - Accent 4", "Medium Style 1" and the fourth accent of a
-couple of families are absent because their GUIDs are not known here.  A table naming a
-GUID that is neither in the deck nor in this table falls back to no style, which is what
-PowerPoint does too.
+than shipped as plausible-looking guesses.
+
+**All 74 built-in styles are now here.**  The last two to arrive were "Light Style 1 -
+Accent 4" (``{D27102A9-...}``) and "Medium Style 1" (``{793D81CF-...}``), which were
+missing only because their GUIDs were unknown, not because measuring them failed.
+``{793D81CF-...}`` was read out of PowerPoint's own executable: the binary carries
+fifteen brace-delimited GUIDs, fourteen of which are table styles already catalogued
+here, and that was the fifteenth.  ``{D27102A9-...}`` came from a published list
+(``aiden0z/pptx-renderer``) and so was only ever a candidate.  Both were then confirmed
+the same way any other entry is -- by measurement.  Neither rendered like the
+unrecognised-GUID fallback, and each came out with its family's exact shape carrying the
+colour a reader would predict but the tool was never told to expect: accent 4 in the
+Light Style 1 shape, and ``dk1`` where the accents sit in the Medium Style 1 shape,
+which is what the accent-less base of a family looks like elsewhere (compare "Dark Style
+2" against "Dark Style 2 - Accent 1/Accent 2").  Re-deriving the whole catalogue in the
+same run reproduced the other 72 entries byte for byte.
+
+*Refuted:* the fourth accent of "Dark Style 2" was once thought missing too.  It is not
+-- PowerPoint genuinely pairs that family's accents as "Accent 1/Accent 2", "Accent
+3/Accent 4" and "Accent 5/Accent 6", and all three pairs are present.
+
+A table naming a GUID that is in neither the deck nor this table still falls back to no
+style, which is what PowerPoint does too -- but the resolver now says so with a
+``table-style-unknown`` warning, because the render being defensible does not make the
+silence acceptable.
 
 Colour expressions are written compactly as ``slot`` or ``slot/transform`` --
 ``accent1``, ``accent1/tint40``, ``dk1/alpha20`` -- and borders as
@@ -278,6 +298,16 @@ BUILTIN_TABLE_STYLES: dict[str, dict] = {
         "firstCol": {"bold": True},
         "lastCol": {"bold": True},
     },
+    "{D27102A9-8310-4765-A935-A1911B00CA55}": {
+        "name": "Light Style 1 - Accent 4",
+        "wholeTbl": {"text": "dk1", "borders": {"top": (1.0, "accent4"), "bottom": (1.0, "accent4")}},
+        "band1H": {"fill": "accent4/alpha20"},
+        "band1V": {"fill": "accent4/alpha20"},
+        "firstRow": {"bold": True, "borders": {"bottom": (1.0, "accent4")}},
+        "lastRow": {"bold": True, "borders": {"top": (1.0, "accent4")}},
+        "firstCol": {"bold": True},
+        "lastCol": {"bold": True},
+    },
     "{5FD0F851-EC5A-4D38-B0AD-8093EC10F338}": {
         "name": "Light Style 1 - Accent 5",
         "wholeTbl": {"text": "dk1", "borders": {"top": (1.0, "accent5"), "bottom": (1.0, "accent5")}},
@@ -421,6 +451,16 @@ BUILTIN_TABLE_STYLES: dict[str, dict] = {
         "band1V": {"fill": "accent6/alpha20"},
         "firstRow": {"bold": True, "borders": {"bottom": (2.0, "accent6")}},
         "lastRow": {"bold": True, "borders": {"top": (3.0, "accent6")}},
+        "firstCol": {"bold": True},
+        "lastCol": {"bold": True},
+    },
+    "{793D81CF-94F2-401A-BA57-92F5A7B2D0C5}": {
+        "name": "Medium Style 1",
+        "wholeTbl": {"fill": "lt1", "text": "dk1", "borders": {"left": (1.0, "dk1"), "right": (1.0, "dk1"), "top": (1.0, "dk1"), "bottom": (1.0, "dk1"), "insideH": (1.0, "dk1")}},
+        "band1H": {"fill": "dk1/tint20"},
+        "band1V": {"fill": "dk1/tint20"},
+        "firstRow": {"fill": "dk1", "text": "lt1", "bold": True},
+        "lastRow": {"bold": True, "borders": {"top": (3.0, "dk1")}},
         "firstCol": {"bold": True},
         "lastCol": {"bold": True},
     },

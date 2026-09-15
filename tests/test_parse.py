@@ -309,6 +309,37 @@ def test_builtin_catalogue_is_keyed_by_upper_case_guid():
     assert builtin_table_style("{not-a-style}") is None
 
 
+def test_the_builtin_catalogue_is_complete():
+    """All 74 of PowerPoint's built-in table styles, measured out of PowerPoint itself.
+
+    The gallery is ten families of six accents, plus eight accent-less variants and the
+    two "No Style" entries.  "Dark Style 2" is the exception the count has to allow for:
+    PowerPoint pairs its accents as "Accent 1/Accent 2", "Accent 3/Accent 4" and "Accent
+    5/Accent 6", so that family has three accent variants rather than six.
+
+    A missing entry is invisible in output -- the table just renders unstyled -- which is
+    why it is asserted here rather than left to be noticed.
+    """
+    from pptx2svg.parse.table_styles_builtin import BUILTIN_TABLE_STYLES
+
+    names = {spec["name"] for spec in BUILTIN_TABLE_STYLES.values()}
+    assert len(BUILTIN_TABLE_STYLES) == 74
+    assert len(names) == 74, "two entries share a name"
+
+    expected = {"No Style, No Grid", "No Style, Table Grid"}
+    for family in ("Themed Style 1", "Themed Style 2", "Light Style 1", "Light Style 2",
+                   "Light Style 3", "Medium Style 1", "Medium Style 2", "Medium Style 3",
+                   "Medium Style 4", "Dark Style 1"):
+        expected |= {f"{family} - Accent {n}" for n in range(1, 7)}
+    # The accent-less base variants PowerPoint offers; Themed Style 1 and 2 have none.
+    expected |= {"Light Style 1", "Light Style 2", "Light Style 3", "Medium Style 1",
+                 "Medium Style 2", "Medium Style 3", "Medium Style 4", "Dark Style 1",
+                 "Dark Style 2"}
+    expected |= {"Dark Style 2 - Accent 1/Accent 2", "Dark Style 2 - Accent 3/Accent 4",
+                 "Dark Style 2 - Accent 5/Accent 6"}
+    assert names == expected
+
+
 # -- Whole packages --------------------------------------------------------------------
 
 

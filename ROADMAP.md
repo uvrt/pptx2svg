@@ -31,7 +31,7 @@ after it needs a way to tell "better" from "different".
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
-| Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified**; cell text now takes a table style's `tcTxStyle` over the master's `otherStyle` |
+| Tables: merged cells, borders, fills, **table styles** | Complete; **all 74** built-in styles carried, every one measured out of PowerPoint; an id in neither the deck nor the catalogue now warns `table-style-unknown` instead of rendering a bare grid in silence; cell text takes a table style's `tcTxStyle` over the master's `otherStyle` |
 | Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. Category labels wrap at whitespace and turn 45° only when their widest unbreakable token still will not fit. Every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
@@ -355,7 +355,7 @@ ignored. All of them now render, with two deliberate exceptions noted at the end
 
 | Gap | State |
 | --- | --- |
-| **Table styles** (`tableStyles.xml`, `a:tblStyle`) | Done — custom styles read, 72 built-ins carried |
+| **Table styles** (`tableStyles.xml`, `a:tblStyle`) | Done — custom styles read, all 74 built-ins carried |
 | **Tab stops** (`a:tabLst`, `defTabSz`) | Done |
 | **Text highlight** (`a:highlight`) | Done — drawn as a rect behind the text |
 | **Underline styles** (`u="dbl"`, `"wavy"`, `"dotted"` …) | Done — `text-decoration-style` |
@@ -398,10 +398,33 @@ They were therefore **measured from PowerPoint's own rendering**, by
 Two cross-checks keep guesses out of the result. A GUID PowerPoint does not recognise
 renders exactly like "No Style, Table Grid" — that is its fallback — which caught three
 candidate GUIDs that were wrong. And within a family the six accent variants must agree
-once the accent number is factored out, which caught five stray colour matches. The
-catalogue is **deliberately incomplete** rather than padded: "Light Style 1 - Accent 4"
-and "Medium Style 1" are absent because their GUIDs are not known here, and a table
-naming an unknown GUID falls back to no style, exactly as PowerPoint does.
+once the accent number is factored out, which caught five stray colour matches.
+
+**The catalogue is now complete: all 74.** The last two were absent only because their
+GUIDs were unknown — the measurement was never the obstacle. "Medium Style 1"
+(`{793D81CF-…}`) was read out of PowerPoint's own executable, which carries fifteen
+brace-delimited GUIDs, fourteen of them table styles already catalogued here; that was
+the fifteenth. "Light Style 1 - Accent 4" (`{D27102A9-…}`) came from
+`aiden0z/pptx-renderer`'s published list and so was never more than a candidate. Both
+then had to pass the same two cross-checks as everything else, and did: neither measures
+like the unrecognised-GUID fallback, and each came out with its family's exact shape
+carrying a colour the tool was never told to expect — accent 4 in the Light Style 1
+shape, `dk1` where the accents sit in the Medium Style 1 shape, which is what an
+accent-less base variant looks like elsewhere (compare "Dark Style 2" against "Dark Style
+2 - Accent 1/Accent 2"). Re-deriving the whole catalogue in the same run reproduced the
+other 72 entries byte for byte.
+
+**Refuted: "Dark Style 2" is not missing its fourth accent.** PowerPoint pairs that
+family's accents as "Accent 1/Accent 2", "Accent 3/Accent 4" and "Accent 5/Accent 6", so
+it has three accent variants by design, not six, and all three are present. The family
+count has to allow for it or the catalogue reads as two short forever.
+
+A table naming a GUID that is in neither the deck nor the catalogue still falls back to
+no style, exactly as PowerPoint does — but it now raises a `table-style-unknown` warning
+while doing it. The render is defensible; the silence was not. An unstyled table is
+pixel-identical to a table whose style genuinely carries nothing, so with no warning
+there is no way to tell a correct render from one that dropped every band and header
+rule. Same shape of bug as the substitutions `font-substituted` exists for.
 
 ### Also found on the way
 
