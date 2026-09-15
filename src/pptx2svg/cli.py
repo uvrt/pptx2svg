@@ -15,10 +15,12 @@ named ``fonts`` is still reachable as ``./fonts``.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
+import tempfile
 from pathlib import Path
 
-from . import ConvertOptions, __version__, convert_pptx_to_svg
+from . import ConvertOptions, __version__, _render
 from .png import RasterizerNotAvailable, available_backends, svg_to_png
 
 
@@ -71,6 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--no-embedded-fonts",
+        action="store_true",
+        help=(
+            "ignore fonts the deck carries in <p:embeddedFontLst>; by default they are "
+            "used for both measurement and drawing"
+        ),
+    )
+    parser.add_argument(
         "--no-bundled-fonts",
         action="store_true",
         help="do not use the fonts shipped with pptx2svg",
@@ -113,10 +123,11 @@ def main(argv: list[str] | None = None) -> int:
         slide_numbers=parse_slide_selection(args.slides),
         width=args.width,
         height=args.height,
+        use_embedded_fonts=not args.no_embedded_fonts,
     )
 
     try:
-        documents = convert_pptx_to_svg(args.input, options)
+        documents, resolved = _render(args.input, options)
     except Exception as error:  # malformed package, unreadable XML, ...
         print(f"pptx2svg: {error}", file=sys.stderr)
         return 1
@@ -137,6 +148,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    # The extracted faces only need to exist while the rasteriser is indexing them; a
+    # deck with no embedded fonts never creates the directory.
+    with contextlib.ExitStack() as stack:
+        embedded_files: list[str] = []
+        if wants_png and resolved.embedded_fonts:
+            directory = stack.enter_context(
+                tempfile.TemporaryDirectory(prefix="pptx2svg-fonts-")
+            )
+            embedded_files = resolved.embedded_fonts.write(directory)
+        return _write_outputs(args, options, documents, numbers, stem, wants_png, embedded_files)
+
+
+def _write_outputs(args, options, documents, numbers, stem, wants_png, embedded_files) -> int:
+    """Write the SVG and PNG files, then report warnings.
+
+    Split out of :func:`main` only so the extracted embedded faces can live in a
+    temporary directory that is open for the whole rasterisation and closed after it.
+    """
     for number, document in zip(numbers, documents):
         if args.format in ("svg", "both"):
             path = args.output / f"{stem}-{number}.svg"
@@ -150,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
                         document,
                         backend=args.backend,
                         font_dirs=args.font_dirs,
+                        font_files=embedded_files or None,
                         # None means "decide from the bundle": skip system fonts
                         # when there is a bundle to be deterministic with, keep them
                         # when there is not, because skipping both renders blank

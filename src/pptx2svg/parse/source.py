@@ -659,6 +659,29 @@ class SourceSlide(SourceSlideBase):
     slide_id: int | None = None
 
 
+@dataclass(frozen=True)
+class SourceEmbeddedFont:
+    """One ``<p:embeddedFont>``: a family name and the parts carrying its four cuts.
+
+    Relationship ids rather than part paths, because that is what the element holds and
+    resolving them needs the package.  ``part_path`` is the part whose relationships they
+    belong to -- ``ppt/presentation.xml`` -- carried along so the reader does not have to
+    be told twice.
+
+    The four slots are an assertion by the deck about which file plays which role, and
+    the file behind a slot need not agree with it: PowerPoint substitutes when a family
+    has no cut for a slot, so ``bold`` can point at a regular-weight face.  The deck's
+    claim is the one that governs rendering -- see :func:`pptx2svg.fonts.sfnt.relabel`.
+    """
+
+    typeface: str
+    part_path: str
+    regular: str | None = None
+    bold: str | None = None
+    italic: str | None = None
+    bold_italic: str | None = None
+
+
 @dataclass
 class SourcePresentation:
     part_path: str
@@ -670,3 +693,5 @@ class SourcePresentation:
     layouts: dict[str, SourceSlideLayout] = field(default_factory=dict)
     masters: dict[str, SourceSlideMaster] = field(default_factory=dict)
     themes: dict[str, SourceTheme] = field(default_factory=dict)
+    #: ``<p:embeddedFontLst>``, in document order.  Empty for the great majority of decks.
+    embedded_fonts: list[SourceEmbeddedFont] = field(default_factory=list)

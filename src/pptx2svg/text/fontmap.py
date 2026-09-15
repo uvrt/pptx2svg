@@ -53,6 +53,7 @@ __all__ = [
     "SUBSTITUTIONS",
     "Substitution",
     "create_font_mapping",
+    "family_key",
     "font_family_value",
     "generic_family",
     "mapped_font",
@@ -290,13 +291,16 @@ def _normalize_full_width(value: str) -> str:
     )
 
 
-def _key(value: str) -> str:
+def family_key(value: str) -> str:
     """Normalise a requested family name to its index key.
 
     Case-folded and outer-whitespace-stripped on purpose, so ``"carlito"``, ``"CARLITO"``
     and ``"Carlito "`` all reach the same row: OOXML puts no constraint on how a
     ``typeface`` attribute is capitalised, and a deck hand-edited or written by a
-    generator carries whatever its author typed.  A name we fail to match does not fail
+    generator carries whatever its author typed.  Public because it has become the whole
+    font subsystem's notion of family identity: the substitution index, the metrics
+    overlay a deck's embedded fonts install, and the `fonts --check` report all have to
+    agree on when two spellings name the same face.  A name we fail to match does not fail
     loudly -- it silently becomes the 0.6 em guess -- so the lookup is deliberately the
     forgiving end of this module.
 
@@ -310,7 +314,7 @@ def _key(value: str) -> str:
 
 
 for _row in SUBSTITUTIONS.values():
-    _INDEX.setdefault(_key(_row.office), _row)
+    _INDEX.setdefault(family_key(_row.office), _row)
 
 
 #: Weight and optical-size qualifiers a family name may carry.  Real decks name faces
@@ -333,7 +337,7 @@ def substitution_for(font_family: str | None) -> Substitution | None:
     if font_family.startswith("+"):
         return None
 
-    key = _key(font_family)
+    key = family_key(font_family)
     found = _INDEX.get(key)
     if found is not None:
         return found
@@ -379,7 +383,7 @@ def mapped_font(font_family: str | None, mapping: dict[str, str]) -> str | None:
 
     lowered = normalized.strip().lower()
     for key, value in mapping.items():
-        if _key(key) == lowered:
+        if family_key(key) == lowered:
             return value
 
     substitution = substitution_for(font_family)
@@ -432,7 +436,7 @@ _BUNDLED_GENERICS = {
 
 
 def generic_family(font_family: str) -> str:
-    known = _BUNDLED_GENERICS.get(_key(font_family))
+    known = _BUNDLED_GENERICS.get(family_key(font_family))
     if known is not None:
         return known
     lowered = font_family.lower()

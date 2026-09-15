@@ -12,10 +12,10 @@ machine's fonts matters more than reproducibility.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Mapping, Protocol
 
 from ..units import PX_PER_PT
-from .fontmap import metrics_for
+from .fontmap import family_key, metrics_for
 from .metrics import FontMetrics
 
 #: Width as a fraction of the font size, for characters with no metrics entry.
@@ -110,7 +110,30 @@ class TextMeasurer(Protocol):
 
 
 class DefaultTextMeasurer:
-    """Measures against the bundled metric-compatible tables."""
+    """Measures against the bundled metric-compatible tables.
+
+    ``extra_metrics`` maps a normalised family key (see
+    :func:`pptx2svg.text.fontmap.family_key`) to a table that wins over the static ones.  It
+    exists for fonts a deck carries itself: :mod:`pptx2svg.fonts.embedded` builds a table
+    from the face it extracted from ``<p:embeddedFontLst>`` and passes it here, so the
+    layout is computed from the same file the rasteriser will draw with.  Injecting a
+    table rather than adding a measurer is deliberate -- every rule in this class about
+    bold cuts, synthetic emboldening and East Asian advances then applies to an embedded
+    face unchanged, instead of being reimplemented beside it.
+
+    Empty by default, so a caller who constructs one by hand gets exactly the old
+    behaviour.
+    """
+
+    def __init__(self, extra_metrics: "Mapping[str, FontMetrics] | None" = None) -> None:
+        self._extra = dict(extra_metrics) if extra_metrics else {}
+
+    def _metrics(self, font_family: str | None) -> FontMetrics | None:
+        if self._extra and font_family:
+            embedded = self._extra.get(family_key(font_family))
+            if embedded is not None:
+                return embedded
+        return metrics_for(font_family)
 
     def measure_text_width(
         self,
@@ -121,8 +144,8 @@ class DefaultTextMeasurer:
         font_family_ea: str | None = None,
     ) -> float:
         base_size_px = font_size_pt * PX_PER_PT
-        latin_metrics = metrics_for(font_family)
-        ea_metrics = metrics_for(font_family_ea)
+        latin_metrics = self._metrics(font_family)
+        ea_metrics = self._metrics(font_family_ea)
         # A face with no bold design of its own gets PowerPoint's synthetic emboldening,
         # and that widens every East Asian advance by a fixed amount.  Asking once per
         # call rather than once per character: the tables are large and the answer is a
@@ -169,7 +192,7 @@ class DefaultTextMeasurer:
     def ascender_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
     ) -> float:
-        metrics = metrics_for(font_family) or metrics_for(font_family_ea)
+        metrics = self._metrics(font_family) or self._metrics(font_family_ea)
         if metrics is None:
             return DEFAULT_ASCENDER_RATIO
         return _first_baseline_ratio(abs(metrics.descender) / metrics.units_per_em)

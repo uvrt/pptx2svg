@@ -31,6 +31,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable, Sequence
 
 from .. import model as m
+from ..fonts.embedded import NO_EMBEDDED_FONTS, EmbeddedFonts
 from ..metafile import extract_metafile_preview
 from ..metafile.pdf import PdfRasterizerNotAvailable, rasterise_pdf
 from ..opc import OpcPackage
@@ -174,6 +175,11 @@ class ResolvedPresentation:
     slides: list[m.Slide]
     warnings: list[Warning] = field(default_factory=list)
     font_scheme: m.FontScheme = field(default_factory=m.FontScheme)
+    #: Faces the deck carried in ``<p:embeddedFontLst>``, decoded and rights-checked.
+    #: Filled by :func:`pptx2svg.convert_pptx_to_model` rather than by
+    #: :func:`resolve_presentation`, which is what lets the decode be limited to the
+    #: families the resolved slides actually ask for.
+    embedded_fonts: EmbeddedFonts = field(default_factory=lambda: NO_EMBEDDED_FONTS)
 
 
 def resolve_presentation(
