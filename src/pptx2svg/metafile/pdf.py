@@ -75,7 +75,14 @@ def rasterise_pdf(data: bytes, *, width_emu: float | None = None) -> bytes | Non
             return None
 
         scale = _render_scale(page_width, width_emu)
-        bitmap = page.render(scale=scale)
+        # A transparent ground, not pdfium's default opaque white.  An EMF preview is
+        # artwork placed on a slide, not a page: `real-college-template` slide 2 puts its
+        # logo on a near-black backdrop and PowerPoint draws only the letters, while the
+        # white fill painted a 650x140 px card behind them -- 1.5% of the slide at full
+        # contrast, and the single largest term in that slide's score.  Asking for a
+        # non-opaque fill also switches pdfium to a BGRA buffer, which
+        # :func:`_bitmap_to_png` already unpacks.
+        bitmap = page.render(scale=scale, fill_color=(255, 255, 255, 0))
         return _bitmap_to_png(bitmap)
     except Exception:
         # pdfium reports malformed documents as PdfiumError, but the helper layer can

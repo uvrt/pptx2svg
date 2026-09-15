@@ -121,6 +121,45 @@ def test_text_inherits_size_from_the_master_text_styles(basic_theme):
     assert all(run.properties.font_size for run in runs)
 
 
+def _titles(resolved, slide_index: int) -> list[m.TextRun]:
+    return [
+        run
+        for element in walk(resolved.slides[slide_index].elements)
+        if getattr(element, "text_body", None)
+        for paragraph in element.text_body.paragraphs
+        for run in paragraph.runs
+        if run.text.strip()
+    ]
+
+
+def test_bold_is_inherited_from_the_layout_and_the_master_text_styles(college_template):
+    """PowerPoint bolds a title whose only ``b="1"`` is a layout's or the master's.
+
+    Both routes are in this one deck.  Slide 6's title inherits from the master's
+    ``p:titleStyle``; slide 2's from ``slideLayout10``'s title placeholder ``a:lstStyle``,
+    and that slide's own run says nothing.  PowerPoint's export of both draws them bold
+    and embeds ``Arial-BoldMT``.  These used to come out regular, on pptx-glimpse's rule
+    that decorations do not cross the placeholder boundary.
+    """
+    _, resolved = resolve(college_template)
+    # Slide 2: bold from the layout's lstStyle.
+    assert any(
+        run.text.startswith("Presentation Title") and run.properties.bold
+        for run in _titles(resolved, 1)
+    )
+    # Slide 6: bold from the master's titleStyle -- its layout says nothing about weight.
+    assert any(
+        run.text == "List Title" and run.properties.bold for run in _titles(resolved, 5)
+    )
+    # Body text under the same master is *not* bold: the master bolds titles only, so a
+    # blanket "inherit everything" would show up here.
+    assert not any(
+        run.properties.bold
+        for run in _titles(resolved, 5)
+        if run.text.startswith("Lorem")
+    )
+
+
 # -- Table styles ----------------------------------------------------------------------
 
 
@@ -158,6 +197,29 @@ def test_builtin_table_style_paints_banding_header_and_gridlines(authoring):
     body_run = body.cells[0].text_body.paragraphs[0].runs[0]
     assert body_run.properties.bold is False
     assert body_run.properties.color.hex == "#000000"
+
+
+def test_a_table_style_outranks_the_masters_other_text_style(college_template):
+    """A cell is not a placeholder, so `p:otherStyle` must not reach it first.
+
+    `real-college-template` defines "Medium Style 2 - Accent 1" in its own
+    `tableStyles.xml` with `<a:schemeClr val="lt1"/>` on `a:firstRow`, and its master's
+    `p:otherStyle` sets `tx1` -- #151515 in that theme.  PowerPoint inks the header white
+    on the #C00000 band; we inked it #151515, because the table style was appended to the
+    cascade *below* the master's.  ``authoring-integration`` could not see this: its
+    master states no colour there, so the two orders agree.
+    """
+    _, resolved = resolve(college_template)
+    table = table_of(resolved, slide_index=4)
+    header = table.table.rows[0].cells[0]
+    run = header.text_body.paragraphs[0].runs[0]
+    assert run.text == "Column A"
+    assert header.fill.color.hex == "#c00000"
+    assert run.properties.color.hex == "#ffffff"
+    assert run.properties.bold is True
+    # The body rows keep `a:wholeTbl`'s dk1, which is this theme's near-black.
+    body_run = table.table.rows[1].cells[0].text_body.paragraphs[0].runs[0]
+    assert body_run.properties.color.hex == "#151515"
 
 
 def test_custom_table_style_from_the_deck_is_applied(basic_theme):

@@ -12,9 +12,27 @@ order, in:
 7. the presentation's ``a:defaultTextStyle``.
 
 Levels 4-7 are "inherited defaults" rather than the shape's own styling, and pptx-glimpse
-draws a distinction there that matters: bold/italic/underline/strike/baseline are
-*not* inherited from them, only size, typeface and colour are.  That mirrors PowerPoint,
-where making a master's body text bold does not bold every slide's body text.
+draws a distinction there: underline/strike/baseline/highlight are *not* inherited from
+them, only size, typeface and colour are.
+
+**Bold and italic used to be on the wrong side of that line**, on pptx-glimpse's reading
+that "making a master's body text bold does not bold every slide's body text".  Measured
+against PowerPoint, it does.  ``real-college-template.pptx`` settles it twice over, in
+the two places that can be told apart:
+
+* its master's ``p:titleStyle`` says ``b="1"`` and nothing else in the deck does, and
+  PowerPoint drew "List Title", "GraphTitle" and "Slide Title" -- three different layouts
+  -- bold;
+* its ``slideLayout10`` repeats ``b="1"`` in the title placeholder's own ``a:lstStyle``,
+  and PowerPoint drew slide 2's "Presentation Title" bold although that slide says
+  nothing.  Slide 3 uses the same layout and *does* say ``b="1"`` on the run, which is
+  why only slide 2 could show the difference.
+
+The export's ``/BaseFont`` list is the corroborating fact: it holds ``Arial-BoldMT`` and
+the deck has not one explicit bold run outside slides 3, 5 and 9.
+
+Underline, strike, baseline and highlight stay excluded: no deck here sets one at levels
+4-7, so there is nothing to check a change against.
 """
 
 from __future__ import annotations
@@ -27,11 +45,15 @@ from ..parse import source as s
 from ..units import ROTATION_UNIT
 from .color import resolve_color
 
-#: Properties inherited from every level of the chain.
-_ALWAYS_INHERITED = ("font_size", "typeface", "typeface_ea", "typeface_cs", "color")
+#: Properties inherited from every level of the chain, including the layout's and
+#: master's.  ``bold`` and ``italic`` belong here -- see the module docstring for the
+#: measurement that moved them.
+_ALWAYS_INHERITED = (
+    "font_size", "typeface", "typeface_ea", "typeface_cs", "color", "bold", "italic",
+)
 #: Properties inherited only from the shape's own paragraph/list style.
 _DECORATIONS = (
-    "bold", "italic", "underline", "underline_style", "strikethrough", "baseline",
+    "underline", "underline_style", "strikethrough", "baseline",
     "highlight",
 )
 
@@ -147,18 +169,19 @@ def _build_style_chain(
         if body is not None and body.list_style is not None:
             chain.append(_StyleEntry(body.list_style, include_decorations=False))
 
-    master_style = _tx_style_for_placeholder(context.master, placeholder_type)
-    if master_style is not None:
-        chain.append(_StyleEntry(master_style, include_decorations=False))
-
-    default_style = context.presentation.default_text_style
-    if default_style is not None:
-        chain.append(_StyleEntry(default_style, include_decorations=False))
-
     if extra_defaults is not None:
-        # A table style's `a:tcTxStyle`: the weakest layer of all, but unlike the other
-        # inherited layers its decorations *do* apply -- a header row styled bold really
-        # does bold the cell's text, which is the whole point of the region.
+        # A table style's `a:tcTxStyle`.  It sits *above* the master's `p:otherStyle` and
+        # the presentation default, not below them: a table cell is not a placeholder, and
+        # the region that styles it is the more specific statement.  It used to be last,
+        # which cost `real-college-template` slide 5 its header -- that deck's
+        # "Medium Style 2 - Accent 1" puts `<a:schemeClr val="lt1"/>` on `a:firstRow` and
+        # PowerPoint inks "Column A" white on the #C00000 band, while the master's
+        # `otherStyle` reached the run first and made it #151515.  The `b="on"` from the
+        # same element did land, because nothing above it says anything about weight,
+        # which is why the region looked like it was working.
+        #
+        # Its decorations apply, unlike the other inherited layers': a header row styled
+        # bold really does bold the cell's text, which is the whole point of the region.
         chain.append(
             _StyleEntry(
                 s.SourceTextStyle(
@@ -169,6 +192,14 @@ def _build_style_chain(
                 include_decorations=True,
             )
         )
+
+    master_style = _tx_style_for_placeholder(context.master, placeholder_type)
+    if master_style is not None:
+        chain.append(_StyleEntry(master_style, include_decorations=False))
+
+    default_style = context.presentation.default_text_style
+    if default_style is not None:
+        chain.append(_StyleEntry(default_style, include_decorations=False))
 
     return chain
 

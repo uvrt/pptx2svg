@@ -1281,9 +1281,15 @@ class ChartBuilder:
 
     def _series(self) -> list[_Series]:
         out: list[_Series] = []
-        for index, source in enumerate(self.plot.series):
+        for source in self.plot.series:
             fill = self._resolve_fill(source.fill)
-            color = self._series_color(fill, index)
+            # `c:idx`, not the position in this list.  The list is sorted by `c:order`
+            # and every probe so far had idx == order, so the two were indistinguishable
+            # until `real-college-template`'s chart, whose two series are
+            # (idx 2, order 0) and (idx 0, order 1).  The second states no fill;
+            # PowerPoint drew it in that theme's accent1 (#C00000) and not in accent2
+            # (#595959), which is what the list position would have given.
+            color = self._series_color(fill, source.index)
             if fill is None:
                 fill = m.SolidFill(color=color)
             outline = self._resolve_outline(source.outline)
@@ -1294,11 +1300,18 @@ class ChartBuilder:
                 fill=fill,
                 outline=outline,
                 format_code=source.format_code,
-                # ECMA-376 makes inversion the default; a file that does not want it says
-                # so explicitly, and every chart in the corpus does.
-                invert_if_negative=(
-                    True if source.invert_if_negative is None else source.invert_if_negative
-                ),
+                # Absent means *no* inversion.  This used to default to true, reading
+                # ECMA-376's CT_Boolean -- whose `val` attribute defaults to 1 -- as
+                # though it also said what an absent element means.  It does not, and
+                # PowerPoint disagrees: `real-college-template`'s stacked chart omits
+                # `c:invertIfNegative` over a -1.0 and PowerPoint drew that bar solid in
+                # the series colour.  Measured across four probes built from that chart
+                # (stacked/clustered x automatic accent fill/explicit `srgbClr 2563EB`):
+                # the negative bar came out solid in the series colour in all four.  The
+                # same chart with `val="1"` added came out white with a dark outline in
+                # both fill variants, so the hollow drawing below is right -- only the
+                # default was wrong.
+                invert_if_negative=bool(source.invert_if_negative),
             )
             if self._vary_colors() and source.fill is None and self.style.accents:
                 # Measured on the varyColors probe: points take accent1, accent2, accent3
@@ -1310,7 +1323,7 @@ class ChartBuilder:
                     for index in range(len(item.values))
                 ]
             if self._is_line or (self._is_radar and self._radar_style != "filled"):
-                self._read_line_style(item, source, index)
+                self._read_line_style(item, source, source.index)
                 if self._is_radar and (source.marker is None or not source.marker.size):
                     # Measured on the probe: a radar series stating no `c:size` draws a
                     # 6 pt marker, not ECMA-376's 7.
@@ -1364,9 +1377,30 @@ class ChartBuilder:
             number_format=first("number_format"),
         )
         if labels.anything:
-            labels.font = self._font(*(source.text_properties for source in present))
-            labels.color = self.style.color
+            bodies = [source.text_properties for source in present]
+            labels.font = self._font(*bodies)
+            labels.color = self._text_color(*bodies) or self.style.color
         return labels
+
+    def _text_color(self, *sources: "s.SourceTextBody | None") -> m.ResolvedColor | None:
+        """The innermost ``c:txPr``'s ``a:defRPr/a:solidFill``, resolved.
+
+        Only data labels read this so far, because that is the only place it has been
+        measured: ``real-college-template``'s chart sets ``<a:schemeClr val="bg1"/>`` on
+        both series' ``c:dLbls`` and PowerPoint inks the numbers white inside the bars.
+        Ours came out in the chart-space default, which is dark text on a #C00000 fill.
+
+        The same element governs axis, legend and title text and is *not* read for those;
+        nothing in the corpus states one there, so there is nothing to check a change
+        against.  :meth:`_font` is the place it would go.
+        """
+        for source in (*sources, self.chart.text_properties):
+            run = _default_run(source)
+            if run is not None and run.color is not None:
+                fill = self._resolve_fill(s.SourceSolidFill(color=run.color))
+                if isinstance(fill, m.SolidFill):
+                    return fill.color
+        return None
 
     @property
     def _is_line(self) -> bool:
@@ -1381,6 +1415,11 @@ class ChartBuilder:
         a probe series stating only ``<a:solidFill><a:srgbClr val="F97316"/></a:solidFill>``
         was drawn by PowerPoint in accent1, its bare fill ignored -- so a bar chart's
         colour rule cannot simply be reused here.
+
+        ``index`` is ``c:idx``, for the same reason the bar accents are -- see
+        :meth:`_series`.  The *marker* cycle below rides on the same number because it is
+        the same "which series is this" question, but only the accent was measured under
+        ``idx != order``; no line chart in the corpus or in any probe has one.
         """
         outline = self._resolve_outline(source.outline)
         if outline is not None and isinstance(outline.fill, m.SolidFill):
@@ -2263,7 +2302,15 @@ class ChartBuilder:
         if end < start and item.invert_if_negative and point not in item.point_fills:
             # Measured: PowerPoint draws a negative bar white with a black 0.75 pt
             # outline, and draws it in the series colour when the file sets
-            # `invertIfNegative` to 0.
+            # `invertIfNegative` to 0 -- or leaves it out, which is the far more common
+            # spelling; see the default above.
+            #
+            # The outline is `tx1` rather than literal black, which only a theme whose
+            # `dk1` is not black can show: on the `probe-invert-on-fill` export the
+            # hollow bar's outline came out #151515, this deck's `dk1`.  Left as
+            # DEFAULT_AXIS_COLOR because that constant is shared with the axis and
+            # gridline defaults and nothing has measured *those* against a non-black
+            # `dk1` yet; the two should move together when one does.
             fill = m.SolidFill(color=m.ResolvedColor(hex="#FFFFFF"))
             outline = outline or m.Outline(
                 width=INVERTED_BAR_OUTLINE_EMU,
@@ -2618,7 +2665,7 @@ class ChartBuilder:
         box = self._bar_box(rect, series, order, item, point, value, scale, horizontal)
         if box is None:
             return None
-        position = (item.labels.position if item.labels else None) or "outEnd"
+        position = (item.labels.position if item.labels else None) or self._label_default()
         centre_x = (box.left + box.right) / 2
         centre_y = (box.top + box.bottom) / 2
         if horizontal:
@@ -2639,6 +2686,22 @@ class ChartBuilder:
         if position == "inBase":
             return centre_x, base, "inside-base-y"
         return centre_x, end, "outside-y"
+
+    def _label_default(self) -> str:
+        """``c:dLblPos`` when the file states none.
+
+        ``outEnd`` for a clustered bar, ``ctr`` for a stacked one.  ECMA-376 does not even
+        *allow* ``outEnd`` on a stacked series -- there is no outside end to sit at, since
+        the next segment starts there -- and PowerPoint agrees: on
+        ``real-college-template``'s stacked chart, which states no ``c:dLblPos``, every
+        label is inked inside its own segment, vertically centred, in the ``c:txPr``'s
+        white.  Drawing them at ``outEnd`` put ours above the whole stack in eleven
+        places.
+        """
+        if self._is_line or self._is_polar:
+            return "outEnd"
+        stacked = (self.plot.grouping or "clustered") in ("stacked", "percentStacked")
+        return "ctr" if stacked else "outEnd"
 
     def _place_label(
         self,
@@ -2689,7 +2752,7 @@ class ChartBuilder:
         first = baseline - box.line_height * (len(lines) - 1)
         for index, line in enumerate(lines):
             self._text(
-                self._label_body(line, font, align=align),
+                self._label_body(line, font, align=align, color=labels.color),
                 left=left,
                 width=width,
                 baseline=first + index * box.line_height,
@@ -2933,7 +2996,20 @@ class ChartBuilder:
             return rect.left
         return rect.left + (value - minimum) / span * rect.width
 
-    def _axis_outline(self, outline: m.Outline | s.SourceOutline | None) -> m.Outline:
+    def _axis_outline(
+        self, outline: m.Outline | s.SourceOutline | None
+    ) -> m.Outline | None:
+        """The stroke for an axis line or gridline, or ``None`` for "draw nothing".
+
+        ``<a:ln><a:noFill/></a:ln>`` is an explicit *no line*, and it has to be told apart
+        from an absent ``c:spPr``, which means "use the default".  Both arrive here as
+        ``None`` out of :func:`resolve.view._resolve_outline` -- which collapses them --
+        so the source element is what gets asked.  ``real-college-template``'s chart says
+        it on its value axis and PowerPoint draws no line up the left of that plot; we
+        drew the default black one, full plot height.
+        """
+        if isinstance(outline, s.SourceOutline) and isinstance(outline.fill, s.SourceNoFill):
+            return None
         resolved = self._resolve_outline(outline) if outline is not None else None
         if resolved is not None and resolved.fill is not None:
             return resolved
@@ -3039,7 +3115,12 @@ class ChartBuilder:
             )
         )
 
-    def _line(self, x0: float, y0: float, x1: float, y1: float, outline: m.Outline) -> None:
+    def _line(
+        self, x0: float, y0: float, x1: float, y1: float, outline: m.Outline | None
+    ) -> None:
+        if outline is None:
+            # An explicit `a:noFill` stroke -- see :meth:`_axis_outline`.
+            return
         self.elements.append(
             m.ConnectorElement(
                 transform=m.Transform(
@@ -3053,7 +3134,14 @@ class ChartBuilder:
             )
         )
 
-    def _label_body(self, text: str, font: ChartFont, *, align: str) -> m.TextBody:
+    def _label_body(
+        self,
+        text: str,
+        font: ChartFont,
+        *,
+        align: str,
+        color: m.ResolvedColor | None = None,
+    ) -> m.TextBody:
         return m.TextBody(
             paragraphs=[
                 m.Paragraph(
@@ -3063,7 +3151,7 @@ class ChartBuilder:
                             properties=m.RunProperties(
                                 font_size=font.size,
                                 font_family=font.family,
-                                color=self.style.color,
+                                color=color or self.style.color,
                             ),
                         )
                     ],
