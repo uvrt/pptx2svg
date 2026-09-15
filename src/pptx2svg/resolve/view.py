@@ -549,18 +549,36 @@ def _table_style(context: ResolveContext, table: s.SourceTable) -> s.SourceTable
     """Find the table's style: its own id, else the presentation's default.
 
     A deck's ``tableStyles.xml`` is consulted first, since a custom style there may reuse
-    a built-in's GUID, and the built-in catalogue second.  Neither is guaranteed to have
-    it -- PowerPoint does not write built-in definitions into the file, and the catalogue
-    covers most but not all of them -- in which case the table simply renders unstyled,
-    which is what PowerPoint does with an id it does not recognise.
+    a built-in's GUID, and the built-in catalogue second.
+
+    An id neither of them has renders unstyled, which is also what PowerPoint does with
+    an id it does not recognise -- so the output is defensible rather than wrong.  What
+    is wrong is doing it quietly: an unstyled table looks exactly like a table whose
+    style genuinely carries no fills, borders or bold, so nobody can tell a deck that
+    rendered correctly from one that lost every band and header rule.  That is the same
+    failure mode ``font-substituted`` exists to close, and it gets the same treatment
+    here.
     """
     styles = context.presentation.table_styles
-    style_id = table.style_id or (styles.default_style_id if styles else None)
+    own_id = table.style_id
+    style_id = own_id or (styles.default_style_id if styles else None)
     if not style_id:
         return None
     if styles is not None and style_id in styles.styles:
         return styles.styles[style_id]
-    return builtin_table_style(style_id)
+    style = builtin_table_style(style_id)
+    if style is None:
+        named = table.alt_text or table.name or "a table"
+        source = "names" if own_id else "inherits the presentation's default"
+        context.warn(
+            "table-style-unknown",
+            f"{named} {source} table style {style_id}, which is in neither the deck's "
+            "tableStyles.xml nor the built-in catalogue; drawing it with its own cell "
+            "formatting only. PowerPoint draws an unrecognised id unstyled too, so the "
+            "render is not wrong -- but if that id names a style PowerPoint does know, "
+            "every fill, border and bold it carries is missing here.",
+        )
+    return style
 
 
 def _band(index: int, first: bool, last: bool, count: int) -> int | None:

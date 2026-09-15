@@ -231,3 +231,115 @@ def test_custom_table_style_from_the_deck_is_applied(basic_theme):
     assert cell.borders.right.fill.color.hex == "#9e9e9e"
     # That style sets no fills at all, so the cells stay unpainted.
     assert cell.fill is None
+
+
+# -- The last two built-in styles, and the id nobody knows ------------------------------
+
+#: A table naming a style id, spliced into a fixture so the id under test is the only
+#: thing that varies.  ``firstRow``/``bandRow`` are on so the header and the first
+#: banded row -- the two regions a style is most visible in -- are both exercised.
+TABLE_NAMING_STYLE = (
+    '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="900" name="Probe table"/>'
+    '<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>'
+    '<p:xfrm><a:off x="300000" y="300000"/><a:ext cx="2400000" cy="900000"/></p:xfrm>'
+    '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
+    '<a:tbl><a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>{style_id}</a:tableStyleId>'
+    "</a:tblPr>"
+    '<a:tblGrid><a:gridCol w="800000"/><a:gridCol w="800000"/><a:gridCol w="800000"/></a:tblGrid>'
+    + (
+        '<a:tr h="300000">'
+        + (
+            "<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p>"
+            '<a:r><a:rPr lang="en-US" sz="800"/><a:t>x</a:t></a:r>'
+            "</a:p></a:txBody><a:tcPr/></a:tc>"
+        )
+        * 3
+        + "</a:tr>"
+    )
+    * 3
+    + "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"
+)
+
+
+def table_naming(authoring, style_id):
+    """Resolve ``authoring-integration`` with one extra table naming ``style_id``."""
+    from deckbuilder import derive_deck
+
+    options = ConvertOptions()
+    deck = derive_deck(
+        authoring, shapes_xml=TABLE_NAMING_STYLE.format(style_id=style_id)
+    )
+    resolved = convert_pptx_to_model(deck, options)
+    tables = [
+        element
+        for element in walk(resolved.slides[0].elements)
+        if isinstance(element, m.TableElement)
+    ]
+    # The spliced frame lands last in the shape tree, after the fixture's own table.
+    return tables[-1], options.warnings
+
+
+def test_light_style_1_accent_4_resolves(authoring):
+    """The GUID was the only thing missing; the measurement was never the problem.
+
+    ``{D27102A9-...}`` came from a published list and was confirmed by rendering it
+    through PowerPoint: it does not measure like the unrecognised-id fallback, and it
+    measures like the rest of the Light Style 1 family with accent 4 in the accent slot
+    -- hairlines above and below, 20 %-alpha banding, bold edges, no fills.  This
+    theme's accent 4 is ``#ffc000``.
+    """
+    table, _ = table_naming(authoring, "{D27102A9-8310-4765-A935-A1911B00CA55}")
+
+    header, band = table.table.rows[0].cells[0], table.table.rows[1].cells[0]
+    assert header.fill is None  # the family paints no fills at all
+    assert band.fill.color.hex == "#ffc000"
+    assert band.fill.color.alpha == 0.2
+    assert header.borders.bottom.fill.color.hex == "#ffc000"
+    assert header.borders.bottom.width == 12700  # 1 pt
+    assert header.text_body.paragraphs[0].runs[0].properties.bold is True
+
+
+def test_medium_style_1_resolves(authoring):
+    """``{793D81CF-...}`` was read out of PowerPoint's own executable.
+
+    The binary carries fifteen brace-delimited GUIDs; fourteen are table styles already
+    catalogued, and this was the fifteenth.  Measured, it is the Medium Style 1 family's
+    shape with ``dk1`` where the accents sit, which is what an accent-less base variant
+    looks like -- a black header with white bold text, a light banded row, and a 3 pt
+    rule above the footer.
+    """
+    table, _ = table_naming(authoring, "{793D81CF-94F2-401A-BA57-92F5A7B2D0C5}")
+
+    header, band = table.table.rows[0].cells[0], table.table.rows[1].cells[0]
+    assert header.fill.color.hex == "#000000"
+    header_run = header.text_body.paragraphs[0].runs[0]
+    assert header_run.properties.color.hex == "#ffffff"
+    assert header_run.properties.bold is True
+    # `dk1` tinted 20 %, which this theme's black resolves to as a light grey.
+    assert band.fill.color.hex == "#e7e7e7"
+    # `wholeTbl` fills white and rules every inside edge in dk1 at 1 pt.
+    assert band.borders.top.fill.color.hex == "#000000"
+    assert band.borders.top.width == 12700
+
+
+def test_an_unresolvable_table_style_id_warns(authoring):
+    """A style id in neither the deck nor the catalogue must not fail silently.
+
+    PowerPoint draws an unrecognised id unstyled too, so the render is defensible -- but
+    an unstyled table is pixel-identical to a table whose style genuinely carries
+    nothing, so without a warning there is no way to tell a correct render from one that
+    lost every band, rule and header colour.  Same failure mode as `font-substituted`.
+    """
+    table, warnings = table_naming(authoring, "{DEADBEEF-0000-0000-0000-000000000000}")
+
+    assert table.table.rows[0].cells[0].fill is None
+    warning = next(w for w in warnings if w.code == "table-style-unknown")
+    assert "Probe table" in warning.message
+    assert "{DEADBEEF-0000-0000-0000-000000000000}" in warning.message
+    assert warning.slide_number == 1
+
+
+def test_a_known_table_style_id_raises_no_warning(authoring):
+    """The guard against a warning that fires on every deck in the corpus."""
+    _, warnings = table_naming(authoring, "{793D81CF-94F2-401A-BA57-92F5A7B2D0C5}")
+    assert not [w for w in warnings if w.code == "table-style-unknown"]

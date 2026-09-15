@@ -103,6 +103,16 @@ SLOT_RANK = {"accent1": 0, "accent2": 0, "accent3": 0, "accent4": 0, "accent5": 
 
 # The candidate GUIDs.  Ones PowerPoint does not recognise are detected and dropped, so
 # this list is allowed to be wrong; it is not allowed to be trusted.
+#
+# Provenance of the two that arrived last, since "where did this GUID come from" is the
+# question a reader will have:
+#   {793D81CF-...} "Medium Style 1"          -- read out of PowerPoint's own executable,
+#       which carries exactly fifteen brace-delimited GUIDs; fourteen were already here.
+#       `strings "/Applications/Microsoft PowerPoint.app/Contents/MacOS/Microsoft
+#       PowerPoint" | grep -oE '{[0-9A-F-]{36}}'` reproduces it.
+#   {D27102A9-...} "Light Style 1 - Accent 4" -- from aiden0z/pptx-renderer's published
+#       list.  Published lists are candidates, never answers; this one survived the
+#       fallback check below and came out carrying accent 4 in the Light Style 1 shape.
 CANDIDATES: list[tuple[str, str]] = [
     ("{2D5ABB26-0587-4C30-8999-92F81FD0307C}", "No Style, No Grid"),
     ("{5940675A-B579-460E-94D1-54222C63F5DA}", "No Style, Table Grid"),
@@ -122,6 +132,7 @@ CANDIDATES: list[tuple[str, str]] = [
     ("{3B4B98B0-60AC-42C2-AFA5-B58CD77FA1E5}", "Light Style 1 - Accent 1"),
     ("{0E3FDE45-AF77-4B5C-9715-49D594BDF05E}", "Light Style 1 - Accent 2"),
     ("{C083E6E3-FA7D-4D7B-A595-EF9225AFEA82}", "Light Style 1 - Accent 3"),
+    ("{D27102A9-8310-4765-A935-A1911B00CA55}", "Light Style 1 - Accent 4"),
     ("{5FD0F851-EC5A-4D38-B0AD-8093EC10F338}", "Light Style 1 - Accent 5"),
     ("{68D230F3-CF80-4859-8CE7-A43EE81993B5}", "Light Style 1 - Accent 6"),
     ("{7E9639D4-E3E2-4D34-9284-5A2195B3D0D7}", "Light Style 2"),
@@ -138,6 +149,7 @@ CANDIDATES: list[tuple[str, str]] = [
     ("{ED083AE6-46FA-4A59-8FB0-9F97EB10719F}", "Light Style 3 - Accent 4"),
     ("{BDBED569-4797-4DF1-A0F4-6AAB3CD982D8}", "Light Style 3 - Accent 5"),
     ("{E8B1032C-EA38-4F05-BA0D-38AFFFC7BED3}", "Light Style 3 - Accent 6"),
+    ("{793D81CF-94F2-401A-BA57-92F5A7B2D0C5}", "Medium Style 1"),
     ("{B301B821-A1FF-4177-AEE7-76D212191A09}", "Medium Style 1 - Accent 1"),
     ("{9DCAF9ED-07DC-4A11-8D7F-57B35C25682E}", "Medium Style 1 - Accent 2"),
     ("{1FECB4D8-DB02-4DC6-A0A2-4F2EBAE1DC90}", "Medium Style 1 - Accent 3"),
