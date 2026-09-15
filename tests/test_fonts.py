@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -696,3 +697,45 @@ def test_a_mixed_run_is_measured_face_by_face():
     # CO2削減 on the same axis: 8.666 + 9.334 + 6.674 of Arial, then two ideographs.
     width = measurer.measure_text_width("CO2削減", 12, False, "Arial", "游ゴシック")
     assert width / PX_PER_PT == pytest.approx(48.674, abs=0.01)
+
+
+def test_the_east_asian_face_is_reported_only_when_east_asian_text_is_drawn():
+    """A Jpan theme entry must not make every Latin run report a CJK substitution.
+
+    ``font_family_ea`` is the *resolved* East Asian face, so on a theme that offers an
+    ``<a:font script="Jpan"/>`` every run in the deck carries one -- whether or not a
+    single CJK character is drawn.  Counting those puts ``resolved_families`` back to
+    listing the script fallbacks its own docstring says it exists to exclude.
+
+    This is not hypothetical: two Google Slides templates with no Japanese anywhere began
+    warning that ＭＳ Ｐゴシック would be substituted, which is a warning about a face
+    that never draws.  The test here is the same :func:`is_cjk` one ``render/text.py``
+    splits on, so the report and the drawing agree.
+    """
+    from pptx2svg import model as m
+    from pptx2svg.fonts.check import resolved_families
+
+    def deck(text: str):
+        run = m.TextRun(
+            text=text,
+            properties=m.RunProperties(font_family="Arial", font_family_ea="ＭＳ Ｐゴシック"),
+        )
+        paragraph = m.Paragraph(runs=[run], properties=m.ParagraphProperties())
+        body = m.TextBody(paragraphs=[paragraph])
+        shape = m.ShapeElement(
+            transform=m.Transform(0, 0, 100, 100),
+            geometry=m.PresetGeometry(preset="rect"),
+            text_body=body,
+        )
+        slide = m.Slide(slide_number=1, elements=[shape])
+        # An empty scheme: this test is about the *run's* resolved East Asian face,
+        # not about the theme's own major/minor entries, which are added
+        # unconditionally and deliberately a few lines further down.
+        return SimpleNamespace(slides=[slide], font_scheme=SimpleNamespace())
+
+    latin_only = resolved_families(deck("Modern productivity"))
+    assert "Arial" in latin_only
+    assert "ＭＳ Ｐゴシック" not in latin_only
+
+    with_japanese = resolved_families(deck("Modern プラットフォーム"))
+    assert "ＭＳ Ｐゴシック" in with_japanese

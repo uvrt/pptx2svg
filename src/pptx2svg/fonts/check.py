@@ -224,6 +224,7 @@ def resolved_families(resolved) -> list[str]:
     renderer will put in the SVG.
     """
     from .. import model as m
+    from ..text.measure import is_cjk
 
     names: set[str] = set()
 
@@ -235,10 +236,23 @@ def resolved_families(resolved) -> list[str]:
             if bullet_font:
                 names.add(bullet_font)
             for run in paragraph.runs:
-                for field_name in ("font_family", "font_family_ea", "font_family_cs"):
+                for field_name in ("font_family", "font_family_cs"):
                     value = getattr(run.properties, field_name, None)
                     if value:
                         names.add(value)
+                # The East Asian face only counts when the run has East Asian text in
+                # it.  `font_family_ea` is the *resolved* face -- the run's `<a:ea>`, or
+                # the theme's, or its `<a:font script="Jpan"/>` -- so on a theme that
+                # offers a Jpan face, every run in the deck carries one whether or not a
+                # single CJK character is drawn.  Reporting those would put this
+                # function back to listing the script fallbacks its own docstring says
+                # it exists to exclude, and it showed up immediately: two Google Slides
+                # templates with no Japanese anywhere began warning that ＭＳ Ｐゴシック
+                # would be substituted.  The test is the one `render/text.py` splits on,
+                # so the report agrees with what is actually drawn.
+                east_asian = getattr(run.properties, "font_family_ea", None)
+                if east_asian and any(is_cjk(ord(ch)) for ch in run.text or ""):
+                    names.add(east_asian)
 
     def visit(element) -> None:
         if isinstance(element, m.GroupElement):
