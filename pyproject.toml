@@ -60,8 +60,18 @@ dev = [
   "numpy>=1.24",
   "pillow>=10",
   "pypdfium2>=4",
-  "pptx2svg-fonts>=0.1",
 ]
+# `pptx2svg-fonts` is deliberately NOT listed above.  It is a sibling distribution that
+# lives in this repository at packages/pptx2svg-fonts and is not published yet, so naming
+# it as a dependency makes `pip install -e '.[dev]'` fail outright against PyPI -- which
+# is exactly what it did to CI on every platform.  Install it from the checkout instead:
+#
+#     pip install -e packages/pptx2svg-fonts
+#
+# The suite does not strictly require it: tests/conftest.py puts the bundle's src/ on
+# sys.path when the directory is present, so a source checkout exercises the bundled-font
+# configuration either way.  Installing it is the more faithful reproduction of what
+# `pip install 'pptx2svg[fonts]'` gives a user, which is why CI does it.
 
 [project.urls]
 Homepage = "https://github.com/uvrt/pptx2svg"
