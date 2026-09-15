@@ -27,7 +27,7 @@ after it needs a way to tell "better" from "different".
 | Package, relationships, parts | Complete |
 | Theme colours, colour maps, transforms | Complete |
 | Placeholder / background / text inheritance | Complete |
-| Shapes: all 186 ECMA-376 presets + custom geometry | Complete and **verified against PowerPoint**: every preset matches its own PDF export at two aspect ratios, median 0.999 silhouette overlap |
+| Shapes: all 187 presets PowerPoint accepts + custom geometry | Complete and **verified against PowerPoint**: every preset matches its own PDF export at two aspect ratios, median 0.999 silhouette overlap |
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
@@ -39,7 +39,7 @@ after it needs a way to tell "better" from "different".
 | Shape identity on output (`data-pptx-id`) | Complete |
 | Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
 
-1,975 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
+1,968 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
 independently testable, and every phase below slots into exactly one of them.
 
 ### Shape identity
