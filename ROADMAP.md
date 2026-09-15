@@ -18,6 +18,45 @@ after it needs a way to tell "better" from "different".
   EMF previews) and a PowerPoint-based visual regression harness. Reviewed specifically
   for techniques worth adopting; the findings are marked **[pptx-renderer]** below.
 
+### How the field handles fonts
+
+Surveyed in September 2026, because this library's central bet — *compute layout from a
+generated table of advance widths, and draw with the very same files* — is unusual enough
+to be worth checking against everyone else's answer.
+
+| | Embedded fonts | Metrics source | Missing-font strategy |
+| --- | --- | --- | --- |
+| LibreOffice ≥ 25.8 | **yes**, libEOT → temp font, `fsType`-gated | fontconfig / system | hardcoded metric map → fontconfig hook → `VCL.xcu` → attribute match |
+| Apache POI XSLF | API exists, renderer ignores it | `java.awt` `FontRenderContext` | `Font.SANS_SERIF`, or a `FONT_MAP` you supply |
+| python-pptx | no | Pillow, macOS/Windows only | n/a — it does no layout |
+| Aspose.Slides | yes | own engine | `FontSubstRule` + PowerPoint-alike default |
+| Syncfusion | not documented | own engine | Microsoft Sans Serif |
+| PPTXjs / js-pptx | no | **none** — CSS plus a global fudge factor | whatever CSS falls back to |
+| **[pptx-renderer]** | **yes**, EOT+MTX, `fsType`-gated | the browser | CSS stack, silently |
+| ONLYOFFICE | rights-checked | **own FreeType/WASM + shipped `font_selection.bin`** | penalty-based match |
+| Collabora Online | via LibreOffice | LibreOffice, server-side | LibreOffice's, plus remote font download |
+| **pptx2svg** | **no** — see Phase 6 | **generated metric table** | clone set + `font-substituted` |
+
+**The load-bearing result is not that this library compares well. It is why.** Two
+projects arrived independently at "carry your own metrics": ONLYOFFICE compiles its own
+FreeType engine to WebAssembly and feeds it a server-generated `font_selection.bin`
+metrics blob, and the Rust project `Ryujiyasu/oxi` ships generated metric tables with
+bundled clones and a resolved / DEGRADED / ABSENT report. Neither borrowed the idea from
+the other. Two independent arrivals is the strongest available validation of the
+principle the whole `text/` and `fonts/` subsystem rests on.
+
+**The contrast worth keeping is silence.** Most of the field substitutes without saying
+so. PPTXjs never measures at all and applies a global `fontSizeFactor` "browser rendering
+adjustment" — a fudge constant is exactly what a renderer needs when it has no metrics,
+and it is the clearest illustration available of what `font-substituted` exists to
+prevent. Apache POI's own developers concede `getTextHeight()` "varies from
+Windows/Linux/Mac". python-pptx closes every render-to-image issue with "use LibreOffice".
+
+Two corrections to notes elsewhere: **Collabora Online is not a JS renderer** — server-side
+LibreOffice rasterises PNG tiles and the browser is a viewport — and **nodeppt is a
+Markdown-to-HTML authoring tool, not a PPTX renderer**. Neither belongs in a comparison of
+rendering approaches.
+
 ---
 
 ## Where we are
@@ -250,6 +289,24 @@ Publishing measurements of a proprietary font is not redistributing it. Advance 
 facts about a design, which is the footing on which Carlito, Arimo and Liberation exist at
 all; no Aptos outline, table or file is in this repository.
 
+**Settled, and negative — checked again in September 2026.** There is still no open
+metric-compatible clone of Aptos, and the question does not need re-opening by the next
+person who wonders. The Document Foundation's own public position concedes that its
+proposed replacements "are not metrically compatible"; Aptos is a 2048-upem design and
+Source Sans, the usual suggestion, is 1000. The open request to adopt one anyway
+(tdf#162872, September 2024) has produced nothing. **Every non-Microsoft renderer reflows
+Aptos text today** — LibreOffice included, whose built-in Tools ▸ Options replacement
+table is empty by default.
+
+That matters beyond this entry: Aptos ships in six weights on a current PowerPoint
+install and is the default face a new deck gets, so it would be the single most important
+row of any survey of open equivalents. It is already answered. Anyone running that survey
+should skip it and spend the budget on the faces that might actually have clones.
+
+*Source note:* the bugzilla thread itself is behind Anubis and could not be fetched by two
+independent attempts, so the TDF position statement is the citation here, not the ticket
+discussion. Flagged rather than laundered into a firmer claim than it is.
+
 ### Left undone
 
 * **Emoji.** `real-product-page.pptx` renders through PowerPoint with AppleColorEmoji.
@@ -266,6 +323,72 @@ all; no Aptos outline, table or file is in this repository.
   friends are unmapped. Mapping them to a bundled family would be better than the 0.6 em
   guess, but only if the mapping is measured first — guessing is how the Caladea claim got
   in.
+* **`font_dirs` / `font_files` / `--font-dir` feed the rasteriser only.** They reach
+  `svg_to_png`; measurement has already happened by then, in `convert_pptx_to_svg`, which
+  never sees them (`__init__.py`, where `convert_pptx_to_png` calls
+  `convert_pptx_to_svg(source, options)` and only then passes the font arguments on). So
+  pointing `--font-dir` at a folder containing the face a deck asks for produces **the
+  right glyphs at guessed widths** — correct letters, wrong line breaks. That is the
+  measure-with-one-draw-with-another failure this subsystem exists to prevent, reachable
+  through a documented flag.
+
+  It is not fully silent: the face is still absent from the bundle, so `font-substituted`
+  fires and its "widths guessed" clause is true. But its "drawn with the generic family"
+  clause is then false, and **the warning gets the interesting half wrong in the
+  reassuring direction**. Worse, the `font-bundle-missing` message advises "or pass
+  `font_dirs=` explicitly" — recommending the parameter that fixes only drawing.
+
+  Callers can already get both halves right by combining `measurer=FontToolsTextMeasurer({...})`
+  with `font_dirs=`, which needs `pptx2svg[measure]`. **The CLI cannot**: there is no
+  measurer flag, so `--font-dir` is the only route a command-line user has, and it is the
+  half-right one. Three candidate fixes, none obviously best: teach `font_dirs` to feed
+  measurement as well (changes existing behaviour), add a CLI measurer option, or narrow
+  the warning text so it stops claiming to know what the rasteriser drew with.
+
+### Two open design questions, from the landscape review
+
+Neither is a defect and neither is being acted on. Both are places where LibreOffice
+encodes a distinction this library currently collapses, recorded so that whoever next
+touches `text/fontmap.py` can decide deliberately rather than rediscover the question.
+
+**1. Should the metric-compatible tier be unoverridable?**
+
+LibreOffice resolves a missing font in five steps, and the *order* is the claim.
+`PhysicalFontCollection::FindFontFamily` tries the exact name, then
+**`FindMetricCompatibleFont` — a hardcoded C++ map** (`"Arial"` → `"Liberation Sans"`,
+`"Times New Roman"` → `"Liberation Serif"`), then the fontconfig pre-match hook, then the
+configurable `VCL.xcu` substitution lists, then attribute matching. The metric map sits
+*deliberately ahead* of the configurable table, because metric compatibility is a stronger
+claim than similarity and a user's preference list should not be able to override it
+silently.
+
+The `VCL.xcu` entry, verbatim, for reference:
+
+```xml
+<node oor:name="calibri" oor:op="replace">
+  <prop oor:name="SubstFonts"><value>carlito;hiraginomarugothicpronw3;hiraginomarugothicprow3</value></prop>
+```
+
+`create_font_mapping()` merges a caller's dict straight over `DEFAULT_FONT_MAPPING` with
+no such tier. So a caller can today override Calibri → Carlito with a face that reflows
+the deck, and nothing says a word — the same silent-substitution failure the
+`font-substituted` warning exists to close, reachable through a documented parameter. The
+question is whether identity and metric-compatible rows should be structurally
+unoverridable, or whether overriding one should at least warn. Not obvious: the escape
+hatch exists because people have legitimate reasons to force a face.
+
+**2. Should the "widths guessed" tier fall back per codepoint rather than per run?**
+
+LibreOffice splits its substitution hook in two (`vcl/inc/font/fontsubstitution.hxx`):
+`PreMatchFontSubstitution`, whole-font and configured, and
+`GlyphFallbackFontSubstitution`, per-codepoint and driven by a set of missing codepoints.
+
+This library has only the whole-font kind, so a face with no clone drops its entire run on
+the generic family and the 0.6 em guess. Per-codepoint fallback would let most of a run
+resolve properly and confine the guess to the characters that genuinely have nowhere to
+go. That is the known better shape for the `missing` tier; it is not a small change, and
+it interacts with measurement, since a run drawn from two faces must be measured from two
+tables.
 
 ---
 
@@ -1499,9 +1622,12 @@ under a transform. All of them match PowerPoint already.
 
 ### 5.3 Advanced rendering (L, do last)
 
-- **Embedded fonts** (`ppt/fonts/*.fntdata`) (M) — extract, undo the trivial obfuscation,
-  pass via the existing `font_files` parameter. Best fidelity-per-effort in this group, and
-  it directly attacks the font-substitution component of the 6.84% baseline.
+- **Embedded fonts** — **moved to Phase 6, and re-estimated from M to L.** This entry used
+  to read "extract, undo the trivial obfuscation, pass via the existing `font_files`
+  parameter". Both halves were wrong: the payload is EOT and in practice MicroType-Express
+  compressed, not trivially obfuscated, and `font_files` feeds the rasteriser only, so it
+  would have drawn the right glyphs while still measuring the wrong widths. Kept visible
+  rather than deleted, because the happy path is what made it look cheap.
 - **3-D (`a:sp3d`, `a:scene3d`), bevels, reflection** (L) — SVG has no 3-D model. Target an
   approximation: bevels as light/dark edge gradients, reflection as a flipped copy under an
   opacity gradient. **[pptx-renderer]** does not attempt these either.
@@ -1516,6 +1642,170 @@ under a transform. All of them match PowerPoint already.
 
 ---
 
+## Phase 6 — Embedded fonts — **not started; read the cost before the plan**
+
+**Effort: L, with a hard dependency that could make it XL.** Phase 5.3 carried this at M
+on the assumption of "trivial obfuscation". That assumption is false, and the correction
+is the most important thing on this page.
+
+### What is there, and that nothing reads it
+
+`ppt/presentation.xml` carries `<p:embeddedFontLst>` — one `<p:embeddedFont>` per family,
+each with `<p:regular>` / `<p:bold>` / `<p:italic>` / `<p:boldItalic>` children naming
+`ppt/fonts/*.fntdata` parts by relationship id. All four faces, keyed by family name,
+exactly the shape the font subsystem wants.
+
+`grep -rln "embeddedFont\|fntdata" src/` returns nothing. The code has never heard of it.
+
+### Why this beats a larger bundle
+
+Two third-party template decks measured locally embed **Anton, Arimo, Literata,
+Merriweather Sans, Merriweather Sans Light and Inclusive Sans**. Every one of those faces
+raises `font-substituted` — "no substitute known; widths guessed, drawn with the generic
+family" — while sitting inside the file being rendered. The deck handed us the font and we
+walked past it.
+
+That is the general case, not a curiosity. Template vendors pick arbitrary Google Fonts,
+of which there are roughly 1,800 families; a bundle can never catch up, and each new deck
+brings faces nobody anticipated. Reading the file always wins, and wins for faces that did
+not exist when the release shipped.
+
+Note also which face is in that list: **Arimo, which this project already bundles.** The
+embedded-font path would have rendered it correctly all along.
+
+### The payload is EOT, not a font file
+
+Measured on both decks, and the identification is measurement rather than inference —
+`EOTSize` matching the part length to the byte on two independent files settles it:
+
+```
+part bytes   70545
+EOTSize      70545        <- matches the part length exactly
+FontDataSize 70305
+Version      0x00020002   <- EOT 2.2
+Flags        0x00000004
+bytes at (EOTSize - FontDataSize): 03 02 78 c0   <- not 00 01 00 00, not OTTO
+```
+
+### The flag reading is an inference, and must stay labelled as one
+
+Apache POI's developer list states that PPTX embedded fonts are "always in EOT format…
+subsetted and compressed… **MicroType Express (MTX) and Non-MTX**", so both variants occur
+in the wild. Reading `Flags = 0x4` as `TTEMBED_TTCOMPRESSED` is consistent with that and
+with the absent TrueType signature at the computed data offset — but **nothing has
+actually decompressed one of these files**. Until something does, "these two decks are
+MTX-compressed" is the leading hypothesis, not an established fact.
+
+**Establishing it is the first task of this phase, and it is cheap.** Run one `.fntdata`
+payload through any existing EOT decoder — libEOT, or FontForge, which reads EOT — and see
+whether a usable font falls out. That single result decides the size of everything below,
+so do it before estimating anything.
+
+### If the inference holds, MTX is the whole problem
+
+The uncompressed path is a header skip plus an optional XOR and would be an afternoon. It
+is also **not what the decks that motivated this phase contain**, so shipping only that
+path would fix nothing currently observable. Any plan that quietly scopes to non-MTX is
+back to estimating from the happy path.
+
+LibreOffice shipped PPTX embedded-font support in **25.8**, and the shape of its solution
+is the cost estimate: `EmbeddedFontsHelper::addEmbeddedFont()` in
+`vcl/source/gdi/embeddedfontshelper.cxx` writes a temporary font file, calls
+`AddTempDevFont`, and **delegates the decode to libEOT**. That is a C library. A
+pure-Python MTX decoder is a project in its own right, not a patch.
+
+**This therefore lands as an optional extra, shaped exactly like `[metafile]`** — the core
+stays standard-library-only, the decoder lives behind an extra, and a deck whose embedded
+fonts cannot be decoded degrades to today's behaviour with a warning naming the reason.
+That is the same degradation contract `metafile-rasterizer-missing` already implements, so
+there is a pattern to copy rather than a policy to invent.
+
+### The `fsType` gate is a constraint, not a nicety
+
+An embedded font carries its own embedding-permission bits in the OS/2 table's `fsType`
+field, and the foundry's restrictions travel with the file. **Both** LibreOffice
+(`EmbeddedFontsHelper::sufficientTTFRights`) **and** **[pptx-renderer]** check them before
+use, and LibreOffice 26.2 went further, replacing silent discard with a dialog telling the
+user why a font was refused.
+
+Given that this project will not put a Microsoft font in git, extracts nothing it has no
+right to, and treats measured widths as facts precisely *because* font files are not —
+using an embedded font without checking `fsType` would be out of character to the point of
+inconsistency. **Write the gate into the design before any decode code exists.** It is far
+harder to add a rights check to a working extractor than to build one that never had a
+bypass.
+
+### An extracted font must reach measurement, not just the rasteriser
+
+The obvious wiring is to hand the extracted files to `svg_to_png` through the existing
+`font_files` parameter. **That is half an implementation and the wrong half.** Those
+arguments feed the rasteriser only; by the time they are used, `convert_pptx_to_svg` has
+already measured every line from the static tables. The result would be a deck drawn in
+the face the author chose and broken in exactly the way this library was built to avoid:
+right glyphs, wrong line breaks, wrong autofit, wrong centring — and looking plausible
+enough in a screenshot to pass review.
+
+So an embedded face has to land in **both** halves: a measurer that can read the extracted
+file (`FontToolsTextMeasurer` already does this for files on disk, behind
+`pptx2svg[measure]`), and the rasteriser's font set. The measure-equals-draw invariant is
+the whole point of the subsystem, and an embedded font is no more exempt from it than
+Aptos is — where the invariant *is* deliberately broken, `Substitution.metric_compatible`
+records it and `fonts --check` fails on it.
+
+This also settles a question that would otherwise come up in review: extracting to a
+temporary file on disk is not a workaround, it is what LibreOffice does
+(`AddTempDevFont`), and it is what lets one extracted face serve both measurement and
+drawing without inventing a second in-memory path.
+
+The same gap exists today for `--font-dir` and is recorded under Fonts ▸ Left undone;
+whoever fixes it there should look at this phase first, since the two want the same
+plumbing.
+
+### The bundle is not the answer here, and for the literal version cannot be
+
+Recorded because it will be proposed again. "Put PowerPoint's default fonts in
+`pptx2svg[fonts]`" splits into two requests with opposite answers:
+
+- **Microsoft's actual font files — blocked, permanently.** Aptos, Calibri, Cambria,
+  Candara, Consolas, Constantia, Corbel and the rest are licensed to Office. No
+  Microsoft-licensed font file may enter this repository or any built artifact, and that
+  rule is not negotiable for convenience. It is also why `tools/install-fonts-debian.sh`
+  puts the ClearType set behind `--ppviewer` with an explicit licence warning instead of
+  shipping it.
+- **Open clones of them — legitimate, and partly done.** The bundle already carries six:
+  Carlito, Arimo, Tinos, Cousine, Caladea and Noto Sans JP, plus Lato and Raleway, which
+  are Office *cloud* fonts. That set covers 8 of the ~186 distinct typefaces a current
+  PowerPoint installs. The remaining ~178 include entirely ordinary menu choices — Gill
+  Sans MT, Rockwell, Franklin Gothic, Century Gothic, Garamond, Palatino Linotype, Tw Cen
+  MT, Perpetua, Bookman Old Style, the Lucida family — and a deck naming one of those
+  without embedding it gets the width guess today. Finding which have open equivalents is
+  a real and separate piece of work.
+
+The two paths are **disjoint, not competing**. Embedded fonts fix decks that carry their
+faces; clones fix decks that name a PowerPoint face and carry nothing. Neither substitutes
+for the other, and the bundle can never cover arbitrary vendor faces at all.
+
+One trap for whoever scopes the clone work: a clone that merely *looks* similar is not a
+clone that *measures* the same. This library measures with what it draws with, so a
+non-metric-compatible substitute must report `approximate`, never `compatible`. Guessing
+that distinction is how the Caladea 4.5 % error got in.
+
+### Done when
+
+- One real `.fntdata` payload has been decoded to a usable font file, and the MTX question
+  is answered by measurement rather than by citation.
+- `<p:embeddedFontLst>` is parsed into the source model, keyed by family and face.
+- An embedded face is **both measured and drawn** from the extracted file — not drawn from
+  it while measured from a guess, which is the failure `font_files` alone would have
+  produced.
+- `fsType` is checked, and a restricted font is refused with a warning that names the
+  restriction.
+- A deck whose embedded font cannot be decoded still renders, and says why.
+- The two template decks in `scratch/` render without a single "no substitute known"
+  warning, which is the observable this phase exists to move.
+
+---
+
 ## Suggested order
 
 ```
@@ -1523,7 +1813,8 @@ Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrende
                                       ├─▶ Phase 2  (SmartArt — DONE)
                                       ├─▶ Phase 4  (EMF previews — DONE)
                                       ├─▶ Phase 5.1 DONE / 5.2  (small gaps)
-                                      └─▶ Phase 3  (charts — reader + 5 types done)
+                                      ├─▶ Phase 3  (charts — reader + 5 types done)
+                                      └─▶ Phase 6  (embedded fonts — not started)
                                                               Phase 5.3 last
 ```
 
@@ -1536,7 +1827,9 @@ Revised quick wins, in order of payoff per day:
    definitions are not in the file and had to be measured out of PowerPoint.
 2. **Font metrics** — now the largest single component of the residual on every fixture,
    and the thing standing between `real-basic-theme.pptx`'s gridlines and PowerPoint's.
-   Phase 5.3's embedded fonts attack one half of it.
+   Phase 6's embedded fonts attack one half of it, and are the only half a bundle can
+   never reach; open clones for PowerPoint's own faces are the other, and the two do not
+   overlap.
 3. ~~**Phase 4 EMF previews**~~ — done; the S estimate held.
 4. ~~**Phase 2 SmartArt**~~ — done; the S estimate held.
 5. ~~**Phase 5.1 shapes**~~ — done. Not the additive, near-zero-risk job it looked
