@@ -2014,7 +2014,7 @@ Not obvious, and decided on a measurement. `real-basic-theme.pptx` embeds Ralewa
 Lato 1.104; the bundle ships later releases of both. Over the characters the two tables
 share, **338 of 340 Raleway advance widths differ** and 205 of 236 Lato ones do, and
 `"Hamburgefonstiv 12345"` measures 251.184 px from the bundled Raleway against 261.000 px
-from the deck's — **3.9 % apart, wider than the 4.5 % Caladea error this file records as a
+from the deck's — **3.9 % apart, the same order as the 4.5 % Caladea error this file records as a
 bug.** The author laid the deck out with the file inside it. So the embedded face wins, and
 `fonts --check` grades it `exact` with "drawn with the face the deck embedded", because the
 layout was measured from the very file the rasteriser is handed.

@@ -706,7 +706,7 @@ def test_the_decks_own_raleway_is_not_the_bundled_one(basic_theme):
     The deck carries Raleway 4.026; the bundle ships a later release.  Measured over the
     340 characters both tables describe, 338 advance widths differ, and "Hamburgefonstiv
     12345" at 18 pt comes out 251.184 px from the bundled table against 261.000 px from
-    the deck's own file -- 3.9% apart, wider than the 4.5% Caladea error the roadmap
+    the deck's own file -- 3.9% apart, the same order as the 4.5% Caladea error the roadmap
     records as a bug.  The author laid the deck out with the file inside it, so that is
     the file to measure.
     """

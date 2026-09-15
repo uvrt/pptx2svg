@@ -6,7 +6,9 @@
 #
 #   1. OPEN SUBSTITUTES (default).  Carlito, Caladea, Arimo, Tinos, Cousine, Noto CJK --
 #      the same faces `pip install 'pptx2svg[fonts]'` bundles, from apt.  Redistributable,
-#      metric-compatible with the Office faces, and enough for correct *layout*.
+#      metric-compatible with the Office faces -- except Caladea and Noto CJK, which
+#      are not, and which `pptx2svg fonts --check` grades `approximate` for that
+#      reason.  See FONTS.md.  Enough for correct *layout* everywhere else.
 #
 #   2. THE REST OF THE OPEN CLONES (--clones).  URW base-35, TeX Gyre, Liberation Sans
 #      Narrow, Comic Relief and Symbol Neu.  Also open, also metric-compatible, and worth
