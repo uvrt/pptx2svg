@@ -246,16 +246,32 @@ ROTATED_LABEL_OFFSET_X_PT = 2.0
 ROTATED_LABEL_OFFSET_Y_PT = 12.7
 
 #: Chart kinds laid out around a centre rather than on a pair of axes.
-POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart", "radarChart"})
+POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart", "radarChart", "ofPieChart"})
 
 #: The polar kinds that are a web of spokes rather than a ring of slices.
 RADAR_CHART_KINDS = frozenset({"radarChart"})
 
+#: A pie whose small points are pulled into a second plot beside it.
+OF_PIE_CHART_KINDS = frozenset({"ofPieChart"})
+
 #: Filled to the zero line rather than stroked through the points.
 AREA_CHART_KINDS = frozenset({"areaChart"})
 
-#: The one Cartesian kind with **two value axes and no category axis**.
-SCATTER_CHART_KINDS = frozenset({"scatterChart"})
+#: The Cartesian kinds with **two value axes and no category axis**.  A bubble is a
+#: scatter with a third dimension and shares every one of its measurements -- the plot
+#: rectangle, the unanchored axes, the coarse x axis -- so it goes through the same code.
+SCATTER_CHART_KINDS = frozenset({"scatterChart", "bubbleChart"})
+
+#: The scatter kind that draws a disc per point rather than a line through them.
+BUBBLE_CHART_KINDS = frozenset({"bubbleChart"})
+
+#: A stock chart **is a line chart**, and that is a measurement rather than a reading of
+#: the schema: a ``c:stockChart`` with no ``c:hiLowLines`` and no ``c:upDownBars`` came
+#: back from PowerPoint as one 1.5 pt polyline per series with the ordinary 6 pt marker
+#: cycle on it -- byte-identical in shape to what ``lineChart`` already draws.  The lines
+#: a real stock chart lacks are suppressed by the *file*, which writes
+#: ``<a:ln><a:noFill/></a:ln>`` on each series; nothing in the renderer hides them.
+STOCK_CHART_KINDS = frozenset({"stockChart"})
 
 #: ``c:crossBetween`` decides whether the points sit at the centres of the category bands
 #: or on the band edges, and it is optional.  **An area chart that states none draws as
@@ -361,6 +377,129 @@ PIE_LABEL_RADIUS = {
 #: The outline on a negative bar drawn hollow by ``c:invertIfNegative`` -- 0.75 pt.
 INVERTED_BAR_OUTLINE_EMU = 9525.0
 
+# -- bubbleChart ----------------------------------------------------------------------
+#
+# Thirty probe charts across three decks in the usual 220.4724 x 181.1024 pt frame,
+# exported by PowerPoint 16.106 and read back as exact path vertices.  Every circle came
+# back axis-aligned and square to 0.001 pt, so the bounding box *is* the diameter.
+
+#: The region the largest bubble is sized against: the **frame inset by 5 pt on every
+#: side**, minus the title band and the legend band, and nothing else.  It is emphatically
+#: not the plot rectangle: ``font14`` and ``font8`` move all four plot edges and draw the
+#: **same** 39.485 pt bubble, while a right legend (plot 137.805 x 145.035) draws 37.511
+#: and a top or bottom one (185.729 x 120.952) draws 33.928.
+#:
+#: The 5 pt is solved rather than guessed.  The legend band is 24.083 pt and shrinks the
+#: diameter by the ratio 33.928/39.485, so the height it eats into is
+#: ``24.083 / (1 - 33.928/39.485) = 171.12`` -- the 181.102 pt frame less **9.98**.  The
+#: side-legend probe then falls out with no further fitting: its reserve is the 47.924 pt
+#: the plot gives up, and ``(210.472 - 47.924) x 0.2308`` is 37.513 against 37.511 drawn.
+BUBBLE_REGION_INSET_PT = 5.0
+
+#: ``c:bubbleScale`` does **not** scale the diameter.  Nine scales from 1 to 300 on an
+#: identical chart give ``D = M * s / (s + 1000/3)`` where ``M`` is the short side of the
+#: region above -- a soft clamp, linear in *s* while small and approaching the region's
+#: own width as *s* grows, so a bubble can never fill more than the region:
+#:
+#: ===== ========= =========
+#: scale PowerPoint predicted
+#: ===== ========= =========
+#:   1     0.512     0.5117
+#:  10     4.983     4.9836
+#:  25    11.937    11.9374
+#:  50    22.318    22.3177
+#:  75    31.427    31.4269
+#: 100    39.485    39.4851
+#: 150    53.101    53.1007
+#: 200    64.163    64.1634
+#: 300    81.048    81.0485
+#: ===== ========= =========
+#:
+#: Worst residual **0.0005 pt**.  A linear reading is refuted at both ends: it predicts
+#: 19.74 at 50 where PowerPoint drew 22.318, and 78.97 at 200 where it drew 64.163.
+BUBBLE_SCALE_HALF = 1000.0 / 3.0
+
+#: ``c:bubbleScale`` when absent, in percent.
+DEFAULT_BUBBLE_SCALE = 100.0
+
+#: How a size becomes a diameter, relative to the largest size **across every series**.
+#: ``area`` (the default) is area-proportional -- sizes 1, 4, 9 drew 13.162, 26.323 and
+#: 39.485, exactly 1:2:3 -- and ``w`` is diameter-proportional: the same sizes with
+#: ``<c:sizeRepresents val="w"/>`` drew 4.387, 17.549 and 39.485, exactly 1:4:9.  The
+#: largest is 39.485 in both, and in four probes whose size *distribution* differs
+#: (1,2,3 / 1,4,9 / 5,5,5 / 1,2,100), so the reference is the maximum and not the sum.
+#: A two-series probe settles that the maximum is **global**: a series topping out at 9
+#: drew 27.920 beside one topping out at 18, which is 39.485 x sqrt(9/18).
+DEFAULT_SIZE_REPRESENTS = "area"
+
+#: Where a bubble's data label sits, measured from the bubble's *centre* as
+#: ``radius + gap``.  ``l``/``r`` put the label box's near edge 8.494 pt out at 10 pt --
+#: three bubbles of radius 6.581, 13.162 and 19.742 gave 8.504, 8.484 and 8.494 once each
+#: digit's own side bearing is taken out -- and ``t``/``b`` put the line box 7.25 and
+#: 6.76 pt out.  These are **not** the scatter's 6.0 and 4.85: a bubble's label stands
+#: about 2.4 pt further off its mark than a marker's does.  One font size only, so
+#: whether they are points or ems is unmeasured; they are carried as points because the
+#: line chart's legend key turned out that way.
+BUBBLE_LABEL_SIDE_GAP_PT = 8.494
+BUBBLE_LABEL_EDGE_GAP_PT = 7.0
+
+# -- ofPieChart -----------------------------------------------------------------------
+#
+# Twenty-four probe charts across two decks.  The two plots are packed across the **same
+# polar region a pie computes** -- the main pie's left edge and the second plot's right
+# edge land on the region's own edges in every probe, and both are centred on its middle
+# row to 0.001 pt.
+
+#: ``c:splitType`` when absent, and what ``auto`` means: the **last ceil(n/3) points**
+#: move to the second plot.  Measured at n = 3, 4, 6, 7 and 8, which moved 1, 2, 2, 3 and
+#: 3 -- ``round(n/3)`` is refuted by n = 4 (it predicts 1) and n = 7 (it predicts 2).
+DEFAULT_OF_PIE_SPLIT = "auto"
+OF_PIE_AUTO_DIVISOR = 3
+
+#: ``c:secondPieSize`` when absent, in percent of the first plot's radius.  Measured:
+#: 33.079 / 44.105 is 0.75 exactly, and probes at 25, 50 and 100 reproduce their own
+#: ratios to 0.001.
+DEFAULT_SECOND_PIE_SIZE = 75.0
+
+#: ``c:gapWidth`` on an ofPie, in percent of the **first plot's radius**.  With the region
+#: width ``W``, ``r = W / (2 + 2s + g/100)`` for the pie form, where ``s`` is
+#: ``secondPieSize`` as a fraction: 198.472 / 4.5 = 44.105 drawn 44.105; /4 = 49.618
+#: drawn 49.618; /5 = 39.694 drawn 39.694; /6.5 = 30.534 drawn 30.534 at ``gapWidth=300``;
+#: /3.5 = 56.706 drawn 56.706 at ``gapWidth=0`` and again at ``secondPieSize=25``.
+DEFAULT_OF_PIE_GAP_WIDTH = 100.0
+
+#: The bar form packs differently, and the divisor is **not** the pie's.  Its bar is
+#: ``s*r`` wide and ``2*s*r`` tall -- the same vertical extent a second pie of that size
+#: would have -- and the gap between the pie and the bar is **half** what it is between
+#: two pies: ``r = W / (2 + s + g/200)`` reproduces 61.068 at ``s=0.75`` and 66.157 at
+#: ``s=0.5``, both exact.  Only ``gapWidth=100`` was measured on the bar form, so the
+#: ``/200`` is the natural reading of one observation rather than a fitted slope.
+OF_PIE_BAR_GAP_DIVISOR = 2.0
+
+#: The main pie is rotated so the aggregated slice is **centred at three o'clock**,
+#: pointing at the second plot.  Five probes: its slice runs 72..108, 27..153, 54..126,
+#: 0..180 and 54..126 degrees clockwise from twelve, every one of them centred on 90.  The
+#: second plot starts at the same angle the first one does.
+OF_PIE_OTHER_ANGLE = 90.0
+
+# -- stockChart -----------------------------------------------------------------------
+#
+# Twelve probe charts.  The plot rectangle, the axis, the bands and the legend key are a
+# line chart's in every one of them.
+
+#: ``c:upDownBars/c:gapWidth`` when absent, in percent of one bar's width.  Measured: the
+#: bar came out 14.646 pt on a 36.612 pt band, which is ``band / (1 + 150/100)``; probes
+#: at 50 and 300 gave 24.410 and 9.154 against 24.408 and 9.153 predicted.
+DEFAULT_UP_DOWN_GAP_WIDTH = 150.0
+
+#: The default fills of ``c:upBars`` and ``c:downBars``.  Read off the export: #F9F9F9 and
+#: #3F3F3F, with a black 0.5 pt outline on both.  They are **not** theme accents, which is
+#: what the brief for this work expected, and they are measured on one theme only -- the
+#: Office scheme, whose ``lt1`` is white and ``dk1`` black -- so whether they are literal
+#: or derived from those two is unknown.
+DEFAULT_UP_BAR_FILL = "#F9F9F9"
+DEFAULT_DOWN_BAR_FILL = "#3F3F3F"
+
 #: Floor on the divisor that turns a category band into one bar's width.  ``c:gapWidth``
 #: is schema-bounded to 0..500 and files need not obey; -100 on a single series makes the
 #: divisor zero exactly.
@@ -375,6 +514,28 @@ DEFAULT_GAP_WIDTH = 150.0
 
 #: The six theme accents a series cycles through when it has no fill of its own.
 ACCENT_KEYS = ("accent1", "accent2", "accent3", "accent4", "accent5", "accent6")
+
+#: **Past six, the per-point accent cycle stops being the plain accents.**  Found on the
+#: ofPie probes, which always need one colour more than they have points, and it applies
+#: to any chart that colours by point: a seven-slice chart came back with accent1..accent6
+#: *darkened* and the seventh a light accent1, and a nine-slice one repeated exactly the
+#: same darkened six and then three light ones.  So the variation is per **cycle** of six
+#: and not a function of the count.
+#:
+#: The two factors are exact.  Applied to the linear-light value of each channel --
+#: ``L * 0.76`` for the first cycle and ``L + 0.23 * (1 - L)`` for the second --
+#: they reproduce **all 27 measured channels to the byte**; 0.75 and 0.25, the round
+#: numbers either side, are off by up to 1 and 5 respectively.  The conversion matters as
+#: much as the factor: the same modulation in HLS on sRGB, which is what
+#: :func:`resolve.color._apply_luminance` does for DrawingML's own ``lumMod``, puts
+#: accent1's blue channel at 150 against the 173 PowerPoint drew.  That is a real defect in
+#: the general colour transform and it is **not** fixed here -- changing it moves every
+#: deck in the corpus -- so this ramp carries its own conversion and says why.
+#:
+#: A third cycle is **not measured**: no probe had more than twelve points.  It repeats the
+#: second's tint, which is a guess and is marked as one.
+VARY_COLOR_CYCLE_SHADE = 0.76
+VARY_COLOR_CYCLE_TINT = 0.23
 
 #: Below this many major units of span, the plain power of ten is halved.  See
 #: :func:`nice_axis_scale`; the threshold is somewhere in (1.842, 4.285] and 2 is the
@@ -903,6 +1064,7 @@ class _Labels:
     show_category: bool = False
     show_series: bool = False
     show_percent: bool = False
+    show_bubble_size: bool = False
     position: str | None = None
     number_format: str | None = None
     font: "ChartFont | None" = None
@@ -911,7 +1073,11 @@ class _Labels:
     @property
     def anything(self) -> bool:
         return (
-            self.show_value or self.show_category or self.show_series or self.show_percent
+            self.show_value
+            or self.show_category
+            or self.show_series
+            or self.show_percent
+            or self.show_bubble_size
         )
 
 
@@ -993,6 +1159,18 @@ class ChartBuilder:
         return c.flat_chart_kind(self.plot.kind) in SCATTER_CHART_KINDS
 
     @property
+    def _is_bubble(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in BUBBLE_CHART_KINDS
+
+    @property
+    def _is_of_pie(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in OF_PIE_CHART_KINDS
+
+    @property
+    def _is_stock(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in STOCK_CHART_KINDS
+
+    @property
     def _radar_style(self) -> str:
         """``c:radarStyle``, normalised to what PowerPoint actually draws.
 
@@ -1006,6 +1184,8 @@ class ChartBuilder:
     def build(self) -> tuple[list[m.SlideElement], m.ChartData]:
         if self._is_radar:
             return self._build_radar()
+        if self._is_of_pie:
+            return self._build_of_pie()
         if self._is_polar:
             return self._build_polar()
         if self._is_scatter:
@@ -1040,6 +1220,413 @@ class ChartBuilder:
             value_axis=None,
             legend_position=self._legend_position(),
         )
+
+    # -- ofPieChart ---------------------------------------------------------------------
+
+    def _build_of_pie(self) -> tuple[list[m.SlideElement], m.ChartData]:
+        """A pie whose smallest points are pulled into a second plot beside it.
+
+        Twenty-four probe charts.  Everything here is the ordinary pie's -- the region, the
+        clockwise-from-twelve convention, the per-point accent cycle, the category legend
+        -- with three things of its own, all measured:
+
+        * **the two plots are packed across the region's full width**, the first's left
+          edge and the second's right edge on the region's own edges, both centred on its
+          middle row; the radius falls out of one division (:data:`DEFAULT_OF_PIE_GAP_WIDTH`);
+        * **the aggregated slice is centred at three o'clock**, which fixes the rotation of
+          both plots (:data:`OF_PIE_OTHER_ANGLE`);
+        * **the split is ``auto`` when unstated, and ``auto`` is the last ceil(n/3)
+          points** (:data:`OF_PIE_AUTO_DIVISOR`).
+        """
+        series = self._series()
+        categories = self._categories(series)
+        region = self._polar_region()
+        self._draw_background(region)
+        self._draw_title()
+        self._draw_of_pie(region, series, categories)
+        self._draw_legend(region, series, per_point=True, categories=categories)
+        return self.elements, m.ChartData(
+            kind=c.flat_chart_kind(self.plot.kind),
+            series=[
+                m.ChartSeries(
+                    name=item.name,
+                    values=list(item.values),
+                    categories=list(categories),
+                    color=item.color,
+                    format_code=item.format_code,
+                )
+                for item in series
+            ],
+            categories=list(categories),
+            title=self._title_text(),
+            grouping=self.plot.grouping,
+            bar_direction=None,
+            value_axis=None,
+            legend_position=self._legend_position(),
+        )
+
+    def _of_pie_split(self, values: list[float | None]) -> set[int]:
+        """Which point indices belong to the **second** plot.
+
+        Five spellings, four of them measured on a six-point chart of 40/25/15/10/6/4:
+
+        * ``pos`` moves the **last** ``c:splitPos`` points -- ``val="4"`` left 40 and 25 in
+          the first plot and moved the other four;
+        * ``val`` moves every point **below** ``c:splitPos`` -- ``val="12"`` moved 10, 6
+          and 4 and kept 15;
+        * ``percent`` is the same test on the point's share of the total -- ``val="15"``
+          moved 10%, 6% and 4% and kept the 15%, so the comparison is strict;
+        * ``cust`` moves exactly the ``c:secondPiePt`` indices, in their original order --
+          ``0`` and ``3`` moved 40 and 10 and left the rest, colours and all, in place;
+        * ``auto``, which is also what an absent ``c:splitType`` means, moves the last
+          ``ceil(n/3)``.  n = 3, 4, 6, 7 and 8 moved 1, 2, 2, 3 and 3 points; ``round(n/3)``
+          is refuted twice over.
+
+        A split that would move everything is drawn as PowerPoint draws it -- the first
+        plot becomes one whole-circle slice -- and one that moves nothing leaves the first
+        plot a plain pie.  **PowerPoint then draws a dark filled disc where the second plot
+        would be**, which this does not: an empty plot is drawn as nothing.
+        """
+        count = len(values)
+        if count <= 0:
+            return set()
+        kind = (self.plot.split_type or DEFAULT_OF_PIE_SPLIT).strip()
+        position = self.plot.split_position
+
+        if kind == "cust":
+            return {index for index in self.plot.custom_split if 0 <= index < count}
+        if kind == "val":
+            threshold = position if position is not None else 0.0
+            return {
+                index
+                for index, value in enumerate(values)
+                if value is not None and value < threshold
+            }
+        if kind == "percent":
+            total = sum(abs(value) for value in values if value is not None)
+            if total <= 0:
+                return set()
+            threshold = position if position is not None else 0.0
+            return {
+                index
+                for index, value in enumerate(values)
+                if value is not None and abs(value) / total * 100.0 < threshold
+            }
+        if kind == "pos":
+            moved = int(position) if position is not None else 0
+        else:  # auto, and anything a file invents
+            moved = -(-count // OF_PIE_AUTO_DIVISOR)
+        moved = min(max(moved, 0), count)
+        return set(range(count - moved, count))
+
+    def _of_pie_geometry(self, region: _Rect) -> tuple[float, float, float, float, bool]:
+        """``(first radius, first centre x, second size fraction, second centre x, is bar)``.
+
+        The packing law, measured to the last decimal on eight probes -- see
+        :data:`DEFAULT_OF_PIE_GAP_WIDTH` and :data:`OF_PIE_BAR_GAP_DIVISOR`.  The clamp
+        against the region's *height* is **not** measured: no probe frame was short enough
+        to reach it, and without it a wide frame draws a pie taller than its own region.
+        """
+        is_bar = (self.plot.of_pie_type or "pie").strip() == "bar"
+        size = self.plot.second_pie_size
+        if size is None:
+            size = DEFAULT_SECOND_PIE_SIZE
+        fraction = max(size, 0.0) / 100.0
+        gap = self.plot.gap_width
+        if gap is None:
+            gap = DEFAULT_OF_PIE_GAP_WIDTH
+        gap = max(gap, 0.0) / 100.0
+
+        if is_bar:
+            divisor = 2.0 + fraction + gap / OF_PIE_BAR_GAP_DIVISOR
+        else:
+            divisor = 2.0 + 2.0 * fraction + gap
+        radius = region.width / max(divisor, MIN_BAR_SLOTS)
+        radius = min(radius, region.height / 2)
+        if is_bar and fraction > 0:
+            radius = min(radius, region.height / (2.0 * fraction))
+        second_x = (
+            region.right - fraction * radius / 2
+            if is_bar
+            else region.right - fraction * radius
+        )
+        return radius, region.left + radius, fraction, second_x, is_bar
+
+    def _draw_of_pie(
+        self, region: _Rect, series: list[_Series], categories: list[str]
+    ) -> None:
+        if not series:
+            return
+        item = series[0]
+        values = list(item.values)
+        total = sum(abs(value) for value in values if value is not None)
+        if total <= 0:
+            return
+        moved = self._of_pie_split(values)
+        radius, first_x, fraction, second_x, is_bar = self._of_pie_geometry(region)
+        if radius <= 0:
+            return
+        middle_y = (region.top + region.bottom) / 2
+
+        other = sum(
+            abs(values[index])
+            for index in sorted(moved)
+            if index < len(values) and values[index] is not None
+        )
+        other_sweep = other / total * 360.0
+        # The aggregated slice is centred at three o'clock, so the ring of real slices
+        # starts where it ends -- and the second plot starts at the same angle.
+        start = OF_PIE_OTHER_ANGLE + other_sweep / 2
+
+        kept = [index for index in range(len(values)) if index not in moved]
+        angle = start
+        corners: list[tuple[float, float]] = []
+        for index in kept:
+            value = values[index]
+            if value is None or value == 0:
+                continue
+            sweep = abs(value) / total * 360.0
+            self._slice(
+                first_x, middle_y, 0.0, radius, angle, sweep,
+                fill=self._point_fill(item, index),
+                outline=item.point_outlines.get(index, item.outline),
+            )
+            angle += sweep
+        if other > 0:
+            # The overflow slice takes the colour one past the last point, which is what
+            # the probes show: six points came out accent1..accent6 and the slice accent1
+            # of the next cycle, and a three-point chart's came out accent4.
+            self._slice(
+                first_x, middle_y, 0.0, radius, angle, other_sweep,
+                fill=self._of_pie_other_fill(item, len(values)),
+                outline=item.outline,
+            )
+            for edge in (angle, angle + other_sweep):
+                radians = math.radians(edge)
+                corners.append((
+                    first_x + radius * math.sin(radians),
+                    middle_y - radius * math.cos(radians),
+                ))
+
+        second_radius = fraction * radius
+        if is_bar:
+            self._draw_of_pie_bar(
+                item, values, sorted(moved), other, second_x, middle_y, second_radius
+            )
+        else:
+            self._draw_of_pie_second(
+                item, values, sorted(moved), other, second_x, middle_y, second_radius, start
+            )
+        if self.plot.series_lines is not None and corners:
+            self._draw_of_pie_connector(
+                corners, second_x, middle_y, second_radius, is_bar
+            )
+        self._draw_of_pie_labels(
+            item, values, categories, kept, sorted(moved), total, other,
+            first_x, middle_y, radius, second_x, second_radius, start, is_bar,
+        )
+
+    def _of_pie_other_fill(self, item: _Series, index: int) -> m.Fill | None:
+        """The aggregated slice takes the colour **one past the last point**.
+
+        Measured on every probe: a six-point chart came out accent1..accent6 with the
+        slice in the next cycle's accent1, a four-point one put it in accent5, and a
+        three-point one in accent4.
+        """
+        if self.style.accents and self._vary_colors():
+            return m.SolidFill(color=self._cycle_accent(index, index + 1))
+        return item.fill
+
+    def _draw_of_pie_second(
+        self,
+        item: _Series,
+        values: list[float | None],
+        moved: list[int],
+        other: float,
+        centre_x: float,
+        centre_y: float,
+        radius: float,
+        start: float,
+    ) -> None:
+        if other <= 0 or radius <= 0:
+            return
+        angle = start
+        for index in moved:
+            value = values[index] if index < len(values) else None
+            if value is None or value == 0:
+                continue
+            sweep = abs(value) / other * 360.0
+            self._slice(
+                centre_x, centre_y, 0.0, radius, angle, sweep,
+                fill=self._point_fill(item, index),
+                outline=item.point_outlines.get(index, item.outline),
+            )
+            angle += sweep
+
+    def _draw_of_pie_bar(
+        self,
+        item: _Series,
+        values: list[float | None],
+        moved: list[int],
+        other: float,
+        centre_x: float,
+        centre_y: float,
+        radius: float,
+    ) -> None:
+        """The ``bar`` form's stack: ``s*r`` wide, ``2*s*r`` tall, first point on top.
+
+        Both measured -- 45.801 x 91.602 at r = 61.068 and s = 0.75, and 33.078 x 66.158
+        at r = 66.157 and s = 0.5 -- and the order is the probe's: the 60% segment sat
+        above the 40% one, which is the order the file lists them in.
+        """
+        if other <= 0 or radius <= 0:
+            return
+        width = radius
+        height = 2.0 * radius
+        left = centre_x - width / 2
+        top = centre_y - height / 2
+        for index in moved:
+            value = values[index] if index < len(values) else None
+            if value is None or value == 0:
+                continue
+            span = abs(value) / other * height
+            self._rect(
+                _Rect(left, top, left + width, top + span),
+                fill=self._point_fill(item, index),
+                outline=item.point_outlines.get(index, item.outline),
+            )
+            top += span
+
+    def _draw_of_pie_connector(
+        self,
+        corners: list[tuple[float, float]],
+        centre_x: float,
+        centre_y: float,
+        radius: float,
+        is_bar: bool,
+    ) -> None:
+        """``c:serLines`` -- two lines from the aggregated slice to the second plot.
+
+        Measured on the pie form, and the geometry is exact: each line runs from one
+        **corner of the aggregated slice** -- where its arc meets the circle -- and is
+        **tangent** to the second pie, the upper corner to the upper tangent point.  The
+        probe's upper line leaves (97.051, 76.922) for (168.104, 58.528), where the dot
+        product of the radius and the line direction is 0.000 and the drawn length
+        73.395 pt is exactly sqrt(d^2 - r^2).
+
+        Its *presence* is the switch: a probe with no ``c:serLines`` drew no connector at
+        all, and a bare one drew these two in black at 0.5 pt -- the axis default.  An
+        explicit ``<a:ln w="28575">`` in red came back red at 2.25 pt.
+
+        **The bar form is not measured** -- no probe put ``c:serLines`` on one -- so its
+        lines run to the bar's two left corners, which is the natural analogue and is
+        marked as a guess here rather than left undrawn.
+        """
+        outline = self._axis_outline(self.plot.series_lines.outline)
+        if outline is None or radius <= 0:
+            return
+        upper, lower = sorted(corners, key=lambda point: point[1])
+        if is_bar:
+            left = centre_x - radius / 2
+            self._line(upper[0], upper[1], left, centre_y - radius, outline)
+            self._line(lower[0], lower[1], left, centre_y + radius, outline)
+            return
+        for corner, want_upper in ((upper, True), (lower, False)):
+            point = _tangent_point(corner, (centre_x, centre_y), radius, want_upper)
+            if point is not None:
+                self._line(corner[0], corner[1], point[0], point[1], outline)
+
+    def _draw_of_pie_labels(
+        self,
+        item: _Series,
+        values: list[float | None],
+        categories: list[str],
+        kept: list[int],
+        moved: list[int],
+        total: float,
+        other: float,
+        first_x: float,
+        middle_y: float,
+        radius: float,
+        second_x: float,
+        second_radius: float,
+        start: float,
+        is_bar: bool,
+    ) -> None:
+        """Point labels on both plots, on the pie's own bisector rule.
+
+        **PowerPoint shrinks both plots to make room for them** -- the label probe's first
+        radius came out 37.981 against the 44.105 the same chart draws without labels, the
+        same 0.861 on both plots -- and this does not: the plots keep their full size and
+        the labels are laid over them.  That is a divergence, measured and recorded rather
+        than fitted, because one observation does not say what the reserve is a function of.
+        """
+        shares = _percent_shares([
+            abs(value) if value is not None else 0.0 for value in values
+        ])
+
+        def emit(index: int, x: float, y: float) -> None:
+            labels = item.point_labels.get(index, item.labels)
+            if labels is None or not labels.anything or labels.font is None:
+                return
+            parts: list[str] = []
+            if labels.show_series and item.name:
+                parts.append(item.name)
+            if labels.show_category and index < len(categories) and categories[index]:
+                parts.append(categories[index])
+            if labels.show_percent:
+                parts.append(f"{shares[index]}%")
+            if labels.show_value:
+                value = values[index]
+                if value is not None:
+                    parts.append(
+                        format_number(value, labels.number_format or item.format_code)
+                    )
+            if parts:
+                self._centred_label(parts, labels.font, x, y)
+
+        fraction = PIE_LABEL_RADIUS.get(
+            (item.labels.position if item.labels else None) or "bestFit", 0.710
+        )
+        angle = start
+        for index in kept:
+            value = values[index]
+            if value is None or value == 0:
+                continue
+            sweep = abs(value) / total * 360.0
+            radians = math.radians(angle + sweep / 2)
+            emit(
+                index,
+                first_x + radius * fraction * math.sin(radians),
+                middle_y - radius * fraction * math.cos(radians),
+            )
+            angle += sweep
+
+        if other <= 0:
+            return
+        if is_bar:
+            top = middle_y - second_radius
+            for index in moved:
+                value = values[index] if index < len(values) else None
+                if value is None or value == 0:
+                    continue
+                span = abs(value) / other * 2.0 * second_radius
+                emit(index, second_x, top + span / 2)
+                top += span
+            return
+        angle = start
+        for index in moved:
+            value = values[index] if index < len(values) else None
+            if value is None or value == 0:
+                continue
+            sweep = abs(value) / other * 360.0
+            radians = math.radians(angle + sweep / 2)
+            emit(
+                index,
+                second_x + second_radius * fraction * math.sin(radians),
+                middle_y - second_radius * fraction * math.cos(radians),
+            )
+            angle += sweep
 
     def _build_radar(self) -> tuple[list[m.SlideElement], m.ChartData]:
         """A radar: a value axis wrapped round a ring of category spokes.
@@ -1448,6 +2035,10 @@ class ChartBuilder:
             self._draw_areas(plot_rect, series, categories, scale)
         elif self._is_line:
             self._draw_lines(plot_rect, series, categories, scale)
+            if self._is_stock:
+                # Drawn over the series, which is the order PowerPoint emitted them in.
+                self._draw_hi_low_lines(plot_rect, series, categories, scale)
+                self._draw_up_down_bars(plot_rect, series, categories, scale)
         else:
             self._draw_bars(plot_rect, series, categories, scale)
         self._draw_axis_lines(plot_rect, scale, value_axis, category_axis)
@@ -1559,7 +2150,9 @@ class ChartBuilder:
                     self._line(x, rect.top, x, rect.bottom, outline)
 
         for index, item in enumerate(series):
-            self._draw_scatter_series(rect, item, x_values[index], x_scale, y_scale)
+            self._draw_scatter_series(
+                rect, index, item, x_values[index], x_scale, y_scale
+            )
 
         if y_axis is not None and not y_axis.delete:
             outline = self._axis_outline(y_axis.outline)
@@ -1786,18 +2379,147 @@ class ChartBuilder:
     def _draw_scatter_series(
         self,
         rect: _Rect,
+        index: int,
         item: _Series,
         xs: list[float | None],
         x_scale: tuple[float, float, float],
         y_scale: tuple[float, float, float],
     ) -> None:
         points = self._scatter_points(rect, item, xs, x_scale, y_scale)
+        if self._is_bubble:
+            self._draw_bubbles(index, item, points)
+            return
         for run in _split_runs(points):
             if len(run) > 1 and item.line is not None:
                 self._polyline(run, item.line, smooth=item.smooth)
         for point in points:
             if point is not None and item.marker_symbol:
                 self._marker(point, item)
+
+    # -- bubbles ------------------------------------------------------------------------
+
+    def _bubble_region(self) -> _Rect:
+        """What the largest bubble is sized against.
+
+        The frame inset by :data:`BUBBLE_REGION_INSET_PT` on every side, less the title
+        band and the legend band.  **Not the plot rectangle**: see the constant, where two
+        probes move every plot edge without moving the bubble and two others move only the
+        legend and do.  The legend's reserve is taken as the amount it takes off the
+        *plot*, which for a side legend is ``_legend_side_width`` minus the edge inset --
+        the side-legend probe reproduces to 0.002 pt with no constant of its own.
+        """
+        frame = self.frame
+        inset = BUBBLE_REGION_INSET_PT
+        left, right = frame.left + inset, frame.right - inset
+        top, bottom = frame.top + inset, frame.bottom - inset
+
+        title = self._title_box()
+        if title is not None:
+            top += TITLE_BAND_LINES * title.line_height
+
+        legend = self._legend_position()
+        if legend is not None and not self._legend_overlays():
+            font = self._legend_font()
+            band = LEGEND_BAND_LINES * font.box.line_height
+            if legend == "b":
+                bottom -= band
+            elif legend in ("t", "tr"):
+                top += band
+            elif legend in ("l", "r"):
+                side = self._legend_side_width(font) - EDGE_INSET_PT
+                if legend == "r":
+                    right -= side
+                else:
+                    left += side
+        return _Rect(left, top, max(right, left + 1.0), max(bottom, top + 1.0))
+
+    def _bubble_scale(self) -> float:
+        scale = self.plot.bubble_scale
+        if scale is None:
+            scale = DEFAULT_BUBBLE_SCALE
+        return max(scale, 0.0)
+
+    def _largest_bubble(self) -> float:
+        """The diameter the biggest size in the whole chart is drawn at."""
+        region = self._bubble_region()
+        scale = self._bubble_scale()
+        if scale <= 0:
+            return 0.0
+        return min(region.width, region.height) * scale / (scale + BUBBLE_SCALE_HALF)
+
+    def _bubble_reference(self) -> float:
+        """The largest ``c:bubbleSize`` across **every** series, by magnitude."""
+        sizes = [
+            abs(size)
+            for source in self.plot.series
+            for size in (source.bubble_sizes or [])
+            if size is not None
+        ]
+        return max(sizes, default=0.0)
+
+    def _bubble_diameter(self, size: float | None, reference: float, largest: float) -> float:
+        if size is None or reference <= 0 or largest <= 0:
+            return 0.0
+        share = min(abs(size) / reference, 1.0)
+        if (self.plot.size_represents or DEFAULT_SIZE_REPRESENTS) == "w":
+            return largest * share
+        return largest * math.sqrt(share)
+
+    def _bubble_sizes(self, index: int, count: int) -> list[float | None]:
+        """One series' ``c:bubbleSize``, padded to the length of its ``c:yVal``.
+
+        A short or absent list is legal; the tail reads as 1, which is what a spreadsheet
+        column of blanks would leave.  **Not measured** -- every probe states a full list.
+        """
+        source = self.plot.series[index] if index < len(self.plot.series) else None
+        sizes = list(source.bubble_sizes) if source is not None and source.bubble_sizes else []
+        if len(sizes) < count:
+            sizes += [1.0] * (count - len(sizes))
+        return sizes[:count]
+
+    def _draw_bubbles(
+        self, index: int, item: _Series, points: list[tuple[float, float] | None]
+    ) -> None:
+        """One disc per point, centred on it.
+
+        Three things the schema does not say, each measured:
+
+        * **a size of zero draws nothing** -- the ``-4, 0, 9`` probe emitted two circles;
+        * **a negative size draws its magnitude, white with a black 0.75 pt outline**, the
+          same drawing a negative bar gets, and ``<c:showNegBubbles val="0"/>`` removes it
+          outright while the element being absent or ``1`` draws it;
+        * **no outline otherwise** -- every probe disc came back filled and not stroked.
+        """
+        largest = self._largest_bubble()
+        reference = self._bubble_reference()
+        sizes = self._bubble_sizes(index, len(points))
+        show_negative = self.plot.show_negative_bubbles
+        for point, centre in enumerate(points):
+            if centre is None:
+                continue
+            size = sizes[point] if point < len(sizes) else None
+            if not size:
+                continue
+            if size < 0 and show_negative is False:
+                continue
+            diameter = self._bubble_diameter(size, reference, largest)
+            if diameter <= 0:
+                continue
+            fill = self._point_fill(item, point)
+            outline = item.point_outlines.get(point, item.outline)
+            if size < 0 and point not in item.point_fills:
+                fill = m.SolidFill(color=m.ResolvedColor(hex="#FFFFFF"))
+                outline = outline or m.Outline(
+                    width=INVERTED_BAR_OUTLINE_EMU,
+                    fill=m.SolidFill(color=m.ResolvedColor(hex=DEFAULT_AXIS_COLOR)),
+                )
+            half = diameter / 2
+            self._rect(
+                _Rect(centre[0] - half, centre[1] - half, centre[0] + half, centre[1] + half),
+                fill=fill,
+                outline=outline,
+                preset="ellipse",
+            )
 
     def _draw_scatter_labels(
         self,
@@ -1822,6 +2544,9 @@ class ChartBuilder:
             ["" if value is None else format_number(value, None) for value in column]
             for column in x_values
         ]
+        sizes = [self._bubble_sizes(order, len(item.values)) for order, item in enumerate(series)]
+        reference = self._bubble_reference() if self._is_bubble else 0.0
+        largest = self._largest_bubble() if self._is_bubble else 0.0
         totals = _percent_totals(series)
         for order, item in enumerate(series):
             xs = x_values[order]
@@ -1835,8 +2560,10 @@ class ChartBuilder:
                 # The x values *are* the categories -- `parse/chart` already caches them
                 # into `c:cat` when a scatter states none -- so `c:showCatName` prints
                 # something rather than nothing.
+                size = sizes[order][point] if point < len(sizes[order]) else None
                 text = self._label_text(
-                    labels, item, categories[order], point, value, totals
+                    labels, item, categories[order], point, value, totals,
+                    bubble_size=size if self._is_bubble else None,
                 )
                 if not text:
                     continue
@@ -1846,6 +2573,12 @@ class ChartBuilder:
                 )
                 position = (labels.position or self._label_default()).lower()
                 radius = item.marker_size / 2
+                side, edge = DATA_LABEL_LINE_GAP_EM * labels.font.size, DATA_LABEL_GAP_PT
+                if self._is_bubble:
+                    # The label stands off the *disc*, and further off it than a marker's
+                    # does: 8.494 pt against 0.6 em = 6.0, and 7.0 pt against 4.85.
+                    radius = self._bubble_diameter(size, reference, largest) / 2
+                    side, edge = BUBBLE_LABEL_SIDE_GAP_PT, BUBBLE_LABEL_EDGE_GAP_PT
                 if position == "ctr":
                     geometry = (centre[0], centre[1], "centre")
                 elif position == "l":
@@ -1856,7 +2589,7 @@ class ChartBuilder:
                     geometry = (centre[0], centre[1] + radius, "below")
                 else:
                     geometry = (centre[0] + radius, centre[1], "right")
-                self._place_label(text, labels, geometry, False)
+                self._place_label(text, labels, geometry, False, side=side, edge=edge)
 
     # -- model --------------------------------------------------------------------------
 
@@ -1917,13 +2650,16 @@ class ChartBuilder:
                 # *exactly*.  pptx-renderer darkens them to 88%, which PowerPoint does not.
                 # Kept apart from `point_fills`, which means "this point has a `c:dPt` of
                 # its own" and is what suppresses the negative-bar inversion.
+                count = self._point_color_count(len(item.values))
                 item.vary_fills = [
-                    m.SolidFill(color=self.style.accents[index % len(self.style.accents)])
+                    m.SolidFill(color=self._cycle_accent(index, count))
                     for index in range(len(item.values))
                 ]
             if (
                 self._is_line
-                or self._is_scatter
+                # A bubble series has neither: PowerPoint drew a bare disc per point on
+                # every one of the thirty probes, with no connecting stroke and no marker.
+                or (self._is_scatter and not self._is_bubble)
                 or (self._is_radar and self._radar_style != "filled")
             ):
                 # **A scatter series is styled exactly like a line series, and
@@ -1981,6 +2717,7 @@ class ChartBuilder:
             show_category=flag("show_category_name"),
             show_series=flag("show_series_name"),
             show_percent=flag("show_percent"),
+            show_bubble_size=flag("show_bubble_size"),
             position=first("position"),
             number_format=first("number_format"),
         )
@@ -2012,7 +2749,16 @@ class ChartBuilder:
 
     @property
     def _is_line(self) -> bool:
-        return c.flat_chart_kind(self.plot.kind) == "lineChart"
+        """Whether the marks are a stroke through the points with markers on it.
+
+        **A stock chart answers yes**, measured: one with neither ``c:hiLowLines`` nor
+        ``c:upDownBars`` came back from PowerPoint as a plain line chart -- 1.5 pt strokes,
+        the 6 pt diamond/square/triangle marker cycle, the line-chart legend key.  Its two
+        decorations are drawn on top of that, and the missing lines a real stock chart has
+        are the file's own ``<a:ln><a:noFill/></a:ln>``, not a rule in the renderer.
+        """
+        kind = c.flat_chart_kind(self.plot.kind)
+        return kind == "lineChart" or kind in STOCK_CHART_KINDS
 
     def _read_line_style(
         self, item: _Series, source: c.SourceChartSeries, index: int
@@ -2087,6 +2833,29 @@ class ChartBuilder:
         ) or m.Outline(
             width=DEFAULT_MARKER_OUTLINE_EMU, fill=m.SolidFill(color=item.color)
         )
+
+    def _point_color_count(self, points: int) -> int:
+        """How many colours this chart cycles through, which decides the ramp.
+
+        An ofPie needs one more than it has points: its aggregated slice takes a colour of
+        its own, and a six-point ofPie -- seven slices -- is already ramped.
+        """
+        return points + 1 if self._is_of_pie else points
+
+    def _cycle_accent(self, index: int, count: int) -> m.ResolvedColor:
+        """Accent ``index`` as drawn, given how many colours the chart needs in total.
+
+        Six or fewer and it is the plain accent; past that each cycle of six takes a
+        luminance shift.  See :data:`VARY_COLOR_CYCLE_SHADE`.
+        """
+        accents = self.style.accents
+        base = accents[index % len(accents)]
+        # The cycle is six long because a theme has six accents, not because *this* style
+        # carries six: a caller that supplies fewer still cycles PowerPoint's six.
+        if count <= len(ACCENT_KEYS):
+            return base
+        shifted = _cycle_shift(base.hex, index // len(ACCENT_KEYS))
+        return m.ResolvedColor(hex=shifted, alpha=base.alpha)
 
     def _series_color(self, fill: m.Fill | None, index: int) -> m.ResolvedColor:
         """One flat colour for the series, for its legend swatch and its fallback fill.
@@ -3062,6 +3831,103 @@ class ChartBuilder:
                 if point is not None and item.marker_symbol:
                     self._marker(point, item)
 
+    def _draw_hi_low_lines(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """``c:hiLowLines`` -- the vertical range at each category.
+
+        Measured: the probe's line runs from the largest value in the category to the
+        smallest -- 18 down to 8 on a 0..20 axis, drawn at 25.606 and 98.123 pt, both on
+        the axis to 0.001 pt -- in black at 0.5 pt, which is the axis default, and in an
+        explicit ``<a:ln w="28575">`` red at 2.25 pt when the file states one.  The
+        element's *presence* is the switch: with it absent nothing is drawn.
+
+        Only well-formed data was measured, so "the largest and smallest of every series"
+        and "the second and third series" are not separated by any probe here; the former
+        is what is implemented, because it is the one that cannot pick the wrong pair when
+        the series are ordered differently.
+        """
+        if self.plot.hi_low_lines is None or len(series) < 2 or not categories:
+            return
+        outline = self._axis_outline(self.plot.hi_low_lines.outline)
+        if outline is None:
+            return
+        xs = self._category_positions(rect, len(categories))
+        for index in range(len(categories)):
+            values = [
+                value
+                for item in series
+                if (value := _at(item.values, index)) is not None
+            ]
+            if len(values) < 2:
+                continue
+            top = self._value_to_y(rect, max(values), scale)
+            bottom = self._value_to_y(rect, min(values), scale)
+            if abs(top - bottom) < 1e-6:
+                continue
+            self._line(xs[index], top, xs[index], bottom, outline)
+
+    def _draw_up_down_bars(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """``c:upDownBars`` -- the body between the first and last series.
+
+        **The series order carries the meaning and the labels carry none**, which is the
+        measurement the brief asked for: a three-series High/Low/Close chart with
+        ``c:upDownBars`` drew all five bars *down*, from each category's High to its
+        Close, so the pair is ``series[0]`` and ``series[-1]`` and not "open and close by
+        name".  Four series drew three up bars and two down, which is where close > open
+        and where it does not.
+
+        The width is ``band / (1 + gapWidth/100)`` with the default
+        :data:`DEFAULT_UP_DOWN_GAP_WIDTH`, measured at 50, 150 and 300, and the fills are
+        :data:`DEFAULT_UP_BAR_FILL` / :data:`DEFAULT_DOWN_BAR_FILL` with a black 0.5 pt
+        outline on both.
+        """
+        bars = self.plot.up_down_bars
+        if bars is None or len(series) < 2 or not categories:
+            return
+        gap = bars.gap_width if bars.gap_width is not None else DEFAULT_UP_DOWN_GAP_WIDTH
+        band = rect.width / max(len(categories), 1)
+        width = band / max(1.0 + max(gap, 0.0) / 100.0, MIN_BAR_SLOTS)
+        xs = self._category_positions(rect, len(categories))
+
+        default_outline = m.Outline(
+            width=DEFAULT_AXIS_LINE_EMU,
+            fill=m.SolidFill(color=m.ResolvedColor(hex=DEFAULT_AXIS_COLOR)),
+        )
+        up_fill = self._resolve_fill(bars.up_fill) or m.SolidFill(
+            color=m.ResolvedColor(hex=DEFAULT_UP_BAR_FILL)
+        )
+        down_fill = self._resolve_fill(bars.down_fill) or m.SolidFill(
+            color=m.ResolvedColor(hex=DEFAULT_DOWN_BAR_FILL)
+        )
+        up_outline = self._resolve_outline(bars.up_outline) or default_outline
+        down_outline = self._resolve_outline(bars.down_outline) or default_outline
+
+        first, last = series[0], series[-1]
+        for index in range(len(categories)):
+            opening = _at(first.values, index)
+            closing = _at(last.values, index)
+            if opening is None or closing is None or opening == closing:
+                continue
+            rising = closing > opening
+            top = self._value_to_y(rect, max(opening, closing), scale)
+            bottom = self._value_to_y(rect, min(opening, closing), scale)
+            self._rect(
+                _Rect(xs[index] - width / 2, top, xs[index] + width / 2, bottom),
+                fill=up_fill if rising else down_fill,
+                outline=up_outline if rising else down_outline,
+            )
+
     def _cross_between(self) -> str:
         """``between`` puts a point at its band's centre, ``midCat`` on the band edge.
 
@@ -3494,6 +4360,7 @@ class ChartBuilder:
         point: int,
         value: float,
         percent_totals: list[float],
+        bubble_size: float | None = None,
     ) -> str:
         """The label's lines, top to bottom.
 
@@ -3513,6 +4380,8 @@ class ChartBuilder:
             parts.append(
                 format_number(value, labels.number_format or item.format_code)
             )
+        if labels.show_bubble_size and bubble_size is not None:
+            parts.append(format_number(bubble_size, labels.number_format))
         return "\n".join(parts)
 
     def _label_anchor(
@@ -3623,7 +4492,11 @@ class ChartBuilder:
         labels: _Labels,
         geometry: tuple[float, float, str],
         horizontal: bool,
+        *,
+        side: float | None = None,
+        edge: float | None = None,
     ) -> None:
+        """``side`` and ``edge`` override the two gaps a bubble measures differently."""
         x, y, placement = geometry
         font = labels.font
         assert font is not None
@@ -3636,7 +4509,7 @@ class ChartBuilder:
             baseline = y + box.ink_centre - block + box.line_height
             left, align = x - width / 2, "ctr"
         elif placement == "outside-y":
-            baseline = y - DATA_LABEL_GAP_PT - box.descent
+            baseline = y - (DATA_LABEL_GAP_PT if edge is None else edge) - box.descent
             left, align = x - width / 2, "ctr"
         elif placement == "inside-y":
             baseline = y + DATA_LABEL_INNER_GAP_PT + box.ascent
@@ -3646,16 +4519,16 @@ class ChartBuilder:
             left, align = x - width / 2, "ctr"
         elif placement == "below":
             # A scatter's `b`: the mirror of `t` about the point, measured 0.70 pt loose.
-            baseline = y + DATA_LABEL_GAP_PT + box.ascent
+            baseline = y + (DATA_LABEL_GAP_PT if edge is None else edge) + box.ascent
             left, align = x - width / 2, "ctr"
         elif placement == "right":
             baseline = y + box.ink_centre
-            left = x + DATA_LABEL_LINE_GAP_EM * box.size
+            left = x + (DATA_LABEL_LINE_GAP_EM * box.size if side is None else side)
             align = "l"
         elif placement == "left":
             # A scatter's `l`: the mirror of `r`, the same 0.6 em off the marker's edge.
             baseline = y + box.ink_centre
-            left = x - DATA_LABEL_LINE_GAP_EM * box.size - width
+            left = x - (DATA_LABEL_LINE_GAP_EM * box.size if side is None else side) - width
             align = "r"
         elif placement == "inside-x":
             baseline = y + box.ink_centre
@@ -3860,10 +4733,16 @@ class ChartBuilder:
         19.200 and 2.025 at 14 pt, and a bottom legend the same again.  They are absolute
         points.  A series with ``c:symbol val="none"`` still gets the rule, without the
         marker.
+
+        **A bubble takes the swatch**, which is the one place its legend parts company
+        with the scatter it otherwise copies: the side- and bottom-legend probes both drew
+        a 5.492 pt disc, and reading the line key there put our plot 13.4 pt narrow and the
+        drawn bubble 3.1 pt small, because the legend reserve also feeds the region the
+        largest bubble is sized against.
         """
         if (
             self._is_line
-            or self._is_scatter
+            or (self._is_scatter and not self._is_bubble)
             or (self._is_radar and self._radar_style != "filled")
         ):
             return LINE_LEGEND_KEY_PT, LINE_LEGEND_KEY_GAP_PT
@@ -4352,6 +5231,67 @@ def _translate_path(commands: str, dx: float, dy: float) -> str:
         value = float(out[index]) + (dx if position % 2 == 0 else dy)
         out[index] = f"{value:.4f}"
     return " ".join(out)
+
+
+def _to_linear(channel: float) -> float:
+    """sRGB 0..255 to linear light.  The IEC 61966-2-1 transfer, toe included."""
+    value = channel / 255.0
+    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+
+def _to_srgb(value: float) -> int:
+    value = max(0.0, min(1.0, value))
+    encoded = value * 12.92 if value <= 0.0031308 else 1.055 * value ** (1 / 2.4) - 0.055
+    return int(round(encoded * 255))
+
+
+def _cycle_shift(hex_color: str, cycle: int) -> str:
+    """The luminance variation a per-point accent takes in its *n*-th cycle of six.
+
+    See :data:`VARY_COLOR_CYCLE_SHADE`.  Cycle 0 is the plain accent when the chart needs
+    six colours or fewer; the caller decides that, because this cannot see the count.
+    """
+    text = hex_color.lstrip("#")
+    if len(text) != 6:
+        return hex_color
+    channels = [int(text[index : index + 2], 16) for index in (0, 2, 4)]
+    out = []
+    for channel in channels:
+        linear = _to_linear(channel)
+        if cycle <= 0:
+            linear *= VARY_COLOR_CYCLE_SHADE
+        else:
+            linear += VARY_COLOR_CYCLE_TINT * (1.0 - linear)
+        out.append(_to_srgb(linear))
+    return "#" + "".join(f"{value:02x}" for value in out)
+
+
+def _tangent_point(
+    origin: tuple[float, float],
+    centre: tuple[float, float],
+    radius: float,
+    upper: bool,
+) -> tuple[float, float] | None:
+    """Where a line from ``origin`` touches the circle, on the upper or lower side.
+
+    An ofPie's connector is tangent to its second pie -- measured, see
+    :meth:`ChartBuilder._draw_of_pie_connector`.  ``None`` when the origin is inside the
+    circle, which no drawable layout produces but a hand-written `c:gapWidth` can.
+    """
+    dx, dy = centre[0] - origin[0], centre[1] - origin[1]
+    distance = math.hypot(dx, dy)
+    if distance <= radius or radius <= 0:
+        return None
+    length = math.sqrt(distance * distance - radius * radius)
+    base = math.atan2(dy, dx)
+    spread = math.asin(min(radius / distance, 1.0))
+    candidates = [
+        (origin[0] + length * math.cos(base + sign * spread),
+         origin[1] + length * math.sin(base + sign * spread))
+        for sign in (1.0, -1.0)
+    ]
+    candidates.sort(key=lambda point: point[1])
+    return candidates[0] if upper else candidates[-1]
 
 
 def _percent_shares(values: list[float]) -> list[int]:

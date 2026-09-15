@@ -450,10 +450,10 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
 
     chart_xml = (
         "<?xml version='1.0'?>"
-        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:stockChart>"
+        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:surfaceChart>"
         "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
         "<c:pt idx='0'><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
-        "</c:stockChart></c:plotArea></c:chart></c:chartSpace>"
+        "</c:surfaceChart></c:plotArea></c:chart></c:chartSpace>"
     ).encode()
     frame = (
         "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Stock'/>"
@@ -482,7 +482,7 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
     options = ConvertOptions()
     convert_pptx_to_model(deck_bytes, options)
     warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
-    assert "stockChart" in warning.message
+    assert "surfaceChart" in warning.message
 
 
 # -- The probe sweep -------------------------------------------------------------------
@@ -4346,6 +4346,7 @@ def test_a_scatter_legends_with_a_rule_and_its_marker():
     class _FakeScatter:
         _is_line = False
         _is_scatter = True
+        _is_bubble = False
         _is_radar = False
         _radar_style = "marker"
 
@@ -4676,3 +4677,880 @@ def test_area_and_scatter_draw_rather_than_warning():
     # `area3DChart` degrades to `areaChart` through `flat_chart_kind`, so it draws flat.
     assert flat_chart_kind("area3DChart") == "areaChart"
 
+
+
+# -- bubbleChart -----------------------------------------------------------------------
+#
+# Thirty probe charts across three decks in the same 220.4724 x 181.1024 pt frame as the
+# scatter sweep, exported by PowerPoint 16.106 and read back as exact path vertices.  Every
+# drawn circle was axis-aligned and square to 0.001 pt, so its bounding box *is* its
+# diameter.  The tables below are PowerPoint's own numbers.
+
+BUBBLE_XS = (1, 2, 3)
+BUBBLE_YS = (3, 4, 5)
+
+
+def bubble_chart_xml(
+    *,
+    series=((BUBBLE_XS, BUBBLE_YS, (1, 4, 9)),),
+    names=("Alpha", "Beta"),
+    scale=None,
+    represents=None,
+    show_neg=None,
+    legend=None,
+    title=None,
+    dlbls=("",),
+    text_size=None,
+    fixed=True,
+):
+    """One bubble chart, in the shape the exported probe deck used."""
+
+    def cache(values):
+        points = "".join(
+            f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>"
+            for i, v in enumerate(values)
+            if v is not None
+        )
+        return (
+            "<c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+            f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef>"
+        )
+
+    body = ""
+    for index, (xs, ys, sizes) in enumerate(series):
+        body += (
+            f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+            "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>{names[index]}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+            + (dlbls[index] if index < len(dlbls) else "")
+            + f"<c:xVal>{cache(xs)}</c:xVal><c:yVal>{cache(ys)}</c:yVal>"
+            + f"<c:bubbleSize>{cache(sizes)}</c:bubbleSize></c:ser>"
+        )
+
+    tail = ""
+    if scale is not None:
+        tail += f"<c:bubbleScale val='{scale}'/>"
+    if show_neg is not None:
+        tail += f"<c:showNegBubbles val='{show_neg}'/>"
+    if represents is not None:
+        tail += f"<c:sizeRepresents val='{represents}'/>"
+
+    def axis(axis_id, cross_id, position, low, high, gridlines):
+        scaling = "<c:orientation val='minMax'/>"
+        if fixed:
+            scaling += f"<c:max val='{high}'/><c:min val='{low}'/>"
+        return (
+            f"<c:valAx><c:axId val='{axis_id}'/><c:scaling>{scaling}</c:scaling>"
+            f"<c:delete val='0'/><c:axPos val='{position}'/>"
+            + ("<c:majorGridlines/>" if gridlines else "")
+            + "<c:numFmt formatCode='General' sourceLinked='1'/>"
+            "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+            "<c:tickLblPos val='nextTo'/>"
+            f"<c:crossAx val='{cross_id}'/><c:crosses val='autoZero'/>"
+            "<c:crossBetween val='midCat'/></c:valAx>"
+        )
+
+    legend_xml = (
+        f"<c:legend><c:legendPos val='{legend}'/><c:layout/><c:overlay val='0'/></c:legend>"
+        if legend
+        else ""
+    )
+    title_xml = (
+        "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r>"
+        f"<a:rPr lang='en-US'/><a:t>{title}</a:t></a:r></a:p></c:rich></c:tx>"
+        "<c:layout/><c:overlay val='0'/></c:title><c:autoTitleDeleted val='0'/>"
+        if title
+        else "<c:autoTitleDeleted val='1'/>"
+    )
+    tx_pr = (
+        "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>"
+        f"<a:defRPr sz='{int(text_size * 100)}'/></a:pPr></a:p></c:txPr>"
+        if text_size
+        else ""
+    )
+    return (
+        f"<c:chart>{title_xml}<c:plotArea><c:layout/>"
+        f"<c:bubbleChart><c:varyColors val='0'/>{body}{tail}"
+        "<c:axId val='100002'/><c:axId val='100003'/></c:bubbleChart>"
+        + axis("100002", "100003", "b", 0, 4, False)
+        + axis("100003", "100002", "l", 0, 6, True)
+        + f"</c:plotArea>{legend_xml}"
+        f"<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>{tx_pr}"
+    )
+
+
+def _discs(children):
+    """Every drawn bubble, smallest first: ``(diameter, centre x, centre y, fill)``."""
+    out = []
+    for child in children:
+        if not isinstance(child, m.ShapeElement):
+            continue
+        if not isinstance(child.geometry, m.PresetGeometry):
+            continue
+        if child.geometry.preset != "ellipse":
+            continue
+        t = child.transform
+        out.append((
+            _pt(t.extent_width),
+            _pt(t.offset_x) + _pt(t.extent_width) / 2,
+            _pt(t.offset_y) + _pt(t.extent_height) / 2,
+            child.fill,
+        ))
+    return sorted(out, key=lambda disc: disc[0])
+
+
+#: ``c:bubbleScale`` against the diameter PowerPoint drew, on an identical chart whose
+#: sizing region is the 181.1024 pt frame less 5 pt a side.  A *linear* reading is refuted
+#: at both ends: it predicts 19.74 at 50 where PowerPoint drew 22.318, and 78.97 at 200
+#: where it drew 64.163.
+BUBBLE_SCALE_SWEEP = {
+    1: 0.512,
+    10: 4.983,
+    25: 11.937,
+    50: 22.318,
+    75: 31.427,
+    100: 39.485,
+    150: 53.101,
+    200: 64.163,
+    300: 81.048,
+}
+
+
+@pytest.mark.parametrize("scale", list(BUBBLE_SCALE_SWEEP))
+def test_bubble_scale_is_a_soft_clamp_not_a_multiplier(scale):
+    kwargs = {} if scale == 100 else {"scale": scale}
+    children, data = _build(bubble_chart_xml(**kwargs), width=FRAME_W, height=FRAME_H)
+    assert data.kind == "bubbleChart"
+    largest = _discs(children)[-1][0]
+    assert largest == pytest.approx(BUBBLE_SCALE_SWEEP[scale], abs=0.01)
+
+
+def test_a_bubbles_area_is_proportional_to_its_size():
+    """Sizes 1, 4, 9 drew 13.162, 26.323 and 39.485 -- exactly 1:2:3."""
+    children, _ = _build(bubble_chart_xml(), width=FRAME_W, height=FRAME_H)
+    diameters = [disc[0] for disc in _discs(children)]
+    assert diameters == pytest.approx([13.162, 26.323, 39.485], abs=0.01)
+
+
+def test_size_represents_w_makes_the_diameter_proportional_instead():
+    """The same sizes with ``<c:sizeRepresents val="w"/>`` drew 4.387, 17.549, 39.485."""
+    children, _ = _build(bubble_chart_xml(represents="w"), width=FRAME_W, height=FRAME_H)
+    diameters = [disc[0] for disc in _discs(children)]
+    assert diameters == pytest.approx([4.387, 17.549, 39.485], abs=0.01)
+
+
+def test_the_largest_bubble_is_the_reference_and_it_is_global():
+    """Four size distributions all drew 39.485 for their biggest, so the reference is the
+    maximum and not the sum; and a two-series probe shares one maximum across both -- a
+    series topping out at 9 drew 27.920 beside one topping out at 18."""
+    for sizes in ((1, 2, 3), (1, 4, 9), (5, 5, 5), (1, 2, 100)):
+        children, _ = _build(
+            bubble_chart_xml(series=((BUBBLE_XS, BUBBLE_YS, sizes),)),
+            width=FRAME_W,
+            height=FRAME_H,
+        )
+        assert _discs(children)[-1][0] == pytest.approx(39.485, abs=0.01)
+
+    children, _ = _build(
+        bubble_chart_xml(
+            series=(
+                (BUBBLE_XS, BUBBLE_YS, (1, 4, 9)),
+                (BUBBLE_XS, (2, 3, 4), (2, 8, 18)),
+            )
+        ),
+        width=FRAME_W,
+        height=FRAME_H,
+    )
+    diameters = [disc[0] for disc in _discs(children)]
+    assert diameters == pytest.approx(
+        [9.307, 13.162, 18.613, 26.323, 27.920, 39.485], abs=0.02
+    )
+
+
+def test_a_zero_size_draws_nothing_and_a_negative_one_draws_hollow():
+    """Sizes -4, 0, 9 drew **two** circles: the 9 in the series colour and the -4 at its
+    magnitude, white with a black 0.75 pt outline -- a negative bar's drawing.
+    ``<c:showNegBubbles val="0"/>`` removes it; the element absent or 1 keeps it."""
+    negative = ((BUBBLE_XS, BUBBLE_YS, (-4, 0, 9)),)
+    for kwargs in ({}, {"show_neg": 1}):
+        children, _ = _build(
+            bubble_chart_xml(series=negative, **kwargs), width=FRAME_W, height=FRAME_H
+        )
+        discs = _discs(children)
+        assert [disc[0] for disc in discs] == pytest.approx([26.323, 39.485], abs=0.01)
+        assert isinstance(discs[0][3], m.SolidFill)
+        assert discs[0][3].color.hex.upper() == "#FFFFFF"
+
+    children, _ = _build(
+        bubble_chart_xml(series=negative, show_neg=0), width=FRAME_W, height=FRAME_H
+    )
+    assert [disc[0] for disc in _discs(children)] == pytest.approx([39.485], abs=0.01)
+
+
+def test_a_bubbles_plot_rectangle_is_a_scatters():
+    """``bare`` in the scatter sweep is 21.073 / 13.670 / 11.102 / 24.965, and a bubble
+    with automatic axes over the same data reproduces it."""
+    children, _ = _build(
+        bubble_chart_xml(series=((BUBBLE_XS, BUBBLE_YS, (1, 2, 3)),), fixed=False),
+        width=FRAME_W,
+        height=FRAME_H,
+    )
+    ours = _insets(children)
+    for edge, truth in (
+        ("left", 21.073), ("right", 13.670), ("top", 11.102), ("bottom", 24.965)
+    ):
+        assert ours[edge] == pytest.approx(truth, abs=SWEEP_TOLERANCE_PT)
+
+
+def test_the_region_a_bubble_is_sized_against_is_not_the_plot():
+    """Two probes move every plot edge and draw the **same** bubble, and two move only the
+    legend band and change it.  ``font14`` and ``font8`` both drew 39.485; a right legend
+    drew 37.511 and a bottom one 33.928.
+
+    The title probe is measured too -- 32.631 pt, which the full pipeline reproduces to
+    0.001 -- and is **not** asserted here: this harness stubs text resolution, so its title
+    font is not the 18 pt fallback PowerPoint gave an unstyled ``c:title`` and its band is
+    2.2 pt out.  That is a property of the stub, not of the rule.
+    """
+    for kwargs, expected in (
+        ({"text_size": 14}, 39.485),
+        ({"text_size": 8}, 39.485),
+        ({"legend": "r"}, 37.511),
+        ({"legend": "b"}, 33.928),
+    ):
+        children, _ = _build(bubble_chart_xml(**kwargs), width=FRAME_W, height=FRAME_H)
+        assert _discs(children)[-1][0] == pytest.approx(expected, abs=0.15), kwargs
+
+
+def test_a_bubble_legends_with_a_swatch_not_a_rule():
+    """The one place a bubble's legend parts company with the scatter it copies.  Both
+    legend probes drew a 5.492 pt key, and the reserve feeds the sizing region too: with
+    the line key the drawn bubble came out 3.1 pt small and the plot 13.4 pt narrow."""
+    from pptx2svg.resolve.chart import (
+        ChartBuilder,
+        ChartFont,
+        LEGEND_SWATCH_EM,
+        font_box,
+    )
+
+    class _FakeBubble:
+        _is_line = False
+        _is_scatter = True
+        _is_bubble = True
+        _is_radar = False
+        _radar_style = "marker"
+
+    font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
+    key, _ = ChartBuilder._legend_key_size(_FakeBubble(), font)
+    assert key == pytest.approx(LEGEND_SWATCH_EM * 10.0, abs=0.01)
+
+
+def test_a_bubble_draws_no_line_and_no_marker():
+    """Every one of the thirty probes emitted bare discs -- no connecting stroke, no
+    marker, and no outline unless the series states one."""
+    children, _ = _build(bubble_chart_xml(), width=FRAME_W, height=FRAME_H)
+    assert _polyline_points(children) == []
+    presets = [
+        child.geometry.preset
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.geometry, m.PresetGeometry)
+        and child.text_body is None
+    ]
+    assert presets.count("ellipse") == 3
+    assert set(presets) <= {"ellipse"}
+
+
+def test_a_bubbles_label_stands_further_off_than_a_markers():
+    """``r`` puts the label box's near edge 8.494 pt past the **disc's** edge at 10 pt, on
+    three bubbles of radius 6.581, 13.162 and 19.742 -- not the scatter's 6.0 off a 3 pt
+    marker."""
+    children, _ = _build(
+        bubble_chart_xml(dlbls=(scatter_dlbls("Val", position="r"),)),
+        width=FRAME_W,
+        height=FRAME_H,
+    )
+    # The axis labels are text too, so keep only what sits beside a bubble: the y labels
+    # are at x < 20 and the x labels below y = 160.
+    boxes = [
+        _pt(shape.transform.offset_x)
+        for shape in children
+        if isinstance(shape, m.ShapeElement)
+        and shape.text_body is not None
+        and _pt(shape.transform.offset_x) > 40.0
+        and _pt(shape.transform.offset_y) < 150.0
+    ]
+    assert max(boxes) == pytest.approx(160.370 + 39.485 / 2 + 8.494, abs=0.4)
+
+
+# -- ofPieChart ------------------------------------------------------------------------
+#
+# Twenty-four probe charts across two decks, same frame, exported by PowerPoint 16.106.
+# The numbers below are read off its own path vertices: a wedge closes through the pie's
+# centre, which is the second-to-last point of the emitted path, so the radius and both
+# edge angles come out exactly.
+
+OF_PIE_VALUES = (40, 25, 15, 10, 6, 4)
+
+
+def of_pie_chart_xml(
+    *,
+    values=OF_PIE_VALUES,
+    of_pie_type="pie",
+    split_type=None,
+    split_pos=None,
+    cust_split=None,
+    second_size=None,
+    gap_width=None,
+    ser_lines=None,
+    legend=None,
+    dlbls="",
+):
+    """One ofPie chart, in the shape the exported probe deck used."""
+    cats = "".join(
+        f"<c:pt idx='{i}'><c:v>Cat{i}</c:v></c:pt>" for i in range(len(values))
+    )
+    points = "".join(f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(values))
+    series = (
+        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>Share</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        f"<c:cat><c:strRef><c:strCache><c:ptCount val='{len(values)}'/>{cats}"
+        "</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+        f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+    )
+    tail = "" if gap_width is None else f"<c:gapWidth val='{gap_width}'/>"
+    if split_type is not None:
+        tail += f"<c:splitType val='{split_type}'/>"
+    if split_pos is not None:
+        tail += f"<c:splitPos val='{split_pos}'/>"
+    if cust_split is not None:
+        body = "".join(f"<c:secondPiePt val='{i}'/>" for i in cust_split)
+        tail += f"<c:custSplit>{body}</c:custSplit>"
+    if second_size is not None:
+        tail += f"<c:secondPieSize val='{second_size}'/>"
+    if ser_lines is not None:
+        tail += f"<c:serLines>{ser_lines}</c:serLines>"
+    legend_xml = (
+        f"<c:legend><c:legendPos val='{legend}'/><c:layout/><c:overlay val='0'/></c:legend>"
+        if legend
+        else ""
+    )
+    return (
+        "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        f"<c:ofPieChart><c:ofPieType val='{of_pie_type}'/>{series}{dlbls}{tail}"
+        f"</c:ofPieChart></c:plotArea>{legend_xml}"
+        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+    )
+
+
+def _wedges(children):
+    """Every drawn wedge as ``(centre, radius, start, sweep)``, in draw order.
+
+    The path is ``M`` at the arc's start, cubics round it, then ``L`` to the centre; the
+    centre is therefore the last emitted point, which is what makes the two plots
+    separable without knowing the layout rule.
+    """
+    out = []
+    for shape, points in _custom_paths(children):
+        if len(points) < 4:
+            continue
+        centre = points[-1]
+        radius = math.hypot(points[0][0] - centre[0], points[0][1] - centre[1])
+        end = points[-2]
+
+        def clockwise(point):
+            return math.degrees(
+                math.atan2(point[0] - centre[0], centre[1] - point[1])
+            ) % 360
+
+        start = clockwise(points[0])
+        sweep = (clockwise(end) - start) % 360
+        out.append((centre, radius, start, sweep or 360.0, shape))
+    return out
+
+
+def _plots(children):
+    """The wedges grouped by the centre they share, left plot first."""
+    groups = {}
+    for centre, radius, start, sweep, shape in _wedges(children):
+        groups.setdefault((round(centre[0], 1), round(centre[1], 1)), []).append(
+            (radius, start, sweep, shape)
+        )
+    return [groups[key] for key in sorted(groups)]
+
+
+#: How many points ``auto`` moves to the second plot, at five point counts.  ``round(n/3)``
+#: is refuted twice: it predicts 1 at n=4 and 2 at n=7.
+OF_PIE_AUTO_SPLIT = {3: 1, 4: 2, 6: 2, 7: 3, 8: 3}
+
+
+@pytest.mark.parametrize("count", list(OF_PIE_AUTO_SPLIT))
+def test_an_of_pie_with_no_split_type_moves_the_last_third(count):
+    values = tuple(range(count, 0, -1))
+    children, data = _build(
+        of_pie_chart_xml(values=values), width=FRAME_W, height=FRAME_H
+    )
+    assert data.kind == "ofPieChart"
+    moved = OF_PIE_AUTO_SPLIT[count]
+    first, second = _plots(children)
+    # The first plot keeps the rest and gains one aggregated slice.
+    assert len(first) == count - moved + 1
+    assert len(second) == moved
+
+
+def test_the_four_stated_split_rules():
+    """40/25/15/10/6/4, one probe each.
+
+    * ``pos`` moves the **last** ``c:splitPos`` points;
+    * ``val`` moves every point **below** ``c:splitPos`` -- 12 moved 10, 6 and 4;
+    * ``percent`` is the same test on the share, and it is strict: 15 kept the 15%;
+    * ``cust`` moves exactly the listed indices.
+    """
+    for kwargs, kept, moved in (
+        ({"split_type": "pos", "split_pos": 4}, 2, 4),
+        ({"split_type": "val", "split_pos": 12}, 3, 3),
+        ({"split_type": "percent", "split_pos": 15}, 3, 3),
+        ({"split_type": "cust", "cust_split": (0, 3)}, 4, 2),
+    ):
+        children, _ = _build(of_pie_chart_xml(**kwargs), width=FRAME_W, height=FRAME_H)
+        first, second = _plots(children)
+        assert (len(first), len(second)) == (kept + 1, moved), kwargs
+
+
+def test_the_aggregated_slice_is_centred_at_three_oclock():
+    """Five probes, every one of them centred on 90 degrees clockwise from twelve: the
+    slice runs 72..108 here, and 27..153, 54..126, 0..180 and 54..126 on the others."""
+    children, _ = _build(of_pie_chart_xml(), width=FRAME_W, height=FRAME_H)
+    first, second = _plots(children)
+    # The aggregated slice is the last one drawn on the first plot.
+    _, start, sweep, _ = first[-1]
+    assert (start + sweep / 2) % 360 == pytest.approx(90.0, abs=0.01)
+    assert start == pytest.approx(72.0, abs=0.01)
+    assert sweep == pytest.approx(36.0, abs=0.01)
+    # Both plots start at the same angle.
+    assert first[0][1] == pytest.approx(108.0, abs=0.01)
+    assert second[0][1] == pytest.approx(108.0, abs=0.01)
+
+
+#: ``(kwargs, first radius, first centre x, second radius, second centre x)`` -- the
+#: packing law, read off six probes.  ``r = W / (2 + 2s + g/100)`` on a 198.472 pt region.
+OF_PIE_LAYOUT = {
+    "default": ({}, 44.105, 55.105, 33.079, 176.394),
+    "size50": ({"second_size": 50}, 49.618, 60.618, 24.809, 184.663),
+    "size100": ({"second_size": 100}, 39.694, 50.694, 39.694, 169.778),
+    "size25": ({"second_size": 25}, 56.706, 67.706, 14.177, 195.295),
+    "gap300": ({"gap_width": 300}, 30.534, 41.534, 22.901, 186.571),
+    "gap0": ({"gap_width": 0}, 56.706, 67.706, 42.530, 166.942),
+}
+
+
+@pytest.mark.parametrize("name", list(OF_PIE_LAYOUT))
+def test_the_two_plots_are_packed_across_the_polar_region(name):
+    kwargs, radius, centre_x, second_radius, second_x = OF_PIE_LAYOUT[name]
+    children, _ = _build(of_pie_chart_xml(**kwargs), width=FRAME_W, height=FRAME_H)
+    first, second = _plots(children)
+    assert first[0][0] == pytest.approx(radius, abs=0.02)
+    assert second[0][0] == pytest.approx(second_radius, abs=0.02)
+    centres = sorted({round(_wedge[0][0], 1) for _wedge in _wedges(children)})
+    assert centres[0] == pytest.approx(centre_x, abs=0.05)
+    assert centres[-1] == pytest.approx(second_x, abs=0.05)
+
+
+def test_the_bar_form_packs_by_a_different_divisor():
+    """``r = W / (2 + s + g/200)``: 61.068 at the default 75% and 66.157 at 50%, and the
+    bar itself is ``s*r`` wide by ``2*s*r`` tall with the first moved point on top."""
+    for kwargs, radius, width, height in (
+        ({}, 61.068, 45.801, 91.602),
+        ({"second_size": 50}, 66.157, 33.078, 66.157),
+    ):
+        children, _ = _build(
+            of_pie_chart_xml(of_pie_type="bar", **kwargs), width=FRAME_W, height=FRAME_H
+        )
+        first = _plots(children)[0]
+        assert first[0][0] == pytest.approx(radius, abs=0.02), kwargs
+        bars = sorted(
+            (
+                child
+                for child in children
+                if isinstance(child, m.ShapeElement)
+                and isinstance(child.geometry, m.PresetGeometry)
+                and child.geometry.preset == "rect"
+            ),
+            key=lambda shape: shape.transform.offset_y,
+        )
+        assert len(bars) == 2
+        assert _pt(bars[0].transform.extent_width) == pytest.approx(width, abs=0.02)
+        total = sum(_pt(bar.transform.extent_height) for bar in bars)
+        assert total == pytest.approx(height, abs=0.02)
+        # 6 and 4 of 10: the 60% segment sits above the 40% one.
+        assert _pt(bars[0].transform.extent_height) == pytest.approx(
+            height * 0.6, abs=0.02
+        )
+        assert _pt(bars[0].transform.offset_x) + width == pytest.approx(
+            FRAME_W - 11.0, abs=0.05
+        )
+
+
+def test_ser_lines_are_tangent_to_the_second_pie():
+    """Measured: each connector leaves a **corner of the aggregated slice** and touches
+    the second pie.  The upper one ran (97.051, 76.922) to (168.104, 58.528), where the
+    radius and the line are perpendicular to 0.000 and the length is sqrt(d^2 - r^2).
+
+    Presence is the switch -- a probe with no ``c:serLines`` drew none -- and the default
+    is black at 0.5 pt, the axis default.
+    """
+    children, _ = _build(of_pie_chart_xml(), width=FRAME_W, height=FRAME_H)
+    assert _lines(children) == []
+
+    children, _ = _build(of_pie_chart_xml(ser_lines=""), width=FRAME_W, height=FRAME_H)
+    lines = _lines(children)
+    assert len(lines) == 2
+    boxes = sorted(
+        (
+            (
+                _pt(line.transform.offset_x),
+                _pt(line.transform.offset_y),
+                _pt(line.transform.offset_x + line.transform.extent_width),
+                _pt(line.transform.offset_y + line.transform.extent_height),
+            )
+            for line in lines
+        ),
+        key=lambda box: box[1],
+    )
+    assert boxes[0] == pytest.approx((97.051, 58.528, 168.104, 76.922), abs=0.05)
+    assert boxes[1] == pytest.approx((97.051, 104.180, 168.104, 122.574), abs=0.05)
+
+
+def test_past_six_colours_the_accent_cycle_is_shaded_then_tinted():
+    """Found on the ofPie probes, which always need one colour more than they have points.
+
+    Seven slices came back as accent1..accent6 *darkened* and a light accent1; nine
+    repeated the same darkened six and then three light ones, so the variation is per cycle
+    of six and not a function of the count.  Both factors are exact against 27 measured
+    channels; the round numbers either side are off by up to 1 and 5.
+    """
+    from pptx2svg.resolve.chart import _cycle_shift
+
+    accents = ["#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47"]
+    shaded = ["#3b64ad", "#d26e2a", "#929292", "#e2aa00", "#5089bc", "#62993e"]
+    tinted = ["#8fa2d4", "#f1a78a", "#bfbfbf"]
+    assert [_cycle_shift(value, 0) for value in accents] == shaded
+    assert [_cycle_shift(value, 1) for value in accents[:3]] == tinted
+
+
+def test_an_of_pie_that_moves_nothing_or_everything_still_draws():
+    """``val`` with a threshold under the smallest value leaves a plain pie, and one over
+    the largest leaves the first plot a single whole-circle slice.  PowerPoint draws a dark
+    filled disc where the empty second plot would be; this draws nothing there, which is
+    the divergence and is recorded rather than reproduced."""
+    children, _ = _build(
+        of_pie_chart_xml(split_type="val", split_pos=1), width=FRAME_W, height=FRAME_H
+    )
+    plots = _plots(children)
+    assert len(plots) == 1
+    assert len(plots[0]) == len(OF_PIE_VALUES)
+
+    children, _ = _build(
+        of_pie_chart_xml(split_type="val", split_pos=100), width=FRAME_W, height=FRAME_H
+    )
+    first, second = _plots(children)
+    assert len(first) == 1
+    assert first[0][2] == pytest.approx(360.0, abs=0.01)
+    assert len(second) == len(OF_PIE_VALUES)
+
+
+# -- stockChart ------------------------------------------------------------------------
+#
+# Twelve probe charts.  The plot rectangle, the axis, the bands and the legend key came
+# back a line chart's in every one.
+
+STOCK_CATS = ("Mon", "Tue", "Wed", "Thu", "Fri")
+STOCK_OPEN = (10, 12, 11, 14, 13)
+STOCK_HIGH = (15, 16, 14, 18, 17)
+STOCK_LOW = (8, 9, 10, 12, 11)
+STOCK_CLOSE = (12, 11, 13, 13, 16)
+STOCK_OHLC = (
+    ("Open", STOCK_OPEN), ("High", STOCK_HIGH), ("Low", STOCK_LOW), ("Close", STOCK_CLOSE)
+)
+STOCK_HLC = (("High", STOCK_HIGH), ("Low", STOCK_LOW), ("Close", STOCK_CLOSE))
+
+
+def stock_chart_xml(
+    *,
+    series=STOCK_OHLC,
+    hi_low=None,
+    up_down=None,
+    up_down_gap=None,
+    up_fill=None,
+    down_fill=None,
+    legend=None,
+):
+    """One stock chart, in the shape the exported probe deck used."""
+    cats = "".join(f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(STOCK_CATS))
+    body = ""
+    for index, (name, values) in enumerate(series):
+        points = "".join(f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(values))
+        body += (
+            f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+            "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>{name}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+            f"<c:cat><c:strRef><c:strCache><c:ptCount val='{len(STOCK_CATS)}'/>{cats}"
+            "</c:strCache></c:strRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+            f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+        )
+    tail = "" if hi_low is None else f"<c:hiLowLines>{hi_low}</c:hiLowLines>"
+    if up_down is not None:
+        inner = "" if up_down_gap is None else f"<c:gapWidth val='{up_down_gap}'/>"
+        if up_fill is not None:
+            inner += f"<c:upBars>{up_fill}</c:upBars>"
+        if down_fill is not None:
+            inner += f"<c:downBars>{down_fill}</c:downBars>"
+        tail += f"<c:upDownBars>{inner}</c:upDownBars>"
+    legend_xml = (
+        f"<c:legend><c:legendPos val='{legend}'/><c:layout/><c:overlay val='0'/></c:legend>"
+        if legend
+        else ""
+    )
+    return (
+        "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        f"<c:stockChart>{body}{tail}"
+        "<c:axId val='100002'/><c:axId val='100003'/></c:stockChart>"
+        "<c:catAx><c:axId val='100002'/><c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='b'/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100003'/>"
+        "<c:crosses val='autoZero'/><c:auto val='1'/><c:lblAlgn val='ctr'/>"
+        "<c:lblOffset val='100'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/><c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        f"</c:plotArea>{legend_xml}"
+        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+    )
+
+
+def _up_down_bars(children):
+    """The open-to-close bodies, left to right, as ``(box, fill hex)``."""
+    out = []
+    for child in children:
+        if not isinstance(child, m.ShapeElement) or child.text_body is not None:
+            continue
+        if not isinstance(child.geometry, m.PresetGeometry):
+            continue
+        if child.geometry.preset != "rect" or not isinstance(child.fill, m.SolidFill):
+            continue
+        t = child.transform
+        # A square marker is a 6 pt rect with a solid fill too; the narrowest bar these
+        # probes draw is 9.154 pt, at `gapWidth=300`.
+        if _pt(t.extent_width) < 8.0:
+            continue
+        out.append((
+            (_pt(t.offset_x), _pt(t.offset_y), _pt(t.extent_width), _pt(t.extent_height)),
+            child.fill.color.hex.upper(),
+        ))
+    return sorted(out)
+
+
+def test_a_stock_chart_with_no_decorations_is_a_line_chart():
+    """Measured, and it is the opposite of what the schema's name suggests: PowerPoint
+    drew one 1.5 pt polyline per series with the ordinary marker cycle on it.  What a real
+    stock chart hides is hidden by the *file*, with `<a:ln><a:noFill/></a:ln>`."""
+    children, data = _build(stock_chart_xml(), width=FRAME_W, height=FRAME_H)
+    assert data.kind == "stockChart"
+    assert len(_polyline_points(children)) == 4
+    assert _up_down_bars(children) == []
+
+
+def test_hi_low_lines_span_the_category_and_only_when_asked():
+    """The probe's line runs from the largest value in the category to the smallest -- 15
+    down to 8 in the first -- at the band centre, in black at 0.5 pt."""
+    children, _ = _build(stock_chart_xml(), width=FRAME_W, height=FRAME_H)
+    plot = _rect_of(children)
+    before = len(_lines(children))
+
+    children, _ = _build(stock_chart_xml(hi_low=""), width=FRAME_W, height=FRAME_H)
+    added = [
+        line
+        for line in _lines(children)
+        if line.transform.extent_width == 0
+        and _pt(line.transform.offset_x) > plot[0] + 1.0
+    ]
+    assert len(added) == 5
+    assert len(_lines(children)) == before + 5
+    # 0..20 on this plot, so one unit is height/20; the first category spans 15 to 8.
+    left, top, right, bottom = plot
+    unit = (bottom - top) / 20.0
+    first = min(added, key=lambda line: line.transform.offset_x)
+    assert _pt(first.transform.offset_x) == pytest.approx(left + (right - left) / 10, abs=0.2)
+    assert _pt(first.transform.offset_y) == pytest.approx(bottom - 15 * unit, abs=0.2)
+    assert _pt(first.transform.extent_height) == pytest.approx(7 * unit, abs=0.2)
+
+
+#: ``c:upDownBars/c:gapWidth`` against the width PowerPoint drew on a 36.612 pt band.
+STOCK_GAP_SWEEP = {None: 14.646, 50: 24.410, 150: 14.646, 300: 9.154}
+
+
+@pytest.mark.parametrize("gap", list(STOCK_GAP_SWEEP))
+def test_up_down_bar_width_follows_the_gap_width(gap):
+    children, _ = _build(
+        stock_chart_xml(up_down="", up_down_gap=gap), width=FRAME_W, height=FRAME_H
+    )
+    bars = _up_down_bars(children)
+    assert len(bars) == 5
+    assert bars[0][0][2] == pytest.approx(STOCK_GAP_SWEEP[gap], abs=0.05)
+
+
+def test_up_down_bars_take_the_first_and_last_series_whatever_they_are_called():
+    """**The series order carries the meaning and the labels carry none.**  A three-series
+    High/Low/Close chart with ``c:upDownBars`` drew all five bars *down*, from each
+    category's High to its Close; four series drew three up and two down.  The defaults are
+    #F9F9F9 and #3F3F3F, which are not theme accents."""
+    children, _ = _build(stock_chart_xml(up_down=""), width=FRAME_W, height=FRAME_H)
+    fills = [fill for _, fill in _up_down_bars(children)]
+    assert fills == ["#F9F9F9", "#3F3F3F", "#F9F9F9", "#3F3F3F", "#F9F9F9"]
+
+    children, _ = _build(
+        stock_chart_xml(series=STOCK_HLC, up_down=""), width=FRAME_W, height=FRAME_H
+    )
+    bars = _up_down_bars(children)
+    assert [fill for _, fill in bars] == ["#3F3F3F"] * 5
+    left, top, right, bottom = _rect_of(children)
+    unit = (bottom - top) / 20.0
+    # The first bar runs High 15 down to Close 12.
+    assert bars[0][0][1] == pytest.approx(bottom - 15 * unit, abs=0.2)
+    assert bars[0][0][3] == pytest.approx(3 * unit, abs=0.2)
+
+
+def test_up_and_down_bar_fills_come_from_the_file_when_it_states_them():
+    red = "<c:spPr><a:solidFill><a:srgbClr val='FF0000'/></a:solidFill></c:spPr>"
+    blue = "<c:spPr><a:solidFill><a:srgbClr val='0000FF'/></a:solidFill></c:spPr>"
+    children, _ = _build(
+        stock_chart_xml(up_down="", up_fill=red, down_fill=blue),
+        width=FRAME_W,
+        height=FRAME_H,
+    )
+    fills = {fill for _, fill in _up_down_bars(children)}
+    assert fills == {"#FF0000", "#0000FF"}
+
+
+def test_the_new_four_types_and_what_still_warns():
+    """The gate in `resolve/view.py`, which is what turns a warning into a picture."""
+    from pptx2svg.resolve.view import DRAWABLE_CHART_KINDS
+
+    assert {"bubbleChart", "ofPieChart", "stockChart"} <= DRAWABLE_CHART_KINDS
+    # `surfaceChart` is deliberately still out: PowerPoint draws it as a lit 3-D mesh --
+    # both spellings, with and without `c:view3D` -- and none of that is built.  See the
+    # roadmap.
+    assert "surfaceChart" not in DRAWABLE_CHART_KINDS
+    assert flat_chart_kind("surface3DChart") == "surfaceChart"
+
+
+#: Numbers a file controls, at three frame sizes including a 1 x 1 pt one.  Every one of
+#: these was run before the rule it exercises was written; the lesson the last review left
+#: is that a measurement pins the frame and says nothing about what a hand-written number
+#: does inside it.
+DEGENERATE_CHARTS = {
+    "bubble with no sizes": lambda: bubble_chart_xml(
+        series=((BUBBLE_XS, BUBBLE_YS, (None, None, None)),)
+    ),
+    "bubble all zero": lambda: bubble_chart_xml(
+        series=((BUBBLE_XS, BUBBLE_YS, (0, 0, 0)),)
+    ),
+    "bubble scale 0": lambda: bubble_chart_xml(scale=0),
+    "of pie all zero": lambda: of_pie_chart_xml(values=(0, 0, 0)),
+    "of pie gap 5000": lambda: of_pie_chart_xml(gap_width=5000, ser_lines=""),
+    "of pie gap -500": lambda: of_pie_chart_xml(gap_width=-500, ser_lines=""),
+    "of pie second size 0": lambda: of_pie_chart_xml(
+        of_pie_type="bar", second_size=0, ser_lines=""
+    ),
+    "of pie custom split out of range": lambda: of_pie_chart_xml(
+        split_type="cust", cust_split=(99, -3)
+    ),
+    "of pie split position past the end": lambda: of_pie_chart_xml(
+        split_type="pos", split_pos=900
+    ),
+    "of pie unknown split type": lambda: of_pie_chart_xml(split_type="nonsense"),
+    "stock with one series": lambda: stock_chart_xml(
+        series=(("Only", STOCK_CLOSE),), hi_low="", up_down=""
+    ),
+    "stock gap -100": lambda: stock_chart_xml(up_down="", up_down_gap=-100),
+}
+
+
+@pytest.mark.parametrize("name", list(DEGENERATE_CHARTS))
+@pytest.mark.parametrize("size", [(FRAME_W, FRAME_H), (1.0, 1.0), (4000.0, 3.0)])
+def test_a_file_controlled_number_does_not_crash_the_new_types(name, size):
+    children, data = _build(
+        DEGENERATE_CHARTS[name](), width=size[0], height=size[1]
+    )
+    assert data.kind in ("bubbleChart", "ofPieChart", "stockChart")
+
+
+def test_a_split_that_moves_nothing_leaves_no_second_plot_and_no_connector():
+    """``cust`` with only out-of-range indices is the shape of an empty split, and the two
+    connector lines have nothing to point at."""
+    children, _ = _build(
+        of_pie_chart_xml(split_type="cust", cust_split=(99,), ser_lines=""),
+        width=FRAME_W,
+        height=FRAME_H,
+    )
+    assert len(_plots(children)) == 1
+    assert _lines(children) == []
+
+
+def test_an_office_2016_chartex_frame_says_what_it_is(authoring):
+    """A ``cx:chartSpace`` frame used to warn ``chart-unreadable``: "names no chart part".
+
+    That is true of the `c:` relationship and false about the file -- the frame's own first
+    child is *also* called ``chart``, so it fell through to the ordinary chart path with no
+    relationship id.  The family (treemap, sunburst, histogram, box-and-whisker, waterfall,
+    funnel, map) shares no markup with ``c:chartSpace``: different namespace, different
+    data model, no ``c:*Chart`` group anywhere in it.  The picture was always right -- an
+    empty positioned frame -- and only the diagnosis was wrong.
+    """
+    from tests.deckbuilder import derive_deck
+
+    cx = "http://schemas.microsoft.com/office/drawing/2014/chartex"
+    part = (
+        "<?xml version='1.0'?>"
+        f"<cx:chartSpace xmlns:cx='{cx}' "
+        "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>"
+        "<cx:chart><cx:plotArea><cx:plotAreaRegion>"
+        "<cx:series layoutId='treemap'/>"
+        "</cx:plotAreaRegion></cx:plotArea></cx:chart></cx:chartSpace>"
+    ).encode()
+    frame = (
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='91' name='Treemap'/>"
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        "<p:xfrm><a:off x='0' y='0'/><a:ext cx='2800000' cy='2300000'/></p:xfrm>"
+        f"<a:graphic><a:graphicData uri='{cx}'>"
+        f"<cx:chart xmlns:cx='{cx}' "
+        "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships' "
+        "r:id='rIdCx'/></a:graphicData></a:graphic></p:graphicFrame>"
+    )
+    deck = derive_deck(
+        authoring,
+        parts={"ppt/charts/chartEx1.xml": part},
+        shapes_xml=frame,
+        slide_relationships=[
+            (
+                "rIdCx",
+                "http://schemas.microsoft.com/office/2014/relationships/chartEx",
+                "../charts/chartEx1.xml",
+            )
+        ],
+        overrides={"ppt/charts/chartEx1.xml": "application/vnd.ms-office.chartex+xml"},
+    )
+    options = ConvertOptions()
+    model = convert_pptx_to_model(deck, options)
+    warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
+    assert "Office 2016" in warning.message
+    assert not any(w.code == "chart-unreadable" for w in options.warnings)
+    assert isinstance(model.slides[0].elements[-1], m.ShapeElement)

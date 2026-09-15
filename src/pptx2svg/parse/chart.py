@@ -140,6 +140,7 @@ class SourceChartDataLabels:
     show_category_name: bool | None = None
     show_series_name: bool | None = None
     show_percent: bool | None = None
+    show_bubble_size: bool | None = None
     show_legend_key: bool | None = None
     show_leader_lines: bool | None = None
     position: str | None = None
@@ -161,6 +162,30 @@ class SourceChartMarker:
     size: float | None = None
     fill: SourceFill | None = None
     outline: SourceOutline | None = None
+
+
+@dataclass
+class SourceChartLines:
+    """One ``c:serLines`` / ``c:hiLowLines`` / ``c:dropLines``.
+
+    The element's *presence* is the switch and its ``c:spPr`` is only the styling, so a
+    bare ``<c:serLines/>`` has to be told apart from an absent one: an ofPie probe with no
+    element drew no connector at all, and one with a bare element drew two black 0.5 pt
+    tangents.  Reading the outline alone would collapse the two.
+    """
+
+    outline: SourceOutline | None = None
+
+
+@dataclass
+class SourceChartUpDownBars:
+    """``c:upDownBars`` -- the open-to-close body of a stock chart."""
+
+    gap_width: float | None = None
+    up_fill: SourceFill | None = None
+    up_outline: SourceOutline | None = None
+    down_fill: SourceFill | None = None
+    down_outline: SourceOutline | None = None
 
 
 @dataclass
@@ -262,6 +287,25 @@ class SourceChartPlot:
     radar_style: str | None = None
     marker: bool | None = None
     data_labels: SourceChartDataLabels | None = None
+    #: ``c:bubbleScale`` in percent, ``c:sizeRepresents`` (``area`` or ``w``),
+    #: ``c:showNegBubbles`` and ``c:bubble3D``.
+    bubble_scale: float | None = None
+    size_represents: str | None = None
+    show_negative_bubbles: bool | None = None
+    bubble_3d: bool | None = None
+    #: ``c:ofPieType`` -- ``pie`` or ``bar`` -- and how the points are divided between the
+    #: two plots: ``c:splitType`` with ``c:splitPos``, or ``c:custSplit``'s explicit list.
+    of_pie_type: str | None = None
+    split_type: str | None = None
+    split_position: float | None = None
+    custom_split: list[int] = field(default_factory=list)
+    #: ``c:secondPieSize`` in percent of the first plot's radius.
+    second_pie_size: float | None = None
+    #: ``c:serLines`` -- the connector between an ofPie's two plots.
+    series_lines: SourceChartLines | None = None
+    #: ``c:hiLowLines`` and ``c:upDownBars`` -- a stock chart's two decorations.
+    hi_low_lines: SourceChartLines | None = None
+    up_down_bars: SourceChartUpDownBars | None = None
 
 
 @dataclass
@@ -369,7 +413,52 @@ def _plot(node: Element) -> SourceChartPlot:
         radar_style=attr(child(node, "radarStyle"), "val"),
         marker=_optional_flag(child(node, "marker")),
         data_labels=_data_labels(child(node, "dLbls")),
+        bubble_scale=num_attr(child(node, "bubbleScale"), "val"),
+        size_represents=attr(child(node, "sizeRepresents"), "val"),
+        show_negative_bubbles=_optional_flag(child(node, "showNegBubbles")),
+        bubble_3d=_optional_flag(child(node, "bubble3D")),
+        of_pie_type=attr(child(node, "ofPieType"), "val"),
+        split_type=attr(child(node, "splitType"), "val"),
+        split_position=num_attr(child(node, "splitPos"), "val"),
+        custom_split=_custom_split(child(node, "custSplit")),
+        second_pie_size=num_attr(child(node, "secondPieSize"), "val"),
+        series_lines=_chart_lines(child(node, "serLines")),
+        hi_low_lines=_chart_lines(child(node, "hiLowLines")),
+        up_down_bars=_up_down_bars(child(node, "upDownBars")),
     )
+
+
+def _chart_lines(node: Element | None) -> SourceChartLines | None:
+    """``c:serLines`` / ``c:hiLowLines``: present means draw, ``c:spPr`` only styles."""
+    if node is None:
+        return None
+    return SourceChartLines(outline=parse_outline(child(node, "spPr")))
+
+
+def _up_down_bars(node: Element | None) -> SourceChartUpDownBars | None:
+    if node is None:
+        return None
+    up = child(node, "upBars")
+    down = child(node, "downBars")
+    return SourceChartUpDownBars(
+        gap_width=num_attr(child(node, "gapWidth"), "val"),
+        up_fill=parse_fill(child(up, "spPr")) if up is not None else None,
+        up_outline=parse_outline(child(up, "spPr")) if up is not None else None,
+        down_fill=parse_fill(child(down, "spPr")) if down is not None else None,
+        down_outline=parse_outline(child(down, "spPr")) if down is not None else None,
+    )
+
+
+def _custom_split(node: Element | None) -> list[int]:
+    """``c:custSplit`` -- the point indices that belong to the *second* plot."""
+    if node is None:
+        return []
+    out = []
+    for point in children(node, "secondPiePt"):
+        index = int_attr(point, "val")  # `c:secondPiePt` carries the index on itself
+        if index is not None and index >= 0:
+            out.append(index)
+    return out
 
 
 def _series(ser: Element, fallback_index: int) -> SourceChartSeries:
@@ -450,6 +539,7 @@ def _data_labels(d_lbls: Element | None) -> SourceChartDataLabels | None:
         show_category_name=_optional_flag(child(d_lbls, "showCatName")),
         show_series_name=_optional_flag(child(d_lbls, "showSerName")),
         show_percent=_optional_flag(child(d_lbls, "showPercent")),
+        show_bubble_size=_optional_flag(child(d_lbls, "showBubbleSize")),
         show_legend_key=_optional_flag(child(d_lbls, "showLegendKey")),
         show_leader_lines=_optional_flag(child(d_lbls, "showLeaderLines")),
         position=attr(child(d_lbls, "dLblPos"), "val"),
