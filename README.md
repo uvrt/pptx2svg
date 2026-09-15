@@ -210,6 +210,11 @@ refused, and the failure looks like a corrupt deck rather than a permissions pro
 
 ## Fonts
 
+> **[FONTS.md](FONTS.md) answers one question end to end: *the deck names font X — will it
+> be drawn correctly, and if not, what do I do?*** It has a scan table keyed on font name,
+> all five ways a face gets drawn, and the escape hatches with their trap. What follows here
+> is the summary.
+
 Office's typefaces are proprietary and cannot be redistributed. Layout is therefore
 computed from the advance widths of open fonts built to match them, and **those same
 files are what the rasteriser draws with** — measuring with one face and drawing with
@@ -246,7 +251,8 @@ Office default since 2023, has no open clone at all — we measure it with its o
 (so line breaks match PowerPoint) and draw it with Carlito, whose widths sit closest of
 anything shippable, −3.6 % on a representative sentence. Noto Sans JP is not
 metric-compatible with MS Gothic or Meiryo either; nothing is, and a Gothic standing in
-for a Gothic beats a Latin fallback.
+for a Gothic beats a Latin fallback. The measurements behind all three, and what to do
+about each, are in [FONTS.md](FONTS.md#the-five-ways-a-font-gets-drawn).
 
 ‡ Debian does not package Raleway. Use the pip bundle, or Google Fonts.
 
@@ -313,7 +319,8 @@ guarantee than any clone offers, so it wins even where a substitute exists.
 `exact` and `compatible` are faithful; `approximate` and `missing` are not, and `--check`
 exits non-zero on them so a deck that cannot be rendered faithfully fails a build instead
 of shipping wrong pixels. The same information reaches library callers as
-`font-substituted` warnings on `ConvertOptions.warnings`.
+`font-substituted` warnings on `ConvertOptions.warnings`. What each grade means and what to
+do about a bad one: [FONTS.md](FONTS.md#the-four-grades).
 
 ### Without the bundle
 
@@ -340,6 +347,13 @@ ConvertOptions(font_mapping={"Helvetica Neue": "Inter"})
 ```
 
 On the command line: `--system-fonts`, `--no-bundled-fonts`, `--font-dir DIR`.
+
+**One trap, stated plainly.** `font_dirs`, `font_files` and `--font-dir` reach the
+rasteriser *after* measurement has already happened, so pointing them at the face a deck
+asks for gives right glyphs at guessed widths — correct letters, wrong line breaks. The
+complete route is `measurer=FontToolsTextMeasurer({...})` *and* `font_dirs=`, which needs
+`pptx2svg[measure]`; the CLI has no measurer flag, so this one needs the Python API. See
+[FONTS.md](FONTS.md#the-escape-hatches-and-their-trap).
 
 ### Debian and other Linux hosts
 
@@ -377,6 +391,8 @@ character by character against the PowerPoint face it substitutes for; the numbe
 `ROADMAP.md` under *The clone landscape*. These are not in the wheel because the wheel
 *redistributes* and their licences (AGPL and GPL-2, both with document-embedding
 exceptions) do not permit that; installing them from Debian's archive is a different act.
+Installing a clone under its own name does not by itself make pptx2svg use it — see
+[FONTS.md](FONTS.md#4-a-clone-exists-but-is-not-bundled) for the two lines it needs.
 
 `--mscorefonts` installs Debian's `ttf-mscorefonts-installer` from **contrib**, which
 presents Microsoft's EULA through debconf — use `--accept-eula` to preseed it for a fleet.
