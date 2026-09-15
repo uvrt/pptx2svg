@@ -120,14 +120,48 @@ def _resolve_dimensions(
     )
 
 
+def _unscaled_text_frame(
+    transform: m.Transform, context: RenderContext
+) -> tuple[m.Transform, str]:
+    """The frame to lay text out in, and the transform that puts it back on the slide.
+
+    Inside a group, the caller's coordinate space is the group's *child* space: one unit
+    there is ``group_scale`` units on the slide.  PowerPoint scales the frame with the
+    group and leaves the type inside it alone (see :attr:`RenderContext.group_scale`), so
+    the layout has to happen in slide units -- the frame grown by the scale, with the
+    font sizes, insets and spacings exactly as authored -- and the result shrunk back
+    into child space on the way out.
+
+    Doing it this way rather than dividing the font size by the scale is what makes the
+    non-uniform case come out right: the counter-scale cancels the group's scale on both
+    axes, so the glyphs are neither shrunk nor stretched, which is what PowerPoint draws.
+    """
+    scale_x, scale_y = context.group_scale
+    # A degenerate scale means the group had a zero extent somewhere; `render_group`
+    # already fell back to identity for that, so there is nothing to undo here either.
+    if (scale_x, scale_y) == (1.0, 1.0) or not scale_x or not scale_y:
+        return transform, ""
+    frame = replace(
+        transform,
+        extent_width=transform.extent_width * scale_x,
+        extent_height=transform.extent_height * scale_y,
+    )
+    return frame, f"scale({num(1 / scale_x)}, {num(1 / scale_y)})"
+
+
 def render_text_body(
     text_body: m.TextBody, transform: m.Transform, context: RenderContext
 ) -> str:
     """Render a text body, flowing it into columns when ``a:bodyPr@numCol`` asks for them."""
     body = text_body.body_properties
+    frame, undo_group_scale = _unscaled_text_frame(transform, context)
     if body.num_col > 1 and body.vert == "horz":
-        return _render_columns(text_body, transform, context)
-    return _render_column(text_body, transform, context)
+        rendered = _render_columns(text_body, frame, context)
+    else:
+        rendered = _render_column(text_body, frame, context)
+    if rendered and undo_group_scale:
+        rendered = f'<g transform="{undo_group_scale}">{rendered}</g>'
+    return rendered
 
 
 def _render_columns(
@@ -1429,15 +1463,22 @@ def _shrink_to_fit_scale(
 def compute_sp_autofit_height(
     text_body: m.TextBody, transform: m.Transform, context: RenderContext
 ) -> float | None:
-    """``spAutofit``: grow the shape to fit its text.  ``None`` when it already fits."""
+    """``spAutofit``: grow the shape to fit its text.  ``None`` when it already fits.
+
+    The answer is in the caller's coordinate space, which inside a group is the group's
+    child space -- so the text is measured in slide units against the grown frame and the
+    height divided back down, the same round trip :func:`_unscaled_text_frame` does.
+    """
     body = text_body.body_properties
     paragraphs = text_body.paragraphs
 
     if not any(run.text for para in paragraphs for run in para.runs):
         return None
 
+    frame, _ = _unscaled_text_frame(transform, context)
+    _, scale_y = context.group_scale
     dims = _resolve_dimensions(
-        body, emu_to_px(transform.extent_width), emu_to_px(transform.extent_height)
+        body, emu_to_px(frame.extent_width), emu_to_px(frame.extent_height)
     )
     full_text_width = dims.width - dims.margin_left - dims.margin_right
     num_col = max(1, body.num_col)
@@ -1459,4 +1500,4 @@ def compute_sp_autofit_height(
     required = height + dims.margin_top + dims.margin_bottom
     if required <= dims.height:
         return None
-    return px_to_emu(required)
+    return px_to_emu(required) / (scale_y or 1.0)

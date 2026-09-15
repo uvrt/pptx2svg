@@ -40,6 +40,28 @@ def test_custom_geometry_is_scaled_onto_the_shape_box():
     assert 'transform="scale(2, 0.5)"' in svg
 
 
+def test_a_path_authored_in_emu_is_not_scaled_away_to_nothing():
+    """The scale factor is a multiplier, so it must not be rounded like a coordinate.
+
+    Every Google Slides export writes its custom paths in EMU -- ``<a:path w="2387010"
+    h="161597">`` on a shape 250 px wide -- which maps onto the shape by 1.05e-4.  Rounded
+    to three decimals, the way a px coordinate can safely be, that is ``scale(0, 0)`` and
+    the shape draws as nothing at all.  Found on slide 1 of a Google Slides sales
+    template, where it swallowed the gradient pill behind the subtitle and the logo mark.
+    """
+    geometry = m.CustomGeometry(
+        paths=[
+            m.CustomGeometryPath(
+                width=2387010, height=161597, commands="M 0 0 L 2387010 161597"
+            )
+        ]
+    )
+    svg = render_geometry(geometry, 250.614, 16.971)
+    scale_x, scale_y = re.search(r"scale\(([\d.e-]+), ([\d.e-]+)\)", svg).groups()
+    assert float(scale_x) == pytest.approx(250.614 / 2387010, rel=1e-9)
+    assert float(scale_y) == pytest.approx(16.971 / 161597, rel=1e-9)
+
+
 # -- Transforms ------------------------------------------------------------------------
 
 

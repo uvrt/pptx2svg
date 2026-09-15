@@ -153,6 +153,11 @@ def render_group(group: "m.GroupElement | m.ChartElement", context: RenderContex
     A group declares both where it sits (``a:off``/``a:ext``) and what coordinate system
     its children were authored in (``a:chOff``/``a:chExt``).  The composite transform is
     ``T(off) . R . F . S(ext/chExt) . T(-chOff)``, and nested groups compose outward-in.
+
+    The scale part of that is geometry-only: PowerPoint draws text inside a group at the
+    point size it was authored at, however far the group stretches its children's
+    coordinate space.  The factor is recorded on the context so the text renderer can
+    undo it; see :attr:`RenderContext.group_scale` for the measurements.
     """
     x = emu_to_px(group.transform.offset_x)
     y = emu_to_px(group.transform.offset_y)
@@ -183,9 +188,14 @@ def render_group(group: "m.GroupElement | m.ChartElement", context: RenderContex
     parts.append(f"scale({num(scale_x)}, {num(scale_y)})")
     parts.append(f"translate({num(-child_x)}, {num(-child_y)})")
 
-    children = "".join(
-        rendered
-        for rendered in (render_element(child, context) for child in group.children)
-        if rendered
-    )
+    outer_scale = context.group_scale
+    context.group_scale = (outer_scale[0] * scale_x, outer_scale[1] * scale_y)
+    try:
+        children = "".join(
+            rendered
+            for rendered in (render_element(child, context) for child in group.children)
+            if rendered
+        )
+    finally:
+        context.group_scale = outer_scale
     return f'<g transform="{" ".join(parts)}">{children}</g>'
