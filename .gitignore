@@ -38,3 +38,6 @@ venv/
 /tests/local-fonts/
 /oracle-fonts/
 *.ttf.local
+
+# Local scratch: render script and its PNG output, not part of the project.
+/scratch/

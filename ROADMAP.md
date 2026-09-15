@@ -31,15 +31,15 @@ after it needs a way to tell "better" from "different".
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
-| Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
-| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 133 probe charts and all 7 real ones; every other chart type warns and draws an empty frame |
+| Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified**; cell text now takes a table style's `tcTxStyle` over the master's `otherStyle` |
+| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. Category labels wrap at whitespace and turn 45° only when their widest unbreakable token still will not fit. Every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
 | Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
 
-356 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
+1,975 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
 independently testable, and every phase below slots into exactly one of them.
 
 ### Shape identity
@@ -56,65 +56,83 @@ pair `(id, path)` is unique, and a downstream consumer needs both to address a s
 
 ### Measured baseline
 
-Against real PowerPoint output, every slide of every fixture, at 1280 px wide, produced
-by `tools/fidelity.py`.
+Against real PowerPoint output, every slide of every fixture, produced by
+`tools/fidelity.py` and recorded in `tests/fidelity-baselines.json`.
 
-**These numbers mean something different from the ones they replace.** Every earlier
-table on this page was partly a measurement of font availability: PowerPoint drew with
+**These numbers mean something different from the ones they replace.** Every table that
+used to sit here was partly a measurement of font availability: PowerPoint drew with
 Microsoft's Calibri, Cambria and Aptos, our side drew with whatever resvg could find, and
 for five of the seven fixtures that was a generic sans. The difference between the two
 images was dominated by glyph shape before the renderer had done anything at all. The
 harness now renders our side with the *same licensed faces* PowerPoint used, read in
-place through a gitignored local profile, and a deck whose faces PowerPoint did not have
-either is skipped rather than scored against Microsoft's own fallback.
+place through a gitignored local profile, and **a deck whose faces PowerPoint did not have
+either is skipped rather than scored against Microsoft's own fallback**.
 
-So the columns below are not comparable with the "pre" and "P1" columns that used to be
-here; they were taken under a different and less honest configuration. What *is*
-comparable is before/after within this table, both measured with PowerPoint's faces on
-both sides.
-
-| Fixture | SSIM before / after | hist before / after | >10/255 before / after |
+| Fixture | SSIM | hist | Gate (≥0.95 / ≥0.80) |
 | --- | --- | --- | --- |
-| `authoring-integration.pptx` | 0.7666 / 0.7661 | 0.797 / 0.796 | 6.80 / 6.76 |
-| `real-basic-theme.pptx` | 0.9658 / **0.9674** | 1.000 / 1.000 | 1.58 / **1.52** |
-| `sample.pptx` | 0.1178 / 0.1178 | 0.974 / 0.974 | 2.49 / 2.49 |
-| `table test.pptx` | 0.9490 / **0.9531** | 0.998 / 0.998 | 1.26 / **1.19** |
-| `real-financial-report.pptx` | skipped | — | — |
-| `real-product-page.pptx` | skipped | — | — |
-| `sample-issue-387.pptx` | skipped | — | — |
+| `table test.pptx` | **0.9895** | 0.9984 | pass |
+| `authoring-integration.pptx` | 0.9327 | 0.9984 | SSIM |
+| `real-college-template.pptx` | 0.8003 | 0.8753 | SSIM, hist |
+| `real-basic-theme.pptx` | skipped | — | PowerPoint drew MS Gothic where the deck names ＭＳ Ｐゴシック |
+| `sample.pptx` | skipped | — | same |
+| `real-financial-report.pptx` | skipped | — | no Noto Sans JP on this machine, so PowerPoint substituted too |
+| `real-product-page.pptx` | skipped | — | same |
+| `sample-issue-387.pptx` | skipped | — | same |
 
-"before" is c57ca8f, "after" is the font work, both under the same font profile.
+**Five of eight fixtures cannot be scored at all, and that is the single biggest hole in
+this project's feedback loop.** Not because the renderer is wrong on them — because the
+oracle and the renderer disagree about which *face* to draw, so any number would measure
+font resolution rather than layout. Two routes close it, neither taken here because both
+change the developer's machine rather than the repository: install Noto Sans JP where
+PowerPoint can see it (`~/Library/Fonts`) and re-export the three decks that name it, or
+rewrite the two Japanese decks' themes to name `MS Gothic` — the face PowerPoint actually
+resolves — instead of ＭＳ Ｐゴシック.
 
-Two honest observations about that table.
+`real-college-template.pptx` was added specifically to escape that trap: it names only
+Arial, Calibri and Wingdings, all of which this machine has, so it is **the first
+real-world deck in the corpus that is measurable rather than skipped**. Its nine slides:
 
-**The gains are small, and that is the finding.** Bundling the right fonts and generating
-the metrics from them removes a whole class of wrongness, but on a corpus scored with
-PowerPoint's own faces on *both* sides there was never much font-related error left to
-remove — the errors that remain are geometric. `table test.pptx` crossing the 0.95 gate
-is the one visible win, and it comes from Aptos Display finally having a metrics table.
+| slide | SSIM | hist | what is left |
+| --- | --- | --- | --- |
+| 1 | 0.9931 | 1.0000 | — |
+| 2 | 0.9870 | 0.9998 | — |
+| 3 | 0.7627 | 0.1195 | CMYK in an EMF: pdfium and Quartz disagree on the logo's red by a visible amount. 2.9% coverage, nearly all logo, is why one hue moves the histogram this far. Needs an ICC transform in `metafile/pdf.py`, and the answer would be machine-specific. |
+| 4 | 0.3721 | 0.9899 | `c:userShapes`, literal text in a number format, a manually laid out legend, the plot area's own `c:spPr` border. See Phase 3. |
+| 5 | 0.9528 | 0.9997 | — |
+| 6 | 0.7372 | 0.9611 | Line tops now agree within 1–2 px; at 20 pt over 5% coverage that alone costs most of the SSIM. |
+| 7 | 0.5112 | 0.9715 | same |
+| 8 | 0.8869 | 0.8365 | A 441 kB JPEG: our resampling and colour differ slightly from pdfium's at 58% coverage. |
+| 9 | 1.0000 | 1.0000 | sparse — too little foreground to judge |
 
-**Three fixtures are skipped, and that is fixable.** They name `Noto Sans JP`, which
-PowerPoint does not have on this machine, so its export is already drawn with a
-substitute of its own choosing. Installing Noto Sans JP where PowerPoint can see it
-(`~/Library/Fonts`) and re-exporting would make all three comparable again. It was not
-done here because it changes the developer's machine, not the repository.
+### Two limits of this oracle, worth knowing before chasing a number
+
+**The oracle is localised.** This Office install renders decimals with a comma (`$8,0`,
+`($1,0)`), so slide 4's numeric text can never match character-for-character regardless of
+what the number-format code does.
+
+**The metric is not monotone in geometric accuracy.** Measured, not assumed: setting slide
+4's plot bottom to PowerPoint's own *to the pixel* scores 0.4704 SSIM / 0.9842 hist, while
+reserving one label line instead of the two PowerPoint drew — a band 11.5 pt too short —
+reproduces its old 0.9950 histogram exactly. The last half-percent on that slide is only
+purchasable by being measurably wrong, so it was left unbought.
 
 ### What the corpus says is wrong now
 
-With fonts eliminated as a variable, `sample.pptx` at 0.118 SSIM is the loudest remaining
-signal, and a side-by-side of slide 2 says plainly what it is:
+With fonts eliminated as a variable, what remains is layout, and it is concentrated:
 
-* **The text block sits about 110 px too high** in a 720 px render. Vertical anchoring or
-  the first-baseline rule, not fonts.
-* **Bold and italic runs are not distinguished.** PowerPoint draws `PPTX` bold on one line
-  and the whole of another in italic; ours renders both upright and uniform. The likely
-  cause is that `msgothic.ttc` is a collection and resvg's face matching does not reach
-  its bold member, but it has not been confirmed.
-* Line breaks then differ, which is a consequence of the first two rather than a third
-  bug.
+* **CJK label width** is the largest single error in any chart, and it is not a chart bug:
+  `font_box` and `text_width` measure a Japanese label through the `<a:latin>` face its
+  axis names rather than the CJK face it will be drawn in. On
+  `real-financial-report.pptx`'s chart3 that is 19.8 pt. It lives in `text/` and `fonts/`.
+* **A manually laid out legend** is the whole of slide 4's remaining chart error.
+* **Text displacement of 1–2 px** on body copy is what slides 6 and 7 are made of, and
+  `tools/fidelity.py`'s own docstring warns that SSIM is unusually sensitive to exactly
+  that on thin high-contrast content.
 
-None of that is font *selection*; all of it is layout. It belongs to whoever picks up
-text positioning next, and it is now measurable, which it was not before.
+The bold/italic and paragraph-spacing defects that used to head this list are **fixed**:
+bold now inherits through the placeholder cascade, `spcBef` and `spcAft` add rather than
+collapse, and `spcPct` is a share of the line height rather than the font size. Slide 6
+went 0.0977 → 0.7372 on the spacing fix alone.
 
 ---
 
@@ -316,8 +334,9 @@ Pure NumPy, dev-only, behind the `fidelity` extra; the library stays standard-li
 
 ### 0.4 Fixture corpus
 
-Six fixtures is thin, and **none contain SmartArt** — Phase 2 needs inputs before it needs
-code. Generate a synthetic corpus with `python-pptx`, one feature per slide (each preset
+Eight fixtures is thin, **only three of them can be scored** (see the baseline table
+above), and **none contain SmartArt** — Phase 2 needed inputs before it needed code, and
+got them from 46 real decks outside the repository instead. Generate a synthetic corpus with `python-pptx`, one feature per slide (each preset
 family, each fill type, each bullet scheme, each table configuration). **[pptx-renderer]**
 does this with a case generator and a support catalogue; the generated-corpus idea ports
 directly even though their generator does not.
@@ -471,7 +490,7 @@ sub-pixel antialiasing on the rules themselves. That is **one** GUID of the seve
 carried. The rest came from the same measurement process but no fixture exercises them,
 and they should not be described as verified.
 
-None of the six other fixtures uses a tab stop, a highlight, `bodyPr@rot`, a hidden shape, a
+None of the seven other fixtures uses a tab stop, a highlight, `bodyPr@rot`, a hidden shape, a
 non-single underline or multiple columns — checked, not assumed. Those are validated
 against PowerPoint using the deck `tools/make_feature_probe.py` builds, which is also
 where the mid-paragraph column finding above comes from. A synthetic corpus of the kind
