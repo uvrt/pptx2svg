@@ -32,6 +32,11 @@ def authoring() -> Path:
     return FIXTURE_DIR / "authoring-integration.pptx"
 
 
+@pytest.fixture(scope="session")
+def college_template() -> Path:
+    return FIXTURE_DIR / "real-college-template.pptx"
+
+
 # The font bundle is a sibling distribution that a source checkout has not pip-installed.
 # Putting it on the path here makes the suite exercise the configuration users actually
 # get from `pip install 'pptx2svg[fonts]'`, rather than silently testing the degraded
