@@ -285,19 +285,36 @@ def _render_column(
         )
 
         para_font_size = _paragraph_font_size(paragraph, default_font_size) * font_scale
-        space_before = _spacing_px(properties.space_before, para_font_size)
-        # Adjacent paragraphs collapse their spacing to the larger of the two.
-        paragraph_gap = max(previous_space_after, space_before)
+        para_natural = _paragraph_natural_height(
+            paragraph, default_font_size, font_scale, context, default_line_ratio
+        )
+        # PowerPoint *adds* the space after one paragraph to the space before the next;
+        # it does not collapse them the way CSS margins or Word do.  Measured on
+        # `real-college-template` slide 6: `spcAft` 6 pt and an inherited `spcBef` of 20%
+        # of a 24.09 pt line (4.78 pt) come out as a 10.78 pt gap, not as 6 pt.
+        paragraph_gap = previous_space_after + _spacing_px(
+            properties.space_before, para_natural
+        )
 
         if not any(run.text for run in paragraph.runs):
-            empty_height = para_font_size if para_font_size > 0 else default_natural_height
+            # An empty paragraph is a line's worth of nothing, so it is as tall as a line
+            # -- the font size alone, which this used to use, is short by the ascent the
+            # face puts above its em.  Measured on `real-college-template` slide 7, whose
+            # two text blocks are separated by one empty 20 pt Arial paragraph:
+            # PowerPoint leaves 106 px between the blocks' line tops and the font size
+            # gave 100.  The natural height gives 107.2, so the residual is 1.2 px rather
+            # than 6.  `_height` used the natural height here already, which is also why
+            # the drawn and measured heights used to disagree for a body with a blank line
+            # in it.
             dy = _compute_dy(
-                is_first_line, _line_height_px(paragraph, empty_height, ln_spc_reduction), paragraph_gap
+                is_first_line,
+                _line_height_px(paragraph, para_natural, ln_spc_reduction),
+                paragraph_gap,
             )
             tspans.append(f'<tspan x="{num(x_pos)}" dy="{dy}" text-anchor="{anchor}"> </tspan>')
             baseline += float(dy)
             is_first_line = False
-            previous_space_after = _spacing_px(properties.space_after, para_font_size)
+            previous_space_after = _spacing_px(properties.space_after, para_natural)
             continue
 
         if should_wrap:
@@ -412,7 +429,7 @@ def _render_column(
             )
             is_first_line = False
 
-        previous_space_after = _spacing_px(properties.space_after, para_font_size)
+        previous_space_after = _spacing_px(properties.space_after, para_natural)
 
     if not tspans and not obliques:
         # A body whose every run was detached for shearing still has text to draw.
@@ -1219,10 +1236,22 @@ def _line_height_px(
     return natural_height_pt * PX_PER_PT * factor * (1 - ln_spc_reduction)
 
 
-def _spacing_px(spacing: m.SpacingValue, font_size_pt: float) -> float:
+def _spacing_px(spacing: m.SpacingValue, natural_height_pt: float) -> float:
+    """``a:spcBef`` / ``a:spcAft`` in pixels.
+
+    ``a:spcPct`` is a percentage of the paragraph's **natural line height**, not of its
+    font size.  Measured on ``real-college-template`` slide 6, whose bullets are 20 pt
+    Arial with ``spcAft`` 6 pt and an inherited ``spcBef`` of 20%: PowerPoint steps
+    62.0 px between line tops at 1280 px wide (128 px/in), our line height is 42.83 px
+    (24.09 pt, Arial's 1.2045 ratio at 20 pt), so the two gaps are 10.78 pt together and
+    the ``spcBef`` half is 4.78 pt.  That is 19.84% of the line height and 23.9% of the
+    font size, so the base is the line.
+
+    ``a:spcPts`` stays absolute -- it is hundredths of a point and says so.
+    """
     if isinstance(spacing, m.PointsSpacing):
         return (spacing.value / 100) * PX_PER_PT
-    return font_size_pt * (spacing.value / 100000) * PX_PER_PT
+    return natural_height_pt * (spacing.value / 100000) * PX_PER_PT
 
 
 def _compute_dy(is_first_line: bool, line_height_px: float, paragraph_gap_px: float) -> str:
@@ -1253,6 +1282,32 @@ def _line_font_size(segments: list[LineSegment], default_font_size: float) -> fl
         if segment.properties.font_size:
             return segment.properties.font_size
     return default_font_size
+
+
+def _paragraph_natural_height(
+    paragraph: m.Paragraph,
+    default_font_size: float,
+    font_scale: float,
+    context: RenderContext,
+    default_ratio: float,
+) -> float:
+    """A paragraph's single-line height in points, before ``a:lnSpc``.
+
+    This is what ``a:spcPct`` is a percentage of -- see :func:`_spacing_px` -- so the
+    drawing pass and the height measurement have to agree on it, which is why it is one
+    function rather than the same four lines twice.
+    """
+    has_text = any(run.text for run in paragraph.runs)
+    end = paragraph.end_para_run_properties
+    if not has_text and end is not None and end.font_size:
+        return end.font_size * font_scale * default_ratio
+    height = _line_natural_height(
+        [LineSegment(run.text, run.properties) for run in paragraph.runs],
+        default_font_size,
+        font_scale,
+        context,
+    )
+    return height if height > 0 else default_font_size * font_scale * default_ratio
 
 
 def _line_natural_height(
@@ -1308,20 +1363,9 @@ def _estimate_text_height(
 
     for index, paragraph in enumerate(paragraphs):
         has_text = any(run.text for run in paragraph.runs)
-        if not has_text and paragraph.end_para_run_properties and paragraph.end_para_run_properties.font_size:
-            natural_height = (
-                paragraph.end_para_run_properties.font_size * font_scale * default_ratio
-            )
-        else:
-            natural_height = _line_natural_height(
-                [LineSegment(run.text, run.properties) for run in paragraph.runs],
-                default_font_size,
-                font_scale,
-                context,
-            )
-        if natural_height <= 0:
-            natural_height = default_font_size * font_scale * default_ratio
-
+        natural_height = _paragraph_natural_height(
+            paragraph, default_font_size, font_scale, context, default_ratio
+        )
         line_height = _line_height_px(paragraph, natural_height, ln_spc_reduction)
 
         if should_wrap and has_text:
@@ -1336,12 +1380,14 @@ def _estimate_text_height(
         total += line_count * line_height
 
         if index > 0:
-            para_font_size = _paragraph_font_size(paragraph, default_font_size) * font_scale
-            space_before = _spacing_px(paragraph.properties.space_before, para_font_size)
-            total += max(previous_space_after, space_before)
+            # Added, not collapsed -- see the same sum in :func:`_render_column`.
+            total += previous_space_after + _spacing_px(
+                paragraph.properties.space_before, natural_height
+            )
 
-        after_font_size = _paragraph_font_size(paragraph, default_font_size) * font_scale
-        previous_space_after = _spacing_px(paragraph.properties.space_after, after_font_size)
+        previous_space_after = _spacing_px(
+            paragraph.properties.space_after, natural_height
+        )
 
     return total
 

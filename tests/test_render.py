@@ -670,6 +670,86 @@ def test_first_baseline_hangs_off_the_descent_not_the_ascent():
     assert measurer.ascender_ratio("Nonexistent Face") == 1.0
 
 
+def _spaced_body(*, before, after, empty_between=False) -> m.TextBody:
+    """Two 20 pt Arial paragraphs, optionally with a blank one between them."""
+    def paragraph(text: str) -> m.Paragraph:
+        return m.Paragraph(
+            properties=m.ParagraphProperties(space_before=before, space_after=after),
+            runs=[m.TextRun(text, m.RunProperties(font_size=20.0, font_family="Arial"))],
+            end_para_run_properties=m.RunProperties(font_size=20.0, font_family="Arial"),
+        )
+
+    blank = m.Paragraph(
+        properties=m.ParagraphProperties(space_before=before, space_after=after),
+        end_para_run_properties=m.RunProperties(font_size=20.0, font_family="Arial"),
+    )
+    middle = [blank] if empty_between else []
+    return m.TextBody(paragraphs=[paragraph("one"), *middle, paragraph("two")])
+
+
+def _line_advances(body: m.TextBody) -> list[float]:
+    return [float(value) for value in re.findall(r'dy="([-\d.]+)"', text_svg(body))]
+
+
+#: 20 pt Arial, with Liberation Sans standing in: (1854 + 434) / 2048 = 1.1172 em, and
+#: the measurer's 1.2 floor does not bite, so the line is 20 * 1.2045 = 24.09 pt.
+_ARIAL_20PT_LINE_PX = 20.0 * DefaultTextMeasurer().line_height_ratio("Arial") * (96 / 72)
+
+
+def test_space_before_and_space_after_add_rather_than_collapse():
+    """PowerPoint sums the two; CSS margins and Word collapse them.
+
+    Measured on ``real-college-template`` slide 6, whose bullets carry ``spcAft`` 6 pt and
+    inherit ``spcBef`` 20%: PowerPoint steps 62.0 px between line tops at 1280 px wide
+    against our line height of 42.83 px, which is a 19.2 px gap.  Collapsing gives the
+    6 pt ``spcAft`` alone -- 10.7 px -- and that is what we used to draw.
+    """
+    advances = _line_advances(
+        _spaced_body(
+            before=m.PercentSpacing(value=20000, type="pct"),
+            after=m.PointsSpacing(value=600, type="pts"),
+        )
+    )
+    gap = advances[-1] - _ARIAL_20PT_LINE_PX
+    assert gap == pytest.approx(
+        6.0 * (96 / 72) + 0.20 * _ARIAL_20PT_LINE_PX, rel=1e-6
+    )
+
+
+def test_a_percent_space_before_is_a_share_of_the_line_not_of_the_font_size():
+    """``a:spcPct`` measures against the natural line height.
+
+    Same measurement: 20% came out as 4.78 pt over a 24.09 pt line, which is 19.84% of
+    the line and 23.9% of the 20 pt font.  Taking the font size -- what this used to do --
+    is short by the ascent the face carries above its em.
+    """
+    advances = _line_advances(
+        _spaced_body(
+            before=m.PercentSpacing(value=20000, type="pct"),
+            after=m.PointsSpacing(value=0, type="pts"),
+        )
+    )
+    assert advances[-1] - _ARIAL_20PT_LINE_PX == pytest.approx(
+        0.20 * _ARIAL_20PT_LINE_PX, rel=1e-6
+    )
+    assert advances[-1] - _ARIAL_20PT_LINE_PX != pytest.approx(
+        0.20 * 20.0 * (96 / 72), rel=1e-3
+    )
+
+
+def test_an_empty_paragraph_is_a_whole_line_tall():
+    """Not just its font size.
+
+    ``real-college-template`` slide 7 separates its two text blocks with one empty 20 pt
+    Arial paragraph; PowerPoint leaves 106 px between the blocks' line tops and the font
+    size gave 100.
+    """
+    zero = m.PointsSpacing(value=0, type="pts")
+    advances = _line_advances(_spaced_body(before=zero, after=zero, empty_between=True))
+    assert advances[1] == pytest.approx(_ARIAL_20PT_LINE_PX, rel=1e-6)
+    assert advances[2] == pytest.approx(_ARIAL_20PT_LINE_PX, rel=1e-6)
+
+
 def test_line_spacing_above_100_percent_moves_the_baseline_to_three_quarters():
     """Above 100% PowerPoint switches rules and the font drops out of the answer.
 
