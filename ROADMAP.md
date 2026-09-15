@@ -32,7 +32,7 @@ after it needs a way to tell "better" from "different".
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; 72 built-in styles carried, **1 verified** |
-| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 60 probe charts and all 6 real ones; every other chart type warns and draws an empty frame |
+| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 72 probe charts and all 6 real ones; every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -804,6 +804,68 @@ What is wrong or unmeasured in the radar path:
 * **The wrap threshold is one bracket.** 43.72 pt of label stayed on one line and 59.10 pt
   wrapped, on a 198.47 pt region; 0.25 is the round number inside (0.2203, 0.2978].
 
+#### Rotated category labels, measured
+
+The category labels turn when they will not fit, and until this was measured it was the
+worst-looking thing any corpus deck did: `real-financial-report.pptx` slide 3 reserved
+27.3 pt under its plot against PowerPoint's 69.5 and printed five Japanese labels on top
+of each other.
+
+Twelve probe charts across two decks, five categories each in the same
+220.4724 x 181.1024 pt frame with 10 pt Aptos labels, exported and read back as exact
+vector coordinates. One deck sweeps the label from a fifth of its band to four times it;
+the other straddles exactly one band, which is what turns the threshold from a guess into
+a window.
+
+* **The rule is that the widest label is wider than its own band.** On a 37.68 pt band a
+  36.62 pt label stayed level and a 38.59 pt one turned, so the threshold is inside
+  (0.972, 1.024] and one band width is the middle of it rather than a round number picked
+  for tidiness. The *widest* label is what counts, not the first: the deck whose five
+  labels differ only by a trailing letter left a 0.73 pt residual until that was fixed,
+  which is exactly the 1.01 pt difference between Aptos' `A` and its `D` times sin 45.
+* **The angle snaps to 45°.** Everything from 1.02 band widths to 4.18 came out at
+  exactly 45, reading up to the right — `rot="-2700000"` in DrawingML terms. No
+  intermediate angle appears anywhere in that range and nothing goes to 90. The corpus
+  deck confirms it independently at 12 pt, where its export's text matrix is 8.4853,
+  which is `12 cos 45`.
+* **The band under the plot becomes `21.39 + widest x sin 45`**, replacing the level
+  `6.5 + lineHeight + 0.615 em` outright rather than adding to it. Six probes, worst
+  residual **0.015 pt**.
+* **The label hangs off the far end of its rotated baseline**, 2.0 pt right of its band's
+  centre and 12.7 pt below the axis. Six probes, spread under 0.15 pt.
+* Neither fixture carries an explicit `rot=` on `a:bodyPr`, so all of this is
+  PowerPoint's own decision rather than anything the file asks for.
+
+And a contrast worth keeping, because it says this is a *category-axis* behaviour rather
+than a general label one: **a radar facing the same problem wraps instead of rotating.**
+Every `rot` in the radar long-label probe is zero and "Category Three" came back split
+over two lines as "Category" / "Three".
+
+Two pieces are measured and **not** shipped, both because a probe refutes the obvious
+rule:
+
+* **The cap.** PowerPoint reserved 85.63 pt for a label 4.18 bands wide — *less* than the
+  86.36 pt it gave the 2.92-band label one step below it. No clamp on the width produces
+  both, so whatever it does past about 90 pt of label was not identified. Ours keeps
+  going up the fitted line; a test asserts that number so the divergence is recorded
+  rather than latent.
+* **The left inset.** It grows too once the first label reaches past the plot: 21.07 pt
+  level, then 21.68, 36.44 and 54.19 as the label widens, with the last two probes
+  sharing a value the way the bottom cap does. Solving it for the minimum pen position
+  gives 10.02, 8.56 and 6.78 — not one number — so it is left alone and our plot comes
+  out wider than PowerPoint's on the two most crowded probes.
+
+**What it bought.** On chart3 the bottom inset goes 27.29 -> 89.3 against PowerPoint's
+69.538, so the error more than halves and the labels stop colliding. The 19.8 pt left is
+not this rule: it is the width we measure a CJK label at. `プラットフォーム` comes out
+96 pt through the `<a:latin typeface="Arial"/>` the axis names, where PowerPoint laid it
+out in a substituted CJK face at about 68 — the same `font_box`/`text_width` gap the
+radar's radius has on the same deck, and the largest single error left in any chart.
+
+`authoring-integration` holds at 0.9327 and `table-test` at 0.9734, unchanged to four
+decimals: neither has a label wide enough to turn, so nothing this work did moves a
+scored number. The probe decks that measured it are throwaway and were deleted.
+
 #### The tick-density question, with four more observations that refute one more rule
 
 The value-axis density rule is still unsolved, and radar adds four measurements that make
@@ -924,7 +986,7 @@ A rule was written, measured against all of it, found to contradict the stacked 
 everywhere except short plots. Whoever picks this up starts from the table above; the
 discriminating pair is the 30.9 pt cell and the stacked probe.
 
-#### Not done for the four types that draw
+#### Not done for the five types that draw
 
 Each of these is known-missing rather than merely absent:
 
@@ -950,17 +1012,10 @@ Each of these is known-missing rather than merely absent:
 * **`c:smooth`'s tension.** Drawn as a Catmull-Rom spline, which has the right shape —
   the probe's control points are not collinear with its vertices, so it is a real spline —
   but PowerPoint's own tension was not measured and the curves will not coincide.
-* **Rotated category labels.** PowerPoint rotates them 45° when they will not fit, which
-  is what `real-financial-report.pptx` slide 3 does; we draw them horizontally and they
-  overlap. That deck's chart3 is the one place our layout is badly wrong (bottom inset
-  27.3 pt against PowerPoint's 69.5 pt) and it is entirely this. **Not attempted here,
-  and one fact from the radar work bears on it**: a radar facing the same problem
-  *wraps* rather than rotating — every `rot` in the long-label probe is zero and
-  "Category Three" came back as "Category" / "Three". So rotation is a category-axis
-  behaviour, not a general label one, and a probe sweep narrowing the category band on a
-  **bar** chart is what would expose its threshold and whether the angle snaps to 45° or
-  is continuous. Neither fixture carries an explicit `rot=` on `a:bodyPr`, so it is
-  PowerPoint's own decision throughout.
+* ~~**Rotated category labels.**~~ — done and measured; see *Rotated category labels,
+  measured* below. Two pieces of it are **not** done and are named there: PowerPoint caps
+  the band it reserves past about 90 pt of label in a way no clamp reproduces, and it
+  widens the *left* inset by up to 33 pt, which three measurements do not fit.
 * **Axis titles**, **minor gridlines and minor ticks**, **`c:dTable`**, and manual
   `c:layout` for the plot area or the legend.
 * **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
@@ -1323,11 +1378,13 @@ plot-area rectangle, polar region -- is built. What is left, cheapest first:
 1. **A line chart's legend key**, whose number is already measured (19.200 pt of rule
    plus 2.025 pt of gap, off the radar legend probe) and whose code already exists in
    `_legend_key_size`. Confirm on a line probe rather than assuming the radar's
-   measurement transfers.
-2. **Rotated category labels** -- the single worst-looking failure on a corpus deck
-   (`real-financial-report.pptx` slide 3, bottom inset 27.3 pt against 69.5 pt). Needs
-   its own probe sweep narrowing the category band; the radar work established that a
-   radar *wraps* instead, so this is specifically a category-axis behaviour.
+   measurement transfers. Still the cheapest thing on this list.
+2. **The CJK label width.** Now the largest single error left in any chart: on
+   `real-financial-report.pptx`'s chart3 it is 19.8 pt of the 19.8 pt that remains after
+   rotation, and on its radar it is the whole 6.8 pt of radius error. `font_box` and
+   `text_width` measure a Japanese label through the `<a:latin>` face its axis names
+   rather than the CJK face it will actually be drawn in. It lives in `text/` and
+   `fonts/`, not in `resolve/chart.py`.
 3. **Data-label wrapping**, **`bestFit` actually moving a label**, and **three-or-more
    line legend entries** -- each a known-missing detail with a named symptom above.
 4. **Combo charts** and **`areaChart` / `scatterChart`** -- new drawing rather than
