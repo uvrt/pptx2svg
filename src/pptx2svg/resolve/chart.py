@@ -56,6 +56,8 @@ from ..text.measure import DEFAULT_LINE_HEIGHT_RATIO, is_cjk
 
 EMU_PER_POINT = 12700.0
 
+_SIN_45 = math.sin(math.radians(45.0))
+
 #: Padding between the frame edge and the outermost label block, in points.  Measured as
 #: the left edge of the value-label column in all three decks and every probe: exactly
 #: 6.5 pt, independent of frame size and font size.
@@ -176,8 +178,100 @@ DATA_LABEL_INNER_GAP_PT = 4.05
 #: what PowerPoint drew.  Measured once, with a 7 pt marker.
 DATA_LABEL_LINE_GAP_EM = 0.6
 
+#: Category labels rotate when the widest of them is wider than the band it has to sit
+#: in.  Bracketed to (0.972, 1.024] by a six-chart probe whose labels straddle exactly one
+#: band -- a 36.62 pt label on a 37.68 pt band stayed horizontal and a 38.59 pt one turned
+#: -- so 1.0 is not a round guess, it is the middle of a 5% window.  Neither fixture
+#: carries an explicit ``rot=`` on ``a:bodyPr``, so this is PowerPoint's own decision.
+ROTATED_LABEL_RATIO = 1.0
+
+#: And the angle it turns to.  **It snaps.**  Twelve probes from a label 1.02 band widths
+#: wide to one 4.18 wide all came out at exactly 45 degrees, reading up to the right --
+#: `rot="-2700000"` in DrawingML terms.  No intermediate angle appeared anywhere in that
+#: range, and nothing went to 90.
+ROTATED_LABEL_DEGREES = -45.0
+
+#: The plot's bottom inset once the labels turn: this, plus the widest label's width times
+#: sin 45.  Fitted to six probes across two decks, worst residual **0.03 pt** -- and the
+#: residual is that small only because the *widest* label is the one that sets it, which
+#: is what a 1.01 pt discrepancy on the deck whose five labels differ by one letter
+#: showed.  It replaces the horizontal band's `6.5 + lineHeight + 0.615 em` entirely.
+ROTATED_LABEL_INSET_PT = 21.39
+
+#: Where the rotated baseline's far end lands, relative to the centre of its band on the
+#: category axis: this far right, and this far below.  Measured on six probes, spread
+#: under 0.15 pt.
+ROTATED_LABEL_OFFSET_X_PT = 2.0
+ROTATED_LABEL_OFFSET_Y_PT = 12.7
+
 #: Chart kinds laid out around a centre rather than on a pair of axes.
-POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart"})
+POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart", "radarChart"})
+
+#: The polar kinds that are a web of spokes rather than a ring of slices.
+RADAR_CHART_KINDS = frozenset({"radarChart"})
+
+#: How far the drawn radius falls short of half the plot region, as a function of the
+#: category labels' line height.  Fitted to five probes -- Aptos at 8, 10 and 14 pt and
+#: Arial at 10 and 14 pt, all with one-line labels -- whose worst residual is 0.089 pt:
+#:
+#: ====== ==== ========= =========
+#: face   size line box  reserve
+#: ====== ==== ========= =========
+#: Aptos   8    9.766     7.071
+#: Aptos  10   12.207    10.081
+#: Aptos  14   17.090    16.191
+#: Arial  10   11.172     8.751
+#: Arial  14   15.641    14.511
+#: ====== ==== ========= =========
+#:
+#: The slope is **not** 1: the reserve grows faster than the line box, which is why no
+#: "leave one line of room" rule reproduces the set.  A sixth probe pins the other end --
+#: with ``<c:delete val="1"/>`` on the category axis, and so no labels at all, the radius
+#: came out 79.44 pt against a half-region of 79.551, i.e. the reserve goes to zero.
+RADAR_LABEL_RESERVE_LINES = 1.2578
+RADAR_LABEL_RESERVE_PT = 5.2501
+
+#: Gap between a polygon vertex and the category label pushed radially out from it.
+#: Fitted to the four measurements taken where the direction is horizontal and the label
+#: box is therefore unambiguous -- 2.775, 2.789, 2.84 and 2.980 pt at 10 pt -- residual
+#: under 0.15 pt.  It is **not** proportional to the size: the same gap came out 2.81 pt
+#: at 8 pt and 2.38 pt at 14 pt.  The two vertical directions are looser, 4.49 pt above
+#: the top vertex and 2.29 pt below the bottom one, and the split is consistent with
+#: PowerPoint's line box being about 1 pt taller than the one our metrics give -- a font
+#: discrepancy rather than a second layout rule, so one constant is used for all four.
+RADAR_LABEL_GAP_PT = 2.85
+
+#: The most of the plot region's width one category label may take before it wraps onto
+#: another line.  Bracketed by two probes on the same 198.47 pt region: a 43.72 pt label
+#: ("Two Three") stayed on one line and a 59.10 pt one ("Category One") wrapped, which is
+#: (0.2203, 0.2978]; 0.25 is the round number inside it.  Wrapping at that cap reproduces
+#: PowerPoint's own break exactly -- "Category Three" came out "Category" / "Three".
+RADAR_LABEL_MAX_FRACTION = 0.25
+
+#: Where the value-axis labels sit: right-aligned, with their right edge this many widths
+#: of the digit zero to the left of the twelve o'clock spoke.  Measured on six charts --
+#: Aptos at 8, 10 and 14 pt, Arial at 10 and 14 pt, and the Arial 12 pt value axis of
+#: ``real-financial-report.pptx``'s own radar -- and it is exactly two digits every time,
+#: worst residual 0.14 pt.  Reading it as a plain em fraction does not work: it is
+#: 1.069 em in Aptos and 1.112 em in Arial, and the difference is exactly twice the
+#: difference between the two faces' digit widths.
+RADAR_VALUE_LABEL_DIGITS = 2.0
+
+#: A radar series' marker when it states no ``c:size``.  Measured 6.0 pt square on the
+#: probe's second series; the first series' diamond measured 5.76 pt across, which is the
+#: same 6 pt box with its tips falling inside PowerPoint's 0.24 pt output grid.  This is
+#: **not** :data:`DEFAULT_MARKER_SIZE_PT`, which is ECMA-376's 7 and has never been
+#: measured for a line chart either way.
+RADAR_MARKER_SIZE_PT = 6.0
+
+#: A ``standard`` or ``marker`` radar's legend key -- a line of the series' own stroke
+#: with its marker at the middle, rather than a bar chart's square swatch -- and the gap
+#: after it, in ems.  Measured once, at 10 pt: a 19.200 pt line from the band's left edge
+#: with the marker centred on it, then 2.025 pt before the entry's text.  A ``filled``
+#: radar legends with the ordinary swatch instead, which is what
+#: ``real-financial-report.pptx``'s own radar draws.
+RADAR_LEGEND_KEY_EM = 1.920
+RADAR_LEGEND_KEY_GAP_EM = 0.2025
 
 #: ``c:holeSize`` when the element is absent.  ECMA-376 documents a default of 10; what
 #: PowerPoint *draws* for a `c:doughnutChart` stating no `c:holeSize` is a **solid pie**,
@@ -234,7 +328,10 @@ HORIZONTAL_MAX_INTERVALS = 5
 
 
 def nice_axis_scale(
-    data_minimum: float, data_maximum: float, horizontal: bool = False
+    data_minimum: float,
+    data_maximum: float,
+    horizontal: bool = False,
+    strict: bool = True,
 ) -> tuple[float, float, float]:
     """``(minimum, maximum, major_unit)`` for a value axis PowerPoint would draw itself.
 
@@ -258,6 +355,11 @@ def nice_axis_scale(
     topping out at exactly 5 gets an axis to 6 rather than one whose last bar touches the
     frame.  Both bumps are measured: the first is what ``authoring-integration.pptx``
     does, the second is the -3 on the negative-value probe whose data floor is -2.
+
+    ``strict=False`` turns that outward bump off, which is what a **radar** wants: the
+    same 0..5 data a bar chart takes to 6 stopped at exactly 5 on every radar probe, five
+    rings with the outermost passing through the largest point.  One discriminating
+    observation, and it is the whole of the difference -- the unit is chosen identically.
     """
     low = min(0.0, data_minimum)
     high = max(0.0, data_maximum)
@@ -277,7 +379,7 @@ def nice_axis_scale(
     if span / unit < AXIS_HALVING_RATIO:
         unit /= 2
 
-    minimum, maximum = _axis_extent(unit, low, high, data_minimum, data_maximum)
+    minimum, maximum = _axis_extent(unit, low, high, data_minimum, data_maximum, strict)
     if horizontal:
         # Counted on the *rounded* extent, not the data span: 0..5 of data becomes a
         # 0..6 axis, and it is the six intervals in that which PowerPoint coarsens.
@@ -286,21 +388,31 @@ def nice_axis_scale(
             if not math.isfinite(stepped) or stepped <= unit:
                 break
             unit = stepped
-            minimum, maximum = _axis_extent(unit, low, high, data_minimum, data_maximum)
+            minimum, maximum = _axis_extent(
+                unit, low, high, data_minimum, data_maximum, strict
+            )
     if not (math.isfinite(minimum) and math.isfinite(maximum) and maximum > minimum):
         return 0.0, 1.0, 1.0
     return minimum, maximum, unit
 
 
 def _axis_extent(
-    unit: float, low: float, high: float, data_minimum: float, data_maximum: float
+    unit: float,
+    low: float,
+    high: float,
+    data_minimum: float,
+    data_maximum: float,
+    strict: bool = True,
 ) -> tuple[float, float]:
-    """Round the domain outwards to whole units, strictly past the data at both ends."""
+    """Round the domain outwards to whole units, strictly past the data at both ends.
+
+    ``strict=False`` rounds to a whole unit and stops there, which is the radar rule.
+    """
     maximum = math.ceil(high / unit) * unit
-    if maximum <= data_maximum:
+    if strict and maximum <= data_maximum:
         maximum += unit
     minimum = math.floor(low / unit) * unit
-    if data_minimum < 0 and minimum >= data_minimum:
+    if strict and data_minimum < 0 and minimum >= data_minimum:
         minimum -= unit
     return minimum, maximum
 
@@ -654,7 +766,24 @@ class ChartBuilder:
     def _is_polar(self) -> bool:
         return c.flat_chart_kind(self.plot.kind) in POLAR_CHART_KINDS
 
+    @property
+    def _is_radar(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in RADAR_CHART_KINDS
+
+    @property
+    def _radar_style(self) -> str:
+        """``c:radarStyle``, normalised to what PowerPoint actually draws.
+
+        Measured: ``standard`` and ``marker`` produced *identical* output -- the same
+        1.5 pt line, the same diamond at every point -- although ECMA-376 says a
+        ``standard`` radar has no markers.  So only ``filled`` is a separate case.
+        """
+        style = (self.plot.radar_style or "standard").strip()
+        return "filled" if style == "filled" else "marker"
+
     def build(self) -> tuple[list[m.SlideElement], m.ChartData]:
+        if self._is_radar:
+            return self._build_radar()
         if self._is_polar:
             return self._build_polar()
         return self._build_cartesian()
@@ -687,6 +816,388 @@ class ChartBuilder:
             value_axis=None,
             legend_position=self._legend_position(),
         )
+
+    def _build_radar(self) -> tuple[list[m.SlideElement], m.ChartData]:
+        """A radar: a value axis wrapped round a ring of category spokes.
+
+        Everything below is measured out of PowerPoint's own PDF -- eighteen probe charts
+        across three decks plus ``real-financial-report.pptx``'s own radar, the only real
+        one in the corpus.  The polar conventions turn out to be the pie's, and that is a
+        measurement rather than an assumption:
+
+        * **angle zero is twelve o'clock and categories run clockwise**, 360/n apart;
+        * the centre is the centre of the **same plot region a pie computes** -- edge
+          insets plus the legend band -- which the legend probe pins to within 0.2 pt;
+        * a point sits at ``(value - minimum) / (maximum - minimum)`` of the radius, so
+          the axis minimum is the centre and the outermost ring is the maximum.
+
+        Four things the schema does not say, each from a probe that contradicts the
+        obvious reading:
+
+        * **The web is polygonal, it follows the category count, and it is drawn whether
+          or not the file asks for it.**  Three, five, six and eight categories gave
+          triangles, pentagons, hexagons and octagons; a probe with no ``c:majorGridlines``
+          at all still drew every ring, and so did one with ``<c:delete val="1"/>`` on the
+          value axis.  Only the *styling* comes from ``c:majorGridlines``.
+        * **The spokes do not.**  No probe without a ``c:spPr`` on its category axis drew
+          any; the corpus radar, whose category axis states ``<a:ln w="12700">`` in
+          #888888, drew six in exactly that.  So the radial lines are the category axis'
+          own line, and its default is none -- the opposite of a bar chart, whose default
+          axis line is black at 0.5 pt.
+        * **``standard`` and ``marker`` draw the same picture**, markers included, though
+          ECMA-376 says a ``standard`` radar has none.
+        * **``filled`` draws only the fill.**  No markers, and no outline unless the
+          series states an ``a:ln`` of its own -- the probe, which states none, emits a
+          bare ``f``; the corpus radar, which states ``w="25400"``, is stroked at 2 pt.
+        """
+        series = self._series()
+        categories = self._categories(series)
+        value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
+        category_axis = self._axis_for(0) or self._axis_of_kind("catAx")
+        scale = self._scale(series, value_axis)
+        region = self._polar_region()
+        category_font = self._label_font(category_axis)
+        value_font = self._label_font(value_axis)
+
+        labels = self._radar_category_labels(
+            categories, category_axis, category_font, region
+        )
+        centre, radius = self._radar_geometry(
+            region, labels, category_font, len(categories)
+        )
+
+        self._draw_background(region)
+        self._draw_title()
+        self._draw_radar_web(centre, radius, scale, len(categories), value_axis, category_axis)
+        self._draw_radar_series(centre, radius, series, categories, scale)
+        if _labels_shown(value_axis):
+            self._draw_radar_value_labels(centre, radius, scale, value_axis, value_font)
+        self._draw_radar_category_labels(centre, radius, labels, category_font)
+        self._draw_radar_data_labels(centre, radius, series, categories, scale)
+        self._draw_legend(region, series)
+
+        return self.elements, m.ChartData(
+            kind=c.flat_chart_kind(self.plot.kind),
+            series=[
+                m.ChartSeries(
+                    name=item.name,
+                    values=list(item.values),
+                    categories=list(categories),
+                    color=item.color,
+                    format_code=item.format_code,
+                )
+                for item in series
+            ],
+            categories=list(categories),
+            title=self._title_text(),
+            grouping=self.plot.grouping,
+            bar_direction=None,
+            value_axis=m.ChartAxisScale(
+                minimum=scale[0], maximum=scale[1], major_unit=scale[2]
+            ),
+            legend_position=self._legend_position(),
+        )
+
+    # -- radar layout -------------------------------------------------------------------
+
+    def _radar_direction(self, index: int, count: int) -> tuple[float, float]:
+        """The unit vector down the ``index``-th spoke, in frame coordinates.
+
+        Twelve o'clock, then clockwise -- the pie's convention, measured again here on the
+        four-category probe, whose vertices land due north, east, south and west.
+        """
+        angle = 2.0 * math.pi * index / max(count, 1)
+        return math.sin(angle), -math.cos(angle)
+
+    def _radar_category_labels(
+        self,
+        categories: list[str],
+        axis: c.SourceChartAxis | None,
+        font: ChartFont,
+        region: _Rect,
+    ) -> list[list[str]]:
+        """Each category's label, already broken into the lines it will be drawn on.
+
+        PowerPoint **wraps** a label too wide for its corner rather than rotating it: the
+        long-label probe came back with every ``rot`` zero and "Category Three" split over
+        two lines as "Category" / "Three".  The width it wraps at is bracketed by
+        :data:`RADAR_LABEL_MAX_FRACTION`.
+        """
+        if not categories or not _labels_shown(axis):
+            return []
+        cap = region.width * RADAR_LABEL_MAX_FRACTION
+        return [_wrap_to_width(name, font, cap) for name in categories]
+
+    def _radar_geometry(
+        self, region: _Rect, labels: list[list[str]], font: ChartFont, count: int
+    ) -> tuple[tuple[float, float], float]:
+        """The web's centre and radius.
+
+        Two constraints, both measured, and the smaller wins:
+
+        * **vertically**, the radius falls short of half the region by a reserve that is a
+          function of the label's line box -- see :data:`RADAR_LABEL_RESERVE_LINES`;
+        * **horizontally**, a category's label must still fit the region, so the vertex it
+          hangs off can be no further out than ``half_width - gap - label_width``, which
+          for a spoke at angle theta bounds the radius by that over ``|sin theta|``.
+
+        Three probes are horizontally bound and land within 0.7 pt; five are vertically
+        bound and land within 0.09 pt.
+
+        **The reserve counts one line even when a label wraps**, and that is the
+        measurement rather than an oversight: the one multi-line observation has a radius
+        of 60.24 pt, which the horizontal constraint reproduces exactly and whose vertical
+        reserve is therefore at most 19.31 pt -- less than the 20.16 pt that two lines of
+        the fitted per-line reserve would ask for.  A rule scaling the reserve by the line
+        count is contradicted by that probe, so it is not used.
+        """
+        centre = ((region.left + region.right) / 2, (region.top + region.bottom) / 2)
+        half_width, half_height = region.width / 2, region.height / 2
+        radius = min(half_width, half_height)
+        if labels:
+            reserve = max(
+                RADAR_LABEL_RESERVE_LINES * font.box.line_height - RADAR_LABEL_RESERVE_PT,
+                0.0,
+            )
+            radius = min(radius, half_height - reserve)
+            for index, lines in enumerate(labels):
+                sideways = abs(self._radar_direction(index, count)[0])
+                if sideways < 1e-3:
+                    continue
+                width = max((font.width(line) for line in lines), default=0.0)
+                room = half_width - RADAR_LABEL_GAP_PT - width
+                radius = min(radius, room / sideways)
+        return centre, max(radius, 1.0)
+
+    def _radar_radius(
+        self, radius: float, value: float, scale: tuple[float, float, float]
+    ) -> float:
+        minimum, maximum, _ = scale
+        span = maximum - minimum
+        if span <= 0:
+            return 0.0
+        return (value - minimum) / span * radius
+
+    def _radar_point(
+        self,
+        centre: tuple[float, float],
+        index: int,
+        count: int,
+        distance: float,
+    ) -> tuple[float, float]:
+        dx, dy = self._radar_direction(index, count)
+        return centre[0] + dx * distance, centre[1] + dy * distance
+
+    # -- radar drawing ------------------------------------------------------------------
+
+    def _draw_radar_web(
+        self,
+        centre: tuple[float, float],
+        radius: float,
+        scale: tuple[float, float, float],
+        count: int,
+        value_axis: c.SourceChartAxis | None,
+        category_axis: c.SourceChartAxis | None,
+    ) -> None:
+        if count <= 0:
+            return
+        ring_outline = self._axis_outline(
+            value_axis.major_gridline_outline if value_axis is not None else None
+        )
+        for value in self._tick_values(scale)[1:]:
+            distance = self._radar_radius(radius, value, scale)
+            if distance <= 0:
+                continue
+            points = [
+                self._radar_point(centre, index, count, distance)
+                for index in range(count)
+            ]
+            if len(points) > 1:
+                self._polyline(points + [points[0]], ring_outline, smooth=False)
+
+        # The category axis draws the spokes, and only when it states a line of its own.
+        spoke = (
+            self._resolve_outline(category_axis.outline)
+            if category_axis is not None and category_axis.outline is not None
+            else None
+        )
+        if spoke is None or spoke.fill is None or isinstance(spoke.fill, m.NoFill):
+            return
+        for index in range(count):
+            x, y = self._radar_point(centre, index, count, radius)
+            self._line(centre[0], centre[1], x, y, spoke)
+
+    def _draw_radar_series(
+        self,
+        centre: tuple[float, float],
+        radius: float,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        count = len(categories)
+        if count <= 0:
+            return
+        filled = self._radar_style == "filled"
+        # `dispBlanksAs` on a radar is **not measured**; this mirrors the line chart, whose
+        # behaviour was.  A ring with a hole in it cannot close, so it is drawn open.
+        blanks = self.chart.display_blanks_as or "gap"
+        for item in series:
+            points: list[tuple[float, float] | None] = []
+            for index in range(count):
+                value = _at(item.values, index)
+                if value is None:
+                    if blanks == "zero":
+                        value = scale[0]
+                    elif blanks == "span":
+                        continue
+                    else:
+                        points.append(None)
+                        continue
+                points.append(
+                    self._radar_point(
+                        centre,
+                        index,
+                        count,
+                        self._radar_radius(radius, value, scale),
+                    )
+                )
+            drawn = [point for point in points if point is not None]
+            closed = len(drawn) == count and count > 2
+            if filled:
+                if len(drawn) > 2:
+                    self._polygon(drawn, fill=item.fill, outline=item.outline)
+                continue
+            if item.line is not None:
+                if closed:
+                    self._polyline(drawn + [drawn[0]], item.line, smooth=False)
+                else:
+                    # A ring is a cycle, so the run either side of index 0 is one run.
+                    # Rotating the list to start just after a blank is what makes
+                    # `_split_runs`, which walks a straight line, see it that way.
+                    for run in _split_runs(_rotate_past_blank(points)):
+                        if len(run) > 1:
+                            self._polyline(run, item.line, smooth=False)
+            for point in points:
+                if point is not None and item.marker_symbol:
+                    self._marker(point, item)
+
+    def _draw_radar_value_labels(
+        self,
+        centre: tuple[float, float],
+        radius: float,
+        scale: tuple[float, float, float],
+        axis: c.SourceChartAxis | None,
+        font: ChartFont,
+    ) -> None:
+        """The tick labels, up the twelve o'clock spoke and to the left of it.
+
+        Measured on all six charts that draw one: right-aligned, their right edge two
+        widths of the digit zero left of the spoke, each centred on its own ring.
+        """
+        box = font.box
+        right = centre[0] - RADAR_VALUE_LABEL_DIGITS * font.width("0")
+        for value, text in self._tick_texts(scale, axis):
+            if not text:
+                continue
+            y = centre[1] - self._radar_radius(radius, value, scale)
+            width = font.width(text) + box.size
+            self._text(
+                self._label_body(text, font, align="r"),
+                left=right - width,
+                width=width,
+                baseline=y + box.ink_centre,
+                box=box,
+            )
+
+    def _draw_radar_category_labels(
+        self,
+        centre: tuple[float, float],
+        radius: float,
+        labels: list[list[str]],
+        font: ChartFont,
+    ) -> None:
+        """One label per spoke, its box pushed radially clear of the vertex.
+
+        The four horizontal directions land within 0.15 pt; the two vertical ones are up
+        to 1.6 pt out, which the measurements attribute to PowerPoint's line box being
+        about a point taller than the one our font metrics give rather than to a second
+        rule -- see :data:`RADAR_LABEL_GAP_PT`.
+        """
+        count = len(labels)
+        box = font.box
+        for index, lines in enumerate(labels):
+            if not any(lines):
+                continue
+            dx, dy = self._radar_direction(index, count)
+            anchor_x = centre[0] + dx * (radius + RADAR_LABEL_GAP_PT)
+            anchor_y = centre[1] + dy * (radius + RADAR_LABEL_GAP_PT)
+            width = max(font.width(line) for line in lines)
+            block = box.line_height * len(lines)
+            if dx > 1e-3:
+                left = anchor_x
+            elif dx < -1e-3:
+                left = anchor_x - width
+            else:
+                left = anchor_x - width / 2
+            if dy > 1e-3:
+                top = anchor_y
+            elif dy < -1e-3:
+                top = anchor_y - block
+            else:
+                top = anchor_y - block / 2
+            # The box is padded half an em either side so a wide glyph is not clipped,
+            # and shifted back by the same amount so each *line* stays centred on the
+            # block the anchoring above placed.
+            for line_index, line in enumerate(lines):
+                self._text(
+                    self._label_body(line, font, align="ctr"),
+                    left=left - box.size / 2,
+                    width=width + box.size,
+                    baseline=top + line_index * box.line_height + box.ascent,
+                    box=box,
+                )
+
+    def _draw_radar_data_labels(
+        self,
+        centre: tuple[float, float],
+        radius: float,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """Data labels, pushed radially out from their point.
+
+        **Not measured.**  The corpus radar carries a ``c:dLbls`` block with every
+        ``c:show*`` flag at 0, and no probe turned one on, so where PowerPoint puts a
+        radar's data label is unknown; this places it the way a pie's ``outEnd`` sits, one
+        marker clear of the point along its own spoke.  It is the one thing the radar path
+        draws without a measurement behind it, and it is here rather than absent because
+        silently dropping flags a file states is the worse failure.
+        """
+        count = len(categories)
+        for item in series:
+            for index in range(count):
+                value = _at(item.values, index)
+                if value is None:
+                    continue
+                labels = item.point_labels.get(index, item.labels)
+                if labels is None or not labels.anything or labels.font is None:
+                    continue
+                parts: list[str] = []
+                if labels.show_series and item.name:
+                    parts.append(item.name)
+                if labels.show_category and categories[index]:
+                    parts.append(categories[index])
+                if labels.show_value:
+                    parts.append(
+                        format_number(value, labels.number_format or item.format_code)
+                    )
+                if not parts:
+                    continue
+                distance = self._radar_radius(radius, value, scale) + item.marker_size
+                x, y = self._radar_point(centre, index, count, distance)
+                self._centred_label(parts, labels.font, x, y)
 
     def _build_cartesian(self) -> tuple[list[m.SlideElement], m.ChartData]:
         series = self._series()
@@ -798,8 +1309,12 @@ class ChartBuilder:
                     m.SolidFill(color=self.style.accents[index % len(self.style.accents)])
                     for index in range(len(item.values))
                 ]
-            if self._is_line:
+            if self._is_line or (self._is_radar and self._radar_style != "filled"):
                 self._read_line_style(item, source, index)
+                if self._is_radar and (source.marker is None or not source.marker.size):
+                    # Measured on the probe: a radar series stating no `c:size` draws a
+                    # 6 pt marker, not ECMA-376's 7.
+                    item.marker_size = RADAR_MARKER_SIZE_PT
             item.labels = self._read_labels(source.data_labels, self.plot.data_labels)
             if source.data_labels is not None:
                 for point_index, override in source.data_labels.overrides.items():
@@ -978,7 +1493,12 @@ class ChartBuilder:
         if not numbers:
             numbers = [0.0]
         minimum, maximum, unit = nice_axis_scale(
-            min(numbers), max(numbers), horizontal=(self.plot.bar_direction or "col") == "bar"
+            min(numbers),
+            max(numbers),
+            horizontal=(self.plot.bar_direction or "col") == "bar",
+            # A radar stops at the data rather than a whole unit past it: 0..5 of data
+            # gives a 0..5 axis where the same data on a bar gives 0..6.
+            strict=not self._is_radar,
         )
 
         if axis is not None:
@@ -1107,19 +1627,12 @@ class ChartBuilder:
             right -= max((value_font.width(text) for text in tick_labels), default=0.0) / 2
         # Nothing overhangs the top of a horizontal chart, so it takes the plain inset.
         top = frame.top + (EDGE_INSET_PT if horizontal else self._top_inset(value_font.box))
-        if labels_under_plot:
-            bottom = frame.bottom - (
-                FRAME_PADDING_PT
-                + bottom_font.box.line_height
-                + CATEGORY_LABEL_GAP_EM * bottom_font.size
-            )
-        else:
-            bottom = frame.bottom - self._top_inset(value_font.box)
 
         title = self._title_box()
         if title is not None:
             top += TITLE_BAND_LINES * title.line_height
 
+        legend_bottom = 0.0
         legend = self._legend_position()
         # `c:overlay` draws the legend on top of the plot rather than beside it, so an
         # overlaid legend takes no space away.  Implemented from the schema; no chart
@@ -1128,7 +1641,7 @@ class ChartBuilder:
             legend_font = self._legend_font()
             band = LEGEND_BAND_LINES * legend_font.box.line_height
             if legend in ("b",):
-                bottom -= band
+                legend_bottom = band
             elif legend in ("t", "tr"):
                 top += band
             elif legend == "r":
@@ -1147,9 +1660,62 @@ class ChartBuilder:
 
         if right - left < 1.0:
             right = left + 1.0
+        # The bottom band comes last because a rotated category label's is a function of
+        # the label's width against the band it has to fit, and the band is `right - left`
+        # -- which the legend has only just finished moving.
+        if labels_under_plot:
+            bottom = frame.bottom - legend_bottom - self._bottom_label_band(
+                bottom_font,
+                categories if not horizontal else [],
+                right - left,
+            )
+        else:
+            bottom = frame.bottom - legend_bottom - self._top_inset(value_font.box)
         if bottom - top < 1.0:
             bottom = top + 1.0
         return _Rect(left, top, right, bottom)
+
+    def _labels_rotate(
+        self, font: ChartFont, categories: list[str], plot_width: float
+    ) -> bool:
+        """Whether the category labels turn 45 degrees rather than staying level.
+
+        **The rule is that the widest label is wider than its own band**, and the probe
+        that says so straddles it by 5%: on a 37.68 pt band a 36.62 pt label stayed level
+        and a 38.59 pt one turned.  A radar facing the same problem *wraps* instead, so
+        this is specifically what the category axis does.
+        """
+        if not categories:
+            return False
+        band = plot_width / len(categories)
+        if band <= 0:
+            return False
+        widest = max((font.width(text) for text in categories), default=0.0)
+        return widest > band * ROTATED_LABEL_RATIO
+
+    def _bottom_label_band(
+        self, font: ChartFont, categories: list[str], plot_width: float
+    ) -> float:
+        """How much of the frame the labels under the plot take.
+
+        Level, that is one line plus its gap.  Turned, it is
+        :data:`ROTATED_LABEL_INSET_PT` plus the widest label's own width times sin 45,
+        which fits six probes to within 0.03 pt.
+
+        **Not capped, and PowerPoint's is.**  A probe whose label is 4.18 band widths wide
+        reserved 85.63 pt where the formula asks for 113.95 -- but it reserved *less* than
+        the probe one step below it, whose 2.92-band label took 86.36 pt, so no clamp on
+        the width reproduces both. Whatever PowerPoint does past about 90 pt of label was
+        not identified, and a rule that fitted the rest and broke there is exactly what
+        this file does not ship.
+        """
+        box = font.box
+        if self._labels_rotate(font, categories, plot_width):
+            widest = max(font.width(text) for text in categories)
+            return ROTATED_LABEL_INSET_PT + widest * _SIN_45
+        return (
+            FRAME_PADDING_PT + box.line_height + CATEGORY_LABEL_GAP_EM * box.size
+        )
 
     def _polar_region(self) -> _Rect:
         """The square-ish box a pie is drawn in.
@@ -1158,7 +1724,12 @@ class ChartBuilder:
         ``real-financial-report.pptx``'s doughnut, whose legend band came out 113.98 pt,
         the identical number that deck's bar charts reserve, and on a probe pie whose band
         matched the formula to 0.03 pt.
+
+        A pie legends its categories and a radar its series, and the band is sized from
+        whichever list it prints -- feeding a radar the category names put its centre
+        13.4 pt out on the legend probe.
         """
+        per_point = not self._is_radar
         frame = self.frame
         left, right = frame.left + EDGE_INSET_PT, frame.right - EDGE_INSET_PT
         top, bottom = frame.top + EDGE_INSET_PT, frame.bottom - EDGE_INSET_PT
@@ -1176,9 +1747,9 @@ class ChartBuilder:
             elif legend in ("t", "tr"):
                 top += band
             elif legend == "r":
-                right = frame.right - self._legend_side_width(font, per_point=True)
+                right = frame.right - self._legend_side_width(font, per_point=per_point)
             elif legend == "l":
-                left += self._legend_side_width(font, per_point=True) - EDGE_INSET_PT
+                left += self._legend_side_width(font, per_point=per_point) - EDGE_INSET_PT
         if right - left < 1.0:
             right = left + 1.0
         if bottom - top < 1.0:
@@ -1407,10 +1978,12 @@ class ChartBuilder:
                 if source.name is not None and index not in deleted
             ]
         widest = max((font.width(name) for name in names), default=0.0)
+        key, key_gap = self._legend_key_size(font)
         natural = (
             widest
-            + (LEGEND_SIDE_LEAD_EM + LEGEND_SWATCH_EM + LEGEND_SWATCH_GAP_EM + LEGEND_SIDE_TRAIL_EM)
-            * font.size
+            + key
+            + key_gap
+            + (LEGEND_SIDE_LEAD_EM + LEGEND_SIDE_TRAIL_EM) * font.size
         )
         return min(natural, self.frame.width * LEGEND_SIDE_MAX_FRACTION)
 
@@ -1821,16 +2394,84 @@ class ChartBuilder:
                 )
             else:
                 band = rect.width / len(categories)
-                self._labels_along_bottom(
-                    rect,
-                    [
-                        (rect.left + index * band, text)
-                        for index, text in enumerate(categories)
-                    ],
-                    category_font,
-                    axis_y=self._category_axis_position(rect, scale, category_axis),
-                    width=band,
+                axis_y = self._category_axis_position(rect, scale, category_axis)
+                # Only labels that sit in the band *under* the plot may turn.  With
+                # negative values the category axis floats up into the plot and
+                # `_plot_rect` reserves no band at all, so turning them there would draw
+                # into space nothing set aside -- and no probe measured what PowerPoint
+                # does in that corner anyway.
+                in_band = abs(axis_y - rect.bottom) < 0.01
+                if in_band and self._labels_rotate(
+                    category_font, categories, rect.width
+                ):
+                    self._rotated_labels_along_bottom(
+                        [
+                            (rect.left + (index + 0.5) * band, text)
+                            for index, text in enumerate(categories)
+                        ],
+                        category_font,
+                        axis_y=axis_y,
+                    )
+                else:
+                    self._labels_along_bottom(
+                        rect,
+                        [
+                            (rect.left + index * band, text)
+                            for index, text in enumerate(categories)
+                        ],
+                        category_font,
+                        axis_y=axis_y,
+                        width=band,
+                    )
+
+    def _rotated_labels_along_bottom(
+        self,
+        labels: list[tuple[float, str]],
+        font: ChartFont,
+        *,
+        axis_y: float,
+    ) -> None:
+        """Category labels turned 45 degrees, reading up towards the axis.
+
+        The measured anchor is the **far end of the rotated baseline**: it lands
+        :data:`ROTATED_LABEL_OFFSET_X_PT` right of its band's centre and
+        :data:`ROTATED_LABEL_OFFSET_Y_PT` below the axis, on all six probes to within
+        0.15 pt.  The renderer rotates a shape about its own centre, so the box is placed
+        by working that rotation backwards from the anchor rather than by rotating the
+        text in place -- which is why the arithmetic below is not simply "left = x".
+        """
+        box = font.box
+        radians = math.radians(ROTATED_LABEL_DEGREES)
+        cos, sin = math.cos(radians), math.sin(radians)
+        for position, text in labels:
+            if not text:
+                continue
+            width = font.width(text) + box.size
+            height = box.line_height * 1.5
+            # Where the baseline's right-hand end sits inside the unrotated box, measured
+            # from the box's centre.  The half em of padding is the same one every other
+            # chart label carries, and the text is right-aligned against it.
+            offset_x = width / 2 - box.size / 2
+            offset_y = box.first_baseline - height / 2
+            turned_x = offset_x * cos - offset_y * sin
+            turned_y = offset_x * sin + offset_y * cos
+            centre_x = position + ROTATED_LABEL_OFFSET_X_PT - turned_x
+            centre_y = axis_y + ROTATED_LABEL_OFFSET_Y_PT - turned_y
+            self.elements.append(
+                m.ShapeElement(
+                    transform=m.Transform(
+                        offset_x=(centre_x - width / 2) * EMU_PER_POINT,
+                        offset_y=(centre_y - height / 2) * EMU_PER_POINT,
+                        extent_width=width * EMU_PER_POINT,
+                        extent_height=height * EMU_PER_POINT,
+                        rotation=ROTATED_LABEL_DEGREES,
+                    ),
+                    geometry=m.PresetGeometry(preset="rect"),
+                    fill=None,
+                    outline=None,
+                    text_body=self._label_body(text, font, align="r"),
                 )
+            )
 
     def _labels_down_left(
         self, rect: _Rect, labels: list[tuple[float, str]], font: ChartFont
@@ -2161,8 +2802,7 @@ class ChartBuilder:
 
         font = self._legend_font()
         box = font.box
-        swatch = LEGEND_SWATCH_EM * box.size
-        gap = LEGEND_SWATCH_GAP_EM * box.size
+        swatch, gap = self._legend_key_size(font)
 
         if position in ("b", "t", "tr"):
             widths = [swatch + gap + font.width(item.name or "") for _, item in entries]
@@ -2213,10 +2853,22 @@ class ChartBuilder:
             self._legend_entry(item, x, y + pitch / 2 + box.ink_centre, swatch, gap, font)
             y += pitch
 
+    def _legend_key_size(self, font: ChartFont) -> tuple[float, float]:
+        """The legend key's width and the gap after it.
+
+        A bar, a pie and a ``filled`` radar all take the square swatch.  A radar drawn as
+        lines takes a **line with its marker on it** instead, which is 13.4 pt wider at
+        10 pt -- measured on the legend probe: a 19.200 pt rule from the band's left edge,
+        then 2.025 pt before the text.  The same key is what PowerPoint draws for a line
+        chart, which this does not yet do; see ROADMAP.md.
+        """
+        if self._is_radar and self._radar_style != "filled":
+            return RADAR_LEGEND_KEY_EM * font.size, RADAR_LEGEND_KEY_GAP_EM * font.size
+        return LEGEND_SWATCH_EM * font.size, LEGEND_SWATCH_GAP_EM * font.size
+
     def _legend_entry_lines(self, name: str, font: ChartFont, x: float) -> int:
         """How many lines this entry needs once the band has capped its width."""
-        swatch = LEGEND_SWATCH_EM * font.size
-        gap = LEGEND_SWATCH_GAP_EM * font.size
+        swatch, gap = self._legend_key_size(font)
         available = self.frame.right - FRAME_PADDING_PT - (x + swatch + gap)
         natural = font.width(name)
         if available <= font.size or natural <= available:
@@ -2234,11 +2886,18 @@ class ChartBuilder:
     ) -> None:
         box = font.box
         centre = baseline - box.ink_centre
-        self._rect(
-            _Rect(x, centre - swatch / 2, x + swatch, centre + swatch / 2),
-            fill=item.fill,
-            outline=None,
-        )
+        if item.line is not None and self._is_radar:
+            # A line key: the stroke across the whole swatch width with the series'
+            # marker centred on it.  Measured on the legend probe.
+            self._line(x, centre, x + swatch, centre, item.line)
+            if item.marker_symbol:
+                self._marker((x + swatch / 2, centre), item)
+        else:
+            self._rect(
+                _Rect(x, centre - swatch / 2, x + swatch, centre + swatch / 2),
+                fill=item.fill,
+                outline=None,
+            )
         # An entry wider than the band it sits in wraps rather than running out of the
         # frame.  PowerPoint wraps too -- `real-financial-report.pptx`'s doughnut legends
         # an 11-character category on two lines -- but it also opens the row pitch from
@@ -2342,6 +3001,40 @@ class ChartBuilder:
                     ]
                 ),
                 fill=m.NoFill(),
+                outline=outline,
+            )
+        )
+
+    def _polygon(
+        self,
+        points: list[tuple[float, float]],
+        *,
+        fill: m.Fill | None,
+        outline: m.Outline | None,
+    ) -> None:
+        """A closed filled area, as one custom-geometry path in the frame's own space."""
+        left = min(x for x, _ in points)
+        top = min(y for _, y in points)
+        width = max(max(x for x, _ in points) - left, 1e-6)
+        height = max(max(y for _, y in points) - top, 1e-6)
+        commands = " ".join(
+            ("M" if index == 0 else "L") + f" {x - left:.4f} {y - top:.4f}"
+            for index, (x, y) in enumerate(points)
+        ) + " Z"
+        self.elements.append(
+            m.ShapeElement(
+                transform=m.Transform(
+                    offset_x=left * EMU_PER_POINT,
+                    offset_y=top * EMU_PER_POINT,
+                    extent_width=width * EMU_PER_POINT,
+                    extent_height=height * EMU_PER_POINT,
+                ),
+                geometry=m.CustomGeometry(
+                    paths=[
+                        m.CustomGeometryPath(width=width, height=height, commands=commands)
+                    ]
+                ),
+                fill=fill,
                 outline=outline,
             )
         )
@@ -2453,6 +3146,45 @@ _MARKER_PRESETS = {
     "star": "star5",
     "dash": "rect",
 }
+
+
+def _wrap_to_width(text: str, font: "ChartFont", cap: float) -> list[str]:
+    """Break ``text`` at spaces so no line is wider than ``cap``, if that is possible.
+
+    A single word is never split: PowerPoint's own break put "Category" and "Three" on
+    their own lines rather than hyphenating either.
+    """
+    if not text or cap <= 0 or font.width(text) <= cap:
+        return [text]
+    lines: list[str] = []
+    current = ""
+    for word in text.split(" "):
+        if not word:
+            continue
+        candidate = f"{current} {word}" if current else word
+        if current and font.width(candidate) > cap:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [text]
+
+
+def _rotate_past_blank(
+    points: list["tuple[float, float] | None"],
+) -> list["tuple[float, float] | None"]:
+    """Start the list at the point after the last blank, keeping cyclic order.
+
+    A radar's points close into a ring, so the run running through index 0 is one run and
+    not two.  Rotating makes that true of the straight list `_split_runs` walks.
+    """
+    blanks = [index for index, point in enumerate(points) if point is None]
+    if not blanks or len(blanks) == len(points):
+        return points
+    start = blanks[-1]
+    return points[start:] + points[:start]
 
 
 def _split_runs(

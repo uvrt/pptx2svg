@@ -94,7 +94,9 @@ METAFILE_MIME_TYPES = frozenset({"image/emf", "image/wmf", "image/x-emf", "image
 #: which Office version and which save format wrote the file, so both are accepted.
 #: Chart groups the renderer can draw.  Everything else warns and draws an empty frame
 #: rather than a wrong picture.
-DRAWABLE_CHART_KINDS = frozenset({"barChart", "lineChart", "pieChart", "doughnutChart"})
+DRAWABLE_CHART_KINDS = frozenset(
+    {"barChart", "lineChart", "pieChart", "doughnutChart", "radarChart"}
+)
 
 DIAGRAM_DRAWING_REL_TYPES = (
     "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing",
@@ -915,8 +917,8 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
 def _first_drawable_plot(source) -> "object | None":
     """The first plot group this renderer knows how to draw.
 
-    ``barChart``, ``lineChart``, ``pieChart`` and ``doughnutChart`` (and their 3-D
-    spellings, drawn flat).  A combo chart whose
+    ``barChart``, ``lineChart``, ``pieChart``, ``doughnutChart`` and ``radarChart`` (and
+    their 3-D spellings, drawn flat).  A combo chart whose
     *first* group is a line but whose second is a bar still draws the bar, which is a
     better picture than an empty frame and is why this scans rather than taking ``[0]``.
     """
