@@ -11,7 +11,10 @@ standard library. PNG output delegates to an existing rasteriser
 ([resvg](https://github.com/linebender/resvg) via `resvg-py`, which ships prebuilt
 wheels — no compiler, no system libraries).
 
-A Python port of [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse).
+Every preset shape, chart, table style and font metric is **measured against PowerPoint's
+own output** rather than guessed: `tools/fidelity.py` scores each render against a PDF
+PowerPoint exported from the same deck, and the constants in this codebase carry the
+measurement that produced them.
 
 ## Install
 

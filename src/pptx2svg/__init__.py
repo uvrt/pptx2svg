@@ -1,6 +1,5 @@
 """Render PowerPoint (.pptx) slides to SVG, and SVG to PNG.
 
-A pure-Python port of `pptx-glimpse <https://github.com/hirokisakabe/pptx-glimpse>`_.
 Parsing, layout and SVG generation use only the standard library; PNG output delegates to
 an existing rasteriser (resvg-py by default).
 
