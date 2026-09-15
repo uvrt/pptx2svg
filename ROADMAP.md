@@ -2078,10 +2078,15 @@ same point the Fonts section opens with from the other direction: aiden0z solved
 problem by reading `<p:embeddedFontLst>`, which is Phase 6, and left the clone problem to
 the user's machine.
 
-Two further negatives, so they are not re-searched. **Liberation Sans Narrow exists only in
-the 1.x GPL-with-font-exception line**; the 2.x OFL releases ship Sans, Serif and Mono and
-no Narrow, and the ChangeLog does not mention one. It is moot either way — URW Nimbus Sans
-Narrow and TeX Gyre Heros Cn both measure exact against Arial Narrow above. And croscore has **a sixth face that this project has never heard of**:
+One correction and one further negative, so neither is re-searched. **Liberation Sans
+Narrow exists only in the 1.x line** — the 2.x OFL releases ship Sans, Serif and Mono and
+no Narrow — but it is not moot, as first written here: Debian packages it as
+`fonts-liberation-sans-narrow` 1:1.07.6-4 in main, and measured against the Arial Narrow
+macOS installs it is **0 of 95 in all four cuts**, the cleanest Arial Narrow result of the
+three. Its licence is **GPL-2 with the Liberation font exception**, and that exception
+covers embedding a glyph in a document, not redistributing the files — the same shape as
+URW's, and the same reason it stays out of the wheel while being the best `apt` route.
+TeX Gyre Heros Cn remains the shortlist pick for the bundle. And croscore has **a sixth face that this project has never heard of**:
 **Symbol Neu**, Google's Apache-2.0 metric clone of Microsoft Symbol, which measures 0/188
 against the installed `symbol.ttf` by legacy code and 0/189 by glyph name. It is not in any
 current package — Google dropped it after croscore 1.23.0 on the reasoning that browsers
@@ -2093,7 +2098,11 @@ faces already bundled (Arimo, Tinos, Cousine; Carlito, Caladea).
 ### The shortlist
 
 Ranked by names rescued from the width guess per megabyte added to a bundle that is
-currently 11 MB packed and 20.5 MB on disk for eight families. The bundle's inclusion rule
+currently 11 MB packed and 20.5 MB on disk for eight families. This is a shortlist for the
+*wheel*, which redistributes and must therefore be conservative. `tools/install-fonts-debian.sh`
+is under no such constraint — it installs from Debian's archive and redistributes nothing —
+so its `--clones` tier takes the measured-best face in every row, `fonts-urw-base35`
+included. The bundle's inclusion rule
 — every family is there because Office will draw with it — is respected: everything below
 is a clone of a face PowerPoint installs.
 
@@ -2169,6 +2178,9 @@ waved through.
 * **Whether `Century` and `Century Schoolbook` being metrically identical is by design.**
   They are two menu entries with the same 95 ASCII advances. Both map to C059 either way, so
   nothing depends on the answer.
+* **Every number here is from one machine's PowerPoint 16.106.** A different Office build
+  could ship a different cut of the same family. Nothing in the survey depends on a version
+  Microsoft could quietly change, but a re-check is cheap and has never been done twice.
 * **Kerning, everywhere.** This survey compares `hmtx` advances only. `pptx2svg` does not
   apply kerning and PowerPoint does, which is a pre-existing gap and not one the clone
   choice changes — but a clone with different kern pairs will diverge from PowerPoint by
