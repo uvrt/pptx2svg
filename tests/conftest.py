@@ -32,9 +32,26 @@ def authoring() -> Path:
     return FIXTURE_DIR / "authoring-integration.pptx"
 
 
+#: Decks that are not ours to redistribute live outside the repository, in the gitignored
+#: `scratch/` directory, so a checkout can still use one when the developer has a copy.
+LOCAL_DIR = Path(__file__).resolve().parents[1] / "scratch"
+
+
 @pytest.fixture(scope="session")
 def college_template() -> Path:
-    return FIXTURE_DIR / "real-college-template.pptx"
+    """Dickinson College's public sample deck -- **not committed**.
+
+    It is a third-party document, so it is not in `tests/fixtures/`; see the licence note
+    in README.md.  Tests that need it skip where it is absent, which is every machine but
+    one.  Put a copy in `scratch/` to run them:
+
+        https://www.dickinson.edu/download/downloads/id/1076/sample_powerpoint_slides.pptx
+        sha256 ac7f2627645042190df3244cc25929f4b006d144fc2cac520e79ab376197bbbf
+    """
+    path = LOCAL_DIR / "real-college-template.pptx"
+    if not path.is_file():
+        pytest.skip(f"no {path}; see the fixture's docstring for where to get it")
+    return path
 
 
 # The font bundle is a sibling distribution that a source checkout has not pip-installed.

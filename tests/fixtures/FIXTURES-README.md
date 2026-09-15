@@ -32,11 +32,13 @@
 | `sample.pptx`                | md-pptx 生成  | 6          | 日本語テキスト・箇条書き・テキスト装飾                     |
 | `sample-issue-387.pptx`      | 手作成        | 1          | インラインテキスト装飾（太字・斜体・太字斜体）             |
 | `authoring-integration.pptx` | document API  | 1          | from-scratch authoring API の package/render 統合 contract |
-| `real-college-template.pptx` | PowerPoint 2007 | 9        | EMF ロゴ・負値を含む積み上げ縦棒チャート・テーブル・箇条書き・JPEG 写真 |
 
-## `real-college-template.pptx` の出所
+## `real-college-template.pptx`（**リポジトリには含めない**）
 
-Dickinson College が公開しているサンプルプレゼンテーション。
+Dickinson College が公開しているサンプルプレゼンテーション。**第三者の著作物であり、
+再配布する権利はこちらにない**ため、`tests/fixtures/` には置かず、gitignore された
+`scratch/` に各自で配置する。必要とするテストは、無ければ skip する
+（`tests/conftest.py` の `college_template` fixture が唯一の参照点）。
 
 | 項目           | 値                                                                             |
 | -------------- | ------------------------------------------------------------------------------ |
@@ -71,8 +73,12 @@ Dickinson College が公開しているサンプルプレゼンテーション�
 - **`a:spcBef` と `a:spcAft` が加算される**ことを示す段落間隔。
 
 なお 647KB は下記「1ファイルあたり 500KB 以下」の目安を超える。内訳は
-`ppt/media/image4.jpeg` の 441KB がほぼすべてで、これを差し替えると
-スライド 8 が測定対象でなくなるため、原本のまま収録している。
+`ppt/media/image4.jpeg` の 441KB がほぼすべてである。いずれにせよリポジトリには
+含めないため、この目安には抵触しない。
+
+上記 4 点の知見は、いずれもこのデッキを必要としないテストとして
+`tests/test_chart.py` / `tests/test_render.py` に定着させてある。
+デッキ本体が無くても回帰は検出できる。
 
 ## Authoring integration fixture の再生成
 

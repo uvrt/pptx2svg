@@ -72,7 +72,7 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | --- | --- | --- | --- |
 | `table test.pptx` | **0.9895** | 0.9984 | pass |
 | `authoring-integration.pptx` | 0.9327 | 0.9984 | SSIM |
-| `real-college-template.pptx` | 0.8003 | 0.8753 | SSIM, hist |
+| `real-college-template.pptx` (local only) | 0.8003 | 0.8753 | SSIM, hist |
 | `real-basic-theme.pptx` | skipped | — | PowerPoint drew MS Gothic where the deck names ＭＳ Ｐゴシック |
 | `sample.pptx` | skipped | — | same |
 | `real-financial-report.pptx` | skipped | — | no Noto Sans JP on this machine, so PowerPoint substituted too |
@@ -88,9 +88,12 @@ PowerPoint can see it (`~/Library/Fonts`) and re-export the three decks that nam
 rewrite the two Japanese decks' themes to name `MS Gothic` — the face PowerPoint actually
 resolves — instead of ＭＳ Ｐゴシック.
 
-`real-college-template.pptx` was added specifically to escape that trap: it names only
-Arial, Calibri and Wingdings, all of which this machine has, so it is **the first
-real-world deck in the corpus that is measurable rather than skipped**. Its nine slides:
+`real-college-template.pptx` escapes that trap: it names only Arial, Calibri and
+Wingdings, all of which this machine has, so it is **the first real-world deck measurable
+rather than skipped**. It is third-party and therefore **not committed** -- it lives in
+the gitignored `scratch/`, and the tests that need it skip where it is absent (see
+`tests/fixtures/README.md`). The defects it found are pinned by tests that do *not* need
+it. Its nine slides:
 
 | slide | SSIM | hist | what is left |
 | --- | --- | --- | --- |

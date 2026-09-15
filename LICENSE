@@ -5,6 +5,15 @@ Copyright (c) 2026 pptx2svg contributors
 This project is a Python port of pptx-glimpse (https://github.com/hirokisakabe/pptx-glimpse),
 Copyright (c) Hiroki Sakabe, also MIT licensed.
 
+The licence below covers this project's own source, tests and tooling. It does not
+cover the sample .pptx files in tests/fixtures/, which are third-party documents
+included as renderer inputs and remain the property of their respective owners; see
+tests/fixtures/README.md and tests/fixtures/FIXTURES-README.md for each file's
+provenance. Decks that this project has no right to redistribute are not committed at
+all, and the tests that use them skip where they are absent. Nor does this licence cover
+the font files carried by the separate pptx2svg-fonts distribution, which are licensed
+individually under the SIL Open Font License 1.1.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
