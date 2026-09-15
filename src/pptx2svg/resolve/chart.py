@@ -51,7 +51,7 @@ from dataclasses import dataclass, field, replace
 from .. import model as m
 from ..parse import chart as c
 from ..parse import source as s
-from ..text.fontmap import metrics_for
+from ..text.fontmap import east_asian_family, metrics_for
 from ..text.measure import DEFAULT_LINE_HEIGHT_RATIO, is_cjk
 
 EMU_PER_POINT = 12700.0
@@ -599,13 +599,41 @@ class ChartFont:
 
     family: str | None
     box: "FontBox"
+    #: The face East Asian characters in this text resolve to, which is almost never the
+    #: Latin one: ``real-financial-report.pptx``'s axes name ``<a:latin typeface="Arial"/>``
+    #: and nothing else, and PowerPoint drew their Japanese labels in the theme's
+    #: ``<a:font script="Jpan" typeface="游ゴシック"/>``.  See
+    #: :func:`pptx2svg.text.fontmap.east_asian_family` for the cascade and the export it
+    #: was read out of.
+    family_ea: str | None = None
+    #: That face's vertical metrics, for the reserves a CJK label's line box drives.
+    box_ea: "FontBox | None" = None
 
     @property
     def size(self) -> float:
         return self.box.size
 
     def width(self, text: str) -> float:
-        return text_width(text, self.family, self.box.size)
+        return text_width(text, self.family, self.box.size, self.family_ea)
+
+    def box_for(self, *texts: str) -> "FontBox":
+        """The line box of the face that will actually draw ``texts``.
+
+        A chart reserves space for a *known* string, so it can ask which face that string
+        resolves to instead of assuming the Latin one.  It matters: on
+        ``real-financial-report.pptx``'s radar, Arial's line box is 1.117 em against the
+        13.4 pt the fitted reserve wants it to be, and the Japanese face's is 1.448 em.
+
+        Mixed text takes the East Asian box, because PowerPoint's line box is the tallest
+        face on the line and the Japanese faces are the taller of the two in every pairing
+        here.  Latin-only text takes the Latin box unchanged, which is what keeps every
+        measured Latin chart in this file where it was.
+        """
+        if self.box_ea is not None and any(
+            is_cjk(ord(char)) for text in texts for char in text
+        ):
+            return self.box_ea
+        return self.box
 
 
 @dataclass(frozen=True)
@@ -696,24 +724,39 @@ def wrap_label(text: str, font: ChartFont, band: float) -> list[str]:
     return lines[:WRAPPED_LABEL_MAX_LINES]
 
 
-def text_width(text: str, family: str | None, size: float) -> float:
+def text_width(
+    text: str, family: str | None, size: float, family_ea: str | None = None
+) -> float:
     """One line's advance width, in points.
 
     The CJK branch is not decoration: ``real-financial-report.pptx`` legends its series
     in Japanese, and measuring those with the Latin mean advance under-counted the legend
     band by 32 pt -- a quarter of the chart's width.  The rule is the same one
     :mod:`pptx2svg.text.measure` uses, so chart text is measured exactly as slide text is.
+
+    ``family_ea`` is which face those East Asian characters resolve to, and it is
+    per-character rather than per-string because one label really does mix the two:
+    PowerPoint drew ``DX投資額`` with ``DX`` in ArialMT and ``投資額`` in
+    YuGothic-Regular, both inside one label.  Measuring the whole string through either
+    face alone gets the other half wrong -- and for a proportional Japanese face the
+    error is large, ``ＭＳ Ｐゴシック`` running from 0.648 em to 1.0 across its katakana.
     """
     metrics = metrics_for(family)
-    if metrics is None:
+    ea_metrics = metrics_for(family_ea) if family_ea else None
+    if metrics is None and ea_metrics is None:
         return 0.5 * size * len(text)
     total = 0.0
     for char in text:
-        width = metrics.widths.get(char)
+        east_asian = is_cjk(ord(char))
+        table = ea_metrics if east_asian and ea_metrics is not None else metrics
+        if table is None:
+            total += 0.5 * size
+            continue
+        width = table.widths.get(char)
         if width is None:
-            width = metrics.cjk_width if is_cjk(ord(char)) else metrics.default_width
-        total += width
-    return total / metrics.units_per_em * size
+            width = table.cjk_width if east_asian else table.default_width
+        total += width / table.units_per_em * size
+    return total
 
 
 # --------------------------------------------------------------------------------------
@@ -729,6 +772,10 @@ class ChartStyle:
     font_size: float
     color: m.ResolvedColor
     accents: list[m.ResolvedColor]
+    #: The theme's East Asian face -- ``<a:ea>`` if it names one, else the
+    #: ``<a:font script="Jpan"/>`` beside it.  A chart's ``c:txPr`` almost never names an
+    #: ``<a:ea>`` of its own, so this is what its Japanese text is drawn in.
+    font_family_ea: str | None = None
 
 
 @dataclass
@@ -1022,7 +1069,9 @@ class ChartBuilder:
         radius = min(half_width, half_height)
         if labels:
             reserve = max(
-                RADAR_LABEL_RESERVE_LINES * font.box.line_height - RADAR_LABEL_RESERVE_PT,
+                RADAR_LABEL_RESERVE_LINES
+                * font.box_for(*(line for lines in labels for line in lines)).line_height
+                - RADAR_LABEL_RESERVE_PT,
                 0.0,
             )
             radius = min(radius, half_height - reserve)
@@ -1660,14 +1709,29 @@ class ChartBuilder:
         """
         size = None
         typeface = None
+        typeface_ea = None
         for source in (*sources, self.chart.text_properties):
             if size is None:
                 size = _text_size(source)
             if typeface is None:
                 typeface = _text_typeface(source)
+            if typeface_ea is None:
+                typeface_ea = _text_typeface_ea(source)
         family = self._resolve_typeface(typeface) if typeface else None
         family = family or self.style.font_family
-        return ChartFont(family=family, box=font_box(family, size or self.style.font_size))
+        # The East Asian face is its own cascade and does not fall back to the Latin one
+        # until everything else has failed -- see `pptx2svg.text.fontmap.east_asian_family`.
+        family_ea = east_asian_family(
+            self._resolve_typeface(typeface_ea) if typeface_ea else None,
+            self.style.font_family_ea,
+        )
+        size = size or self.style.font_size
+        return ChartFont(
+            family=family,
+            box=font_box(family, size),
+            family_ea=family_ea,
+            box_ea=font_box(family_ea, size) if family_ea else None,
+        )
 
     def _label_font(self, axis: c.SourceChartAxis | None) -> ChartFont:
         return self._font(axis.text_properties if axis is not None else None)
@@ -1864,11 +1928,27 @@ class ChartBuilder:
         86.36 pt, so no clamp on the width reproduces both. Whatever PowerPoint does past
         about 90 pt of label was not identified, and a rule that fitted the rest and broke
         there is exactly what this file does not ship.
+
+        A third observation narrows it without settling it.  ``real-financial-report.pptx``
+        chart3 reserves 69.538 pt for a 96 pt label, which inverts through this formula to
+        an implied width of 68.09 -- and its frame is 135 pt tall against the probe deck's
+        181.1024.  The three implied widths are 90.85, 91.88 and 68.09, which are 0.502,
+        0.507 and 0.504 of their frame heights: a straight line through them has an
+        intercept of 0.01.  **Still not shipped.**  Under a pure cap the two probes would
+        reserve the *same* amount and they differ by 0.73 pt, and fitting a rule on three
+        points, one of them the deck it would be validated against, is how the Caladea
+        claim got in.  One probe deck sweeping frame height settles it.
+
+        The same export shows what PowerPoint does once the cap bites: it **truncates**.
+        It drew ``プラット…`` for an eight-character category.  Nothing here does that, so
+        our labels overflow where PowerPoint's are cut.
         """
-        box = font.box
         if self._labels_rotate(font, categories, plot_width):
             widest = max(font.width(text) for text in categories)
             return ROTATED_LABEL_INSET_PT + widest * _SIN_45
+        # The line box is the *drawn* face's, which for a Japanese label is not the one
+        # `<a:latin>` names -- see `ChartFont.box_for`.
+        box = font.box_for(*categories)
         lines = self._label_line_count(font, categories, plot_width)
         return (
             FRAME_PADDING_PT
@@ -3287,6 +3367,13 @@ class ChartBuilder:
                             properties=m.RunProperties(
                                 font_size=font.size,
                                 font_family=font.family,
+                                # Without this the renderer has one face for a label that
+                                # PowerPoint drew in two, and resvg substitutes per text
+                                # chunk rather than per glyph -- so the whole label would
+                                # be drawn in whatever one face it settles on, at widths
+                                # nothing computed.  Naming it is what makes the emitted
+                                # `font-family` agree with `ChartFont.width`.
+                                font_family_ea=font.family_ea,
                                 color=color or self.style.color,
                             ),
                         )
@@ -3602,6 +3689,18 @@ def _text_typeface(body: s.SourceTextBody | None) -> str | None:
     """
     run = _default_run(body)
     return run.typeface if run is not None else None
+
+
+def _text_typeface_ea(body: s.SourceTextBody | None) -> str | None:
+    """``c:txPr``'s ``a:defRPr/a:ea@typeface``, unexpanded.
+
+    No chart in this corpus writes one -- every one of the five in
+    ``real-financial-report.pptx`` names ``<a:latin typeface="Arial"/>`` and stops -- so
+    this exists to stop a chart that *does* name an East Asian face being overridden by
+    the theme.  A ``+mn-ea``-style pointer comes back as-is, the same as the Latin side.
+    """
+    run = _default_run(body)
+    return run.typeface_ea if run is not None else None
 
 
 def _title_size(title: c.SourceChartText | None) -> float:

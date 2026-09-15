@@ -42,6 +42,7 @@ from typing import Sequence
 
 from .. import model as m
 from ..parse import source as s
+from ..text.fontmap import east_asian_family
 from ..units import ROTATION_UNIT
 from .color import resolve_color
 
@@ -325,7 +326,9 @@ def _resolve_run_properties(
         font_family=(
             _resolve_typeface(context, merged.typeface) or _theme_body_latin(context)
         ),
-        font_family_ea=_resolve_typeface(context, merged.typeface_ea),
+        font_family_ea=east_asian_family(
+            _resolve_typeface(context, merged.typeface_ea), _theme_east_asian(context)
+        ),
         font_family_cs=_resolve_typeface(context, merged.typeface_cs),
         bold=bool(merged.bold),
         italic=bool(merged.italic),
@@ -337,6 +340,39 @@ def _resolve_run_properties(
         hyperlink=_hyperlink(context, merged),
         outline=outline,
         highlight=resolve_color(context.colors, merged.highlight),
+    )
+
+
+def _theme_east_asian(context) -> str | None:
+    """The face this theme draws East Asian text in, for a run that names none.
+
+    The counterpart of :func:`_theme_body_latin`, and the piece that was missing: a run
+    stating no ``<a:ea>`` used to reach the measurer with ``font_family_ea=None``, so
+    every kana and every ideograph in it was measured through the *Latin* table.  That is
+    not a small approximation -- a Latin face has no East Asian glyph at all, so the
+    width came from :attr:`FontMetrics.cjk_width`, which is one em in every table because
+    the extractor writes ``units_per_em`` where the probe kanji is missing.  Layout was
+    computed from a constant while the rasteriser drew with a real face.
+
+    **Body before heading, measured.**  ``real-financial-report.pptx``'s theme offers
+    ``游ゴシック Light`` as its major Jpan face and ``游ゴシック`` as its minor, and
+    PowerPoint's own export drew the chart's Japanese in **YuGothic-Regular** -- the
+    minor.  The Latin side already makes the same choice for the same reason (see
+    :func:`_theme_body_latin`): a master that wants the heading face says so with
+    ``+mj-ea``, and guessing it for everything else gets a light weight on body copy.
+
+    Within a collection, ``<a:ea>`` comes before the ``<a:font script="..."/>`` list;
+    :func:`pptx2svg.text.fontmap.east_asian_family` is what enforces that an empty
+    ``typeface=""`` -- which is what every theme in this corpus writes -- is not a name.
+    """
+    scheme = context.theme.font_scheme if context.theme else None
+    if scheme is None:
+        return None
+    return east_asian_family(
+        scheme.minor_east_asian,
+        scheme.minor_japanese,
+        scheme.major_east_asian,
+        scheme.major_japanese,
     )
 
 

@@ -40,6 +40,7 @@ from ..parse.chart import flat_chart_kind, parse_chart_space
 from ..parse.drawing import parse_group_transforms
 from ..parse.shapes import parse_shape_tree
 from ..parse.table_styles_builtin import builtin_table_style
+from ..text.fontmap import east_asian_family
 from ..units import ROTATION_UNIT
 from ..xmlutil import attr, child, descendants
 from .chart import (
@@ -983,6 +984,22 @@ def _chart_style(context: ResolveContext, source) -> ChartStyle:
     """
     theme = context.theme
     minor = (theme.font_scheme.minor_latin or None) if theme is not None else None
+    # The East Asian face is a separate cascade, and the chart never states one: every
+    # `c:txPr` in `real-financial-report.pptx` names `<a:latin typeface="Arial"/>` and
+    # stops, while PowerPoint drew the Japanese category labels in the theme's
+    # `<a:font script="Jpan" typeface="游ゴシック"/>`.  Body before heading, for the same
+    # reason `_theme_body_latin` picks the minor face: the export used YuGothic-Regular
+    # where the major entry is `游ゴシック Light`.
+    minor_ea = (
+        east_asian_family(
+            theme.font_scheme.minor_east_asian,
+            theme.font_scheme.minor_japanese,
+            theme.font_scheme.major_east_asian,
+            theme.font_scheme.major_japanese,
+        )
+        if theme is not None
+        else None
+    )
     text_color = resolve_color(context.colors, s.SchemeColor(scheme="tx1")) or m.ResolvedColor(
         hex="#000000"
     )
@@ -994,6 +1011,7 @@ def _chart_style(context: ResolveContext, source) -> ChartStyle:
         font_size=default_font_size(source),
         color=text_color,
         accents=accents,
+        font_family_ea=minor_ea,
     )
 
 

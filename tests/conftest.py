@@ -32,6 +32,11 @@ def authoring() -> Path:
     return FIXTURE_DIR / "authoring-integration.pptx"
 
 
+@pytest.fixture(scope="session")
+def financial() -> Path:
+    return FIXTURE_DIR / "real-financial-report.pptx"
+
+
 #: Decks that are not ours to redistribute live outside the repository, in the gitignored
 #: `scratch/` directory, so a checkout can still use one when the developer has a copy.
 LOCAL_DIR = Path(__file__).resolve().parents[1] / "scratch"

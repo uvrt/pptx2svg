@@ -1015,7 +1015,17 @@ def _bullet_style_attrs(
 
 
 def _needs_script_split(properties: m.RunProperties) -> bool:
-    """A run with distinct Latin and East Asian typefaces must be split per script."""
+    """A run with distinct Latin and East Asian typefaces must be split per script.
+
+    Far more runs qualify than used to.  ``font_family_ea`` is now the *resolved* East
+    Asian face -- the run's ``<a:ea>``, or the theme's, or its ``<a:font script="Jpan"/>``
+    -- rather than only what the run itself spelled, so a run that names no ``<a:ea>``
+    over a theme that offers a Jpan face splits where it silently did not before.  That
+    is the point: the chunk built below is where a Japanese glyph gets asked for in a
+    Japanese face, and it is measured in the same face by
+    :meth:`DefaultTextMeasurer.measure_text_width`, which selects per character on the
+    same :func:`is_cjk` test :func:`_split_by_script` splits on.
+    """
     return (
         properties.font_family is not None
         and properties.font_family_ea is not None

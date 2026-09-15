@@ -333,6 +333,36 @@ convert_pptx_to_svg("deck.pptx", opts)
 `--system-fonts`; or map and measure it yourself
 ([escape hatches](#the-escape-hatches-and-their-trap)).
 
+## Which face draws the Japanese?
+
+The five routes above answer *what do we draw this family with*. A run carrying kana or
+ideographs has an earlier question to answer first — **which family** — and OOXML gives
+it three places to look. In order:
+
+1. the run's own `<a:ea typeface="..."/>`;
+2. the theme font collection's `<a:ea>`;
+3. the theme's `<a:font script="Jpan"/>` list (then `Hans`, `Hant`, `Hang`).
+
+The Latin `<a:latin>` face is the last resort, not the default, and that ordering is
+measured rather than assumed. PowerPoint's own PDF export of a deck whose charts name
+`<a:latin typeface="Arial"/>` and nothing else, over a theme writing
+`<a:ea typeface=""/>` and `<a:font script="Jpan" typeface="游ゴシック"/>`, embeds
+**YuGothic-Regular** for the Japanese and **ArialMT** for the Latin runs *inside the same
+labels*.
+
+Two things to know when reading a deck's XML:
+
+* **`typeface=""` is not a name.** Nearly every theme writes an empty `<a:ea>`; it means
+  the collection names no East Asian face, and the script list is what answers.
+* **A Latin face named as the East Asian one is ignored.** Decks really do write
+  `<a:ea typeface="Raleway"/>`, and PowerPoint draws their Japanese in a Japanese face
+  anyway. So does this library: a candidate that cannot draw kana loses to one that can.
+
+One run can therefore be two faces, and it is split into separate `<tspan>` chunks that
+each name their own, because rasterisers fall back per chunk rather than per glyph.
+Measurement splits at exactly the same character boundaries, which is the same
+measure-equals-draw rule the rest of this page is about.
+
 ## Ask the tool: `pptx2svg fonts --check`
 
 This is the thing that answers the question for a *specific* deck, and it is the reason
