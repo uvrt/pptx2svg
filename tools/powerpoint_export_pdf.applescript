@@ -29,6 +29,20 @@
 --     failure; clearing the dialog afterwards needs a separate process (see the recovery
 --     helper in pptx-agent's tests/oracle.py).  A timeout here therefore means "PowerPoint
 --     would not open this file", which is exactly the verdict the oracle exists to give.
+--   * **A repair dialog left standing makes every later export fail with -9074**, including
+--     one of a deck that exported fine an hour earlier to a path PowerPoint has always been
+--     allowed to write.  So -9074 does not reliably mean "unapproved path": check for the
+--     dialog before believing it.  Two commands settle it and both work while PowerPoint is
+--     otherwise unresponsive:
+--         osascript -e 'tell application "System Events" to tell process "Microsoft PowerPoint" \
+--             to get {name of every button, value of every static text} of window 1'
+--         osascript -e 'tell application "System Events" to tell process "Microsoft PowerPoint" \
+--             to click button "Cancel" of window 1'
+--     (the button is localised -- "Annuleren" on a Dutch install).  A second failure mode
+--     looks different again: a deck PowerPoint repairs *silently* opens as `Name [Repaired]`,
+--     which no longer matches the full path this script looks for, and the export produces
+--     no file at all while the script still exits 0.  Always check the PDF exists rather
+--     than trusting the exit status.
 
 on run argv
     if (count of argv) is not 2 then

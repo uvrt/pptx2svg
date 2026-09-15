@@ -804,7 +804,8 @@ appears.
 
 ## Phase 3 — Charts
 
-**Effort: XL. 3.1 and the `barChart` half of 3.2 are done; the rest is not.**
+**Effort: XL. 3.1 is done and 3.2 has seven of its types; combo charts, the secondary
+axis and the bubble/stock/surface/ofPie tail are not.**
 
 No shortcut: unlike SmartArt, PowerPoint does *not* cache a rendered chart. The
 `c:chartSpace` part holds data plus styling, and the renderer must do axis scaling, tick
@@ -852,19 +853,23 @@ Three things the obvious reading gets wrong, each found in a fixture:
 mapping. Both **[pptx-renderer]** and this roadmap flagged it; it is invisible until a
 deck does both at once.
 
-### 3.2 Renderer — five types **done**, the rest not started
+### 3.2 Renderer — seven types **done**, the rest not started
 
 1. ✅ `barChart` — clustered, stacked, percentStacked, `barDir` col and bar
 2. ✅ `lineChart` — markers, smoothing, blanks, the real fixture on slide 2
 3. ✅ `pieChart` / `doughnutChart` — hole, rings, explosion, the real fixture on slide 3
 4. ✅ `radarChart` — standard, marker and filled, the real fixture on slide 4
-5. `areaChart`
-6. `scatterChart` / `bubbleChart`
-7. `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
+5. ✅ `areaChart` — standard, stacked, percentStacked, negatives, `crossBetween`
+6. ✅ `scatterChart` — two value axes, all five `c:dLblPos`, splines
+7. `bubbleChart` — the reader already carries `c:bubbleSize`; nothing draws it
+8. `stockChart`, `surfaceChart`, `ofPieChart` — long tail; defer
 
-**No chart in the corpus warns `chart-unsupported-type` any more.**
+**Still warning `chart-unsupported-type`:** `bubbleChart`, `stockChart`,
+`surfaceChart`/`surface3DChart`, `ofPieChart`. Their 3-D spellings degrade through
+`parse/chart.flat_chart_kind` and then warn too. **No chart in the corpus warns**, and
+none ever did once 3.1 landed.
 
-Data labels are drawn for all five, at every `c:dLblPos` each type accepts — except
+Data labels are drawn for all seven, at every `c:dLblPos` each type accepts — except
 the radar's, whose placement no export has ever shown; see below.
 
 #### Polar layout, measured
@@ -1013,6 +1018,161 @@ What is wrong or unmeasured in the radar path:
   discrepancy rather than a second layout rule — so one constant is used for all four.
 * **The wrap threshold is one bracket.** 43.72 pt of label stayed on one line and 59.10 pt
   wrapped, on a 198.47 pt region; 0.25 is the round number inside (0.2203, 0.2978].
+
+#### Area, measured
+
+Eighteen probe charts in the same 220.4724 x 181.1024 pt frame as the bar sweep, plus four
+tie-breakers, exported by PowerPoint 16.106 and read back as exact path vertices.
+
+**The plot rectangle is a bar chart's, to the last decimal.** All four insets agree on
+every one of the eighteen — `bare` 21.073 / 11.000 / 11.102 / 24.965, `font14` 26.907 /
+11.000 / 13.545 / 32.353, `title` top 40.803, `legend-b` bottom 49.048 — worst residual
+across the sweep **0.23 pt**. So is the value axis: 3, 4, 5 of data gives 0..6 by 1, the
+bar's strictly-outward rule and *not* the radar's stop-at-the-data one.
+
+What is new, and six of the seven refute the obvious reading:
+
+* **An area chart that states no `c:crossBetween` draws as `midCat`.** Three probes: with
+  `val="between"` the three vertices land on the band centres (52.473 / 115.292 /
+  178.072); with `val="midCat"` and with **no element at all** they are byte-identical to
+  each other on the plot's edges and midpoint (26.433 / 108.015 / 189.632). A line chart's
+  absent case is not measured — every line chart in the corpus and in every probe states
+  `between` — so the default there is left alone and this one is scoped to the area.
+* **`midCat` narrows the plot** because the first and last category label are now centred
+  on its own edges and half of each hangs outside. Left becomes
+  `max(label column, 11.0 + half the first label)` and right `11.0 + half the last`:
+  `Reader` is 30.859 pt and `Renderer` 39.673 pt, giving 26.433 and 189.636 against
+  PowerPoint's 26.433 and 189.632.
+* **The fill closes to the zero line, not to the plot's floor.** The negative probe's
+  polygon returns along y = 117.069, which is where its -3..6 axis puts 0, with the plot's
+  own bottom 53 pt lower. The path therefore **crosses itself** where the line crosses
+  zero and PowerPoint leaves the bow tie exactly as it falls — its fill rule is nonzero
+  **winding**, which is what the renderer already does.
+* **`c:invertIfNegative` does not exist on an area series.** CT_AreaSer has no such
+  element; a deck carrying one makes PowerPoint open it `[Repaired]` and refuse to export.
+  So the question the bar chart settled does not arise here — the file cannot ask.
+* **The series are painted in series order, first at the back, and the fills are opaque.**
+  Every one of the eighteen came back at alpha 255, and two probes say it is *order* and
+  not size: swapping the two series' values swapped which one was hidden, and a probe
+  whose first series covers the second entirely still emitted the first path first. A
+  front series really does hide what is behind it. That is PowerPoint's picture.
+* **No outline unless the file asks.** Eight probes stating none got a bare fill; one
+  stating `<a:ln w="25400"/>` got a second, stroked copy of the whole closed path,
+  baseline edge included.
+* **A blank splits the run, and a run of one point draws nothing.** The
+  `dispBlanksAs="gap"` probe, whose middle value is missing, drew **no area at all** —
+  two runs of one point each, and a point has no area.
+
+Stacked and percent-stacked accumulate exactly as a stacked bar does, with each band's
+lower edge the running total *without* this series, traced backwards; percentStacked's
+last series reaches 100% in every category. And:
+
+* **An area data label sits at the vertical centre of its own band**, horizontally centred
+  on the point. Unstacked 3/4/5 put its labels at 1.5, 2.0 and 2.5 on the value axis; a
+  stacked pair put the second series' at 4, 6.5 and 5.5, the midpoints of its *segments*
+  and not of the stack. Ten labels, worst residual 0.21 pt.
+* **`c:dLblPos` is refused outright.** An area chart whose `c:dLbls` carries one — `ctr`
+  included, which is the only value ECMA-376 lists for an area series — makes PowerPoint
+  open the deck `[Repaired]`. An area label has exactly one placement.
+* **The legend key is the square swatch**, 5.492 pt then 2.371 pt of gap: a bar's key, not
+  the line chart's rule.
+
+#### Scatter, measured
+
+Eighteen probe charts plus six tie-breakers. **Both axes are value axes and there is no
+category axis at all**, which is the one structural difference from every other Cartesian
+chart here and the reason `_build_scatter` does not go through `_build_cartesian`.
+
+**The brief's question — does the plot-area code assume a category axis? — is yes, and
+specifically the bottom of it.** `_bottom_label_band` takes a category list and decides
+between a level band, a wrapped one and a turned one; `_labels_rotate` and `wrap_label`
+are written around a *band width*, which a row of numbers does not have; and
+`_draw_labels` picks its placement off `barDir`. None of that applies to a scatter. What a
+scatter's bottom actually is, measured, is the **horizontal bar chart's**: one plain line
+of value labels centred on their ticks, with half the last one hanging past the plot's
+right edge. So the band is `_bottom_label_band(font, [], width)` — the same formula with
+an empty category list — and nothing else of that machinery is reached.
+
+* **The plot rectangle** is the horizontal bar's on all six discriminating probes:
+  `bare` 21.073 / 13.670 / 11.102 / 24.965 (the right inset is `11.0 + half of "6"`),
+  `font14` 26.907 / 14.740 / 13.545 / 32.353, `x-deleted` 11.000 right and 11.102 bottom
+  with no labels to reserve for. Worst residual **0.32 pt** over eighteen.
+* **The two negative corners mirror the bar chart's.** A negative *x* range floats the
+  value axis into the plot — drawn at 111.088 pt, not at the plot's left edge 95.7 pt away
+  — and the y labels go with it, right-aligned the same `descent + 0.645 em` from the axis
+  the column always uses; the left inset is then the first x label's overhang, 15.373 pt
+  measured against 15.373 predicted. A negative *y* range moves the x labels up beside the
+  zero line and the bottom band disappears.
+* **The x axis is the coarse one, and the cap is four intervals and not five.** 1..5 of
+  data comes out 0..6 **by two** where the same span on the y axis takes ones. The
+  constant was five on the single horizontal-bar observation, which only bounds it below
+  six; the discriminating probe is `x-float`, whose 0.5..4.5 rounds to a *five*-interval
+  0..5 at unit 1 and was coarsened to 0..6 by 2 anyway, against `x-neg`'s four-interval
+  -4..4 by 2 which was kept. The bracket is [4, 5).
+* **`c:scatterStyle` decides nothing.** `marker`, `line` and `lineMarker` produced
+  byte-identical output — line *and* markers in all three. What turns either off is the
+  series' own markup: `<a:ln><a:noFill/></a:ln>` for the line, `<c:symbol val="none"/>`
+  for the marker, each measured. That was a live defect on the line chart too: a `noFill`
+  stroke resolves to `None` exactly as an absent `c:spPr` does, and the default 1.5 pt
+  line was being substituted for it.
+* **A blank breaks the run**, and the vertex list alone does not say so. The path through
+  a missing middle y has four points, which reads as unbroken; its segment *kinds* are
+  move, line, move, line. Reading coordinates without reading the operators is how that
+  gets missed — it was, until the render was put beside PowerPoint's. Points are joined in
+  **the order the file lists them**, not sorted by x: the unsorted probe's path runs
+  3, 1, 5, 2, 4.
+* **All five `c:dLblPos` values are the line chart's geometry read off a different edge of
+  the marker.** `r` — the default when the file states none — and `l` put the label's near
+  edge a marker radius plus 0.6 em from the point, 9.000 pt measured and 9.000 predicted
+  on both sides; `t` and `b` put its line box a radius plus the bar's 4.85 pt gap away;
+  `ctr` is the ink centre. Worst residuals 0.20, 0.20, 0.21, **0.91** and 0.26 pt.
+* **The legend key is the line chart's rule**, 19.200 pt with the marker on its midpoint.
+
+#### Two constants the new probes corrected, and one they finally measured
+
+Both of these are shared with `lineChart` and both were carried on assumption:
+
+* **The default marker is 6 pt, not ECMA-376's 7.** The radar already used 6 from a probe
+  whose *diamond* measured 5.76 pt across — a diamond, so the reading depended on the tips
+  falling inside PowerPoint's 0.24 pt output grid. Two probes settle it with an
+  axis-aligned shape and no such argument: the scatter two-series probe's second series
+  states no `c:marker` and its **square** measured exactly 6.000 x 6.000, and a line chart
+  with an explicit `c:size val="6"` square measured the same 6.000 on the same export. The
+  scatter's `r` data label confirms it a third way: its 9.000 pt offset is radius plus
+  0.6 em, which is 9.0 at a 6 pt marker and 9.5 at a 7 pt one.
+* **An absent `c:smooth` smooths.** It is a chart boolean, so the element being missing is
+  not the same as `val="0"` — the trap `parse/chart._flag` exists for, and this reader was
+  using `bool(None)`. Three probes: `val="1"`, the element absent, and `val="0"` came back
+  as four cubics, the *same* four cubics, and a four-segment polyline. PowerPoint's own
+  writer always emits the element, so no corpus deck moves; a hand-written one does.
+* **`c:smooth`'s tension is now measured, and both ends of the spline were wrong.** The
+  roadmap recorded the curve as "a Catmull-Rom spline, which has the right shape" with the
+  tension unmeasured. It is the plain 1/6: a five-point series exports as four cubics whose
+  interior controls reproduce `c1 = p1 + (p2 - p0)/6` and `c2 = p2 - (p3 - p1)/6` to the
+  0.001 pt the PDF prints, on a line chart and a scatter alike. **The terminal controls
+  are a third of their own chord, not a sixth** — 87.073 against the 90.527 that
+  duplicating the end point gives, on a chord of 20.72 pt — so the phantom point is a
+  *reflection*, `p0 = 2*p1 - p2`, and reflecting it reproduces both ends exactly.
+
+**What it bought.** No corpus deck holds an area or a scatter, so nothing scored moves and
+that is the point: `authoring-integration` holds at 0.9327/0.9984, `table-test` at
+0.9895/0.9984 and `real-college-template` at 0.8003/0.8753, all unchanged to four decimals
+despite the marker size, the smooth default, the spline ends, the `noFill` stroke and the
+bottom-axis interval cap all being shared with chart types those decks *do* hold. The
+improvement is in the probe decks, scored the same way:
+
+| probe deck | before | after |
+| --- | --- | --- |
+| area (18 charts) | 0.6165 / −0.0251 | **0.9562 / 0.9990** |
+| scatter (18 charts) | 0.0175 / −0.1142 | **0.8695 / 0.7945** |
+| tie-breakers (12) | 0.3148 / −0.0547 | **0.8921 / 0.8624** |
+| smooth (6) | 0.4291 / 0.3285 | **0.8768 / 0.6820** |
+
+The three that stay under 0.95 are decks of thin curves and markers on white, where SSIM
+is punishing about a pixel of antialiasing; put side by side at 1400 px the renders are
+indistinguishable apart from the tick density noted below. The probe decks are throwaway
+and were deleted; their generators are `tests/test_chart.py`'s `area_chart_xml` and
+`scatter_chart_xml`.
 
 #### Rotated category labels, measured
 
@@ -1295,13 +1455,34 @@ A rule was written, measured against all of it, found to contradict the stacked 
 everywhere except short plots. Whoever picks this up starts from the table above; the
 discriminating pair is the 30.9 pt cell and the stacked probe.
 
-#### Not done for the five types that draw
+**The area sweep adds one more datum and sharpens the contradiction rather than resolving
+it.** Two of its probes carry the identical 0..10 axis and 10 pt labels and differ only in
+plot height, because one of them has a bottom legend:
+
+| plot height | PowerPoint | intervals | spacing |
+| --- | --- | --- | --- |
+| 145.03 pt | 0..10 by 1 | 10 | 14.503 pt |
+| 120.95 pt | 0..10 by 2 | 5 | 12.095 pt |
+
+So 14.503 pt is accepted and 12.095 pt refused, which brackets a putative threshold to
+(12.095, 14.503] — and the 30.9 pt cell above refused **15.43 pt** on the same font. The
+three cannot be ordered by spacing alone. Ours draws eleven labels where PowerPoint draws
+six on the 120.95 pt probe, and that is the only visible difference between our render of
+the area deck and PowerPoint's.
+
+#### Not done for the seven types that draw
 
 Each of these is known-missing rather than merely absent:
 
-* **Data-label wrapping.** PowerPoint wraps a long category name onto two lines inside a
-  multi-part label; we draw it on one. `c:separator`, `c:leaderLines` and a data label's
-  own `c:layout` are read or ignored but never drawn.
+* **Data-label wrapping**, and **`c:separator` on an area chart**. PowerPoint wraps a long
+  category name onto two lines inside a multi-part label; we draw it on one. `c:separator`,
+  `c:leaderLines` and a data label's own `c:layout` are read or ignored but never drawn.
+  The area probe adds a measurement to that: a label showing category name *and* value
+  came back joined with `"; "` on **one** line and wrapped mid-word when it did not fit
+  (`Rendere` / `r; 5`), where a bar chart's multi-part label stacks its parts on separate
+  lines. Ours stacks for both. The bar behaviour is measured and shipped; the area one is
+  measured and **not** — changing the join would need the wrap that goes with it, and this
+  is the same known gap either way.
 * ~~**A line chart's legend key.**~~ — done. Four line-chart legend probes confirm the
   radar's 19.200 pt of rule with the marker at its midpoint and 2.025 pt before the text,
   and add that a series with `c:symbol val="none"` still gets the rule, and that the
@@ -1316,9 +1497,10 @@ Each of these is known-missing rather than merely absent:
 * **`bestFit` is a fixed fraction of the radius.** PowerPoint's moves a label out of the
   way when it does not fit; the probe pie's labels all fit, so that behaviour was never
   exercised.
-* **`c:smooth`'s tension.** Drawn as a Catmull-Rom spline, which has the right shape —
-  the probe's control points are not collinear with its vertices, so it is a real spline —
-  but PowerPoint's own tension was not measured and the curves will not coincide.
+* ~~**`c:smooth`'s tension.**~~ — done and measured; see *Two constants the new probes
+  corrected* above. It is the plain Catmull-Rom 1/6, and the terminal control points are a
+  *third* of their own chord rather than a sixth, which is the reflected phantom point and
+  not the duplicated one this used to draw. Thirteen ordinates reproduced to 0.08 pt.
 * ~~**Rotated category labels.**~~ — done and measured; see *Rotated category labels,
   measured* and *Wrapped category labels* below. Labels wrap at spaces before they turn,
   and the band grows a line box for every extra line. Four pieces are **not** done and
@@ -1332,10 +1514,25 @@ Each of these is known-missing rather than merely absent:
 * **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
   list, which is the hard part and is done; a second value axis is then mostly drawing.
 * **Log scales** and `c:tickLblSkip` / `c:tickMarkSkip`. `c:crosses` and `c:crossesAt`
-  move the category axis but have only been measured at zero. `c:crossBetween="midCat"`
-  is implemented from the schema; nothing measured here uses it.
+  move the category axis but have only been measured at zero — except on a scatter, where
+  the negative-x and negative-y probes measure both crossings at the other axis' own zero.
+  `c:crossBetween="midCat"` **is** measured now, on an area chart; the same placement is
+  applied to a line chart stating it, which no probe has exercised.
 * **`dispBlanksAs="span"`** is treated as `gap`, which is right for a bar chart and will
-  not be for a line one.
+  not be for a line one. It is unmeasured on an area chart and on a scatter, where the
+  line chart's reading is reused.
+* **A scatter's `c:bubbleSize`** is read and ignored; `bubbleChart` still warns. A scatter
+  series' `c:trendline` and `c:errBars` are neither read nor drawn.
+* **A scatter data label at `b` is 0.9 pt low**, the one loose number in the five
+  placements. It is the slack this file records elsewhere: PowerPoint's line box runs about
+  a point taller than our metrics give, so a placement hung off the *ascent* inherits all
+  of the difference where one hung off the descent inherits none. One constant is used for
+  both rather than two fitted ones.
+* **A horizontal legend's entry pitch is 1.3 to 2.2 pt out** on both new types, and the
+  measurement says so: the area probe's two bottom entries are 40.375 pt apart and the
+  scatter's 55.127 pt, which is 7.58 and 8.97 pt of gap after the entry's own width where
+  `LEGEND_ENTRY_GAP_EM` gives 5.0. No single number produces both, so the constant fitted
+  to the bar legends is left alone and the residual recorded.
 * The chart frame's rounded corners (`c:roundedCorners`) and effects.
 
 #### What the probe sweeps could not catch
@@ -2462,7 +2659,7 @@ Phase 0  (PowerPoint oracle + VRT)  ──┬─▶ Phase 1  (parsed-but-unrende
                                       ├─▶ Phase 2  (SmartArt — DONE)
                                       ├─▶ Phase 4  (EMF previews — DONE)
                                       ├─▶ Phase 5.1 DONE / 5.2  (small gaps)
-                                      ├─▶ Phase 3  (charts — reader + 5 types done)
+                                      ├─▶ Phase 3  (charts — reader + 7 types done)
                                       └─▶ Phase 6  (embedded fonts — DONE)
                                                               Phase 5.3 last
 ```
@@ -2486,9 +2683,9 @@ Revised quick wins, in order of payoff per day:
    like: it turned up two arc-conversion bugs that had been silently misdrawing
    custom geometry, and it replaced hand-transcription with a spec compiler.
 
-Phase 3 is well along: the reader and five chart types -- `barChart`, `lineChart`,
-`pieChart`, `doughnutChart` and `radarChart` -- are done and measured, and no chart in
-the corpus warns `chart-unsupported-type` any more. The shared infrastructure the rest
+Phase 3 is well along: the reader and seven chart types -- `barChart`, `lineChart`,
+`areaChart`, `scatterChart`, `pieChart`, `doughnutChart` and `radarChart` -- are done
+and measured, and no chart in the corpus warns `chart-unsupported-type` any more. The shared infrastructure the rest
 need -- value domain, tick selection, number formatting, gridlines, legend layout,
 plot-area rectangle, polar region -- is built. What is left, cheapest first:
 
@@ -2506,8 +2703,15 @@ plot-area rectangle, polar region -- is built. What is left, cheapest first:
 3. **Data-label wrapping**, **`bestFit` actually moving a label**, and **three-or-more
    line legend entries** -- each a known-missing detail with a named symptom above.
    Category-label wrapping is done; the data-label kind is a separate path.
-4. **Combo charts** and **`areaChart` / `scatterChart`** -- new drawing rather than
+4. **Combo charts**, and **`bubbleChart`** -- which is a scatter with a third value
+   per point and now has the whole of the scatter path under it -- then the long tail
+   of `stockChart`, `surfaceChart` and `ofPieChart`. New drawing rather than
    corrections, and the largest of what remains.
+5. **The bottom-axis tick density.** Still unsolved, and the area sweep has narrowed
+   the contradiction rather than resolved it: 14.503 pt of tick spacing accepted,
+   12.095 pt refused and 15.43 pt refused, all at 10 pt on the same axis range. It is
+   the only visible difference between our render of the area probe deck and
+   PowerPoint's.
 
 ## Non-goals
 
