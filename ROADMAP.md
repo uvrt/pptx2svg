@@ -1655,6 +1655,62 @@ under a transform. All of them match PowerPoint already.
 - **Bidi / RTL text** (L) — Arabic and Hebrew need reordering and shaping. Depends on 5.2's
   complex-script fonts. Large, and only matters for those scripts.
 
+### 5.4 Group coordinate scaling does not scale text — **measured, and fixed**
+
+A group's `a:ext`/`a:chExt` ratio maps its children's authored coordinate space onto its
+on-slide box. We implemented that as an SVG `scale()` around the whole subtree, which
+scales the glyphs with everything else. Google Slides exports make that catastrophic: they
+author a slide in a small private space and stretch it to fit, so a 24 pt subtitle in a
+group scaling 3.7969x drew at 91 pt, wrapped onto three lines and fell off the bottom of
+the slide.
+
+**Both readings were defensible before the measurement.** If PowerPoint scaled text, our
+91 pt was right and the template was simply mis-authored. It does not. A probe deck of 21
+groups was exported by PowerPoint 16.x and the drawn text read back out of the PDF with
+`pypdfium2` — per-character font size is written as `1` with the size folded into the text
+matrix, so the sizes below are cap heights and advance widths, not `/FontSize`:
+
+| probe | group scale | drawn |
+| --- | --- | --- |
+| ungrouped control, 18 pt Arial | — | 12.89 pt cap height |
+| uniform | 4.0 | 12.89 |
+| nested, 2x inside 3x | 6.0 | 12.89 |
+| shrinking group | 0.25 | 12.89 |
+| non-uniform, x only | 4.0 / 1.0 | 12.89 tall, 58.67 pt wide — the control's width exactly |
+
+The non-uniform probe is the one that settles it: scaled text would have drawn four times
+as wide. **PowerPoint never scales text with a group, in either axis, at any depth.**
+
+Everything else in the text frame is absolute too, each measured on the same deck:
+`bodyPr@lIns` of 91440 EMU drew a 7.20 pt indent at scale 1 and 7.20 pt at scale 4;
+`lnSpc` `spcPts` 3000 gave a 30.00 pt baseline pitch at both; `spcBef` `spcPts` 1200 gave a
+32.88 pt paragraph pitch at both; `normAutofit` `fontScale` 50% gave a 6.44 pt cap height
+at both; the first baseline sat 18.1 pt below the frame top at both. Only the *frame*
+scales — a long paragraph broke into identical lines inside a 4x group and in an ungrouped
+box of the same on-slide width.
+
+So the fix is not "divide the font size by the scale", which would be wrong for a
+non-uniform group and would wrap at the child-space width. The text is laid out in the
+frame grown by the accumulated scale, at the authored size, and the result wrapped in the
+transform that cancels the scale. `RenderContext.group_scale` carries the factor;
+`tests/test_group_text_scale.py` holds the cases.
+
+**Known limitation:** a rotated group with a *non-uniform* scale composes to a shear, and a
+pair of per-axis factors cannot express that. Nothing in the corpus does it. The same probe
+also showed our geometry wrong for that case — a rotated shape in a 4:1 group draws a
+differently-skewed parallelogram than PowerPoint's — which is a separate, pre-existing bug
+in the group transform itself, not in the text.
+
+**A second defect surfaced on the same slide.** `_render_custom_path` emitted the path's
+scale through the coordinate formatter, which rounds to three decimals. A custom path
+authored in EMU — which is what every Google Slides export writes, `<a:path w="2387010"
+h="161597">` on a shape 250 px wide — maps onto its shape by 1.05e-4, and three decimals
+make that `scale(0, 0)`. **Every such shape drew as nothing.** It was invisible in the
+corpus because the committed fixtures author custom paths in small path units, and in the
+suite because the unit test used `w="100"`. On the sales template this was worth more than
+the text fix: mean SSIM against PowerPoint's export went 0.7912 → 0.8015 with the group
+rule alone and 0.7912 → 0.9101 with both.
+
 ---
 
 ## Phase 6 — Embedded fonts — **done**

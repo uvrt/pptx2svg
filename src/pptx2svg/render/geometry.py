@@ -34,6 +34,26 @@ def _n(value: float) -> str:
     return f"{rounded:g}"
 
 
+def _factor(value: float) -> str:
+    """Format a multiplier, which must not be rounded the way a coordinate can be.
+
+    :func:`_n` rounds to three decimals because a coordinate is in px and a thousandth of
+    a pixel is nothing.  A scale factor is not a length, and the same rounding destroys
+    it: a custom path authored in EMU -- which is what every Google Slides export writes,
+    ``<a:path w="2387010" h="161597">`` on a shape 250 px wide -- maps onto its shape by
+    1.0499e-4, and three decimals make that ``scale(0, 0)``.  Every such shape drew as
+    nothing.  Found on slide 1 of a Google Slides sales template, where it swallowed the
+    gradient pill behind the subtitle and the logo mark next to "FORGE".
+
+    Ten significant digits keeps the largest EMU coordinate a path can carry (about
+    1e8, the widest slide PowerPoint allows) accurate to well under a thousandth of a
+    pixel, so nothing is lost at the other end of the range either.
+    """
+    if value == int(value):
+        return str(int(value))
+    return f"{value:.10g}"
+
+
 def _pts(*points: tuple[float, float]) -> str:
     return " ".join(f"{_n(x)},{_n(y)}" for x, y in points)
 
@@ -647,4 +667,7 @@ def _render_custom_path(
     """Custom paths are authored in their own coordinate space; scale it onto the shape."""
     scale_x = shape_width / path.width if path.width > 0 else 1.0
     scale_y = shape_height / path.height if path.height > 0 else 1.0
-    return f'<path d="{path.commands}" transform="scale({_n(scale_x)}, {_n(scale_y)})"/>'
+    return (
+        f'<path d="{path.commands}" '
+        f'transform="scale({_factor(scale_x)}, {_factor(scale_y)})"/>'
+    )
