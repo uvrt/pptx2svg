@@ -56,6 +56,8 @@ from ..text.measure import DEFAULT_LINE_HEIGHT_RATIO, is_cjk
 
 EMU_PER_POINT = 12700.0
 
+_SIN_45 = math.sin(math.radians(45.0))
+
 #: Padding between the frame edge and the outermost label block, in points.  Measured as
 #: the left edge of the value-label column in all three decks and every probe: exactly
 #: 6.5 pt, independent of frame size and font size.
@@ -175,6 +177,32 @@ DATA_LABEL_INNER_GAP_PT = 4.05
 #: centred on the point vertically and sits to its right -- ECMA's ``r`` default, which is
 #: what PowerPoint drew.  Measured once, with a 7 pt marker.
 DATA_LABEL_LINE_GAP_EM = 0.6
+
+#: Category labels rotate when the widest of them is wider than the band it has to sit
+#: in.  Bracketed to (0.972, 1.024] by a six-chart probe whose labels straddle exactly one
+#: band -- a 36.62 pt label on a 37.68 pt band stayed horizontal and a 38.59 pt one turned
+#: -- so 1.0 is not a round guess, it is the middle of a 5% window.  Neither fixture
+#: carries an explicit ``rot=`` on ``a:bodyPr``, so this is PowerPoint's own decision.
+ROTATED_LABEL_RATIO = 1.0
+
+#: And the angle it turns to.  **It snaps.**  Twelve probes from a label 1.02 band widths
+#: wide to one 4.18 wide all came out at exactly 45 degrees, reading up to the right --
+#: `rot="-2700000"` in DrawingML terms.  No intermediate angle appeared anywhere in that
+#: range, and nothing went to 90.
+ROTATED_LABEL_DEGREES = -45.0
+
+#: The plot's bottom inset once the labels turn: this, plus the widest label's width times
+#: sin 45.  Fitted to six probes across two decks, worst residual **0.03 pt** -- and the
+#: residual is that small only because the *widest* label is the one that sets it, which
+#: is what a 1.01 pt discrepancy on the deck whose five labels differ by one letter
+#: showed.  It replaces the horizontal band's `6.5 + lineHeight + 0.615 em` entirely.
+ROTATED_LABEL_INSET_PT = 21.39
+
+#: Where the rotated baseline's far end lands, relative to the centre of its band on the
+#: category axis: this far right, and this far below.  Measured on six probes, spread
+#: under 0.15 pt.
+ROTATED_LABEL_OFFSET_X_PT = 2.0
+ROTATED_LABEL_OFFSET_Y_PT = 12.7
 
 #: Chart kinds laid out around a centre rather than on a pair of axes.
 POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart", "radarChart"})
@@ -1599,19 +1627,12 @@ class ChartBuilder:
             right -= max((value_font.width(text) for text in tick_labels), default=0.0) / 2
         # Nothing overhangs the top of a horizontal chart, so it takes the plain inset.
         top = frame.top + (EDGE_INSET_PT if horizontal else self._top_inset(value_font.box))
-        if labels_under_plot:
-            bottom = frame.bottom - (
-                FRAME_PADDING_PT
-                + bottom_font.box.line_height
-                + CATEGORY_LABEL_GAP_EM * bottom_font.size
-            )
-        else:
-            bottom = frame.bottom - self._top_inset(value_font.box)
 
         title = self._title_box()
         if title is not None:
             top += TITLE_BAND_LINES * title.line_height
 
+        legend_bottom = 0.0
         legend = self._legend_position()
         # `c:overlay` draws the legend on top of the plot rather than beside it, so an
         # overlaid legend takes no space away.  Implemented from the schema; no chart
@@ -1620,7 +1641,7 @@ class ChartBuilder:
             legend_font = self._legend_font()
             band = LEGEND_BAND_LINES * legend_font.box.line_height
             if legend in ("b",):
-                bottom -= band
+                legend_bottom = band
             elif legend in ("t", "tr"):
                 top += band
             elif legend == "r":
@@ -1639,9 +1660,62 @@ class ChartBuilder:
 
         if right - left < 1.0:
             right = left + 1.0
+        # The bottom band comes last because a rotated category label's is a function of
+        # the label's width against the band it has to fit, and the band is `right - left`
+        # -- which the legend has only just finished moving.
+        if labels_under_plot:
+            bottom = frame.bottom - legend_bottom - self._bottom_label_band(
+                bottom_font,
+                categories if not horizontal else [],
+                right - left,
+            )
+        else:
+            bottom = frame.bottom - legend_bottom - self._top_inset(value_font.box)
         if bottom - top < 1.0:
             bottom = top + 1.0
         return _Rect(left, top, right, bottom)
+
+    def _labels_rotate(
+        self, font: ChartFont, categories: list[str], plot_width: float
+    ) -> bool:
+        """Whether the category labels turn 45 degrees rather than staying level.
+
+        **The rule is that the widest label is wider than its own band**, and the probe
+        that says so straddles it by 5%: on a 37.68 pt band a 36.62 pt label stayed level
+        and a 38.59 pt one turned.  A radar facing the same problem *wraps* instead, so
+        this is specifically what the category axis does.
+        """
+        if not categories:
+            return False
+        band = plot_width / len(categories)
+        if band <= 0:
+            return False
+        widest = max((font.width(text) for text in categories), default=0.0)
+        return widest > band * ROTATED_LABEL_RATIO
+
+    def _bottom_label_band(
+        self, font: ChartFont, categories: list[str], plot_width: float
+    ) -> float:
+        """How much of the frame the labels under the plot take.
+
+        Level, that is one line plus its gap.  Turned, it is
+        :data:`ROTATED_LABEL_INSET_PT` plus the widest label's own width times sin 45,
+        which fits six probes to within 0.03 pt.
+
+        **Not capped, and PowerPoint's is.**  A probe whose label is 4.18 band widths wide
+        reserved 85.63 pt where the formula asks for 113.95 -- but it reserved *less* than
+        the probe one step below it, whose 2.92-band label took 86.36 pt, so no clamp on
+        the width reproduces both. Whatever PowerPoint does past about 90 pt of label was
+        not identified, and a rule that fitted the rest and broke there is exactly what
+        this file does not ship.
+        """
+        box = font.box
+        if self._labels_rotate(font, categories, plot_width):
+            widest = max(font.width(text) for text in categories)
+            return ROTATED_LABEL_INSET_PT + widest * _SIN_45
+        return (
+            FRAME_PADDING_PT + box.line_height + CATEGORY_LABEL_GAP_EM * box.size
+        )
 
     def _polar_region(self) -> _Rect:
         """The square-ish box a pie is drawn in.
@@ -2320,16 +2394,84 @@ class ChartBuilder:
                 )
             else:
                 band = rect.width / len(categories)
-                self._labels_along_bottom(
-                    rect,
-                    [
-                        (rect.left + index * band, text)
-                        for index, text in enumerate(categories)
-                    ],
-                    category_font,
-                    axis_y=self._category_axis_position(rect, scale, category_axis),
-                    width=band,
+                axis_y = self._category_axis_position(rect, scale, category_axis)
+                # Only labels that sit in the band *under* the plot may turn.  With
+                # negative values the category axis floats up into the plot and
+                # `_plot_rect` reserves no band at all, so turning them there would draw
+                # into space nothing set aside -- and no probe measured what PowerPoint
+                # does in that corner anyway.
+                in_band = abs(axis_y - rect.bottom) < 0.01
+                if in_band and self._labels_rotate(
+                    category_font, categories, rect.width
+                ):
+                    self._rotated_labels_along_bottom(
+                        [
+                            (rect.left + (index + 0.5) * band, text)
+                            for index, text in enumerate(categories)
+                        ],
+                        category_font,
+                        axis_y=axis_y,
+                    )
+                else:
+                    self._labels_along_bottom(
+                        rect,
+                        [
+                            (rect.left + index * band, text)
+                            for index, text in enumerate(categories)
+                        ],
+                        category_font,
+                        axis_y=axis_y,
+                        width=band,
+                    )
+
+    def _rotated_labels_along_bottom(
+        self,
+        labels: list[tuple[float, str]],
+        font: ChartFont,
+        *,
+        axis_y: float,
+    ) -> None:
+        """Category labels turned 45 degrees, reading up towards the axis.
+
+        The measured anchor is the **far end of the rotated baseline**: it lands
+        :data:`ROTATED_LABEL_OFFSET_X_PT` right of its band's centre and
+        :data:`ROTATED_LABEL_OFFSET_Y_PT` below the axis, on all six probes to within
+        0.15 pt.  The renderer rotates a shape about its own centre, so the box is placed
+        by working that rotation backwards from the anchor rather than by rotating the
+        text in place -- which is why the arithmetic below is not simply "left = x".
+        """
+        box = font.box
+        radians = math.radians(ROTATED_LABEL_DEGREES)
+        cos, sin = math.cos(radians), math.sin(radians)
+        for position, text in labels:
+            if not text:
+                continue
+            width = font.width(text) + box.size
+            height = box.line_height * 1.5
+            # Where the baseline's right-hand end sits inside the unrotated box, measured
+            # from the box's centre.  The half em of padding is the same one every other
+            # chart label carries, and the text is right-aligned against it.
+            offset_x = width / 2 - box.size / 2
+            offset_y = box.first_baseline - height / 2
+            turned_x = offset_x * cos - offset_y * sin
+            turned_y = offset_x * sin + offset_y * cos
+            centre_x = position + ROTATED_LABEL_OFFSET_X_PT - turned_x
+            centre_y = axis_y + ROTATED_LABEL_OFFSET_Y_PT - turned_y
+            self.elements.append(
+                m.ShapeElement(
+                    transform=m.Transform(
+                        offset_x=(centre_x - width / 2) * EMU_PER_POINT,
+                        offset_y=(centre_y - height / 2) * EMU_PER_POINT,
+                        extent_width=width * EMU_PER_POINT,
+                        extent_height=height * EMU_PER_POINT,
+                        rotation=ROTATED_LABEL_DEGREES,
+                    ),
+                    geometry=m.PresetGeometry(preset="rect"),
+                    fill=None,
+                    outline=None,
+                    text_body=self._label_body(text, font, align="r"),
                 )
+            )
 
     def _labels_down_left(
         self, rect: _Rect, labels: list[tuple[float, str]], font: ChartFont

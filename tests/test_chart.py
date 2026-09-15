@@ -2630,3 +2630,276 @@ def test_the_real_radar_matches_powerpoints_geometry():
     assert [shape.fill.color.hex.upper() for shape in filled] == ["#2563EB", "#94A3B8"]
     assert all(shape.outline is not None for shape in filled)
     assert len([c for c in chart.children if isinstance(c, m.ConnectorElement)]) == 6
+
+
+# -- Rotated category labels ------------------------------------------------------------
+#
+# Two probe decks of six bar charts, all in the same 220.4724 x 181.1024 pt frame with
+# five categories and 10 pt Aptos labels, exported by PowerPoint 16.106 and read back out
+# of the PDF as exact vector coordinates.  The first sweeps the label from a fifth of its
+# band to four times it; the second straddles exactly one band width, which is what turns
+# the threshold from a guess into a 5% window.
+#
+# `real-financial-report.pptx`'s own chart3 is the third source: its export rotates too,
+# at 12 pt, which is where the 45 degrees is confirmed off a real deck rather than a probe.
+
+#: The band every chart in both decks has: (209.47 - 21.07) / 5, measured off the
+#: gridlines.
+ROTATION_BAND_PT = 37.68
+
+#: name -> (categories, widest label's width in pt, does PowerPoint turn them,
+#: PowerPoint's bottom inset in pt).  The width is the widest of the five, which is what
+#: sets the band -- the deck whose five labels differ only by a trailing letter showed
+#: that to 1.01 pt, and using the first label instead left a 0.73 pt residual everywhere.
+ROTATION_SWEEP = {
+    # The straddle: 36.62 pt on a 37.68 pt band stays level, 38.59 pt turns.
+    "r085": (("000000",) * 5, 32.05, False, 24.965),
+    "r092": (("CCCCC",) * 5, 34.62, False, 24.965),
+    "r097": (("OOOOO",) * 5, 36.62, False, 24.965),
+    "r102": (("hhhhhhh",) * 5, 38.59, True, 48.688),
+    "r108": (("vvvvvvvvv",) * 5, 40.69, True, 50.155),
+    "r115": (("wwwwww",) * 5, 43.24, True, 51.959),
+    # The range.
+    "w1": (tuple("ABCDE"), 6.90, False, 24.965),
+    "w2": (tuple(f"Cat{n}" for n in "ABCDE"), 22.37, False, 24.965),
+    "w3": (tuple(f"Category{n}" for n in "ABCDE"), 45.87, True, 53.843),
+    "w4": (tuple(f"CategoryLong{n}" for n in "ABCDE"), 66.74, True, 68.604),
+    "w5": (tuple(f"CategoryLongerStill{n}" for n in "ABCDE"), 91.84, True, 86.356),
+}
+
+#: The unrotated band is a different formula and was fitted separately, so it keeps the
+#: older sweep's tolerance; the rotated one lands an order of magnitude closer.
+ROTATION_TOLERANCE_PT = 0.15
+LEVEL_TOLERANCE_PT = 0.2
+
+
+def rotation_chart_xml(cats, values=None):
+    """A plain clustered column chart whose only variable is its category labels."""
+    values = values or tuple(3 + (index % 3) for index in range(len(cats)))
+    points = "".join(
+        f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(values)
+    )
+    cpts = "".join(f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate(cats))
+    return (
+        "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"
+        "<c:varyColors val='0'/>"
+        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        "<c:pt idx='0'><c:v>Coverage</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        "<c:spPr><a:solidFill><a:srgbClr val='2563EB'/></a:solidFill></c:spPr>"
+        f"<c:cat><c:strRef><c:strCache><c:ptCount val='{len(cats)}'/>{cpts}"
+        "</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+        f"<c:ptCount val='{len(values)}'/>{points}"
+        "</c:numCache></c:numRef></c:val></c:ser>"
+        "<c:axId val='100002'/><c:axId val='100003'/></c:barChart>"
+        "<c:catAx><c:axId val='100002'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='b'/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100003'/>"
+        "<c:crosses val='autoZero'/><c:auto val='1'/><c:lblAlgn val='ctr'/>"
+        "<c:lblOffset val='100'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        "</c:plotArea><c:plotVisOnly val='1'/>"
+        "<c:dispBlanksAs val='gap'/></c:chart>"
+    )
+
+
+def _rotation_probe(cats, **kwargs):
+    return _build(
+        rotation_chart_xml(cats, **kwargs), width=220.4724, height=181.1024
+    )[0]
+
+
+def _turned(children):
+    """Every label the resolver rotated, left to right."""
+    turned = [
+        child
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and child.text_body is not None
+        and child.transform.rotation
+    ]
+    return sorted(turned, key=lambda shape: shape.transform.offset_x)
+
+
+def _bottom_inset(children, frame_height=181.1024):
+    return frame_height - _pt(_plot_bottom(children))
+
+
+@pytest.mark.parametrize("name", list(ROTATION_SWEEP))
+def test_a_category_label_turns_when_it_is_wider_than_its_band(name):
+    """The threshold, and the 5% window the probe pins it inside.
+
+    ``OOOOO`` is 36.62 pt on a 37.68 pt band and PowerPoint left it level; ``hhhhhhh`` is
+    38.59 pt on the same band and PowerPoint turned it.  One band width is not a round
+    guess -- it is the middle of (0.972, 1.024].
+    """
+    cats, width, turns, _ = ROTATION_SWEEP[name]
+    children = _rotation_probe(cats)
+    assert bool(_turned(children)) is turns, (
+        f"{name}: widest label {width:.2f} pt on a {ROTATION_BAND_PT:.2f} pt band, "
+        f"{width / ROTATION_BAND_PT:.3f} of it"
+    )
+
+
+@pytest.mark.parametrize("name", list(ROTATION_SWEEP))
+def test_the_band_under_the_plot_matches_powerpoints(name):
+    """Both formulas in one number: the level band and the turned one.
+
+    Turned, it is ``21.39 + width * sin 45``, and the six rotated rows land within
+    0.015 pt of PowerPoint.  Level, it is the older ``6.5 + lineHeight + 0.615 em``,
+    which is 0.11 pt light and was fitted before this sweep existed.
+    """
+    cats, _, turns, expected = ROTATION_SWEEP[name]
+    ours = _bottom_inset(_rotation_probe(cats))
+    tolerance = ROTATION_TOLERANCE_PT if turns else LEVEL_TOLERANCE_PT
+    assert ours == pytest.approx(expected, abs=tolerance), (
+        f"{name}: PowerPoint {expected:.3f}, ours {ours:.3f}"
+    )
+
+
+def test_a_turned_label_snaps_to_forty_five_degrees():
+    """Twelve probes from 1.02 band widths to 4.18 all came out at exactly 45.
+
+    No intermediate angle appeared anywhere in that range and nothing went to 90, so the
+    angle is a constant rather than a function of the crowding.
+    """
+    for name, (cats, _, turns, _inset) in ROTATION_SWEEP.items():
+        if not turns:
+            continue
+        turned = _turned(_rotation_probe(cats))
+        assert len(turned) == 5, name
+        assert {shape.transform.rotation for shape in turned} == {-45.0}, name
+
+
+def test_a_turned_label_lands_where_powerpoint_put_it():
+    """The anchor is the far end of the rotated baseline, not the box.
+
+    PowerPoint's pens for ``CategoryA``..``CategoryE`` are 10.781, 48.238, 85.171,
+    122.776 and 161.254, all on frame row 171.600.  Recovering ours means undoing the
+    rotation about the box centre, which is the same arithmetic the resolver does forwards.
+    """
+    from pptx2svg.resolve.chart import font_box
+
+    children = _rotation_probe(tuple(f"Category{n}" for n in "ABCDE"))
+    box = font_box("Aptos", 10.0)
+    radians = math.radians(-45.0)
+    cos, sin = math.cos(radians), math.sin(radians)
+    pens = []
+    for shape in _turned(children):
+        transform = shape.transform
+        width = _pt(transform.extent_width)
+        height = _pt(transform.extent_height)
+        centre_x = _pt(transform.offset_x) + width / 2
+        centre_y = _pt(transform.offset_y) + height / 2
+        # The *left* end of the right-aligned baseline, inside the unrotated box.
+        offset_x = -width / 2 + box.size / 2
+        offset_y = box.first_baseline - height / 2
+        pens.append(
+            (
+                centre_x + offset_x * cos - offset_y * sin,
+                centre_y + offset_x * sin + offset_y * cos,
+            )
+        )
+    expected = [10.781, 48.238, 85.171, 122.776, 161.254]
+    assert len(pens) == len(expected)
+    for (x, y), truth in zip(pens, expected):
+        assert x == pytest.approx(truth, abs=0.6), (x, truth)
+        assert y == pytest.approx(171.600, abs=0.9), y
+
+
+def test_a_label_four_times_its_band_is_not_capped_the_way_powerpoints_is():
+    """The one measurement the shipped formula does **not** reproduce, kept visible.
+
+    PowerPoint reserved 85.628 pt for a 130.88 pt label -- *less* than the 86.356 pt it
+    gave the 91.84 pt label one step below it -- so no clamp on the width produces both,
+    and whatever it does past about 90 pt of label was never identified.  Ours keeps
+    going up the fitted line.  This test asserts today's behaviour so the divergence is
+    a recorded number rather than a surprise.
+    """
+    cats = tuple(f"CategoryLongerStillAndMore{n}" for n in "ABCDE")
+    ours = _bottom_inset(_rotation_probe(cats))
+    assert ours == pytest.approx(113.9, abs=0.6)
+    assert ours > 85.628 + 20
+
+
+def test_a_horizontal_chart_does_not_turn_the_labels_under_it():
+    """Its bottom band holds *value* ticks, and no probe measured those rotating.
+
+    The same labels on a ``col`` chart do turn, which is what makes this a statement
+    about orientation rather than a test that passes because nothing rotates anywhere.
+    """
+    cats = tuple(f"CategoryLongerStill{n}" for n in "ABCDE")
+    assert len(_turned(_rotation_probe(cats))) == 5
+    body = rotation_chart_xml(cats).replace(
+        "<c:barDir val='col'/>", "<c:barDir val='bar'/>"
+    )
+    children, _ = _build(body, width=220.4724, height=181.1024)
+    assert _turned(children) == []
+
+
+def test_the_real_bar_chart_with_long_labels_turns_them():
+    """chart3 of `real-financial-report.pptx`, the corpus deck this was worth doing for.
+
+    PowerPoint turns its Japanese category labels 45 degrees -- its export's text matrix
+    is 8.4853 at 12 pt, which is ``12 * cos 45`` -- and reserves **69.538 pt** under the
+    plot.  We turn them too, which we did not before, and reserve 89.3.
+
+    The remaining 19.8 pt is not the rotation rule: it is the width we measure the labels
+    at.  ``プラットフォーム`` comes out 96 pt through the ``<a:latin typeface="Arial"/>``
+    the axis names, where PowerPoint laid it out in a substituted CJK face at about 68.
+    That is the same ``font_box``/``text_width`` gap the radar's radius has on this deck,
+    and it lives in `text/` and `fonts/` rather than here.  Before this work the inset was
+    27.29 pt, so the error more than halved.
+    """
+    from tests.conftest import FIXTURE_DIR
+
+    deck = convert_pptx_to_model(
+        (FIXTURE_DIR / "real-financial-report.pptx").read_bytes()
+    )
+    charts = [
+        element
+        for element in deck.slides[2].elements
+        if isinstance(element, m.ChartElement) and element.chart.kind == "barChart"
+    ]
+    assert len(charts) == 1
+    children = charts[0].children
+    turned = _turned(children)
+    assert len(turned) == 4
+    assert {shape.transform.rotation for shape in turned} == {-45.0}
+    inset = _bottom_inset(children, frame_height=135.0)
+    assert inset == pytest.approx(89.3, abs=0.5)
+    # Still wrong, but nearer than the 27.29 pt it reserved when it drew them level.
+    assert abs(inset - 69.538) < abs(27.29 - 69.538)
+
+
+def test_labels_that_float_inside_the_plot_do_not_turn():
+    """Negative values lift the category axis off the plot's floor.
+
+    `_plot_rect` then reserves no band under the plot at all -- measured, on the negative
+    probe -- and prints the labels beside the zero line instead.  Turning them there would
+    draw into space nothing set aside, and no probe measured that corner, so the two stay
+    in step: the labels turn only where a band was reserved for them.
+    """
+    cats = tuple(f"CategoryLongerStill{n}" for n in "ABCDE")
+    # The same labels over positive data do turn, so this is about the axis floating.
+    assert len(_turned(_rotation_probe(cats))) == 5
+    children = _rotation_probe(cats, values=(3, -4, 5, -2, 1))
+    assert _turned(children) == []
+    # And they are still all drawn, level, rather than dropped.
+    labels = {
+        "".join(run.text for p in child.text_body.paragraphs for run in p.runs)
+        for child in children
+        if isinstance(child, m.ShapeElement) and child.text_body is not None
+    }
+    assert set(cats) <= labels
