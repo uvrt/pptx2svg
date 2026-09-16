@@ -150,9 +150,11 @@ def _entries() -> list[Substitution]:
     # anything else we have, and saying so beats falling through to the 0.6 em guess.
     rows.append(Substitution("Aptos Narrow", "Carlito", "Aptos", metric_compatible=False))
 
-    # -- Japanese.  Noto Sans JP is not metric-compatible with any of these (nothing is;
-    #    the MS faces are proprietary and were never cloned), and it is the only Japanese
-    #    face we ship, so it is what every one of them is *drawn* with.
+    # -- Japanese.  Noto Sans JP is not metric-compatible with any of these -- as a
+    #    *face*; on the ideographs and kana alone it is exactly compatible with all of
+    #    them, which is the finding the fixed-pitch block below rests on, and the
+    #    divergence is confined to the Latin sub-run.  It is the only Japanese face we
+    #    ship, so it is what every one of them is *drawn* with.
     #
     #    What they are *measured* with is a separate question, and for the four MS faces
     #    the answer is their own table.  The "P" in MS PGothic means proportional: its
@@ -200,6 +202,111 @@ def _entries() -> list[Substitution]:
             Substitution(
                 office, "Noto Sans JP", table,
                 metric_compatible=False, has_italic_cut=False, east_asian=True,
+            )
+        )
+
+    # -- The fixed-pitch CJK faces: Chinese and Korean, measured and not drawn.
+    #
+    #    These cost the bundle nothing, which is why they are here and why they were the
+    #    first row of the shortlist in ROADMAP.md.  A fixed-pitch East Asian face has two
+    #    advances and no more -- half an em for Latin, a full em for everything
+    #    ideographic -- so its whole advance table is two integers and needs no font file
+    #    behind it.  Verified against the installed faces rather than assumed: every
+    #    printable ASCII character comes back at exactly the half-width and every kana,
+    #    ideograph and full-width form at exactly the full width, in all eleven.  See
+    #    ``tools/extract_font_metrics.py``'s ``verify_fixed_pitch``.
+    #
+    #    **Every one of them grades `approximate`, and the reason is not the widths.**  The
+    #    widths we now measure are exact; the outlines we draw are Noto Sans JP's, and Noto
+    #    Sans JP is neither fixed-pitch in Latin nor able to draw much of what these faces
+    #    exist for.  The two halves of a CJK run fail differently and both matter:
+    #
+    #    * **The Latin half is the half-width trap.**  Their ASCII is exactly 0.5 em;
+    #      Noto Sans JP's is proportional and averages 0.494 em with an `i` at 0.24 and an
+    #      `M` at 0.83.  So a run of Latin inside a Chinese label measures right and draws
+    #      at anything from half to 1.7 times the width we reserved.  Getting the
+    #      ideographs right does not rescue that, which is exactly why "compatible" would
+    #      be the wrong word: the *ideographs* are metric-compatible and the face is not.
+    #    * **The ideographic half is a coverage problem, not a width one.**  Measured
+    #      against the Noto Sans JP we ship: 8,166 to 8,245 of the Chinese faces' 20,900-odd
+    #      unified ideographs have no glyph in it at all, and for the four Korean faces
+    #      **none of the 11,172 Hangul syllables do** -- zero.  Korean text drawn with our
+    #      bundle is missing glyphs, not merely the wrong shapes.
+    #
+    #    Worth having anyway, and the report says which part is which: a deck naming one of
+    #    these used to reach the 0.6 em per-character guess for every character in it, so
+    #    the line breaks were wrong as well as the glyphs.  Now the breaks are PowerPoint's.
+    #
+    #    Hangul is the one residual inside the *measurement*.  `is_cjk` stops at U+9FFF and
+    #    the syllables block starts at U+AC00, so a Hangul character falls to
+    #    `default_width` -- the half-width -- where the face draws it at a full em.  Fixing
+    #    that means making `is_cjk` full-width-but-not-break-anywhere, which is a change to
+    #    line breaking and belongs with a Korean probe rather than with a width table.
+    fixed_pitch_cjk = (
+        # Simplified Chinese.  The `N` in NSimSun means the fixed-pitch cut of SimSun,
+        # which is the same file's face 1.
+        ("SimSun", "SimSun"), ("宋体", "SimSun"),
+        ("NSimSun", "NSimSun"), ("新宋体", "NSimSun"),
+        ("SimHei", "SimHei"), ("黑体", "SimHei"),
+        ("KaiTi", "KaiTi"), ("楷体", "KaiTi"),
+        ("FangSong", "FangSong"), ("仿宋", "FangSong"),
+        # Traditional Chinese.  PMingLiU is the *proportional* sibling and is deliberately
+        # absent: it is to MingLiU what ＭＳ Ｐゴシック is to ＭＳ ゴシック, and measuring
+        # it as its fixed-pitch parent is the exact bug the MS PGothic table exists to
+        # stop.  It keeps falling through until somebody measures it.
+        ("MingLiU", "MingLiU"), ("細明體", "MingLiU"),
+        ("MingLiU_HKSCS", "MingLiU_HKSCS"), ("細明體_HKSCS", "MingLiU_HKSCS"),
+        # Korean.  The `Che` suffix (체) is Korean for exactly this: the fixed-pitch cut.
+        # Batang, Gulim, Dotum and Gungsuh without it are proportional and are left out for
+        # the same reason PMingLiU is.
+        ("BatangChe", "BatangChe"), ("바탕체", "BatangChe"),
+        ("GulimChe", "GulimChe"), ("굴림체", "GulimChe"),
+        ("DotumChe", "DotumChe"), ("돋움체", "DotumChe"),
+        ("GungsuhChe", "GungsuhChe"), ("궁서체", "GungsuhChe"),
+    )
+    hangul_faces = {"BatangChe", "GulimChe", "DotumChe", "GungsuhChe"}
+    for office, table in fixed_pitch_cjk:
+        if table in hangul_faces:
+            caveat = (
+                f"widths measured exactly (0.5/1.0 em); Noto Sans JP draws no Hangul "
+                f"at all, so {office}'s Korean text has no glyphs"
+            )
+        else:
+            caveat = (
+                f"widths measured exactly (0.5/1.0 em); drawn as Noto Sans JP, whose "
+                f"Latin is proportional and which lacks 8,200 of {table}'s ideographs"
+            )
+        rows.append(
+            Substitution(
+                office, "Noto Sans JP", table,
+                metric_compatible=False,
+                # None of these files carries an italic cut, and neither does the Noto
+                # Sans JP we draw them with -- it is a weight-axis variable font with no
+                # slant axis.  PowerPoint slants them itself; we have to.
+                has_italic_cut=False,
+                east_asian=True,
+                caveat=caveat,
+            )
+        )
+
+    # -- The monospaced Latin pair, on the same metrics-only footing.  Both are exactly
+    #    1234/2048 = 0.602539 em on every character they draw, Cousine is 1229/2048 =
+    #    0.600098, and 0.41% is the whole of the error: the line breaks are Cousine's and
+    #    PowerPoint's alike, and each drawn line is four thousandths short.  That is the
+    #    closest any face we ship comes -- Consolas, the other Office monospace, is
+    #    0.549805 em and 9.1% away, which is why it is not here.
+    #
+    #    `approximate` rather than `compatible`, because the widths we measure with are not
+    #    the widths we draw with; the number is small enough that the caveat carries it.
+    for office in ("Lucida Console", "Lucida Sans Typewriter"):
+        rows.append(
+            Substitution(
+                office, "Cousine", office,
+                metric_compatible=False,
+                caveat=(
+                    f"{office} is 0.602539 em fixed pitch and Cousine is 0.600098; "
+                    "measured exactly, drawn 0.41% narrow"
+                ),
             )
         )
 
@@ -284,10 +391,22 @@ DEFAULT_FONT_MAPPING: dict[str, str] = {
 }
 
 #: Names that read as serif faces, for the generic family at the end of a font stack.
+#:
+#: The CJK entries are there because the generic is the *last* resort -- what a host draws
+#: when it has neither the face the deck named nor the one we substitute -- and for a
+#: Chinese or Korean face the choice between serif and sans is the difference between
+#: Song/Ming/Batang and a gothic.  SimHei, Gulim and Dotum are the gothics of the set and
+#: are deliberately absent; 黑体, 굴림 and 돋움 all mean exactly that.
 _SERIF_HINTS = (
     "mincho", "明朝", "times new roman", "georgia", "cambria", "garamond",
     "book antiqua", "palatino", "caslon", "baskerville", "constantia",
+    "simsun", "nsimsun", "宋体", "mingliu", "細明體", "batang", "바탕",
+    "gungsuh", "궁서", "kaiti", "楷体", "fangsong", "仿宋",
 )
+
+#: Names that read as monospaced faces.  ``mono`` and ``courier`` catch most of them; these
+#: are the Office monospaces that say so in English instead.
+_MONOSPACE_HINTS = ("mono", "courier", "consolas", "console", "typewriter")
 
 
 def _normalize_full_width(value: str) -> str:
@@ -514,7 +633,7 @@ def generic_family(font_family: str) -> str:
         return "serif"
     if "serif" in lowered and "sans" not in lowered:
         return "serif"
-    if "mono" in lowered or "courier" in lowered or "consolas" in lowered:
+    if any(hint in lowered for hint in _MONOSPACE_HINTS):
         return "monospace"
     return "sans-serif"
 

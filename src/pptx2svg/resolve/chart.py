@@ -578,8 +578,17 @@ AXIS_END_LABEL_LINES = 2
 #: ``2 * EDGE_INSET_PT`` -- and the measurement says so to a tenth of a point.
 #:
 #: Solved from ten transition scans over five label sizes: with the rung at the label's
-#: line box, every font puts it in (21.3, 22.7] and their intersection is
+#: line pitch, every font puts it in (21.3, 22.7] and their intersection is
 #: **(21.92, 22.03]**.  See :func:`side_axis_intervals`.
+#:
+#: **The Arial reading narrows that, and narrows it past this number.**  Every one of the
+#: ten scans is Aptos, whose line gap is zero, so all ten bracket the reserve against the
+#: same rung either way; the one Arial reading -- ten intervals at 165 pt of frame and nine
+#: at 160 -- needs the reserve above 22.012, which intersects the Aptos bracket at
+#: (22.012, 22.03] and leaves ``2 * EDGE_INSET_PT`` 0.012 pt outside it.  **Not moved**:
+#: one reading against a constant that has a meaning, and every other reading in the sweep
+#: is indifferent between 22.00 and 22.02.  An Arial scan at 161 to 164 pt settles whether
+#: the reserve really is 22.02 or whether the missing hundredths are somewhere else.
 AXIS_EDGE_RESERVE_PT = 2 * EDGE_INSET_PT
 
 #: What a **radial** axis -- a radar's, running from the centre to the rim -- can hold
@@ -654,14 +663,14 @@ AXIS_ZERO_ANCHOR_RATIO = 5.0 / 6.0
 # --------------------------------------------------------------------------------------
 
 
-def side_axis_intervals(available_pt: float, line_box_pt: float) -> int:
+def side_axis_intervals(available_pt: float, pitch_pt: float) -> int:
     """How many major intervals a value axis **up the side** of a chart is divided into.
 
     ``available_pt`` is the chart frame's height less its title and less a legend above or
-    below it -- what is left for the plot and its axis labels -- and ``line_box_pt`` is the
-    line box of the face the *tick labels* are drawn in.  The count is then
+    below it -- what is left for the plot and its axis labels -- and ``pitch_pt`` is the
+    baseline-to-baseline pitch of the face the *tick labels* are drawn in.  The count is
 
-    ``floor((available - 2 * EDGE_INSET_PT) / line_box) - 2``, clamped to 1..10.
+    ``floor((available - 2 * EDGE_INSET_PT) / pitch) - 2``, clamped to 1..10.
 
     **This is the coarsening stage, and it is one stage rather than two.**  There is no
     separate "step the unit up when the plot is short": the same expression that caps a
@@ -677,17 +686,33 @@ def side_axis_intervals(available_pt: float, line_box_pt: float) -> int:
     plot taking three force a rung under 5.8 pt, which the 74.16 pt plot's five intervals
     then contradict.
 
-    **The rung is one line box of the label.**  Ten transition scans -- the frame walked
+    **The rung is one line pitch of the label.**  Ten transition scans -- the frame walked
     two points at a time either side of the height where the drawn unit changes, at 6, 10,
-    14, 20 and 28 pt labels -- bracket it to (1.2143, 1.225] ems, and Aptos' own line box
-    is 1.2207.  Arial labels cross their transition 4 to 9 pt lower, which is a *face*
-    ratio and not a constant one, so this asks the face rather than
-    :data:`~pptx2svg.text.measure.DEFAULT_LINE_HEIGHT_RATIO`.  The residual that leaves is
-    the one ``_bottom_label_band`` already carries and names: PowerPoint's pitch is the
-    face's full ``hhea`` spacing including ``lineGap``, which our metrics do not hold, so
-    an Arial axis is 0.33 pt per rung short and steps up about 5 pt of frame *early*: the
-    one reading in the whole sweep that this rule misses is an Arial axis at 160 pt taking
-    ten intervals where PowerPoint takes nine.
+    14, 20 and 28 pt labels -- bracket it to (1.2143, 1.225] ems, and Aptos' own pitch is
+    1.2207.  Arial labels cross their transition 4 to 9 pt lower, which is a *face* ratio
+    and not a constant one, so this asks the face rather than
+    :data:`~pptx2svg.text.measure.DEFAULT_LINE_HEIGHT_RATIO`.
+
+    **Pitch, not line box, and Arial is what says so.**  Every one of those ten scans is
+    Aptos, whose ``hhea`` lineGap is zero, so they cannot tell the two apart; Arial's is
+    67 units of 2048 and it can.  Read with the line box the Arial readings are not merely
+    loose but *contradictory*: PowerPoint steps up between 160 and 165 pt of frame, and
+    ``22 + 12 * lineBox`` puts the step at 156.0 to 156.1 for every reserve in the 22 pt
+    bracket, which is outside that window.  With the pitch -- 2355 units of 2048, 11.499 pt
+    at 10 pt -- the same expression gives 159.91 to 160.02, which is inside it.  That is
+    the same lineGap ``_bottom_label_band`` measures independently on its four-rung ladder,
+    arrived at from a different chart and a different quantity.
+
+    **One reading still misses, by 0.012 pt.**  A 160 pt frame of 10 pt Arial draws ten
+    intervals here and nine in PowerPoint: ``(160 - 22) / 11.499`` is 12.00104, and eleven
+    would need the reserve above 22.012.  The two brackets do intersect -- the Aptos scans
+    put the reserve in (21.92, 22.03] and this reading needs (22.012, ...), leaving
+    (22.012, 22.03] -- so the model is consistent and it is the round
+    ``2 * EDGE_INSET_PT`` that the intersection now excludes, by three hundredths of a
+    point.  Not moved: that would be a one-reading fit against a constant with a meaning,
+    and an Arial scan at 161 to 164 pt settles it properly.  Before the lineGap the rung
+    was 0.33 pt short and this reading was out by four points of frame; it is now out by
+    one part in a thousand of a rung.
 
     **The two line boxes and the 22 pt are separately measured.**  With the rung at the
     line box, every font's own scans put the remaining reserve at 21.3 to 22.7 pt and the
@@ -699,25 +724,33 @@ def side_axis_intervals(available_pt: float, line_box_pt: float) -> int:
     bands ``_plot_rect`` already reserves for them predicts; a legend at the *right* left
     the count at 8, so it is the height the furniture eats and not the furniture itself.
     """
-    if not (math.isfinite(available_pt) and math.isfinite(line_box_pt)) or line_box_pt <= 0:
+    if not (math.isfinite(available_pt) and math.isfinite(pitch_pt)) or pitch_pt <= 0:
         return AXIS_MAX_INTERVALS
-    rungs = (available_pt - AXIS_EDGE_RESERVE_PT) / line_box_pt
+    rungs = (available_pt - AXIS_EDGE_RESERVE_PT) / pitch_pt
     if not math.isfinite(rungs):
         return AXIS_MAX_INTERVALS
     return max(1, min(AXIS_MAX_INTERVALS, math.floor(rungs) - AXIS_END_LABEL_LINES))
 
 
-def radial_axis_intervals(radial_pt: float, line_box_pt: float) -> int:
+def radial_axis_intervals(radial_pt: float, pitch_pt: float) -> int:
     """How many major intervals a **radial** axis -- a radar's rings -- is divided into.
 
-    ``radial_pt`` is the drawn radius, centre to rim, and ``line_box_pt`` the line box of
+    ``radial_pt`` is the drawn radius, centre to rim, and ``pitch_pt`` the line pitch of
     the ring labels' face.  See :data:`RADIAL_AXIS_SLACK_EM`; the radius is available
     before the scale because a radar's geometry is set by its *category* labels, which is
     why :meth:`ChartBuilder._build_radar` measures it first.
+
+    **Pitch here is carried across from the side axis, not measured here.**  All forty
+    ring readings are Aptos, whose ``hhea`` lineGap is zero, so they say nothing about
+    which of the two this rung is, and the corpus radar comes out at four rings either
+    way -- there is no neutral choice to make, only two readings of the same evidence.
+    It is the pitch because a radar's rings are labelled by the same value-axis tick
+    labels the side axis counts, and that is where the two were separated: see
+    :func:`side_axis_intervals`.  A radar in a face with a line gap would decide it.
     """
-    if not (math.isfinite(radial_pt) and math.isfinite(line_box_pt)) or line_box_pt <= 0:
+    if not (math.isfinite(radial_pt) and math.isfinite(pitch_pt)) or pitch_pt <= 0:
         return AXIS_MAX_INTERVALS
-    rungs = radial_pt / line_box_pt + RADIAL_AXIS_SLACK_EM
+    rungs = radial_pt / pitch_pt + RADIAL_AXIS_SLACK_EM
     if not math.isfinite(rungs):
         return AXIS_MAX_INTERVALS
     return max(1, min(AXIS_MAX_INTERVALS, math.floor(rungs)))
@@ -1178,10 +1211,61 @@ class FontBox:
     size: float
     ascent: float
     descent: float
+    #: The face's ``hhea`` line gap at this size, in points; 0.0 for a face whose gap we
+    #: have not measured, which is what makes :attr:`pitch` degrade to
+    #: :attr:`line_height`.
+    gap: float = 0.0
 
     @property
     def line_height(self) -> float:
+        """One line's own box: ascent + descent, with no leading.
+
+        What PowerPoint reserves for a label standing on its own -- the one-line category
+        band, the top inset over the highest value label -- and the two are separately
+        measured.  ``CATEGORY_LABEL_GAP_EM`` and :meth:`ChartBuilder._top_inset` were both
+        fitted over Aptos at three sizes *and Arial at 12 pt*, to within 0.16 and 0.02 pt,
+        and Arial's gap at 12 pt is 0.39 pt: a one-line reserve that carried the gap could
+        not have fitted that tightly.  So the gap is between lines and not around them,
+        which is what typesetting has always said and is here measured rather than assumed.
+        """
         return self.ascent + self.descent
+
+    @property
+    def pitch(self) -> float:
+        """Baseline to baseline: the line box plus the face's own ``hhea`` line gap.
+
+        The distance PowerPoint advances by for each line *after* the first, and the rung
+        its value axis counts in.  Arial is the face that separates this from
+        :attr:`line_height` -- 67 units of 2048, 0.328 pt at 10 pt -- and it separates them
+        twice over, in the wrapped category band and in the tick rule; see
+        :func:`side_axis_intervals` and :meth:`ChartBuilder._bottom_label_band` for the two
+        measurements.  Calibri, Aptos, Times New Roman and Courier New all have a zero gap,
+        so for them this *is* the line box and every number measured with them stands.
+
+        **Four places in this file were checked and deliberately left on the line box**,
+        because a measurement says so rather than because nobody looked:
+
+        * :meth:`ChartBuilder._top_inset`.  ``max(11.0, 5.0 + lineHeight/2)`` fits Aptos
+          at 8/10/14 pt *and Arial at 12 pt* to within 0.02 pt.  Half of Arial's gap at
+          12 pt is 0.20 pt, ten times that residual, so the inset is measurably the box.
+        * :data:`CATEGORY_LABEL_GAP_EM`, the level band's constant term, fitted over the
+          same four cases to 0.16 pt.  Same argument; see
+          :meth:`ChartBuilder._bottom_label_band`.
+        * :data:`TITLE_BAND_LINES`.  It is a *ratio* to the line box, and the only title
+          ever measured is 18 pt Arial: 29.70 pt against a 20.109 pt box.  Expressed
+          against the pitch the same measurement gives 1.4350 instead of 1.4769 and
+          reproduces that title identically, so the two are indistinguishable here and
+          differ only for faces nobody measured.  Changing it would move every non-Arial
+          title on no evidence at all.
+        * :data:`LEGEND_BAND_LINES` and the multi-line blocks in ``_place_label``,
+          ``_centred_label`` and ``_draw_radar_category_labels``.  Every one of those was
+          measured in Aptos alone, which cannot tell the two apart.
+
+        The general shape of it: a reserve *around* one line is the box, a step *between*
+        two lines is the pitch, and everything still on the box is there because its
+        probe deck had no line gap to show.
+        """
+        return self.ascent + self.descent + self.gap
 
     @property
     def ink_centre(self) -> float:
@@ -1231,6 +1315,10 @@ def font_box(family: str | None, size: float) -> FontBox:
         size=size,
         ascent=metrics.ascender / units * size,
         descent=abs(metrics.descender) / units * size,
+        # `None` is "nobody measured this face's gap", not "the gap is zero", and the two
+        # have to behave identically: a face we have not measured must lay out exactly as
+        # it did before the column existed.  See `FontMetrics.line_gap`.
+        gap=(metrics.line_gap or 0) / units * size,
     )
 
 
@@ -3360,9 +3448,9 @@ class ChartBuilder:
         """
         font = self._label_font(axis)
         if radial_pt is not None:
-            return radial_axis_intervals(radial_pt, font.box.line_height)
+            return radial_axis_intervals(radial_pt, font.box.pitch)
         if not horizontal:
-            return side_axis_intervals(self._axis_band_height(), font.box.line_height)
+            return side_axis_intervals(self._axis_band_height(), font.box.pitch)
         widest = 0.0
         if provisional is not None:
             texts = [text for _, text in self._tick_texts(provisional, axis)]
@@ -3550,29 +3638,40 @@ class ChartBuilder:
         needing the most lines, not the widest string, although no probe separates those
         two because in all twenty they were the same label.
 
-        The extra line is the face's own line box, measured on a four-rung ladder in five
-        faces at 10 pt.  The band grew by exactly the same amount from one line to two, two
-        to three and three to four in every face, so this is a straight line and not a fit:
+        The extra line is the face's own line **pitch**, measured on a four-rung ladder in
+        five faces at 10 pt.  The band grew by exactly the same amount from one line to
+        two, two to three and three to four in every face, so this is a straight line and
+        not a fit:
 
-        ====================  ==========  ===========  =========
-        face                  per line    line box     residual
-        ====================  ==========  ===========  =========
-        Calibri               12.205      12.207       -0.002
-        Aptos                 12.205      12.207       -0.002
-        Courier New           11.330      11.328       +0.002
-        Times New Roman       11.075      11.074       +0.001
-        Arial                 11.500      11.172       **+0.328**
-        ====================  ==========  ===========  =========
+        ====================  ==========  ===========  ===========  =========
+        face                  per line    line box     + lineGap    residual
+        ====================  ==========  ===========  ===========  =========
+        Calibri               12.205      12.207       12.207       -0.002
+        Aptos                 12.205      12.207       12.207       -0.002
+        Courier New           11.330      11.328       11.328       +0.002
+        Times New Roman       11.075      11.074       11.074       +0.001
+        Arial                 11.500      11.172       **11.499**   +0.001
+        ====================  ==========  ===========  ===========  =========
 
-        **Arial is the one refutation, and it has a name.**  PowerPoint's pitch is the
-        face's full ``hhea`` line spacing -- ascender plus descender plus *lineGap* -- and
-        Arial is the only one of the five whose lineGap is not zero: 67 units of 2048,
-        which is 0.328 pt at 10 pt, exactly the residual above.  We cannot use that rule,
-        because :mod:`pptx2svg.text.metrics` carries no lineGap and the substitute we
-        would read one from disagrees with the face PowerPoint used: Tinos' is 87 where
-        Office's own ``times.ttf`` is 0, so adding the gap would trade this 0.33 pt error
-        on Arial for a 0.42 pt one on Times New Roman.  The line box alone is the better
-        of the two, and the error it leaves is recorded rather than hidden.
+        **Arial is what identified the term.**  PowerPoint's pitch is the face's full
+        ``hhea`` line spacing -- ascender plus descender plus *lineGap* -- and Arial is the
+        only one of the five whose lineGap is not zero: 67 units of 2048, 0.328 pt at
+        10 pt, exactly the residual the fourth column removes.  The other four are
+        unmoved because their gap is genuinely zero, which is why this table reads as a
+        confirmation rather than a refit.
+
+        **The gap it carries is Arial's, not Arimo's**, and that distinction is the whole
+        reason the column could be added at all: Tinos' lineGap is 87 where Office's own
+        ``times.ttf`` is 0, so reading the substitute would have traded Arial's 0.33 pt
+        error for a 0.42 pt one on Times New Roman.  :class:`~pptx2svg.text.metrics.FontMetrics`
+        now carries the *Office* face's gap as a measured number, on the footing the Aptos
+        advance widths already stand on.
+
+        **One line is the line box, not the pitch**, and that is measured too rather than
+        assumed: a ladder gives only the slope, but :data:`CATEGORY_LABEL_GAP_EM` was
+        fitted over Aptos at 8/10/14 pt *and Arial at 12 pt* to within 0.16 pt, and Arial's
+        gap at 12 pt is 0.39 pt.  A constant term carrying the gap could not have fitted
+        that closely.  Leading goes between lines, not above the first.
 
         **Not capped for a turned label, and PowerPoint's is.**  A probe whose label is
         4.18 band widths wide reserved 85.63 pt where the formula asks for 113.95 -- but it
@@ -3604,7 +3703,8 @@ class ChartBuilder:
         lines = self._label_line_count(font, categories, plot_width)
         return (
             FRAME_PADDING_PT
-            + box.line_height * lines
+            + box.line_height
+            + box.pitch * (lines - 1)
             + CATEGORY_LABEL_GAP_EM * box.size
         )
 
@@ -4667,7 +4767,11 @@ class ChartBuilder:
                     self._label_body(line, font, align="ctr"),
                     left=left,
                     width=box_width,
-                    baseline=baseline + index * box.line_height,
+                    # The rows advance by the same pitch the band is reserved in -- see
+                    # `_bottom_label_band`.  They have to: the band is sized to hold
+                    # exactly these rows, so spacing them by the line box instead would
+                    # leave an Arial block sitting 0.33 pt a line above its own floor.
+                    baseline=baseline + index * box.pitch,
                     box=box,
                 )
 

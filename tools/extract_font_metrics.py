@@ -16,6 +16,20 @@ on this machine, cross-checked against PowerPoint's own PDF export (see
 outline, table or file is redistributed.  This is the same footing on which Carlito and
 Arimo exist at all.
 
+Two later additions stand on exactly that footing and are worth naming here, because both
+are places where "measure with what we draw with" is the *wrong* rule:
+
+* **``line_gap`` is read from the Office face, not from the clone.**  A line gap never
+  reaches a glyph -- it moves baselines -- so the number that matters is the one
+  PowerPoint paced the deck with.  Three of the four clones agree with their original and
+  Tinos does not (87 against ``times.ttf``'s 0), which is why this is a table and not a
+  field read.  See :data:`LINE_GAP_SOURCES`.
+* **Thirteen fixed-pitch faces have tables and no files.**  SimSun, MingLiU, BatangChe,
+  Lucida Console and their siblings have two advances between them -- half an em and a
+  full em -- so their entire advance table is two integers, verified against the installed
+  face by :func:`verify_fixed_pitch` and pruned to the two dozen characters that break the
+  rule.  Nothing is downloaded, licensed or shipped for them.  See :data:`FIXED_PITCH`.
+
 Usage::
 
     python3 tools/extract_font_metrics.py --check     # exit 1 if metrics.py is stale
@@ -228,6 +242,11 @@ def read_face(
         # -431, Carlito: -550 vs -512).
         "ascender": hhea.ascender,
         "descender": hhea.descender,
+        # hhea again, and for the same reason the two above are hhea: PowerPoint's own
+        # line pitch is ascent + descent + *this*.  For a face we only measure, this file
+        # is the Office face and the number is already the right one; for a clone it is
+        # overwritten from the Office original -- see LINE_GAP_SOURCES.
+        "line_gap": hhea.lineGap,
         "default_width": _default_width(widths, units_per_em),
         "cjk_width": cjk_width,
         "widths": widths,
@@ -235,6 +254,46 @@ def read_face(
         "bold_cjk_width": bold_cjk,
         "bold_widths": bold_widths,
     }
+
+
+def prune_fixed_pitch(face: dict) -> dict:
+    """Drop every row the two fallback constants already answer.
+
+    A fixed-pitch East Asian face has exactly two advances -- half an em for Latin and
+    half-width kana, a full em for everything ideographic -- and ``default_width`` and
+    ``cjk_width`` are those two numbers.  Writing out three hundred and fifty rows that
+    all repeat one of them costs a hundred and fifty lines an entry and says nothing;
+    what is worth reading is the handful of characters that are *not* where the rule puts
+    them, which for these faces is the typographic punctuation an East Asian design draws
+    full-width (``—``, ``“``, ``…``, ``■``) although Unicode files it under Latin.
+
+    Behaviour is unchanged by construction: :func:`pptx2svg.text.measure` reaches the same
+    number for a pruned row through the fallback it was equal to.
+    """
+    pruned = dict(face)
+    for widths_key, default_key, cjk_key in (
+        ("widths", "default_width", "cjk_width"),
+        ("bold_widths", "bold_default_width", "bold_cjk_width"),
+    ):
+        default, cjk = face[default_key], face[cjk_key]
+        pruned[widths_key] = {
+            char: width
+            for char, width in face[widths_key].items()
+            if width != (cjk if _is_cjk(char) else default)
+        }
+    return pruned
+
+
+def _is_cjk(char: str) -> bool:
+    """The ranges :func:`pptx2svg.text.measure.is_cjk` answers for, imported from it.
+
+    Pruning has to agree with the measurer character for character: a row dropped because
+    it equalled ``cjk_width`` is only harmless if the measurer will ask ``cjk_width`` for
+    that character too.
+    """
+    from pptx2svg.text.measure import is_cjk
+
+    return is_cjk(ord(char))
 
 
 # --------------------------------------------------------------------------------------
@@ -266,6 +325,104 @@ def source_faces() -> dict[str, tuple[Path, Path, int | None]]:
     }
 
 
+#: Metrics key -> the Office face whose ``hhea`` lineGap the entry must carry.
+#:
+#: Everything else in a clone's entry is read off the clone, because metric compatibility
+#: means the clone *is* the measurement.  The line gap is the exception: it is the one
+#: vertical metric the clones are free to differ on, and two of the four do.  Measured
+#: here, in units of 2048:
+#:
+#:     Calibri 0 / Carlito 0            agree
+#:     Arial 67 / Arimo 67              agree
+#:     Times New Roman 0 / Tinos 87     **disagree**
+#:     Courier New 0 / Cousine 0        agree
+#:
+#: Tinos is the whole reason this table exists rather than a call to ``hhea.lineGap`` on
+#: the bundled file.  Its 87 is a real property of Tinos and the wrong number for a deck
+#: that asked for Times New Roman, which is what PowerPoint laid out with; taking it would
+#: buy a 0.33 pt fix on Arial at the cost of a 0.42 pt regression on Times New Roman.
+#:
+#: The four keys not listed here take their own file's gap, and that is right rather than
+#: a gap in the list: Lato, Raleway and Noto Sans JP are drawn under the name the deck
+#: asked for, and Caladea's entry is only ever reached by a deck that names Caladea --
+#: Cambria has a measured table of its own.  A deck that names Tinos or Liberation Serif
+#: directly therefore lays out with a zero gap where the real Tinos has 87; that is
+#: exactly what it did before this field existed, and it is the smaller of the two errors.
+LINE_GAP_SOURCES = {
+    "Carlito": "Calibri",
+    "Arimo": "Arial",
+    "Tinos": "Times New Roman",
+    "Cousine": "Courier New",
+}
+
+#: Measured-only faces whose entire advance table is two constants.
+#:
+#: Every one of these has exactly two advances -- half an em and a full em -- across the
+#: whole sample, so ``default_width`` and ``cjk_width`` answer all but a couple of dozen
+#: characters and :func:`prune_fixed_pitch` drops the rest.  :func:`verify_fixed_pitch`
+#: asserts the property against the file rather than trusting the name: a face that had
+#: quietly gone proportional would fail the build instead of shipping a flat table.
+#:
+#: Measured on the copies Office installs here, ``(unitsPerEm, half, full)``:
+#:
+#:     SimSun, NSimSun, SimHei, KaiTi, FangSong        (256, 128, 256)
+#:     MingLiU, MingLiU_HKSCS                          (1024, 512, 1024)
+#:     BatangChe, GulimChe, DotumChe, GungsuhChe       (1024, 512, 1024)
+#:     ＭＳ ゴシック, ＭＳ 明朝                         (256, 128, 256)
+#:     Lucida Console, Lucida Sans Typewriter          (2048, 1234, --)
+#:
+#: The two Lucidas are Latin-only -- no kana, no ideographs -- so their ``cjk_width`` is
+#: the ``units_per_em`` non-answer :func:`_widths` writes for a face with no glyph for the
+#: probe kanji, and only their half-width column means anything.
+#:
+#: The two ＭＳ faces are listed because they *are* fixed-pitch, and pruning them shortens
+#: two entries that were already checked in at full length; nothing about them changes.
+FIXED_PITCH = frozenset(
+    {
+        "ＭＳ ゴシック", "ＭＳ 明朝",
+        "SimSun", "NSimSun", "SimHei", "KaiTi", "FangSong",
+        "MingLiU", "MingLiU_HKSCS",
+        "BatangChe", "GulimChe", "DotumChe", "GungsuhChe",
+        "Lucida Console", "Lucida Sans Typewriter",
+    }
+)
+
+
+def verify_fixed_pitch(key: str, face: dict) -> None:
+    """Refuse to write a flat table for a face that is not flat.
+
+    Two claims, both checked against the file and not against the family name:
+
+    * every printable ASCII character the face covers advances exactly
+      ``default_width`` -- the "fixed pitch at the width you record" claim; and
+    * every kana, ideograph and full-width form it covers advances exactly ``cjk_width``,
+      which is what it means for :func:`prune_fixed_pitch` to have left no CJK row behind.
+
+    ＭＳ Ｐゴシック is the face this is guarding against: it lives in the same file as
+    ＭＳ ゴシック, differs only in being proportional, and a generator that took the wrong
+    index would produce a table that looked perfectly healthy.
+    """
+    default, cjk = face["default_width"], face["cjk_width"]
+    odd = {
+        char: width
+        for char, width in face["widths"].items()
+        if 0x20 <= ord(char) < 0x7F and width != default
+    }
+    if odd:
+        raise SystemExit(
+            f"{key} is not fixed-pitch: {len(odd)} ASCII advances differ from "
+            f"{default} ({odd})"
+        )
+    east_asian = {
+        char: width for char, width in face["widths"].items() if _is_cjk(char)
+    }
+    if east_asian:
+        raise SystemExit(
+            f"{key} is not full-width in the East Asian ranges: {len(east_asian)} "
+            f"advances differ from {cjk} ({east_asian})"
+        )
+
+
 #: Faces we measure but never draw: Office-only, and no open font reproduces their
 #: advance widths.  See the module docstring for why storing measurements is legitimate.
 #:
@@ -287,6 +444,13 @@ def source_faces() -> dict[str, tuple[Path, Path, int | None]]:
 #: MS PGothic and MS Mincho (they are embedded in its PDF export), and we to the same
 #: family, which Office installs.  We drew the right outlines and measured them with
 #: Noto Sans JP's widths, because the table had no entry for the face we were drawing.
+#: The thirteen after the Japanese four are the cheapest entries on this page: their
+#: advance table is two constants, so they add thirteen family names to what we can
+#: measure without adding a byte to any wheel.  Eleven are the fixed-pitch CJK faces --
+#: the ``Che`` suffix on the Korean ones and the ``N`` on ``NSimSun`` *mean* fixed-pitch,
+#: and MingLiU and SimSun are fixed-pitch outright -- and two are Latin monospace.  See
+#: :data:`FIXED_PITCH` for the measurements and ``text/fontmap.py`` for what each is drawn
+#: with, which is a separate and less happy question.
 MEASURED_ONLY = (
     "Cambria",
     "Aptos",
@@ -295,6 +459,19 @@ MEASURED_ONLY = (
     "ＭＳ ゴシック",
     "ＭＳ Ｐ明朝",
     "ＭＳ 明朝",
+    "SimSun",
+    "NSimSun",
+    "SimHei",
+    "KaiTi",
+    "FangSong",
+    "MingLiU",
+    "MingLiU_HKSCS",
+    "BatangChe",
+    "GulimChe",
+    "DotumChe",
+    "GungsuhChe",
+    "Lucida Console",
+    "Lucida Sans Typewriter",
 )
 
 
@@ -351,22 +528,26 @@ def _width_rows(widths: dict[str, int]) -> list[str]:
     return rows
 
 
+def _width_block(name: str, widths: dict[str, int]) -> list[str]:
+    """One ``widths={...}`` field.  Empty on one line, because a fixed-pitch face's is."""
+    if not widths:
+        return [f"        {name}={{}},"]
+    return [f"        {name}={{"] + _width_rows(widths) + ["        },"]
+
+
 def render_entry(key: str, face: dict, note: str) -> str:
     lines = [f'    "{key}": FontMetrics(']
     lines.append(f"        # {note}")
     lines.append(f'        units_per_em={face["units_per_em"]},')
     lines.append(f'        ascender={face["ascender"]},')
     lines.append(f'        descender={face["descender"]},')
+    lines.append(f'        line_gap={face["line_gap"]},')
     lines.append(f'        default_width={face["default_width"]},')
     lines.append(f'        cjk_width={face["cjk_width"]},')
-    lines.append("        widths={")
-    lines += _width_rows(face["widths"])
-    lines.append("        },")
+    lines += _width_block("widths", face["widths"])
     lines.append(f'        bold_default_width={face["bold_default_width"]},')
     lines.append(f'        bold_cjk_width={face["bold_cjk_width"]},')
-    lines.append("        bold_widths={")
-    lines += _width_rows(face["bold_widths"])
-    lines.append("        },")
+    lines += _width_block("bold_widths", face["bold_widths"])
     lines.append("    ),")
     return "\n".join(lines)
 
@@ -384,24 +565,89 @@ NOTES = {
     "Aptos": "MEASURED ONLY -- proprietary, no clone exists, drawn with a substitute",
     "Aptos Display": "MEASURED ONLY -- Office cloud font, no clone exists",
     "ＭＳ Ｐゴシック": "MEASURED ONLY -- proportional: kana run 0.648-1.0 em, not full-width",
-    "ＭＳ ゴシック": "MEASURED ONLY -- monospaced full-width, the non-proportional cut",
+    "ＭＳ ゴシック": "MEASURED ONLY -- fixed pitch 128/256 of 256, the non-proportional cut",
     "ＭＳ Ｐ明朝": "MEASURED ONLY -- proportional serif; PowerPoint falls back to it too",
-    "ＭＳ 明朝": "MEASURED ONLY -- monospaced full-width serif",
+    "ＭＳ 明朝": "MEASURED ONLY -- fixed pitch 128/256 of 256, the serif's non-proportional cut",
+    "SimSun": "MEASURED ONLY -- fixed pitch 128/256 of 256; rows are full-width Latin",
+    "NSimSun": "MEASURED ONLY -- fixed pitch 128/256 of 256; the SimSun file's face 1",
+    "SimHei": "MEASURED ONLY -- fixed pitch 128/256 of 256; rows are full-width Latin",
+    "KaiTi": "MEASURED ONLY -- fixed pitch 128/256 of 256; rows are full-width Latin",
+    "FangSong": "MEASURED ONLY -- fixed pitch 128/256 of 256; rows are full-width Latin",
+    "MingLiU": "MEASURED ONLY -- fixed pitch 512/1024 of 1024; rows are full-width Latin",
+    "MingLiU_HKSCS": "MEASURED ONLY -- fixed pitch 512/1024; the MingLiU file's face 2",
+    "BatangChe": "MEASURED ONLY -- fixed pitch 512/1024 of 1024; 65 full-width Latin rows",
+    "GulimChe": "MEASURED ONLY -- fixed pitch 512/1024 of 1024; 65 full-width Latin rows",
+    "DotumChe": "MEASURED ONLY -- fixed pitch 512/1024 of 1024; 65 full-width Latin rows",
+    "GungsuhChe": "MEASURED ONLY -- fixed pitch 512/1024 of 1024; 65 full-width Latin rows",
+    "Lucida Console": "MEASURED ONLY -- monospace 1234/2048 = 0.6025 em; no CJK at all",
+    "Lucida Sans Typewriter": "MEASURED ONLY -- monospace 1234/2048, the same pitch",
 }
+
+
+def office_line_gaps() -> dict[str, int]:
+    """:data:`LINE_GAP_SOURCES` resolved against the local profile, skipping what is absent.
+
+    Read-only, and only ``hhea.lineGap`` comes out -- one integer per face.  Nothing else
+    from an Office file reaches the clones' entries, which stay generated from the
+    bundled files exactly as before.
+    """
+    sys.path.insert(0, str(HERE))
+    import fidelity
+
+    profile = fidelity.load_profile()
+    if profile is None:
+        return {}
+    faces = profile.get("faces", {})
+    gaps: dict[str, int] = {}
+    for key, office in LINE_GAP_SOURCES.items():
+        styles = faces.get(office)
+        if not styles or "regular" not in styles:
+            continue
+        path = Path(styles["regular"]["path"])
+        if not path.exists():
+            continue
+        gaps[key] = _open(path, None, collection_index(path, office))["hhea"].lineGap
+    return gaps
+
+
+def _line_gap_for(key: str, measured: dict[str, int]) -> int | None:
+    """The gap a bundled face's entry carries: Office's, or the checked-in one, or none.
+
+    The fallback order matters for ``--check`` on CI, which has no Office and must not see
+    drift.  Re-emitting what is checked in keeps it green; falling through to ``None``
+    rather than to the bundled file's own gap is what stops a machine with no Office
+    quietly writing Tinos' 87 into a column that is supposed to hold Times New Roman's 0.
+    """
+    if key in measured:
+        return measured[key]
+    if key not in LINE_GAP_SOURCES:
+        return None  # caller keeps the face's own gap; see LINE_GAP_SOURCES.
+    from pptx2svg.text.metrics import METRICS as CURRENT
+
+    existing = CURRENT.get(key)
+    return existing.line_gap if existing is not None else None
 
 
 def build_block() -> str:
     parts = ["METRICS: dict[str, FontMetrics] = {"]
+    gaps = office_line_gaps()
     for key, (regular, bold, weight) in source_faces().items():
         for path in (regular, bold):
             if not path.exists():
                 raise SystemExit(f"missing bundled font: {path}")
-        parts.append(render_entry(key, read_face(regular, bold, weight), NOTES[key]))
+        face = read_face(regular, bold, weight)
+        if key in LINE_GAP_SOURCES:
+            face["line_gap"] = _line_gap_for(key, gaps)
+        parts.append(render_entry(key, face, NOTES[key]))
     local = measured_only_faces()
     for key in MEASURED_ONLY:
         entry = local.get(key)
         if entry is not None and entry[0].exists() and entry[1].exists():
-            parts.append(render_entry(key, read_face(*entry), NOTES[key]))
+            face = read_face(*entry)
+            if key in FIXED_PITCH:
+                face = prune_fixed_pitch(face)
+                verify_fixed_pitch(key, face)
+            parts.append(render_entry(key, face, NOTES[key]))
         else:
             # No Office on this machine, or no font profile written yet.  Re-emit what is
             # already checked in rather than dropping the entry: ``--check`` has to stay
@@ -426,6 +672,7 @@ def _checked_in(key: str) -> dict:
         "units_per_em": existing.units_per_em,
         "ascender": existing.ascender,
         "descender": existing.descender,
+        "line_gap": existing.line_gap,
         "default_width": existing.default_width,
         "cjk_width": existing.cjk_width,
         "widths": existing.widths,

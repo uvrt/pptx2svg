@@ -220,6 +220,40 @@ def test_axis_scale_matches_what_powerpoint_drew(values, intervals, expected):
     assert nice_axis_scale(min(values), max(values), intervals=intervals) == expected
 
 
+def test_the_side_axis_rung_is_the_faces_full_hhea_pitch():
+    """Arial is the face that separates the pitch from the line box, and it does it twice.
+
+    ``axis-wider``'s Arial cell walks a 10 pt axis over frames of 160, 165, 169, 172 and
+    175 pt; PowerPoint steps from nine intervals to ten somewhere in (160, 165].  The rung
+    decides where we step, and the two candidates put it in different places:
+
+        line box  22 + 12 * 11.1719 = 156.06    outside PowerPoint's window
+        pitch     22 + 12 * 11.4990 = 159.99    inside it, by 0.01 pt
+
+    So the line box is not loose here, it is refuted.  What the pitch leaves is the one
+    reading the sweep still misses -- 160 pt itself, by 0.012 pt of rung -- and
+    :data:`~pptx2svg.resolve.chart.AXIS_EDGE_RESERVE_PT` carries why that is not patched.
+    """
+    from pptx2svg.resolve.chart import font_box, side_axis_intervals
+
+    box = font_box("Arial", 10.0)
+    assert box.line_height == pytest.approx(11.1719, abs=5e-4)
+    assert box.pitch == pytest.approx(11.4990, abs=5e-4)
+    assert box.gap == pytest.approx(0.3271, abs=5e-4)
+
+    # Where each rung puts the nine-to-ten step, walked a point at a time.
+    def step(rung):
+        return next(h for h in range(140, 200) if side_axis_intervals(h, rung) == 10)
+
+    assert step(box.line_height) == 157
+    assert step(box.pitch) == 160
+
+    # A zero-gap face is untouched: every number measured with Aptos still stands.
+    aptos = font_box("Aptos", 10.0)
+    assert aptos.gap == 0.0
+    assert aptos.pitch == aptos.line_height
+
+
 def test_the_maximum_clears_the_data_by_five_per_cent_not_by_a_whole_unit():
     """A series topping out at the axis maximum would touch the frame, and PowerPoint
     clears it -- but by padding the range 5% before rounding, not by adding a unit.
@@ -3476,23 +3510,24 @@ WRAP_LADDER = {
     "courier-4": ("Courier New", ("MMMMM MMMMM MMMMM MMMMM",) * 5, 4, 57.370),
 }
 
-#: Every face here but Arial lands inside this at every rung.  What it allows is the level
-#: band's own pre-existing bias, which runs from 0.11 pt light on Arial to 0.60 pt heavy on
-#: Courier New and was fitted long before this sweep; what the test is really asserting is
-#: that the *slope* is right, which is why the residual is flat across all four rungs
-#: instead of fanning out.
+#: Every face lands inside this at every rung.  What it allows is the level band's own
+#: pre-existing bias, which runs from 0.11 pt heavy on Arial to 0.60 pt heavy on Courier
+#: New and was fitted long before this sweep; what the test is really asserting is that the
+#: *slope* is right, which is why the residual is flat across all four rungs instead of
+#: fanning out.
 WRAP_BAND_TOLERANCE_PT = 0.65
 
-#: How far short of PowerPoint our band falls for each line after the first, in Arial only.
-#: This is Arial's ``hhea`` lineGap -- 67 units of 2048, 0.0327 em -- which PowerPoint adds
-#: to the line box and :mod:`pptx2svg.text.metrics` does not carry.  See
-#: ``_bottom_label_band`` for why adding it is not the improvement it looks like.
+#: Arial's ``hhea`` lineGap at 10 pt: 67 units of 2048, 0.0327 em.  It used to be how far
+#: short of PowerPoint our band fell for each line after the first -- Arial is the only one
+#: of the five probe faces whose gap is not zero -- and
+#: :class:`~pptx2svg.text.metrics.FontMetrics` now carries it, so the tests below assert
+#: its *absence* from the residual rather than its presence.
 ARIAL_LINE_GAP_PT_PER_LINE = 0.328
 
 
 @pytest.mark.parametrize("name", list(WRAP_LADDER))
-def test_the_wrapped_band_grows_by_one_line_box_a_line(name):
-    """Four rungs in five faces, and the slope is the face's own line box.
+def test_the_wrapped_band_grows_by_one_line_pitch_a_line(name):
+    """Four rungs in five faces, and the slope is the face's own baseline-to-baseline pitch.
 
     PowerPoint's band grew by exactly the same amount from one line to two, two to three
     and three to four in every face, so the residual is flat rather than fanning -- which
@@ -3502,26 +3537,32 @@ def test_the_wrapped_band_grows_by_one_line_box_a_line(name):
     children = _wrap_probe(cats, face=face)
     assert not _turned(children), f"{name} turned; it should have wrapped"
     assert len(_label_rows(children)) == lines
-    allowance = WRAP_BAND_TOLERANCE_PT + (
-        ARIAL_LINE_GAP_PT_PER_LINE * (lines - 1) if face == "Arial" else 0.0
-    )
-    assert _bottom_inset(children) == pytest.approx(expected, abs=allowance)
+    assert _bottom_inset(children) == pytest.approx(expected, abs=WRAP_BAND_TOLERANCE_PT)
 
 
-def test_arial_is_short_by_its_line_gap_and_nothing_else():
-    """The one face the line box alone does not fit, pinned so it cannot drift.
+def test_arial_carries_its_line_gap_and_the_residual_goes_flat():
+    """The face that identified the term, pinned so the term cannot be dropped again.
 
     Arial is the only one of the five probe faces whose ``hhea`` lineGap is not zero, and
     PowerPoint adds it: 67 units of 2048 is 0.328 pt at 10 pt, which is exactly how far our
-    band falls short per extra line.  Recorded rather than corrected -- the substitute we
-    would read a lineGap from carries 87 where Office's own ``times.ttf`` carries 0, so
-    adding it would trade this error for a bigger one on Times New Roman.
+    band used to fall short per extra line.  With the gap carried -- Arial's own, read from
+    ``arial.ttf`` rather than from the Arimo we draw with -- the residual stops growing and
+    settles on the level band's own +0.11 pt bias, the same constant offset every other
+    face in the ladder shows.
+
+    The assertion is the *flatness*, not the value: a slope would mean the per-line term is
+    wrong again, and it is the slope that the substitute's 87-unit gap would have got wrong
+    in the other direction.
     """
+    residuals = []
     for name in ("arial-1", "arial-2", "arial-3", "arial-4"):
         _, cats, lines, expected = WRAP_LADDER[name]
-        residual = _bottom_inset(_wrap_probe(cats)) - expected
-        predicted = 0.110 - ARIAL_LINE_GAP_PT_PER_LINE * (lines - 1)
-        assert residual == pytest.approx(predicted, abs=0.05), name
+        residuals.append(_bottom_inset(_wrap_probe(cats)) - expected)
+    for residual in residuals:
+        assert residual == pytest.approx(0.110, abs=0.05)
+    # A dropped gap would fan these out by 0.328 pt a rung; Tinos' 87-unit gap would fan
+    # them the other way by 0.098.  Either is an order of magnitude outside this.
+    assert max(residuals) - min(residuals) < 0.01
 
 
 def test_the_label_needing_the_most_lines_sets_the_band():
@@ -3533,7 +3574,7 @@ def test_the_label_needing_the_most_lines_sets_the_band():
     cats = ("MM MM", "MM MM", "MM MM MM MM MM MM", "MM MM", "MM MM")
     children = _wrap_probe(cats)
     assert _bottom_inset(children) == pytest.approx(
-        46.712, abs=WRAP_BAND_TOLERANCE_PT + 2 * ARIAL_LINE_GAP_PT_PER_LINE
+        46.712, abs=WRAP_BAND_TOLERANCE_PT
     )
     rows = _label_rows(children)
     assert [len(row) for row in rows] == [5, 1, 1]
@@ -3576,7 +3617,7 @@ def test_the_band_stops_growing_where_the_measurements_stop():
     """
     six = _bottom_inset(_wrap_probe((" ".join(["MMM"] * 6),) * 5))
     assert six == pytest.approx(
-        81.212, abs=WRAP_BAND_TOLERANCE_PT + 5 * ARIAL_LINE_GAP_PT_PER_LINE
+        81.212, abs=WRAP_BAND_TOLERANCE_PT
     )
     for tokens in (8, 12, 24):
         children = _wrap_probe((" ".join(["MMM"] * tokens),) * 5)

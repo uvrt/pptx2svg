@@ -31,13 +31,16 @@ Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the
 | **Aptos, Aptos Display, Aptos Narrow** | Measured as Aptos, drawn with Carlito | `approximate` | No clone exists anywhere. Install real Aptos — [Aptos](#aptos) |
 | **MS Gothic, MS Mincho, MS PGothic, MS PMincho** | Measured from their own tables, drawn with Noto Sans JP | `approximate` | The ideographs and kana already measure exactly; the Latin sub-run does not — [CJK](#a-note-on-cjk-the-approximate-grade-understates-it) |
 | **Meiryo, Yu Gothic, Yu Mincho, Hiragino, Noto Serif JP** | Measured *and* drawn with Noto Sans JP | `approximate` | Same: exact on CJK, off on the Latin sub-run — [CJK](#a-note-on-cjk-the-approximate-grade-understates-it) |
+| **SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact (0.5 em Latin, 1.0 em ideographic); Noto Sans JP lacks about 8,200 of each face's ideographs and its Latin is proportional |
+| **BatangChe, GulimChe, DotumChe, GungsuhChe** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact, but **Noto Sans JP draws no Hangul at all** — supply a Korean face yourself — [escape hatches](#the-escape-hatches-and-their-trap) |
+| **Lucida Console, Lucida Sans Typewriter** | Measured at 0.602539 em, drawn with Cousine at 0.600098 | `approximate` | Nothing worth doing; each drawn line is 0.41% narrow |
 | **Book Antiqua, Palatino Linotype, Century, Century Schoolbook, Century Gothic, Bookman Old Style, Monotype Corsiva, Arial Narrow, Symbol, Monotype Sorts, Comic Sans MS** | Widths guessed; drawn with the generic family | `missing` | A measured open clone exists but pptx2svg does not ship or map it — [tier 4](#4-a-clone-exists-but-is-not-bundled) |
 | **Anything else** — Gill Sans MT, Verdana, Segoe UI, Georgia, Garamond, Tahoma, Trebuchet MS, Wingdings, the Indic and Thai faces… | Widths guessed; drawn with the generic family | `missing` | [Embed the font in the deck](#1-the-deck-carries-it-best), or supply it yourself — [escape hatches](#the-escape-hatches-and-their-trap) |
 
 `exact` and `compatible` are faithful. `approximate` and `missing` are not, and
 `pptx2svg fonts --check` exits non-zero on them.
 
-Run `pptx2svg fonts` for the full table — 45 names, of which 20 grade faithful.
+Run `pptx2svg fonts` for the full table — 69 names, of which 20 grade faithful.
 
 ## The five ways a font gets drawn
 
@@ -221,7 +224,7 @@ Headline rows, so you need not open the roadmap to learn your Palatino deck is c
 | Symbol | **Symbol Neu** (Apache-2.0) | **0 of 188 by legacy code, 0 of 189 by glyph name, mean 1.0000** |
 | Monotype Sorts | URW D050000L | 9 of 202 differ, mean 0.9938 |
 | Comic Sans MS | **Comic Relief** (OFL) | **0 of 95 ASCII, regular and bold.** The cleanest result in the survey |
-| 13 CJK families (MS Gothic, MS Mincho, SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS, BatangChe, GulimChe, DotumChe, GungsuhChe) | Noto Sans Mono CJK JP | **0 differing over 1,106–2,264 shared codepoints each** |
+| 13 CJK families (MS Gothic, MS Mincho, SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS, BatangChe, GulimChe, DotumChe, GungsuhChe) | Noto Sans Mono CJK JP | **0 differing over 1,106–2,264 shared codepoints each.** All thirteen now have measured tables of their own and rows in the table above; a clone would change what *draws* them, not what measures them |
 
 The full survey — including the faces the internet *suggests* and which all measurably
 reflow (Gill Sans MT → Libre Franklin, mean 1.0774; Verdana → DejaVu Sans, 57 of 95 differ;
