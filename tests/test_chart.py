@@ -3183,6 +3183,16 @@ def _turned(children):
     return sorted(turned, key=lambda shape: shape.transform.offset_x)
 
 
+def _runs(shapes):
+    """Every text run in the given shapes, in order."""
+    return [
+        run
+        for shape in shapes
+        for paragraph in shape.text_body.paragraphs
+        for run in paragraph.runs
+    ]
+
+
 def _bottom_inset(children, frame_height=181.1024):
     return frame_height - _pt(_plot_bottom(children))
 
@@ -3266,22 +3276,84 @@ def test_a_turned_label_lands_where_powerpoint_put_it():
     assert len(pens) == len(expected)
     for (x, y), truth in zip(pens, expected):
         assert x == pytest.approx(truth, abs=0.6), (x, truth)
-        assert y == pytest.approx(171.600, abs=0.9), y
+        # **1.0 pt is the standing residual on this row, and it is the probe deck's own
+        # inconsistency rather than slack.**  Those six probes gave three numbers -- a
+        # 21.39 pt band, a 12.7 pt drop to the anchor and this pen row -- and the first two
+        # leave 8.69 pt under the pen where the row itself says 9.50.  The label decks read
+        # the pen directly on 88 charts and put it at 8.78 for 10 pt Aptos, which agrees
+        # with the band and the anchor and not with this row.
+        assert y == pytest.approx(171.600, abs=1.1), y
 
 
-def test_a_label_four_times_its_band_is_not_capped_the_way_powerpoints_is():
-    """The one measurement the shipped formula does **not** reproduce, kept visible.
+def test_a_label_four_times_its_band_reserves_less_than_the_one_below_it():
+    """The measurement that named the cap, reproduced including its inversion.
 
-    PowerPoint reserved 85.628 pt for a 130.88 pt label -- *less* than the 86.356 pt it
-    gave the 91.84 pt label one step below it -- so no clamp on the width produces both,
-    and whatever it does past about 90 pt of label was never identified.  Ours keeps
-    going up the fitted line.  This test asserts today's behaviour so the divergence is
-    a recorded number rather than a surprise.
+    PowerPoint reserved 85.628 pt for a 130.90 pt label -- *less* than the 86.356 pt it
+    gave the 91.86 pt label one step below it.  No clamp on the width produces both, and
+    for three decks that stood in ``_bottom_label_band`` as an unidentified cap.  It is a
+    **truncation**: the narrower label fits its 101.13 pt allowance and is drawn whole,
+    the wider one does not and is cut to ``CategoryLongerStillA`` at 90.83 pt, and a cut
+    prefix is necessarily a hair narrower than a whole label that just fits.
+
+    Both numbers, and the 0.728 pt between them, come out of a rule fitted without either.
     """
-    cats = tuple(f"CategoryLongerStillAndMore{n}" for n in "ABCDE")
-    ours = _bottom_inset(_rotation_probe(cats))
-    assert ours == pytest.approx(113.9, abs=0.6)
-    assert ours > 85.628 + 20
+    wide = tuple(f"CategoryLongerStillAndMore{n}" for n in "ABCDE")
+    near = tuple(f"CategoryLongerStill{n}" for n in "ABCDE")
+    ours, below = _bottom_inset(_rotation_probe(wide)), _bottom_inset(_rotation_probe(near))
+    assert ours == pytest.approx(85.628, abs=0.15)
+    assert below == pytest.approx(86.356, abs=0.15)
+    # The inversion itself, which is the part no cap on the width survives.
+    assert ours < below
+    assert below - ours == pytest.approx(0.728, abs=0.02)
+    # And the wider label is the one that comes back cut.
+    assert {run.text for run in _runs(_turned(_rotation_probe(wide)))} == {
+        "CategoryLongerStillA…"
+    }
+    assert {run.text for run in _runs(_turned(_rotation_probe(near)))} == set(near)
+
+
+def test_the_allowance_is_a_height_rule_and_ignores_the_width():
+    """Six frame widths and three category counts reserved *identically*, measured.
+
+    This is the trap the tick sweep walked into and it is checked the same way: the band
+    and the plot both move with the frame's width, so a rule fitted to either would fit
+    the probe deck and break on the corpus.  Frame widths of 150, 180, 250, 320, 400 and
+    500 pt and category counts of 3, 5 and 8 all came back with the same 83.343 pt reserve
+    and the same 32 characters kept.
+    """
+    def band_for(count, width):
+        cats = tuple("I" * 90 for _ in range(count))
+        children, _ = _build(
+            wrap_chart_xml(cats, face="Arial"), width=width, height=181.1024
+        )
+        return _bottom_inset(children)
+
+    bands = [band_for(5, width) for width in (150.0, 180.0, 250.0, 320.0, 400.0, 500.0)]
+    bands += [band_for(count, 220.4724) for count in (3, 5, 8)]
+    for band in bands:
+        assert band == pytest.approx(bands[0], abs=0.001)
+    # And the number itself is PowerPoint's, on the frame all nine share.
+    assert bands[0] == pytest.approx(83.343, abs=0.4)
+
+
+def test_a_label_is_cut_by_width_and_not_by_character_count():
+    """``MMMM...IIII`` and ``IIII...MMMM`` are the same 32 characters and the same 177.7 pt.
+
+    PowerPoint kept **10** of the first and **21** of the second, and reserved 79.34 and
+    81.34 pt for them.  A cut counted in characters gives one number for both.
+    """
+    from pptx2svg.resolve.chart import ChartFont, font_box, truncate_label
+
+    font = ChartFont(family="Arial", box=font_box("Arial", 10.0))
+    wide, narrow = "M" * 16 + "I" * 16, "I" * 16 + "M" * 16
+    assert font.width(wide) == pytest.approx(font.width(narrow), abs=0.001)
+    # The allowance the probe frame gives, read back out of the rule.
+    allowance = 101.13
+    assert truncate_label(wide, font, allowance) == "M" * 10 + "…"
+    assert truncate_label(narrow, font, allowance) == "I" * 16 + "M" * 5 + "…"
+    # A label that fits is left alone, and one character always survives.
+    assert truncate_label("MMM", font, allowance) == "MMM"
+    assert truncate_label("MMM", font, 1.0) == "M…"
 
 
 def test_a_horizontal_chart_does_not_turn_the_labels_under_it():
@@ -3315,13 +3387,12 @@ def test_the_real_bar_chart_with_long_labels_turns_them():
     measured, and ``デジタル`` (48), ``グローバル`` (60) and ``その他`` (36) match to
     0.000 pt as well.
 
-    What the export does show is something nothing here models: **PowerPoint truncated the
-    label.**  It drew ``プラット…`` -- four katakana and an ellipsis -- where the category
-    is eight characters, and it did the same to two of the radar's six.  The reserve it
-    kept, 69.538 pt, implies a label width of 68.09 through this formula, which is 1.06 of
-    the 64.39 pt band; the real label is 1.49 bands.  That is the same unidentified cap
-    ``_bottom_label_band`` already records for a 4.18-band probe, seen from the other side.
-    Before the rotation work the inset was 27.29 pt, so the error more than halved.
+    What the export shows besides is the mechanism: **PowerPoint truncated the label.**  It
+    drew ``プラット…`` -- four katakana and an ellipsis -- where the category is eight
+    characters, and left ``グローバル`` at five whole.  Both follow from one allowance,
+    62.3 pt on this 135 pt frame, and this chart was *not* in the sweep that measured it:
+    it reserves **68.59** against PowerPoint's 69.538, where it reserved 89.3 uncapped and
+    27.29 before the labels turned at all.
     """
     from tests.conftest import FIXTURE_DIR
 
@@ -3339,9 +3410,12 @@ def test_the_real_bar_chart_with_long_labels_turns_them():
     assert len(turned) == 4
     assert {shape.transform.rotation for shape in turned} == {-45.0}
     inset = _bottom_inset(children, frame_height=135.0)
-    assert inset == pytest.approx(89.3, abs=0.5)
-    # Still wrong, but nearer than the 27.29 pt it reserved when it drew them level.
-    assert abs(inset - 69.538) < abs(27.29 - 69.538)
+    assert inset == pytest.approx(68.59, abs=0.15)
+    assert abs(inset - 69.538) < 1.0
+    # The label PowerPoint cut, cut in the same place, and the one it kept, kept.
+    drawn = {run.text for run in _runs(turned)}
+    assert "プラット…" in drawn
+    assert "グローバル" in drawn
 
 
 def test_labels_that_float_inside_the_plot_do_not_turn():
@@ -3715,7 +3789,10 @@ def test_a_chart_measures_and_draws_its_japanese_in_the_themes_script_face():
         for paragraph in shape.text_body.paragraphs
         for run in paragraph.runs
     }
-    assert set(labels) == {"デジタル", "プラットフォーム", "グローバル", "その他"}
+    # `プラットフォーム` is drawn cut, which is what PowerPoint's own export drew -- see
+    # `test_the_real_bar_chart_with_long_labels_turns_them`.  The *measured* width below is
+    # still the whole string's, because the cut is a consequence of measuring it.
+    assert set(labels) == {"デジタル", "プラット…", "グローバル", "その他"}
     for properties in labels.values():
         assert properties.font_family == "Arial"
         assert properties.font_family_ea == "游ゴシック"

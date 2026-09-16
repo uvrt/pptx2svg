@@ -232,18 +232,99 @@ WRAPPED_LABEL_MAX_LINES = 6
 #: range, and nothing went to 90.
 ROTATED_LABEL_DEGREES = -45.0
 
-#: The plot's bottom inset once the labels turn: this, plus the widest label's width times
-#: sin 45.  Fitted to six probes across two decks, worst residual **0.03 pt** -- and the
-#: residual is that small only because the *widest* label is the one that sets it, which
-#: is what a 1.01 pt discrepancy on the deck whose five labels differ by one letter
-#: showed.  It replaces the horizontal band's `6.5 + lineHeight + 0.615 em` entirely.
-ROTATED_LABEL_INSET_PT = 21.39
+#: The plot's bottom inset once the labels turn is the level band with the label's own box
+#: **turned through 45 degrees**: ``FRAME_PADDING_PT + (lineBox + width) * cos 45 +
+#: CATEGORY_LABEL_GAP_EM * size``.  That is the same three terms the level band has, with
+#: the one that runs along the baseline now running diagonally, and it is a decomposition
+#: rather than a refit: the flat 21.39 pt this replaces is what it gives for the 10 pt
+#: Aptos the original six probes were all drawn in, to 0.10 pt.
+#:
+#: **What forced the decomposition is the size sweep.**  A flat constant is right at one
+#: size and nowhere else: probe charts across 6, 8, 10, 12, 14, 18, 20 and 24 pt put the
+#: constant at 14.70 pt through 39.94, and the formula reproduces all nine face/size pairs
+#: to 0.28 pt.  Split into the two pieces the cap needs separately:
+#:
+#: ====================  ==========  =========  ==========  ==========
+#: face and size         pad below   anchor A   sum, drawn  sum, rule
+#: ====================  ==========  =========  ==========  ==========
+#: Arial 6 pt                 7.582      7.117      14.699      14.93
+#: Arial 10 pt                8.062     12.435      20.497      20.55
+#: Arial 14 pt                8.302     17.643      25.945      26.17
+#: Arial 20 pt                9.502     24.855      34.357      34.60
+#: Arial 24 pt                9.920     30.022      39.942      40.22
+#: Aptos 10 pt                8.782     12.604      21.386      21.28
+#: ====================  ==========  =========  ==========  ==========
+#:
+#: ``A`` is the drop from the axis line to the **far end of the rotated baseline** and is
+#: ``ascent * cos 45 + CATEGORY_LABEL_GAP_EM * size``; the pad under the deepest pen is
+#: ``FRAME_PADDING_PT + descent * cos 45``.  Both are read straight off the export -- the
+#: pen positions are in the PDF -- rather than solved for.  The em term is the level
+#: band's own :data:`CATEGORY_LABEL_GAP_EM`, unturned, which is the other half of why this
+#: reads as the same band rather than a second one.
+
+#: How far the deepest pen of a turned label may drop below the axis: **half the frame's
+#: height, less this**.  Past it PowerPoint cuts the label rather than reserving more.
+#:
+#: This is the cap the file could not name for three observations.  Three probe decks,
+#: 112 charts, exported and read back as pen positions: frame heights from 70 to 380 pt,
+#: label sizes 6 to 24 pt, six frame widths, four category counts and four faces.  Every
+#: chart brackets the allowance from **both** sides -- the prefix PowerPoint kept fits and
+#: one more character does not -- which is what turns a drawn label into a measurement.
+#:
+#: **The shape is settled and the offset is not, quite.**  The allowance runs with the
+#: frame's height at a slope of ``sin 45`` over twelve heights and at every size, so the
+#: rule is "half the height, less a fixed drop"; what 95 two-sided readings do *not* do is
+#: agree on one number for that drop.  Solved per size against the pen positions it comes
+#: out at 8.6 pt for a 6 pt label, 7.6 at 8 pt, 6.4 at 10 and 12, and unconstrained above
+#: 14 -- non-monotone, so it is not a linear term in the size either.  6.25 is what the
+#: densest family gives (46 readings at 10 pt bracket it into (6.20, 6.31]) and it
+#: reproduces **78 of the 95** exactly, drawn string and band alike.  The other 17 miss by
+#: at most one and a half characters: 6 and 8 pt labels are cut about 2 pt of width later
+#: than PowerPoint cuts them, and three legend probes by 0.19 for a reason that is not this
+#: constant (see below).  An uncapped reserve is wrong by 30 pt on the same charts.
+#:
+#: **What it is not.**  Not a fixed number of points: the cap runs from 28.3 pt of band at
+#: a 70 pt frame to 183.6 at a 380 pt one.  Not a fraction of the plot or of the band: six
+#: frame widths from 150 to 500 pt and category counts of 3, 5 and 8 all reserved
+#: *identically*, which is the same trap the tick rule fell into and is checked here the
+#: same way.  Not a line count and not a character count: ``MMMM...IIII`` and
+#: ``IIII...MMMM`` are the same 32 characters and the same 177.7 pt, and PowerPoint cut
+#: them 2 pt apart in *width*.
+#:
+#: **The rival, kept because it is the other half of the residual.**  ``band <=
+#: (height - EDGE_INSET_PT) / 2`` -- the plot keeping half the frame outright, with no
+#: anchor term -- brackets every reading at 10 pt and below, including the 6 and 8 pt ones
+#: this constant misses, and fails from 12 pt up, where it leaves one to two characters of
+#: band unused.  The two rules are the same rule with the anchor counted and not counted;
+#: no fraction of the anchor in between fits both ends, and neither does any affine term in
+#: the label size.  Whatever PowerPoint is really doing is between them.
+#:
+#: The height it halves is the frame's less the furniture: a **bottom legend** and a
+#: **title** each moved the cap by their own band, over three frame heights each, while a
+#: *side* legend did not move it at all.  The legend probes land 0.19 pt out for a reason
+#: of their own: PowerPoint's legend band is 2 *pitches* (23.02, 23.02 and 23.07 pt read
+#: off three frames) where :data:`LEGEND_BAND_LINES` takes 2 line boxes, 22.34 -- the same
+#: lineGap that ``_bottom_label_band``'s wrapped ladder turned up, unfixed here because the
+#: legend band is measured elsewhere and moving it is not this change's business.
+ROTATED_LABEL_HEADROOM_PT = 6.25
+
+#: What PowerPoint puts at the cut, as its own text object whose pen starts exactly where
+#: the kept text ends: one U+2026, not three dots.  It is **inside** the allowance the
+#: prefix is measured against -- ``f36``/``f37`` cut three characters earlier than a rule
+#: on the prefix alone would -- and **outside** the band, hanging past the anchor towards
+#: the axis, which is why the reserve follows the kept prefix and not the drawn string.
+LABEL_ELLIPSIS = "…"
 
 #: Where the rotated baseline's far end lands, relative to the centre of its band on the
-#: category axis: this far right, and this far below.  Measured on six probes, spread
-#: under 0.15 pt.
+#: category axis: this far right, and :func:`rotated_label_anchor` below.  Measured on six
+#: probes, spread under 0.15 pt.
+#:
+#: **The drop is not the flat 12.7 pt this used to carry.**  That was fitted at 10 pt and
+#: is the same shape of error the flat band constant was: reading the pen straight off the
+#: export puts it at 7.12 pt for a 6 pt label and 30.02 for a 24 pt one.  It is now the
+#: same anchor the band is built from, so a label cannot be drawn anywhere but in the space
+#: reserved for it, and at 10 pt it is 12.79 against the 12.7 it replaces.
 ROTATED_LABEL_OFFSET_X_PT = 2.0
-ROTATED_LABEL_OFFSET_Y_PT = 12.7
 
 #: Chart kinds laid out around a centre rather than on a pair of axes.
 POLAR_CHART_KINDS = frozenset({"pieChart", "doughnutChart", "radarChart", "ofPieChart"})
@@ -1345,6 +1426,45 @@ def wrap_label(text: str, font: ChartFont, band: float) -> list[str]:
             current = token
     lines.append(current)
     return lines[:WRAPPED_LABEL_MAX_LINES]
+
+
+def rotated_label_anchor(box: "FontBox") -> float:
+    """How far below the axis line a turned label's far end sits.
+
+    The fixed part of the drop, and the one term the band and the drawn label must share.
+    See :data:`ROTATED_LABEL_HEADROOM_PT` for the readings behind it: it is the label's
+    ascent turned through 45 degrees plus the level band's own gap, which reproduces the
+    pen positions of eight sizes and two faces to 0.2 pt.
+    """
+    return box.ascent * _SIN_45 + CATEGORY_LABEL_GAP_EM * box.size
+
+
+def truncate_label(text: str, font: ChartFont, allowance: float) -> str:
+    """One turned category label, cut the way PowerPoint cuts it.
+
+    A label that fits its allowance is left alone; one that does not is cut to the longest
+    **prefix whose width plus the ellipsis' own** still fits, and one U+2026 is appended.
+    Both halves of that are measured, on the probe pair that separates them: a label of 36
+    narrow characters was drawn whole and one of 37 came back at **32** -- three characters
+    short of what the prefix alone would have allowed, which is exactly the ellipsis.
+
+    **At least one character survives.**  A 24 pt label on a 110 pt frame has an allowance
+    of 2.5 pt and PowerPoint still drew one character and an ellipsis, so the floor is a
+    character rather than an empty string.
+
+    The cut is by *width*, not by character count: ``MMMM...IIII`` and ``IIII...MMMM`` are
+    the same 32 characters and the same 177.7 pt of label, and PowerPoint kept 10 of the
+    first and 21 of the second.
+    """
+    if not text or font.width(text) <= allowance:
+        return text
+    ellipsis = font.width(LABEL_ELLIPSIS)
+    kept = 0
+    for index in range(1, len(text)):
+        if font.width(text[:index]) + ellipsis > allowance:
+            break
+        kept = index
+    return text[: max(kept, 1)] + LABEL_ELLIPSIS
 
 
 def text_width(
@@ -3626,14 +3746,49 @@ class ChartBuilder:
             or 1
         )
 
+    def _furniture_height(self) -> float:
+        """The frame's height, less the bands a title and a top or bottom legend take.
+
+        This is what the turned label's allowance is half of.  A **side** legend is not in
+        it: the probe with one reserved and cut identically to the probe with none, which
+        is what says the allowance is a height rule rather than an area one.  A bottom
+        legend was probed at three frame heights, a title at three, and a top legend at
+        one -- the top legend cut at exactly the same character as the bottom one, which
+        is why both are here rather than only the one the band is drawn under.
+        """
+        height = self.frame.height
+        title = self._title_box()
+        if title is not None:
+            height -= TITLE_BAND_LINES * title.line_height
+        legend = self._legend_position()
+        if legend in ("b", "t", "tr") and not self._legend_overlays():
+            height -= LEGEND_BAND_LINES * self._legend_font().box.line_height
+        return height
+
+    def _rotated_allowance(self, box: FontBox) -> float:
+        """How wide a turned category label may be before PowerPoint cuts it.
+
+        The deepest pen of a turned label may drop at most
+        ``height / 2 - ROTATED_LABEL_HEADROOM_PT`` below the axis line; the anchor takes
+        the fixed part of that drop and ``sin 45`` turns what is left back into a width.
+        """
+        headroom = (
+            self._furniture_height() / 2
+            - ROTATED_LABEL_HEADROOM_PT
+            - rotated_label_anchor(box)
+        )
+        return max(headroom / _SIN_45, 0.0)
+
     def _bottom_label_band(
         self, font: ChartFont, categories: list[str], plot_width: float
     ) -> float:
         """How much of the frame the labels under the plot take.
 
-        Level and on one line, that is one line box plus its gap.  Turned, it is
-        :data:`ROTATED_LABEL_INSET_PT` plus the widest label's own width times sin 45,
-        which fits six probes to within 0.03 pt.  **Wrapped, it is the level band plus one
+        Level and on one line, that is one line box plus its gap.  Turned, it is the same
+        three terms with the line box **and** the label's own width turned through 45
+        degrees, and the width is the one PowerPoint *draws* rather than the one the deck
+        authored -- see :data:`ROTATED_LABEL_HEADROOM_PT` and :func:`truncate_label`.
+        **Wrapped, it is the level band plus one
         line box for every line after the first** -- and the line that sets it is the one
         needing the most lines, not the widest string, although no probe separates those
         two because in all twenty they were the same label.
@@ -3673,30 +3828,56 @@ class ChartBuilder:
         gap at 12 pt is 0.39 pt.  A constant term carrying the gap could not have fitted
         that closely.  Leading goes between lines, not above the first.
 
-        **Not capped for a turned label, and PowerPoint's is.**  A probe whose label is
-        4.18 band widths wide reserved 85.63 pt where the formula asks for 113.95 -- but it
-        reserved *less* than the probe one step below it, whose 2.92-band label took
-        86.36 pt, so no clamp on the width reproduces both. Whatever PowerPoint does past
-        about 90 pt of label was not identified, and a rule that fitted the rest and broke
-        there is exactly what this file does not ship.
+        **Turned, the band is capped, and the cap is a truncation.**  This used to record
+        an unidentified clamp: a label 4.18 band widths wide reserved 85.63 pt where the
+        uncapped formula asks for 113.95, and reserved *less* than the 2.92-band label one
+        step below it, which took 86.36 -- so no clamp on the width could produce both.
+        Two probe decks, 88 readings, settle it, and the 0.73 pt inversion is the part that
+        names the mechanism rather than the part that resisted it:
 
-        A third observation narrows it without settling it.  ``real-financial-report.pptx``
-        chart3 reserves 69.538 pt for a 96 pt label, which inverts through this formula to
-        an implied width of 68.09 -- and its frame is 135 pt tall against the probe deck's
-        181.1024.  The three implied widths are 90.85, 91.88 and 68.09, which are 0.502,
-        0.507 and 0.504 of their frame heights: a straight line through them has an
-        intercept of 0.01.  **Still not shipped.**  Under a pure cap the two probes would
-        reserve the *same* amount and they differ by 0.73 pt, and fitting a rule on three
-        points, one of them the deck it would be validated against, is how the Caladea
-        claim got in.  One probe deck sweeping frame height settles it.
+        * the 2.92-band label is **91.86 pt and fits** the 101.13 pt allowance its frame
+          gives it, so it is drawn whole and reserves ``21.28 + 91.86 sin 45`` = 86.23;
+        * the 4.18-band one is 130.90 pt, does **not** fit, and is cut to the longest
+          prefix that does -- ``CategoryLongerStillA`` at 90.83 pt -- which reserves 85.51.
 
-        The same export shows what PowerPoint does once the cap bites: it **truncates**.
-        It drew ``プラット…`` for an eight-character category.  Nothing here does that, so
-        our labels overflow where PowerPoint's are cut.
+        A cut prefix is necessarily a hair *narrower* than the whole label that just fits,
+        so the wider category reserves less.  Both magnitudes land within 0.12 pt of what
+        PowerPoint drew and the gap between them is 0.728 against a measured 0.728, on two
+        numbers that were not in the fit.
+
+        :data:`ROTATED_LABEL_HEADROOM_PT` carries the sweep the cap came out of and
+        :func:`truncate_label` the cut.  The allowance is on the label's **width**, not on
+        the band: an untruncated label may reserve more than the cap would allow a cut one,
+        which is what separates this from the half-the-frame-height rule the three
+        observations suggested and refutes that rule outright.
+
+        ``real-financial-report.pptx``'s chart3 comes out of this without being in it: its
+        allowance is 62.3 pt, which keeps ``グローバル`` (60) whole and cuts
+        ``プラットフォーム`` (96) to ``プラット…`` exactly as PowerPoint did, for a band of
+        68.6 against its measured **69.538**.
+
+        The decks are built and read by ``tools/make_label_probe.py`` and
+        ``tools/read_label_probe.py``, and the reader's second line per chart is this rule's
+        own prediction, so a change here is checked against the exports rather than argued
+        about.  What it does not reproduce is in :data:`ROTATED_LABEL_HEADROOM_PT`: 17 of
+        95 readings are cut within one and a half characters of PowerPoint rather than on
+        it, and the CJK probes are not a test of any of this, because the probe deck's
+        Japanese fell back to **MS Gothic**, whose metrics this library does not carry.
         """
         if self._labels_rotate(font, categories, plot_width):
-            widest = max(font.width(text) for text in categories)
-            return ROTATED_LABEL_INSET_PT + widest * _SIN_45
+            box = font.box_for(*categories)
+            allowance = self._rotated_allowance(box)
+            # The ellipsis hangs *past* the anchor, towards the axis, so the band is sized
+            # from the kept prefix rather than from the drawn string.
+            widest = max(
+                font.width(truncate_label(text, font, allowance).removesuffix(LABEL_ELLIPSIS))
+                for text in categories
+            )
+            return (
+                FRAME_PADDING_PT
+                + (box.line_height + widest) * _SIN_45
+                + CATEGORY_LABEL_GAP_EM * box.size
+            )
         # The line box is the *drawn* face's, which for a Japanese label is not the one
         # `<a:latin>` names -- see `ChartFont.box_for`.
         box = font.box_for(*categories)
@@ -4622,9 +4803,15 @@ class ChartBuilder:
                 elif in_band and self._labels_rotate(
                     category_font, categories, rect.width
                 ):
+                    # The same allowance `_bottom_label_band` sized the band with, so a
+                    # label is drawn exactly as long as the space set aside for it.
+                    allowance = self._rotated_allowance(category_font.box_for(*categories))
                     self._rotated_labels_along_bottom(
                         [
-                            (rect.left + (index + 0.5) * band, text)
+                            (
+                                rect.left + (index + 0.5) * band,
+                                truncate_label(text, category_font, allowance),
+                            )
                             for index, text in enumerate(categories)
                         ],
                         category_font,
@@ -4653,12 +4840,13 @@ class ChartBuilder:
 
         The measured anchor is the **far end of the rotated baseline**: it lands
         :data:`ROTATED_LABEL_OFFSET_X_PT` right of its band's centre and
-        :data:`ROTATED_LABEL_OFFSET_Y_PT` below the axis, on all six probes to within
-        0.15 pt.  The renderer rotates a shape about its own centre, so the box is placed
+        :func:`rotated_label_anchor` below the axis.  The renderer rotates a shape about
+        its own centre, so the box is placed
         by working that rotation backwards from the anchor rather than by rotating the
         text in place -- which is why the arithmetic below is not simply "left = x".
         """
-        box = font.box
+        # The *drawn* face's box, which is the one the band was built from too.
+        box = font.box_for(*(text for _, text in labels))
         radians = math.radians(ROTATED_LABEL_DEGREES)
         cos, sin = math.cos(radians), math.sin(radians)
         for position, text in labels:
@@ -4669,12 +4857,20 @@ class ChartBuilder:
             # Where the baseline's right-hand end sits inside the unrotated box, measured
             # from the box's centre.  The half em of padding is the same one every other
             # chart label carries, and the text is right-aligned against it.
-            offset_x = width / 2 - box.size / 2
+            #
+            # **A cut label is aligned on its prefix, not on its ellipsis.**  In
+            # `real-financial-report.pptx`'s export the ellipsis' own pen starts where
+            # `プラット` ends, which is the anchor, so the ellipsis hangs past it -- the
+            # same reason `_bottom_label_band` sizes the band from the prefix.
+            overhang = (
+                font.width(LABEL_ELLIPSIS) if text.endswith(LABEL_ELLIPSIS) else 0.0
+            )
+            offset_x = width / 2 - box.size / 2 - overhang
             offset_y = box.first_baseline - height / 2
             turned_x = offset_x * cos - offset_y * sin
             turned_y = offset_x * sin + offset_y * cos
             centre_x = position + ROTATED_LABEL_OFFSET_X_PT - turned_x
-            centre_y = axis_y + ROTATED_LABEL_OFFSET_Y_PT - turned_y
+            centre_y = axis_y + rotated_label_anchor(box) - turned_y
             self.elements.append(
                 m.ShapeElement(
                     transform=m.Transform(

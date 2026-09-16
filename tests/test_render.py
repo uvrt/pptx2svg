@@ -826,6 +826,45 @@ def test_a_font_change_starts_a_new_text_chunk():
     assert 'x="' in tspans[1][0], tspans[1][0]
 
 
+def test_a_right_aligned_mixed_script_line_starts_where_the_line_starts():
+    """The chunk the line opens with is anchored ``start``, wherever the line is aligned.
+
+    Splitting a line into absolutely positioned chunks means resolving the paragraph's own
+    alignment into a position first, and that position is the line's **left** edge.
+    Handing it back with the paragraph's anchor drew the first chunk one chunk-width to
+    the left of where it belongs on a right-aligned line, and half a width on a centred
+    one -- silently, because it only happens when a font change splits the line at all.
+
+    Four corpus slides were drawing that way, and the rotated category labels
+    ``truncate_label`` cuts are the fifth: a Japanese label and its ellipsis are two runs.
+    """
+    for alignment, first in (("r", "start"), ("ctr", "start"), ("l", "start")):
+        body = m.TextBody(
+            paragraphs=[
+                m.Paragraph(
+                    properties=m.ParagraphProperties(alignment=alignment),
+                    runs=[
+                        m.TextRun(
+                            "Markdownから",
+                            m.RunProperties(
+                                font_size=18,
+                                font_family="Calibri",
+                                font_family_ea="ＭＳ Ｐゴシック",
+                            ),
+                        )
+                    ],
+                )
+            ]
+        )
+        svg = text_svg(body)
+        tspans = re.findall(r"<tspan([^>]*)>([^<]*)</tspan>", svg)
+        assert [text for _attrs, text in tspans] == ["Markdown", "から"], alignment
+        assert f'text-anchor="{first}"' in tspans[0][0], (alignment, tspans[0][0])
+        # And the second chunk begins exactly one Latin run further along.
+        starts = [float(re.search(r'x="([-\d.]+)"', attrs).group(1)) for attrs, _ in tspans]
+        assert starts[1] > starts[0]
+
+
 def test_a_single_face_line_is_left_flowing():
     """No font change, no absolute positions: let the rasteriser accumulate advances.
 
