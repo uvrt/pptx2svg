@@ -687,7 +687,15 @@ def _render_line(
     # A tab stop owns the chunk it opens -- it is the thing that carries the stop's
     # alignment -- so its prefix is held here until a tspan consumes it, rather than
     # being rebuilt from the font-change rule below.
-    pending: str | None = _leading(left, dy, anchor)
+    #
+    # **The first chunk is anchored ``start`` even on a right- or centre-aligned line**,
+    # because ``left`` is already where the line begins: the branch above resolved the
+    # line's own anchor into a position rather than leaving it to the rasteriser.  Handing
+    # that position back with the line's anchor draws the chunk one chunk-width -- or half
+    # of one -- to the left of where it belongs, which is only visible when a font change
+    # splits the line at all.  ``honour_tabs`` only ever runs on a ``start`` line, so this
+    # is the same string it used to produce there.
+    pending: str | None = _leading(left, dy, "start")
     for entry in planned:
         if entry is None:
             cursor = _chunk_end(chunk_start, chunk_width, chunk_anchor)

@@ -71,7 +71,7 @@ rendering approaches.
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; **all 74** built-in styles carried, every one measured out of PowerPoint; an id in neither the deck nor the catalogue now warns `table-style-unknown` instead of rendering a bare grid in silence; cell text takes a table style's `tcTxStyle` over the master's `otherStyle` |
-| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. Category labels wrap at whitespace and turn 45° only when their widest unbreakable token still will not fit. Every other chart type warns and draws an empty frame |
+| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. Category labels wrap at whitespace, turn 45° only when their widest unbreakable token still will not fit, and are **cut with an ellipsis** when a turned one is wider than the frame's height allows. Every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -168,13 +168,13 @@ With fonts eliminated as a variable, what remains is layout, and it is concentra
   dropped, and fixing it takes 6.83 pt off the corpus radar's radius — but the 19.8 pt
   attributed to chart3's *width* is not a width error at all. PowerPoint's own export
   draws `プラットフォーム` at 12.000 pt a glyph, which is the 96 pt we measure.
-* **The rotated-label reserve has no cap**, and PowerPoint's does. That is what chart3's
-  19.8 pt actually is, and there is now a candidate rule for it (below) that one probe
-  deck would settle.
-* **PowerPoint ellipsis-truncates a category label that will not fit** and nothing here
-  does. Measured on `real-financial-report.pptx`: its rotated bar axis drew `プラット…`
-  for an eight-character category, and its radar drew `海外売上…` and `従業員満…` for
-  six-character ones. We draw all three in full.
+* ~~**The rotated-label reserve has no cap**~~ and ~~**PowerPoint ellipsis-truncates a
+  category label that will not fit**~~ — both closed, and they were one mechanism seen
+  from two sides. See *The rotated label's cap is a truncation* below: three probe decks,
+  112 charts. Chart3's bar axis now draws `プラット…` where PowerPoint draws `プラット…`,
+  keeps `グローバル` whole where PowerPoint keeps it, and reserves 68.59 pt against its
+  69.538 — the 19.8 pt error is 0.95. **The radar's two truncations are not fixed**: that
+  is a different allowance (`RADAR_LABEL_MAX_FRACTION`) and no probe here measured it.
 * **A manually laid out legend** is the whole of slide 4's remaining chart error.
 * **Text displacement of 1–2 px** on body copy is what slides 6 and 7 are made of, and
   `tools/fidelity.py`'s own docstring warns that SSIM is unusually sensitive to exactly
@@ -293,15 +293,12 @@ draw, instead of at one with no kana in it.
   `RADAR_LABEL_MAX_FRACTION` cap we already carry: 0.25 × 243.243 pt region = 60.8 pt, and
   both truncated labels came back at five cells (60.0 pt) where the full string is six
   (72.0). We wrap onto a second line instead.
-* **A candidate cap for the rotated reserve, on three observations.** Inverting
-  `ROTATED_LABEL_INSET_PT + width · sin 45` through PowerPoint's insets gives an implied
-  label width of 90.85 and 91.88 pt for the two probes that exceeded the cap (frame
-  181.1024 pt tall) and 68.09 pt for chart3 (frame 135 pt). Both ratios are 0.505 of the
-  frame height, and a straight line through them has an intercept of 0.01. It is **not
-  implemented**: three points with a 1.03 pt spread in two of them, and the two probes
-  should be *equal* under a pure cap and are not. One probe deck sweeping frame height
-  would settle it; this is exactly the shape of the Caladea claim, so it is recorded
-  rather than shipped.
+* ~~**A candidate cap for the rotated reserve, on three observations.**~~ The candidate
+  was *half the frame height* on three implied widths that were 0.502, 0.504 and 0.507 of
+  their frames. **It is refuted, and it was refuted by the fourth point.** The three
+  implied widths were an inversion through our own formula, and the formula's constant is
+  not a constant: it is `21.39` only for the 10 pt Aptos all three were read in. Sweeping
+  the label size moves it from 14.70 pt to 39.94. What the sweep found instead is below.
 * **`lang` may select between the script list and an application default.**
   `real-financial-report.pptx`'s table cells name no typeface, inherit `+mn-ea` → 游ゴシック
   — and PowerPoint drew them in **MS Gothic**, not Yu Gothic, on a machine that has both.
@@ -1795,14 +1792,9 @@ over two lines as "Category" / "Three". That observation turned out to be the th
 worth pulling: a bar chart wraps first too, and rotates only when wrapping cannot save
 the label. See *Wrapped category labels* below.
 
-Two pieces are measured and **not** shipped, both because a probe refutes the obvious
-rule:
+One piece is measured and **not** shipped, because a probe refutes the obvious rule. The
+other — the cap — is now settled; see *The rotated label's cap is a truncation* below.
 
-* **The cap.** PowerPoint reserved 85.63 pt for a label 4.18 bands wide — *less* than the
-  86.36 pt it gave the 2.92-band label one step below it. No clamp on the width produces
-  both, so whatever it does past about 90 pt of label was not identified. Ours keeps
-  going up the fitted line; a test asserts that number so the divergence is recorded
-  rather than latent.
 * **The left inset.** It grows too once the first label reaches past the plot: 21.07 pt
   level, then 21.68, 36.44 and 54.19 as the label widens, with the last two probes
   sharing a value the way the bottom cap does. Solving it for the minimum pen position
@@ -1820,12 +1812,75 @@ PowerPoint's own export draws all eight glyphs at exactly 12.000 pt — one em o
 YuGothic-Regular it embeds — so the label is 96 pt drawn and 96 pt measured, and
 `デジタル`, `グローバル` and `その他` match to 0.000 pt as well. The error is this rule's
 missing cap, and the export adds a clue the probes could not: **PowerPoint truncated the
-label to `プラット…`**. See *The East Asian face cascade* for the implied-width numbers
-and the 0.505-of-frame-height candidate they suggest.
+label to `プラット…`**. That clue turned out to be the whole answer; see below.
 
 `authoring-integration` holds at 0.9327 and `table-test` at 0.9734, unchanged to four
 decimals: neither has a label wide enough to turn, so nothing this work did moves a
 scored number. The probe decks that measured it are throwaway and were deleted.
+
+#### The rotated label's cap is a truncation
+
+Three probe decks, 112 charts, built by `tools/make_label_probe.py` and read back by
+`tools/read_label_probe.py` — pen positions and drawn strings out of PowerPoint's own PDF,
+not rasters. The question was the cap the section above could not name. **There is no cap
+on the reserve. PowerPoint cuts the label and the reserve follows what it drew.**
+
+* **The ellipsis is one U+2026 and its own text object**, whose pen starts exactly where
+  the kept text ends. It is *inside* the allowance the prefix is measured against —
+  `f36`/`f37` bracket that at three characters — and *outside* the band, hanging past the
+  anchor towards the axis, which is why the reserve is sized from the prefix alone.
+* **The cut is by width, not by characters.** `MMMM…IIII` and `IIII…MMMM` are the same 32
+  characters and the same 177.7 pt; PowerPoint kept 10 of the first and 21 of the second.
+* **At least one character survives**: a 24 pt label on a 110 pt frame has an allowance of
+  2.5 pt and still came back as one character and an ellipsis.
+* **The allowance is a height rule.** Six frame widths from 150 to 500 pt and category
+  counts of 3, 5 and 8 reserved *identically* — the same trap the tick rule fell into,
+  checked the same way. A right legend changed nothing; a **bottom** legend, a **top**
+  legend and a **title** each moved it by their own band, on three frame heights each.
+* **The slope is `sin 45`**: the allowance runs from 21 pt of label on a 70 pt frame to
+  241 on a 380 pt one, straight, at every size.
+* **The band constant is not a constant.** `21.39` was fitted at 10 pt Aptos; the pen
+  positions put it at 14.70 pt for a 6 pt label and 39.94 for a 24 pt one. It decomposes
+  exactly into the level band with the label's box turned: `FRAME_PADDING_PT +
+  (lineBox + width) · cos 45 + 0.615 em`, to 0.28 pt over nine face/size pairs.
+
+**The 0.73 pt inversion — the observation that refused three rules — falls straight out.**
+The 2.92-band label is 91.86 pt and *fits* its 101.13 pt allowance, so it is drawn whole
+and reserves 86.23; the 4.18-band one is 130.90, does not fit, and is cut to
+`CategoryLongerStillA` at 90.83, which reserves 85.51. A cut prefix is necessarily a hair
+narrower than a whole label that just fits, so the wider category reserves *less*. Both
+land within 0.12 pt of PowerPoint and the gap between them is 0.728 against a measured
+0.728 — on two numbers that were not in the fit.
+
+**What is not settled: the offset.** The rule is "half the height, less a fixed drop", and
+95 two-sided readings do not agree on one number for that drop. Solved per size it is
+8.6 pt at 6 pt, 7.6 at 8, 6.4 at 10 and 12, and unconstrained above 14 — non-monotone, so
+not a linear term in the size either, and no affine model in (height, size) fits all 95.
+`ROTATED_LABEL_HEADROOM_PT = 6.25` is what the densest family gives (46 readings at 10 pt
+bracket it into (6.20, 6.31]) and it reproduces **78 of 95** exactly, drawn string and
+band alike. The other 17 miss by at most one and a half characters, concentrated at 6 and
+8 pt. The rival — `band ≤ (height − EDGE_INSET_PT)/2`, the plot keeping half the frame
+with no anchor term — brackets every reading at 10 pt *and below* and fails from 12 pt up.
+The two are the same rule with the anchor counted and not counted; the truth is between
+them and this data cannot say where.
+
+**Two things the sweep turned up that are not this rule:**
+
+* **PowerPoint's legend band is 2 × the face's *pitch*, not 2 × its line box.** Read off
+  three frames: 23.02, 23.02, 23.07 pt for 10 pt Arial, where `LEGEND_BAND_LINES ×
+  line_height` is 22.34. Same lineGap the wrapped-label ladder found. Not fixed here.
+* **A right- or centre-aligned line split by a font change drew its first chunk one chunk
+  width to the left.** `_render_line` resolves the line's anchor into a position and then
+  handed that position back with the line's own anchor. Four corpus slides were drawing
+  that way; the rotated label and its ellipsis were the fifth, which is how it surfaced.
+  Fixed, with a test.
+
+**The CJK probes are not a test of any of this.** The probe deck's Japanese fell back to
+**MS Gothic**, whose metrics this library does not carry (our `游ゴシック` is Noto Sans
+JP's table), so those 12 charts measure the font table, not the rule. The one Japanese
+chart drawn in a face we do approximate — chart3, in YuGothic — is reproduced: allowance
+62.3 pt, `グローバル` (60) kept whole, `プラットフォーム` (96) cut to `プラット…`, band
+68.59 against PowerPoint's 69.538.
 
 #### Wrapped category labels, and why the rotation rule was right in the wrong domain
 
@@ -1892,7 +1947,10 @@ Two more things measured and deliberately not shipped:
   tokens all came back on **two** lines in a 35.212 pt band, each line four band widths
   wide and overlapping its neighbours. No rule reproduces both the linear part and that
   collapse, so the band stops growing at six and a test records that we are then 44 pt
-  over. This is the same shape of problem as the rotated band's cap past 90 pt of label.
+  over. This used to read as the same shape of problem as the rotated band's cap past
+  90 pt of label — and that one turned out to be a **truncation**, so the wrapped
+  collapse is worth re-reading with the same question: what does PowerPoint *draw* at
+  eight tokens, rather than what does it reserve.
 * **An explicit orientation on `a:bodyPr` forbids the turn, and PowerPoint drops labels
   instead.** `<a:bodyPr rot="0" vert="horz"/>` and `<a:bodyPr vert="horz"/>` both left
   `MMMMM` level on a band it does not fit — and PowerPoint printed only every *other*
@@ -3418,9 +3476,9 @@ types that landed this week reused nearly all of it. What is left, cheapest firs
    Asian face cascade*. `ChartFont` now carries the East Asian face as well as the Latin
    one, measures per character and names both in the emitted `font-family`, which takes
    5.00 pt of the radar's 6.83 pt radius error. Chart3's 19.8 pt turned out not to be a
-   width at all: PowerPoint draws `プラットフォーム` at the same 96 pt we measure. What
-   is left there is **the rotated reserve's missing cap**, with a candidate rule on three
-   observations and a probe deck needed to settle it.
+   width at all: PowerPoint draws `プラットフォーム` at the same 96 pt we measure. The
+   rotated reserve's missing cap is closed too — it is a **truncation**, see *The rotated
+   label's cap is a truncation* — and chart3's 19.8 pt error is now 0.95.
 2. **A manually laid out legend.** `real-college-template.pptx` slide 4 carries a
    `c:legend/c:layout/c:manualLayout` we ignore, and it is now the whole of that slide's
    remaining chart error: 4.8 pt of plot height and 9.5 pt of legend baseline. Reading
