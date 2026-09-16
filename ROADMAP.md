@@ -2088,9 +2088,16 @@ scans then walk the frame two points at a time either side of a step:
 The rung is (1.2143, 1.225] ems and Aptos' own line box is 1.2207; the reserve's five
 brackets intersect at **(21.92, 22.03]**, which is `2 * EDGE_INSET_PT`. Arial labels cross
 their transition 4 to 9 pt lower — a *face* ratio and not PowerPoint's constant 1.2 em line
-box for running text — so the rung asks the face. The residual that leaves is the one
-`_bottom_label_band` already carries: PowerPoint's pitch is the face's full `hhea` spacing
-including `lineGap`, our metrics hold none, and an Arial axis is 0.33 pt per rung short.
+box for running text — so the rung asks the face.
+
+**The rung is the face's full `hhea` pitch, `lineGap` included, and that is now carried.**
+All ten scans are Aptos, whose gap is zero, so they cannot separate pitch from line box;
+Arial's gap is 67 units of 2048 and it can. Read with the line box the Arial readings are
+not merely loose but *contradictory* — PowerPoint steps up between 160 and 165 pt of frame
+and `22 + 12 × lineBox` puts the step at 156.0 to 156.1 for every reserve in the 22 pt
+bracket, which is outside that window. With the pitch (11.499 pt at 10 pt) the same
+expression gives 159.91 to 160.02, inside it. `FontMetrics` now holds the *Office* face's
+`lineGap` — Arial's 67, not the Arimo we draw with — and the rung asks for it.
 
 **A bottom axis is a different rung.** Four ems rather than one line box, bracketed to
 (4.00, 4.02] at 10 pt and (3.78, 4.18] at 20 pt, with a 23 pt reserve in (22, 24]. What
@@ -2117,8 +2124,15 @@ what its 45.56 pt radius holds.
 **What the five misses are.** Four are the bottom axis with labels wider than its rung,
 where the single-rung approximation leaves two windows about 15 pt wide at each crossing —
 three of those four are the skipped-tick case above, which is a different mechanism
-altogether. The fifth is an Arial side axis crossing 5 pt early, which is the `lineGap` our
-metrics do not carry. Both are in the constants' docstrings with their brackets.
+altogether. The fifth was an Arial side axis crossing 5 pt early, and that is now the
+`lineGap` above: **it still misses, but by 0.012 pt instead of four points of frame.**
+`(160 − 22) / 11.499` is 12.00104, and taking nine intervals there needs the reserve above
+22.012 — which is inside the Aptos bracket (21.92, 22.03] and just outside the round
+`2 * EDGE_INSET_PT` we ship. The two brackets intersect at (22.012, 22.03], so the model is
+consistent and it is the tidy 22 that the intersection now excludes. **Not moved**: one
+reading against a constant with a meaning is a fit, and an Arial scan at 161 to 164 pt
+settles whether the reserve is really 22.02 or whether the missing hundredths are something
+else. All five are in the constants' docstrings with their brackets.
 
 **What this fixes in the corpus.** `real-financial-report.pptx`'s line chart — 43 of data
 on a 112.5 pt frame — drew 0..50 by 10 where PowerPoint draws **0..60 by 20**; it now draws
@@ -3164,6 +3178,31 @@ draws them with Noto Sans JP, and the only thing missing is a measured table, wh
 nothing to carry and does not enlarge the wheel by a byte. The same trick works for the
 monospaced Latin faces, where the whole table is one number:
 
+> **Done**, and the measurement came out slightly different from the sketch above. It is
+> *two* constants, not three: half an em for Latin and half-width kana, a full em for
+> everything ideographic, verified against every installed face by
+> `verify_fixed_pitch` — every printable ASCII character at exactly the half-width, every
+> kana, ideograph and full-width form at exactly the full width, in all thirteen. What
+> needs rows is the two dozen typographic characters an East Asian design draws *full*
+> width although Unicode files them under Latin (`—`, `“`, `…`, `■`): 21 in MS Gothic, 23
+> in SimSun, 42 in KaiTi, 65 in the Korean four. `units_per_em` is 256 for the Japanese and
+> Simplified Chinese faces, 1024 for MingLiU and the Korean ones, 2048 for the Lucidas.
+>
+> **All thirteen grade `approximate`, not `compatible`, and the reason is the drawn face
+> rather than the widths.** The widths are exact; what draws them is not. Measured against
+> the Noto Sans JP the bundle ships: 8,166 to 8,245 of each Chinese face's 20,900-odd
+> unified ideographs have no glyph in it, and **none of the 11,172 Hangul syllables do** —
+> Korean text drawn from the bundle is missing glyphs, not merely mis-shaped. The Latin
+> half fails differently and is the half-width trap: these faces put ASCII at exactly
+> 0.5 em and Noto Sans JP's is proportional (0.24 em for `i`, 0.83 for `M`), so getting
+> every ideograph right does not make the face compatible. Each says so in its `caveat`.
+>
+> One residual inside the *measurement*, recorded rather than fixed: `is_cjk` stops at
+> U+9FFF and Hangul syllables start at U+AC00, so a Hangul character falls to
+> `default_width` — the half-width — where the face draws it at a full em. Making `is_cjk`
+> full-width-but-not-break-anywhere is a change to line breaking and wants a Korean probe,
+> not a width table.
+
 | Family | Advance | Nearest shippable | Drawn-width error |
 | --- | --- | --- | --- |
 | Lucida Console | 0.602539 em | Cousine (0.600098, already bundled) | **0.41 %** |
@@ -3253,7 +3292,7 @@ is a clone of a face PowerPoint installs.
 
 | | Adds | Rescues | kB per name |
 | --- | --- | --- | --- |
-| 1 | **Metrics-only CJK and mono tables** (0 kB) | MS Gothic, MS Mincho, SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS, BatangChe, GulimChe, DotumChe, GungsuhChe, Lucida Console, Lucida Sans Typewriter | **0** |
+| 1 | ~~**Metrics-only CJK and mono tables** (0 kB)~~ — **done** | MS Gothic, MS Mincho, SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS, BatangChe, GulimChe, DotumChe, GungsuhChe, Lucida Console, Lucida Sans Typewriter | **0** |
 | 2 | **Symbol Neu** (Apache-2.0, 1 file, 69 kB) | Symbol | 69 |
 | 3 | **Comic Relief** (OFL, 2 cuts, 171 kB) | Comic Sans MS | 171 |
 | 4 | **TeX Gyre Heros Cn** (GUST, 4 cuts, 467 kB) | Arial Narrow | 467 |
@@ -3261,6 +3300,10 @@ is a clone of a face PowerPoint installs.
 | 6 | **TeX Gyre Adventor** (GUST, 4 cuts, 693 kB) | Century Gothic | 693 |
 | 7 | **TeX Gyre Pagella** (GUST, 4 cuts, 875 kB) | Book Antiqua, Palatino Linotype | 438 |
 | 8 | **TeX Gyre Schola** (GUST, 4 cuts, 813 kB) | Century Schoolbook, Century | 407 |
+
+Row 1 is done; what follows was written before it was and its "no caveat at all" claim is
+corrected above — the tables are exact and what draws them is not, so the thirteen names
+grade `approximate` with the reason in each row's `caveat`.
 
 Rows 1–8 together are **3.6 MB on disk for 24 names**, against 20.5 MB for the 16 the
 bundle answers today. Rows 1–5 carry no caveat at all: the metrics-only tables and Symbol

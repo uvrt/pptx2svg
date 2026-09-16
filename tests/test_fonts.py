@@ -31,11 +31,13 @@ from pptx2svg.text.fontmap import (
     SUBSTITUTIONS,
     font_family_value,
     generic_family,
+    metrics_for,
     substitution_for,
     typographic_family,
 )
 from pptx2svg.text.measure import DefaultTextMeasurer
 from pptx2svg.text.metrics import METRICS
+from pptx2svg.units import PX_PER_PT
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -294,16 +296,31 @@ def test_a_deck_naming_a_bundled_face_lays_out_from_its_own_widths(authoring):
 #: showed what the alternative costs: MS PGothic is proportional (katakana 0.648-1.0 em)
 #: and Noto Sans JP is not (uniformly 1.0), so its lines were measured up to a third too
 #: wide and wrapped early.
+#:
+#: The thirteen fixed-pitch faces below joined for a different reason: not that no clone
+#: exists, but that none is *needed*.  Their advance table is two constants -- half an em
+#: and a full em -- so measuring them properly costs nothing at all, while what we draw
+#: them with stays a compromise (Noto Sans JP for the CJK ones, Cousine for the Lucidas).
 DIVERGENT = {
     "Aptos", "Aptos Display", "Aptos Narrow", "Cambria",
     "MS Gothic", "MS ゴシック", "MS PGothic", "MS Pゴシック",
     "MS Mincho", "MS 明朝", "MS PMincho", "MS P明朝",
+    "SimSun", "宋体", "NSimSun", "新宋体", "SimHei", "黑体",
+    "KaiTi", "楷体", "FangSong", "仿宋",
+    "MingLiU", "細明體", "MingLiU_HKSCS", "細明體_HKSCS",
+    "BatangChe", "바탕체", "GulimChe", "굴림체",
+    "DotumChe", "돋움체", "GungsuhChe", "궁서체",
+    "Lucida Console", "Lucida Sans Typewriter",
 }
 
 #: Tables with no font behind them.  See the note on :data:`DIVERGENT`.
 MEASURED_ONLY = {
     "Aptos", "Aptos Display", "Cambria",
     "ＭＳ ゴシック", "ＭＳ Ｐゴシック", "ＭＳ 明朝", "ＭＳ Ｐ明朝",
+    "SimSun", "NSimSun", "SimHei", "KaiTi", "FangSong",
+    "MingLiU", "MingLiU_HKSCS",
+    "BatangChe", "GulimChe", "DotumChe", "GungsuhChe",
+    "Lucida Console", "Lucida Sans Typewriter",
 }
 
 
@@ -339,6 +356,159 @@ def test_the_proportional_japanese_faces_are_measured_as_proportional():
     # them at all and falls through to cjk_width.
     assert "ト" not in monospaced.widths
     assert monospaced.cjk_width == monospaced.units_per_em
+
+
+#: Metrics key -> the ``hhea`` lineGap of the Office face it stands for, in font units.
+#: Read from the copies Office installs on the machine that generated the table; the whole
+#: point of the column is that two of these disagree with the clone we draw with.
+OFFICE_LINE_GAPS = {"Carlito": 0, "Arimo": 67, "Tinos": 0, "Cousine": 0}
+
+
+def test_a_clone_carries_the_office_faces_line_gap_and_not_its_own():
+    """The one column that is deliberately not read off the file we draw with.
+
+    Arimo's own gap happens to equal Arial's, so it proves nothing on its own.  Tinos is
+    the case: its ``hhea`` lineGap is 87 and ``times.ttf``'s is 0, and taking Tinos' would
+    trade a 0.33 pt error on Arial for a 0.42 pt one on Times New Roman -- which is the
+    trade ``resolve/chart.py`` used to record as unavoidable.
+    """
+    for key, gap in OFFICE_LINE_GAPS.items():
+        assert METRICS[key].line_gap == gap, key
+    # Stated as the negative too, because this is the assertion that has to survive
+    # somebody "fixing" the extractor to read the bundled file.
+    assert METRICS["Tinos"].line_gap == 0
+
+
+def test_an_unmeasured_line_gap_lays_out_exactly_as_no_gap():
+    """``None`` means nobody measured it, and it must not become a guess of zero or of anything else."""
+    from pptx2svg.resolve.chart import font_box
+    from pptx2svg.text.metrics import FontMetrics
+
+    unmeasured = FontMetrics(
+        units_per_em=1000, ascender=800, descender=-200,
+        default_width=500, cjk_width=1000, widths={},
+    )
+    assert unmeasured.line_gap is None
+    measured = METRICS["Arial"] if "Arial" in METRICS else METRICS["Arimo"]
+    assert measured.line_gap is not None
+
+    box = font_box("No Such Face", 10.0)
+    assert box.gap == 0.0
+    assert box.pitch == box.line_height
+
+
+#: The thirteen tables that cost the wheel nothing: ``(key, units_per_em, half, full)``.
+#: Measured from the faces Office installs; ``tools/extract_font_metrics.py`` re-derives
+#: and re-verifies them, and this is the shape of the result.  The two Lucidas are
+#: Latin-only, so their "full" column is the ``units_per_em`` non-answer the extractor
+#: writes for a face with no glyph for its probe kanji.
+FIXED_PITCH = {
+    "ＭＳ ゴシック": (256, 128, 256),
+    "ＭＳ 明朝": (256, 128, 256),
+    "SimSun": (256, 128, 256),
+    "NSimSun": (256, 128, 256),
+    "SimHei": (256, 128, 256),
+    "KaiTi": (256, 128, 256),
+    "FangSong": (256, 128, 256),
+    "MingLiU": (1024, 512, 1024),
+    "MingLiU_HKSCS": (1024, 512, 1024),
+    "BatangChe": (1024, 512, 1024),
+    "GulimChe": (1024, 512, 1024),
+    "DotumChe": (1024, 512, 1024),
+    "GungsuhChe": (1024, 512, 1024),
+    "Lucida Console": (2048, 1234, 2048),
+    "Lucida Sans Typewriter": (2048, 1234, 2048),
+}
+
+
+@pytest.mark.parametrize("key", list(FIXED_PITCH))
+def test_a_fixed_pitch_table_is_two_constants(key):
+    """Half an em and a full em, and the rows are only what breaks that rule.
+
+    This is what makes the thirteen free: an advance table that is two integers needs no
+    font file behind it, which is why they could be added without enlarging the wheel by a
+    byte.  The rows that survive are the typographic characters an East Asian design draws
+    full-width although Unicode files them under Latin -- and every one of them is the
+    *full* width, never a third value, which is the claim "fixed pitch" actually makes.
+    """
+    metrics = METRICS[key]
+    units, half, full = FIXED_PITCH[key]
+    assert (metrics.units_per_em, metrics.default_width, metrics.cjk_width) == (
+        units, half, full
+    )
+    allowed = {half, full}
+    odd = {char: w for char, w in metrics.widths.items() if w not in allowed}
+    # Lucida Console draws the euro one unit wider than everything else -- a rounding
+    # artefact in the file, kept because it is what the face says.
+    assert odd == ({"€": 1235} if key == "Lucida Console" else {})
+
+
+def test_a_fixed_pitch_cjk_face_measures_half_width_latin_and_full_width_ideographs():
+    """The half-width trap, asserted through the public measurer rather than the table.
+
+    A Japanese or Chinese fixed-pitch face puts its *Latin* at half an em and its
+    ideographs at a full one, and a substitute can get one right while getting the other
+    wrong: Noto Sans JP is exactly right on the ideographs and proportional on the Latin.
+    Measuring through the same entry point the renderer uses is what makes this a statement
+    about layout rather than about a dict.
+    """
+    measurer = DefaultTextMeasurer()
+    for family in ("SimSun", "MingLiU", "BatangChe", "MS Gothic"):
+        latin = measurer.measure_text_width("Handgloves", 20.0, font_family=family)
+        assert latin == pytest.approx(10 * 0.5 * 20.0 * PX_PER_PT), family
+        kanji = measurer.measure_text_width(
+            "編編編", 20.0, font_family=family, font_family_ea=family
+        )
+        assert kanji == pytest.approx(3 * 20.0 * PX_PER_PT), family
+
+    # And the guess it replaces.  "Handgloves" is nine normal characters at 0.6 em and one
+    # narrow (`l`) at 0.3, so the per-category fallback calls it 5.7 ems where the face
+    # says 5.0 -- 14% wide, which is a line break in the wrong place on any full line.
+    guessed = measurer.measure_text_width("Handgloves", 20.0, font_family="Nonexistent")
+    measured = measurer.measure_text_width("Handgloves", 20.0, font_family="SimSun")
+    assert guessed / measured == pytest.approx(5.7 / 5.0, abs=1e-6)
+
+
+def test_the_lucidas_are_measured_at_their_own_pitch_and_drawn_at_cousines():
+    """0.602539 em measured, 0.600098 em drawn: the 0.41% the caveat names."""
+    measurer = DefaultTextMeasurer()
+    for family in ("Lucida Console", "Lucida Sans Typewriter"):
+        measured = measurer.measure_text_width("MMMMM", 100.0, font_family=family)
+        drawn = measurer.measure_text_width("MMMMM", 100.0, font_family="Cousine")
+        assert measured / (5 * 100.0 * PX_PER_PT) == pytest.approx(0.602539, abs=1e-5)
+        assert measured / drawn == pytest.approx(1.0041, abs=1e-4), family
+
+
+def test_the_fixed_pitch_families_grade_approximate_and_say_why():
+    """Exact widths are not compatibility; the face we draw with decides that.
+
+    Korean is the sharpest case and its caveat has to say so: the bundle's Noto Sans JP
+    carries none of the 11,172 Hangul syllables, so a BatangChe deck is missing glyphs
+    rather than merely drawn in the wrong design.
+    """
+    names = ["SimSun", "MingLiU", "BatangChe", "GulimChe", "Lucida Console"]
+    report = check_families(names)
+    if report.mode != "bundled":
+        pytest.skip("pptx2svg-fonts is not importable")
+    assert {face.verdict for face in report.faces} == {"approximate"}
+    assert not report.faithful
+    by_name = {face.requested: face for face in report.faces}
+    assert by_name["SimSun"].metrics == "SimSun"
+    assert by_name["SimSun"].substitute == "Noto Sans JP"
+    assert "Hangul" in by_name["BatangChe"].reason
+    assert "0.41%" in by_name["Lucida Console"].reason
+    assert by_name["Lucida Console"].substitute == "Cousine"
+
+
+def test_the_localised_spellings_reach_the_same_tables():
+    """A Chinese or Korean deck spells these in its own script, and a deck is what we index."""
+    for latin, native in (
+        ("SimSun", "宋体"), ("NSimSun", "新宋体"), ("SimHei", "黑体"),
+        ("KaiTi", "楷体"), ("FangSong", "仿宋"), ("MingLiU", "細明體"),
+        ("BatangChe", "바탕체"), ("GulimChe", "굴림체"),
+        ("DotumChe", "돋움체"), ("GungsuhChe", "궁서체"),
+    ):
+        assert metrics_for(native) is METRICS[latin], native
 
 
 # --------------------------------------------------------------------------------------
