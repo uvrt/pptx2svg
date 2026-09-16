@@ -96,11 +96,26 @@ def path_points(obj, parent):
     return points
 
 
+def _is_stroked(obj) -> bool:
+    """Whether this path is drawn as a stroke rather than only filled.
+
+    A **bar** and an **area** are filled rectangles and polygons whose edges include
+    horizontal segments, and pairing a filled path's points produces lines that look
+    exactly like gridlines.  The scatter decks never hit this because a scatter draws
+    nothing but markers and a line; the type sweep does, on every slide.
+    """
+    fill = ctypes.c_int()
+    stroke = ctypes.c_int()
+    if not raw.FPDFPath_GetDrawMode(obj, ctypes.byref(fill), ctypes.byref(stroke)):
+        return True
+    return bool(stroke.value)
+
+
 def horizontal_strokes(page):
     """Every horizontal path stroke, as ``(y, x0, x1)`` in page points."""
     out = []
     for obj, kind, parent in walk(page):
-        if kind != raw.FPDF_PAGEOBJ_PATH:
+        if kind != raw.FPDF_PAGEOBJ_PATH or not _is_stroked(obj):
             continue
         # Gridlines arrive as one path holding every line, so pair the points up rather
         # than requiring a two-point path.
@@ -110,6 +125,19 @@ def horizontal_strokes(page):
             # where the axis does, never at the page edge.
             if abs(y0 - y1) < 0.05 and abs(x1 - x0) > 20.0 and min(x0, x1) > 5.0:
                 out.append((round(y0, 3), round(min(x0, x1), 2), round(max(x0, x1), 2)))
+    return sorted(out)
+
+
+def vertical_strokes(page):
+    """Every vertical path stroke, as ``(x, y0, y1)`` -- the gridlines of a bottom axis."""
+    out = []
+    for obj, kind, parent in walk(page):
+        if kind != raw.FPDF_PAGEOBJ_PATH or not _is_stroked(obj):
+            continue
+        pts = path_points(obj, parent)
+        for (x0, y0), (x1, y1) in zip(pts[::2], pts[1::2]):
+            if abs(x0 - x1) < 0.05 and abs(y1 - y0) > 20.0 and min(y0, y1) > 5.0:
+                out.append((round(x0, 3), round(min(y0, y1), 2), round(max(y0, y1), 2)))
     return sorted(out)
 
 
@@ -143,7 +171,14 @@ def labels(page):
         text = bytes(buf)[: count * 2].decode("utf-16-le", "replace").rstrip("\x00").strip()
         if text:
             out.append(
-                (text, round(left, 2), round((top + bottom) / 2, 3), round(top - bottom, 2))
+                (
+                    text,
+                    round(left, 2),
+                    round((top + bottom) / 2, 3),
+                    round(top - bottom, 2),
+                    round(right - left, 2),
+                    round((left + right) / 2, 3),
+                )
             )
     raw.FPDFText_ClosePage(textpage)
     return out
@@ -164,105 +199,170 @@ def _number(label: str) -> float:
     return float(label)
 
 
-def prediction(low, high, slack):
-    saved = chartmod._DECADE_SLACK
-    chartmod._DECADE_SLACK = slack
-    try:
-        return chartmod.nice_axis_scale(low, high, horizontal=False, anchor_zero=False)
-    finally:
-        chartmod._DECADE_SLACK = saved
-
-
 def unit_from(values):
+    """The step between consecutive labels, or the list of steps when they differ."""
     steps = [round(b - a, 12) for a, b in zip(values, values[1:])]
     return steps[0] if steps and len(set(steps)) == 1 else steps
 
 
-def _ceil_125(value: float) -> float:
-    """The smallest 1-2-5 step at or above *value*."""
-    decade = float(f"1e{math.floor(math.log10(value))}")
-    for step in (1, 2, 5, 10):
-        if value <= step * decade * (1 + 1e-12):
-            return step * decade
-    raise AssertionError(value)
+def prediction(probe: dict, axis_pt: float = 0.0) -> tuple[float, float, float]:
+    """The axis the shipped rule draws for this probe, frame and all.
 
+    ``axis_pt`` is the length PowerPoint drew, and it is used for one thing only: a
+    **radar**'s interval count is a function of its radius, which is a layout output
+    rather than a frame dimension, so the reader feeds back the radius it read instead of
+    reimplementing ``_radar_geometry`` here.
 
-def measured_rule(low: float, high: float) -> tuple[float, float, float]:
-    """PowerPoint's axis as these probes measured it: ``(minimum, maximum, unit)``.
-
-    The **base** unit only.  On a short axis PowerPoint then coarsens up the 1-2-5 ladder
-    by a rule that is still unknown, so a reading coarser than this is not a failure of
-    this function -- see ROADMAP.md, "The unit rule is not the power of ten below the
-    span".  Written here rather than in ``src`` because it is half a rule, and shipping
-    half of it would draw eleven gridlines where PowerPoint draws four.
+    The probes carry no title and no legend except the ``g`` family, whose key says which
+    it has, so the band the rule divides is the frame itself less that furniture.  The face
+    is the deck's theme minor font, Aptos, because none of the probes names another.
     """
-    anchored = not (
-        (low > 0 and high > 0 and low > chartmod.AXIS_ZERO_ANCHOR_RATIO * high)
-        or (low < 0 and high < 0 and high < chartmod.AXIS_ZERO_ANCHOR_RATIO * low)
+    size = probe.get("size", 1000) / 100
+    width_pt, height_pt = (dimension / 12700 for dimension in probe["frame"])
+    face = probe.get("face", "Aptos")
+    box = chartmod.font_box(face, size)
+    radar = probe.get("kind") == "radar"
+    horizontal = probe.get("kind") == "bar" or probe.get("read") == "x"
+    if horizontal:
+        provisional = chartmod.nice_axis_scale(
+            probe["low"], probe["high"], anchor_zero=_anchor_zero(probe)
+        )
+        widest = max(
+            (
+                chartmod.text_width(
+                    chartmod.format_number(value, "General"), face, size
+                )
+                for value in _tick_values(provisional)
+            ),
+            default=0.0,
+        )
+        intervals = chartmod.bottom_axis_intervals(width_pt, size, widest)
+    elif radar:
+        intervals = chartmod.radial_axis_intervals(axis_pt, box.line_height)
+    else:
+        if probe.get("legend") in ("b", "t", "tr"):
+            height_pt -= chartmod.LEGEND_BAND_LINES * box.line_height
+        if probe.get("title"):
+            # An unstyled chart title is Arial 18 pt, which is the fallback any unstyled
+            # text box gets and what `_title_size` returns when nothing names a size.
+            title = chartmod.font_box("Arial", 18.0)
+            height_pt -= chartmod.TITLE_BAND_LINES * title.line_height
+        intervals = chartmod.side_axis_intervals(height_pt, box.line_height)
+    return chartmod.nice_axis_scale(
+        probe["low"],
+        probe["high"],
+        intervals=intervals,
+        # A radar pads nothing and stops at the data, which is what `strict=False` is.
+        strict=not radar,
+        anchor_zero=_anchor_zero(probe),
     )
-    if anchored:
-        low, high = min(0.0, low), max(0.0, high)
-    pad = 0.05 * (high - low)
-    padded_low = 0.0 if anchored and low >= 0 else low - pad
-    padded_high = 0.0 if anchored and high <= 0 else high + pad
-    unit = _ceil_125((padded_high - padded_low) / 10)
-    return (
-        math.floor(padded_low / unit + 1e-9) * unit,
-        math.ceil(padded_high / unit - 1e-9) * unit,
-        unit,
-    )
+
+
+def _anchor_zero(probe: dict) -> bool:
+    """Whether this probe's axis is held at zero, which every type but a scatter is.
+
+    The category-chart probes carry a ``kind``; the scatter ones do not.
+    """
+    return bool(probe.get("kind"))
+
+
+def _tick_values(scale) -> list[float]:
+    minimum, maximum, unit = scale
+    values, value = [], minimum
+    while value <= maximum + unit * 1e-9 and len(values) < 200:
+        values.append(value)
+        value += unit
+    return values
+
+
+def read_page(page, probe: dict) -> dict:
+    """Everything one probe slide says: the drawn axis, its length and its labels.
+
+    The axis length is taken from the **extreme tick labels' own centres**, not from the
+    gridlines: a bar or an area fills paths whose edges survive every stroke filter on
+    some exports, and the first and last tick sit exactly at the ends of the plot, so the
+    labels measure the same length more robustly.  The gridline count is still read and
+    reported, as the cross-check that the labels were all found.
+    """
+    horizontal = probe.get("kind") == "bar" or probe.get("read") == "x"
+    text = labels(page)
+    if probe.get("read") == "x":
+        # Both axes carry numbers on this probe, so the bottom row -- the labels sharing
+        # the lowest centre -- is the x axis and everything above it is the y axis.
+        floor_y = min((row[2] for row in text), default=0.0)
+        text = [row for row in text if abs(row[2] - floor_y) < 3.0]
+    numbers = []
+    for label, left, y, _height, width, x in text:
+        try:
+            numbers.append((_number(label), x if horizontal else y, width))
+        except ValueError:
+            pass
+    # A bottom axis runs left to right and a side axis bottom to top, and PDF y grows
+    # upwards, so sorting on the position ascending puts both in increasing value order.
+    numbers.sort(key=lambda n: n[1])
+    values = [n[0] for n in numbers]
+    positions = [n[1] for n in numbers]
+    strokes = vertical_strokes(page) if horizontal else horizontal_strokes(page)
+    axis = round(abs(positions[-1] - positions[0]), 3) if len(positions) > 1 else 0.0
+    return {
+        "values": values,
+        "axis": axis,
+        "intervals": max(len(values) - 1, 0),
+        "step": round(axis / max(len(values) - 1, 1), 3),
+        "glyph": max((row[3] for row in text), default=0.0),
+        "widest": max((n[2] for n in numbers), default=0.0),
+        "gridlines": len(strokes),
+        "unit": unit_from(values),
+    }
 
 
 def main() -> int:
     path = Path(sys.argv[1]).expanduser()
     only = sys.argv[2] if len(sys.argv) > 2 else None
     doc = pdfium.PdfDocument(path)
+    rows = []
     for index, probe in enumerate(probes_for(path)):
         if only and only not in probe["key"]:
             continue
+        # Hold the page: pdfium frees it with the wrapper, and reading objects out of a
+        # freed page segfaults rather than raising.
         pdf_page = doc[index]
-        page = pdf_page.raw
-        strokes = horizontal_strokes(page)
-        text = labels(page)
-        numbers = []
-        for label, x0, y, _height in text:
-            try:
-                numbers.append((_number(label), y, x0))
-            except ValueError:
-                pass
-        glyph = max((row[3] for row in text), default=0.0)
-        numbers.sort(key=lambda n: n[1])
-        values = [n[0] for n in numbers]
-        with_slack = prediction(probe["low"], probe["high"], 1e-12)
-        without = prediction(probe["low"], probe["high"], 0.0)
+        read = read_page(pdf_page.raw, probe)
+        values, unit = read["values"], read["unit"]
+        ours = prediction(probe, read['axis'])
         span = probe["high"] - probe["low"]
-        unit = unit_from(values)
-        ys = [s[0] for s in strokes]
-        height = round(ys[-1] - ys[0], 2) if len(ys) > 1 else 0.0
-        step = round(height / (len(ys) - 1), 2) if len(ys) > 1 else 0.0
-        print(f"=== {index + 1:2d} {probe['key']:12s} {probe['low']!r}..{probe['high']!r} "
+        print(f"=== {index + 1:2d} {probe['key']:16s} {probe['low']!r}..{probe['high']!r} "
               f"span={span!r} short={1 - span / probe['decade']:.2e} "
-              f"frame={probe['frame'][1] / 12700:.0f}pt")
+              f"frame={probe['frame'][1] / 12700:.0f}pt size={probe.get('size', 1000) / 100:g}pt")
         print(f"    drawn    {values[0] if values else '?'}..{values[-1] if values else '?'} "
-              f"by {unit}   ticks={len(values)} intervals={max(len(ys) - 1, 0)} "
-              f"axis={height}pt step={step}pt glyph={glyph}pt")
+              f"by {unit}   ticks={len(values)} gridlines={read['gridlines']} "
+              f"axis={read['axis']}pt step={read['step']}pt glyph={read['glyph']}pt "
+              f"widest={read['widest']}pt")
         print(f"    labels   {values}")
-        print(f"    ours     slack={with_slack}  noslack={without}")
-        base = measured_rule(probe["low"], probe["high"])
-        verdict = "base"
-        if values and not (
-            isinstance(unit, float)
-            and abs(unit - base[2]) < base[2] * 1e-9
-            and abs(values[0] - base[0]) < base[2] * 1e-6
-            and abs(values[-1] - base[1]) < base[2] * 1e-6
-        ):
-            verdict = (
-                f"coarsened x{unit / base[2]:g}"
-                if isinstance(unit, float) and unit > base[2]
-                else "*** NEITHER ***"
-            )
-        print(f"    measured {base}  {verdict}")
+        verdict = "MATCH" if _agrees(values, unit, ours) else "*** DIFFERS ***"
+        print(f"    ours     {ours}  {verdict}")
+        rows.append((probe, read, ours, verdict))
+    print("\n# key size frame_pt axis_pt intervals step_pt drawn_unit ours_unit verdict")
+    for probe, read, ours, verdict in rows:
+        print(f"{probe['key']}\t{probe.get('size', 1000) / 100:g}\t"
+              f"{probe['frame'][1] / 12700:.1f}x{probe['frame'][0] / 12700:.1f}\t"
+              f"{read['axis']}\t{read['intervals']}\t{read['step']}\t{read['unit']}\t"
+              f"{ours[2]:g}\t{read['widest']}\t{verdict}")
+    agreed = sum(1 for row in rows if row[3] == "MATCH")
+    print(f"\n{agreed} of {len(rows)} probes reproduced")
     return 0
+
+
+def _agrees(values, unit, ours) -> bool:
+    """Whether the drawn axis and ours are the same axis."""
+    if not values or not isinstance(unit, float):
+        return False
+    minimum, maximum, our_unit = ours
+    return (
+        abs(unit - our_unit) < our_unit * 1e-6
+        and abs(values[0] - minimum) < our_unit * 1e-6
+        and abs(values[-1] - maximum) < our_unit * 1e-6
+    )
 
 
 if __name__ == "__main__":

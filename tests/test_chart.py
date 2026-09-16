@@ -19,7 +19,7 @@ from pptx2svg import model as m
 from pptx2svg.parse.chart import flat_chart_kind, parse_chart_space
 from pptx2svg.resolve.chart import (
     _decade,
-    _next_nice_unit,
+    _nice_unit,
     format_number,
     nice_axis_scale,
 )
@@ -194,30 +194,45 @@ def test_every_chart_in_the_corpus_reads(deck, part, kind, series_count):
 
 
 @pytest.mark.parametrize(
-    "values,expected",
+    "values,intervals,expected",
     [
-        # authoring-integration.pptx: PowerPoint draws 0..6 by 1 for data topping out at 5.
-        ([3, 4, 5], (0.0, 6.0, 1.0)),
-        # real-financial-report chart1, series maxing at 4285: PowerPoint drew 0..5000 by 1000.
-        ([3980, 4120, 4285, 465, 488, 512], (0.0, 5000.0, 1000.0)),
-        # ...and chart3, maxing at 1842: 0..2000 by 500.
-        ([1599, 1185, 663, 334, 1842, 1285, 814, 344], (0.0, 2000.0, 500.0)),
+        # authoring-integration.pptx: PowerPoint draws 0..6 by 1 for data topping out at
+        # 5, on a 228.3 pt frame with 10 pt labels -- ten intervals of room, so the base
+        # rule answers on its own.
+        ([3, 4, 5], 10, (0.0, 6.0, 1.0)),
+        # real-financial-report chart1, maxing at 4285: PowerPoint drew 0..5000 by 1000 on
+        # a 142.5 pt frame at 12 pt, which is six intervals of room.
+        ([3980, 4120, 4285, 465, 488, 512], 6, (0.0, 5000.0, 1000.0)),
+        # ...and chart3, maxing at 1842: 0..2000 by 500 on a 135 pt frame, also six.
+        ([1599, 1185, 663, 334, 1842, 1285, 814, 344], 6, (0.0, 2000.0, 500.0)),
+        # The same 1842 on a frame with room for ten draws 0..2000 by **200**, which is
+        # what says the by-500 axis above is a coarsened one rather than the base rule.
+        # Measured: `tools/make_axis_probe.py` deck `axis-bar`, probe `bar1842t`.
+        ([1599, 1185, 663, 334, 1842, 1285, 814, 344], 10, (0.0, 2000.0, 200.0)),
     ],
 )
-def test_axis_scale_matches_what_powerpoint_drew(values, expected):
-    """All three come from reading gridline coordinates out of PowerPoint's PDF.
+def test_axis_scale_matches_what_powerpoint_drew(values, intervals, expected):
+    """All four come from reading gridline coordinates out of PowerPoint's PDF.
 
-    Five intervals is the only target tick count that reproduces all three; four and six
-    each get one of them wrong.
+    The unit is the finest 1-2-5 step that divides the padded range into *intervals*, and
+    the count is what the frame has room for; see :func:`side_axis_intervals`.
     """
-    assert nice_axis_scale(min(values), max(values)) == expected
+    assert nice_axis_scale(min(values), max(values), intervals=intervals) == expected
 
 
-def test_the_maximum_is_rounded_strictly_up():
-    # A series topping out at exactly the axis maximum would touch the frame; PowerPoint
-    # adds an interval instead, which is why authoring-integration's axis reaches 6.
+def test_the_maximum_clears_the_data_by_five_per_cent_not_by_a_whole_unit():
+    """A series topping out at the axis maximum would touch the frame, and PowerPoint
+    clears it -- but by padding the range 5% before rounding, not by adding a unit.
+
+    The two are the same answer when the data lands on a unit boundary and different when
+    it does not, and **4.9 is where they part**: a whole-unit bump leaves 0..5, the pad
+    carries 5.145 past 5 and the axis goes to 6.  PowerPoint draws 0..6, measured on the
+    `axis-pad` deck, and the same deck brackets the pad itself -- 0.3..4.8 takes unit 1 and
+    0.3..4.76 takes 0.5, which is (4.17%, 5.04%] of the maximum.
+    """
     assert nice_axis_scale(0.0, 5.0)[1] == 6.0
-    assert nice_axis_scale(0.0, 4.9)[1] == 5.0
+    assert nice_axis_scale(0.0, 4.9)[1] == 6.0
+    assert nice_axis_scale(0.0, 4.7)[1] == 5.0
 
 
 def test_a_negative_minimum_extends_the_axis_below_zero():
@@ -252,21 +267,23 @@ def test_a_one_ulp_error_in_log10_does_not_move_the_axis(monkeypatch, direction)
     time -- and every axis has to come out where it was.
 
     0..100 is `real-financial-report.pptx` slide 4's radar, the one place in the corpus
-    where the ulp used to show: unit 100, halved to 50 by :data:`AXIS_HALVING_RATIO`, two
-    rings.  One ulp low under the old expression and `floor` gave 1, the unit became 10,
-    and the slide grew by five thousand characters of SVG.
+    where the ulp used to show: with four intervals of radius the unit is a hundred over
+    four rounded up the ladder, which is 50, and it draws two rings.  One ulp low under the
+    old expression and `floor` gave a decade of 10, the unit became 10, and the slide grew
+    by five thousand characters of SVG.
     """
     monkeypatch.setattr(math, "log10", _log10_off_by_one_ulp(direction))
 
     assert _decade(100.0) == 100.0
-    assert nice_axis_scale(0.0, 100.0, strict=False) == (0.0, 100.0, 50.0)
+    assert nice_axis_scale(0.0, 100.0, intervals=4, strict=False) == (0.0, 100.0, 50.0)
     # The 1-2-5 ladder reads a magnitude the same way, and failed the same way: an ulp low
-    # made the magnitude of 100 be 10, the mantissa 10, and the "next" unit 100 again --
-    # a step that does not step, which silently ends the horizontal coarsening loop.
-    assert _next_nice_unit(100.0) == 200.0
+    # made the magnitude of 100 be 10 and the rung above it 20, so an axis wanting a
+    # hundred-unit step got a twenty.
+    assert _nice_unit(100.0) == 100.0
+    assert _nice_unit(100.1) == 200.0
     # And the measured axes are unmoved, ulp or no ulp.
     assert nice_axis_scale(0.0, 5.0) == (0.0, 6.0, 1.0)
-    assert nice_axis_scale(465.0, 4285.0) == (0.0, 5000.0, 1000.0)
+    assert nice_axis_scale(465.0, 4285.0, intervals=6) == (0.0, 5000.0, 1000.0)
     assert nice_axis_scale(0.0, 0.07) == pytest.approx((0.0, 0.08, 0.01))
 
 
@@ -335,13 +352,13 @@ def test_the_residue_of_an_authored_subtraction_never_changes_the_axis():
     does not, so a chart of 1.00..1.10 got an axis by 0.05 and its neighbour 1.03..1.13 one
     by 0.01: five times the gridlines for a tenth of data either way.
 
-    The unit we pick is **not** PowerPoint's 0.02 -- that is the tick-density divergence
-    recorded in ROADMAP.md, and the test below pins it -- but it is the same for all four,
-    which is the whole of what a residue is allowed to do.
+    The unit we pick is PowerPoint's own 0.02 on all four, which it was not while the rule
+    was the power of ten below the span; what a residue is allowed to do is nothing, and it
+    does nothing either way.
     """
     for low, high in AUTHORED_TENTH_PAIRS:
         minimum, maximum, unit = nice_axis_scale(low, high, anchor_zero=False)
-        assert unit == pytest.approx(0.05), (low, high)
+        assert unit == pytest.approx(0.02), (low, high)
         assert minimum <= low and maximum >= high
 
 
@@ -363,18 +380,18 @@ def test_powerpoint_ignores_the_decade_of_a_span_on_an_unanchored_axis():
 
     A five-per-cent shortfall and a one-ulp shortfall drawn identically is not a wide
     forgiveness window; it is a rule that never asks which decade the span is in.  So the
-    slack's width is unmeasurable here, no number is fitted to these, and what we draw is
-    asserted instead so the divergence is recorded rather than latent.
+    slack's width is unmeasurable here and no number is fitted to these -- and since the
+    unit is a count of the padded range rather than a decade, all three now come out where
+    PowerPoint drew them.
     """
-    assert nice_axis_scale(1.03, 1.13, anchor_zero=False) == pytest.approx((1.0, 1.15, 0.05))
+    assert nice_axis_scale(1.03, 1.13, anchor_zero=False) == pytest.approx((1.02, 1.14, 0.02))
     assert nice_axis_scale(1.03, 1.1299999999, anchor_zero=False) == pytest.approx(
-        (1.02, 1.13, 0.01)
+        (1.02, 1.14, 0.02)
     )
-    assert nice_axis_scale(1.03, 1.125, anchor_zero=False) == pytest.approx((1.02, 1.13, 0.01))
-    # And the extent rule diverges too: PowerPoint rounds outwards from a range padded by
-    # 5% at each end, which clears a datum sitting exactly on a unit boundary and clears
-    # one that does not as well.  0.3..4.9 came back 0..6 by 1.
-    assert nice_axis_scale(0.3, 4.9) == pytest.approx((0.0, 5.0, 1.0))
+    assert nice_axis_scale(1.03, 1.125, anchor_zero=False) == pytest.approx((1.02, 1.14, 0.02))
+    # The extent comes out of the same padded range: 0.3..4.9 is already clear of a 0..5
+    # axis and PowerPoint draws 0..6, which is the pad carrying 4.9 to 5.145.
+    assert nice_axis_scale(0.3, 4.9) == pytest.approx((0.0, 6.0, 1.0))
 
 
 def test_the_decade_helper_survives_the_ends_of_the_double_range():
@@ -2747,11 +2764,19 @@ def test_a_point_sits_at_its_fraction_of_the_radius():
 
 
 def test_a_radars_axis_stops_at_the_data_where_a_bars_goes_past_it():
-    """The one discriminating observation: 0..5 of data draws five rings, not six."""
+    """0..5 of data draws five rings where a bar chart's axis goes to six.
+
+    A radar pads nothing -- that is the same measurement as its extent stopping at the
+    data -- so both halves of `strict=False` are exercised here.  The unit then follows the
+    radius: five rings on a radius with room for five or six intervals, and ten rings on
+    one with room for ten, which is what the `axis-ring` deck drew at 0..5 on its widest
+    frame.
+    """
     from pptx2svg.resolve.chart import nice_axis_scale
 
     assert nice_axis_scale(0, 5) == (0.0, 6.0, 1.0)
-    assert nice_axis_scale(0, 5, strict=False) == (0.0, 5.0, 1.0)
+    assert nice_axis_scale(0, 5, intervals=5, strict=False) == (0.0, 5.0, 1.0)
+    assert nice_axis_scale(0, 5, intervals=10, strict=False) == (0.0, 5.0, 0.5)
 
     children = _radar()
     rings = [
@@ -4603,8 +4628,10 @@ def test_a_scatters_axis_leaves_zero_out_when_the_data_sits_far_from_it(name):
     from pptx2svg.resolve.chart import nice_axis_scale
 
     xs, expected = SCATTER_ZERO_ANCHOR[name]
+    # Four intervals is what a 220.47 pt frame gives a bottom axis with 10 pt labels --
+    # `bottom_axis_intervals` -- which is the frame every one of these probes was drawn on.
     assert nice_axis_scale(
-        min(xs), max(xs), horizontal=True, anchor_zero=False
+        min(xs), max(xs), intervals=4, anchor_zero=False
     ) == pytest.approx(expected)
 
     # And it reaches the drawing: the first and last x labels are the axis' own ends.
@@ -4635,31 +4662,32 @@ def test_the_zero_anchor_still_holds_for_every_other_chart_type():
     """
     from pptx2svg.resolve.chart import nice_axis_scale
 
-    assert nice_axis_scale(2010, 2020) == pytest.approx((0.0, 3000.0, 1000.0))
-    assert nice_axis_scale(2010, 2020, anchor_zero=False) == pytest.approx(
+    assert nice_axis_scale(2010, 2020) == pytest.approx((0.0, 2500.0, 500.0))
+    assert nice_axis_scale(2010, 2020, intervals=4, anchor_zero=False) == pytest.approx(
         (2005.0, 2025.0, 5.0)
     )
 
 
-def test_the_axis_ladder_that_the_corpus_radar_refuted():
-    """A measurement kept as a test because the rule it implies is **not** shipped.
+def test_the_two_observations_that_refuted_every_ladder_now_come_out_together():
+    """The pair that no ratio rule could order, and both are the tick count.
 
-    A scatter probe of 120..160 came back 0..180 **by 20** on a 145 pt axis, where halving
-    the power of ten gives 0..200 by 50.  Stepping the unit down the 1-2-5 ladder while the
-    span holds fewer than about 3.5 units reproduces that *and* all five observations
-    `AXIS_HALVING_RATIO` was fitted to -- and then the corpus radar refutes it:
-    `real-financial-report.pptx`'s chart5 has 65..100 of data and PowerPoint's own export
-    draws **two** rings, at radii 22.78 and 45.56, which is 0..100 by 50 at a ratio of
-    exactly 2.0, where the scatter refused 3.2.
+    A scatter probe of 120..160 came back 0..180 **by 20** on a 145 pt axis where halving
+    the power of ten gave 0..200 by 50, and `real-financial-report.pptx`'s radar came back
+    0..100 by 50 -- two rings at radii 22.78 and 45.56 -- where the ladder that reproduced
+    the scatter gave five.  A ratio threshold has to accept 2.0 and refuse 3.2 at once,
+    which is why three of them were written and reverted.
 
-    What separates them is axis length, so both belong to the unsolved tick-density
-    question rather than to unit selection.  This asserts what we actually draw, so the
-    divergence is recorded rather than latent.
+    Neither is about the ratio.  The scatter's y axis has a 181.1 pt frame at 10 pt labels,
+    which is room for ten intervals, and 168 padded over ten rounds up to 20.  The radar's
+    radius is 45.56 pt at 13.406 pt of line box, which is room for four, and a hundred over
+    four rounds up the 1-2-5 ladder to 50.
     """
     from pptx2svg.resolve.chart import nice_axis_scale
 
-    assert nice_axis_scale(120, 160) == pytest.approx((0.0, 200.0, 50.0))
-    assert nice_axis_scale(65, 100, strict=False) == pytest.approx((0.0, 100.0, 50.0))
+    assert nice_axis_scale(120, 160, intervals=10) == pytest.approx((0.0, 180.0, 20.0))
+    assert nice_axis_scale(65, 100, intervals=4, strict=False) == pytest.approx(
+        (0.0, 100.0, 50.0)
+    )
 
 
 def test_a_midcat_bar_chart_keeps_its_labels_in_the_bands_with_its_bars():

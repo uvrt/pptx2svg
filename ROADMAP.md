@@ -1441,9 +1441,10 @@ improvement is in the probe decks, scored the same way:
 | axis minimum (6) | 0.4870 / 0.9201 | **0.5806 / 0.8859** |
 
 The axis-minimum deck is the one that stays low, and the reason is named above: four of
-its six charts reproduce exactly and the other two are the 120..160 y axis, where we draw
-five gridlines against PowerPoint's nine. That is the unsolved density rule and not the
-zero anchor the deck was built to measure.
+its six charts reproduce exactly and the other two are the 120..160 y axis, where we drew
+five gridlines against PowerPoint's nine. That was the unsolved tick rule and not the zero
+anchor the deck was built to measure; it is solved since, and that axis now comes out
+0..180 by 20 as PowerPoint draws it.
 
 The three that stay under 0.95 are decks of thin curves and markers on white, where SSIM
 is punishing about a pixel of antialiasing; put side by side at 1400 px the renders are
@@ -1742,10 +1743,12 @@ defect.**
   broken over two lines, which moves both plots 8 pt down. That is the *Where a wrapped
   legend's rows sit* gap already recorded below. Its `dlbl` chart is the label shrink
   recorded above. Every other chart on the deck is exact.
-* **stock 1 is the unsolved value-axis rule**, and it adds one more observation to the
+* **stock 1 was the unsolved value-axis rule**, and it added one more observation to the
   section below rather than being a stock defect: 8..18 of data on a 145.035 pt axis comes
-  back **0..20 by 2** — ten intervals at 14.504 pt — where the shipped rule gives 0..20 by
-  5. Every stock-specific number on that deck reproduces: the hi-low lines land within
+  back **0..20 by 2** — ten intervals at 14.504 pt — where the old rule gave 0..20 by 5.
+  The measured rule draws PowerPoint's: its 181.1 pt frame has room for ten intervals, and
+  18.9 padded over ten rounds up to 2. Every stock-specific number on that deck
+  reproduces: the hi-low lines land within
   0.07 pt, the bar widths within 0.005 pt, the bar tops and bottoms within 0.06 pt, the
   up/down assignment on all five categories, and the default fills exactly. What costs the
   SSIM is six missing gridlines and six missing axis labels on each of twelve charts.
@@ -1918,24 +1921,24 @@ neither the declared height nor our band).
 `authoring-integration` holds at 0.9327 and `table-test` at 0.9895, unchanged to four
 decimals. The probe decks are throwaway and were deleted.
 
-#### The tick-density question, with four more observations that refute one more rule
+#### The four radar readings that refuted a spacing rule, and what they are
 
-The value-axis density rule is still unsolved, and radar adds four measurements that make
-the "no single rule" verdict firmer rather than softer. Same frame, same data, the only
-variable the label font:
+These four were taken to bracket a *spacing* threshold and could not: a radar accepted
+1.389 em of spacing and refused 0.929, where a bar chart's bracket was (1.543, 1.610) em
+on the same machine. Same frame, same data, the only variable the label font:
 
-| face | size | radius | PowerPoint | spacing | in line boxes | in ems |
-| --- | --- | --- | --- | --- | --- | --- |
-| Aptos | 10 | 69.47 | 0..5 by 1 | 13.89 | 1.138 | 1.389 |
-| Arial | 10 | 70.80 | 0..5 by 1 | 14.16 | 1.267 | 1.416 |
-| Aptos | 14 | 63.36 | 0..6 by 2 | 21.12 | refused 12.67 | refused 0.905 |
-| Arial | 14 | 65.04 | 0..6 by 2 | 21.68 | refused 13.01 | refused 0.929 |
+| face | size | radius | PowerPoint | ours |
+| --- | --- | --- | --- | --- |
+| Aptos | 10 | 69.47 | 0..5 by 1 | 0..5 by 1 (N=6) |
+| Arial | 10 | 70.80 | 0..5 by 1 | 0..5 by 1 (N=7) |
+| Aptos | 14 | 63.36 | 0..6 by 2 | 0..6 by 2 (N=4) |
+| Arial | 14 | 65.04 | 0..6 by 2 | **0..5 by 1** (N=5) |
 
-So a radar accepts 1.389 em of spacing and refuses 0.929 em, bracketing its threshold to
-(0.929, 1.389). **The bar chart's bracket is (1.543, 1.610) em** — measured in the same
-way, on the same machine — and the two do not overlap. Whatever the rule is, it is not one
-number shared by both chart types. Today's behaviour is still "no density limit", which is
-right for the 10 pt radars and draws five rings where PowerPoint draws three at 14 pt.
+They are not a spacing threshold; they are a *count*, and the count is the radius over the
+label's line box. Three of the four come out exactly; the fourth is Arial's `lineGap`
+again — its real `hhea` spacing is 16.09 pt at 14 pt against the 15.64 our metrics give,
+and 16.09 puts the count at four and the axis at 0..6 by 2. See "The value axis' tick
+rule, solved".
 #### The corpus contains no drawn data label
 
 Worth stating once, because two separate readings of the same files got it wrong. Five of
@@ -1979,14 +1982,12 @@ within 0.14 pt and on the axis exactly.
 
 What the measurement said that the reasoning did not:
 
-* **The axis rule is the plain power of ten below the span, halved when the span is under
-  twice it** — and that is what is shipped, but it is **wrong**, as a later measurement
-  says below. It was read as "not a tick target" because no target reproduces both
-  0..9 → 0..10 by 1 (ten intervals) and 0..1842 → 0..2000 by 500 (four); on a taller frame
-  PowerPoint draws that second one **by 200**, ten intervals, so the pair was one rule seen
-  at two frame sizes and the fit went to the shape of the smaller one. See "The unit rule
-  is not the power of ten below the span". Both ends round *strictly* outwards here, where
-  PowerPoint rounds outwards from a range padded 5% at each end.
+* ~~**The axis rule is the plain power of ten below the span, halved when the span is
+  under twice it.**~~ — refuted and replaced; see "The value axis' tick rule, solved". It
+  was read as "not a tick target" because no target reproduces both 0..9 → 0..10 by 1 (ten
+  intervals) and 0..1842 → 0..2000 by 500 (four); on a taller frame PowerPoint draws that
+  second one **by 200**, ten intervals, so the pair was one rule seen at two frame sizes
+  and the fit went to the shape of the smaller one.
 * **The tick-mark allowance is reserved whether or not tick marks are drawn.**
   `majorTickMark="none"` and `"out"` produced byte-identical plot rectangles.
 * **The default axis and gridline colour is black at 0.5 pt, not grey.** Charts written by
@@ -2007,189 +2008,124 @@ What the measurement said that the reasoning did not:
   values PowerPoint reserves no band under the plot at all and prints the category labels
   inside it, beside the zero line.
 * **A horizontal value axis comes out coarser than a vertical one** for the same data on
-  an axis of almost the same length, so it is not a density limit. One measurement only,
-  and the code says so.
+  an axis of almost the same length. Measured again since, over six frame widths and three
+  label widths: its rung is four ems where a side axis' is one line box.
 
 One rule resisted: **the vertical centring of a one-line label on a tick**. Five
 measurements across two faces and three sizes fit none of half the cap height, half the
 x-height, half the line box, or the centre of the digits' own ink. The constant is the
 fitted mean and its worst residual is 0.61 pt.
 
-#### The value axis' tick density is measured but **not solved**
+#### The value axis' tick rule, solved
 
-`real-financial-report.pptx`'s line chart is the case that exposes it: 43 of data on a
-73.6 pt plot, where PowerPoint draws **0..60 by 20** and the rule above gives 0..50 by 10.
-Short plots draw fewer ticks, and the rule that decides how many is not known.
+**The unit is a count, the count is a length, and the length is the frame's.** Both halves
+are measured and shipped:
 
-A six-cell probe, identical data (`3, 4, 5`) and 10 pt labels, shrinking frame:
+> The major unit is the finest 1-2-5 step that divides the **padded** data range into no
+> more than *N* intervals, where the range is padded 5% at each end (clamped at zero when
+> the axis is anchored there), and the extent is that padded range rounded outwards to
+> whole units. *N* is what the chart has room for:
+>
+> | axis | N |
+> | --- | --- |
+> | up the side | `floor((frame height − 22 pt) / line box) − 2`, capped at 10 |
+> | along the bottom | `floor((frame width − 23 pt) / rung)`, capped at 10, rung = max(4 em, widest label + 0.4 em) |
+> | radial (a radar) | `floor(radius / line box + 0.875)`, capped at 10 |
+>
+> The "frame height" is the chart frame less its title and less a legend above or below
+> it; the line box is the **tick labels' own face** at their own size. A radar pads
+> nothing and stops at the data.
 
-| plot height | PowerPoint | intervals | spacing |
-| --- | --- | --- | --- |
-| 145.0 pt | 0..6 by 1 | 6 | 24.2 pt |
-| 82.0 pt | 0..6 by 2 | 3 | 27.3 pt |
-| 50.5 pt | 0..6 by 2 | 3 | 16.8 pt |
-| 30.9 pt | 0..10 by 10 | 1 | 30.9 pt |
-| 19.1 pt | 0..10 by 10 | 1 | 19.1 pt |
-| 11.2 pt | 0..10 by 10 | 1 | 11.2 pt |
+**616 readings over fifteen probe decks, and 611 of them reproduce exactly** — axis ends
+and unit both — where the shipped decade-and-halve rule reproduced 29 of the 94 scatter
+readings and 21 of their extents. (`tools/read_axis_probe.py` scores 609 of the 616; the
+two it cannot score are a 71 pt radar whose two labels pdfium merges into one, and the
+raster shows PowerPoint drawing the 0 and the 5 the rule asks for.) The five that differ
+are named at the end of this section. What each deck settled, in the order they were
+built:
 
-Those six alone are reproduced by "step the unit up the 1-2-5 ladder until the ticks are
-at least 1.58 em apart", bracketed to (1.543, 1.610) by the 30.9 pt cell refusing 15.43 pt
-and the 14 pt probe accepting 22.53 pt. **And the stacked probe refutes it**: a 0..10 axis
-on a 145.0 pt plot with the same 10 pt font takes *ten* intervals at 14.5 pt spacing —
-finer than the 15.43 pt the 30.9 pt cell rejected, on the same axis range and the same
-font. No monotone spacing threshold produces both, so at least one more variable is
-involved that this sweep did not vary.
-
-A rule was written, measured against all of it, found to contradict the stacked case, and
-**reverted rather than shipped**. Today's behaviour is "no density limit", which is right
-everywhere except short plots. Whoever picks this up starts from the table above; the
-discriminating pair is the 30.9 pt cell and the stacked probe.
-
-**The area sweep adds one more datum and sharpens the contradiction rather than resolving
-it.** Two of its probes carry the identical 0..10 axis and 10 pt labels and differ only in
-plot height, because one of them has a bottom legend:
-
-| plot height | PowerPoint | intervals | spacing |
-| --- | --- | --- | --- |
-| 145.03 pt | 0..10 by 1 | 10 | 14.503 pt |
-| 120.95 pt | 0..10 by 2 | 5 | 12.095 pt |
-
-So 14.503 pt is accepted and 12.095 pt refused, which brackets a putative threshold to
-(12.095, 14.503] — and the 30.9 pt cell above refused **15.43 pt** on the same font. The
-three cannot be ordered by spacing alone. Ours draws eleven labels where PowerPoint draws
-six on the 120.95 pt probe, and that is the only visible difference between our render of
-the area deck and PowerPoint's.
-
-**A second rule was written against this and reverted, and the refutation is the corpus
-radar.** The scatter axis-minimum probe threw up a case the *unit* rule gets wrong rather
-than the density one: 120..160 of data on a 145 pt axis came back **0..180 by 20**, where
-halving the power of ten gives 0..200 by 50. Stepping the unit down the 1-2-5 ladder while
-the span holds fewer than about 3.5 units reproduces that **and** all five observations
-`AXIS_HALVING_RATIO` was fitted to — six for six, and it brackets the threshold to
-(3.2, 3.684] with 160/50 refused and 1842/500 accepted. Then `real-financial-report.pptx`
-kills it: its chart5 has 65..100 of data and PowerPoint's own export draws **two** rings,
-at radii 22.78 and 45.56, which is 0..100 by 50 — a ratio of exactly **2.0 accepted**
-where the scatter refused 3.2.
-
-What separates them is the **axis length**, which puts both observations back in this
-section rather than in unit selection:
-
-| chart | span | unit | intervals | axis | spacing |
-| --- | --- | --- | --- | --- | --- |
-| corpus radar | 100 | 50 | 2 | 45.56 pt | 22.78 pt |
-| scatter y | 160 | 20 | 9 | 145.03 pt | 16.11 pt |
-
-A target *band* of roughly 16 to 24 pt of spacing fits those two and every cell of the
-six-cell table above — the radar's alternatives are 9.1 pt and 45.6 pt, both outside it,
-and the scatter's are 8.1 pt and 36.3 pt — and then it dies on the same stacked probe that
-killed the last candidate, which accepts 14.5 pt. So the ladder is **not shipped**, the
-halving stays, and `test_the_axis_ladder_that_the_corpus_radar_refuted` pins what we
-actually draw so the divergence is recorded rather than latent. Whoever picks this up now
-has two long-axis observations to add to the six short-axis ones, and the discriminating
-set is the 30.9 pt cell, the stacked probe and the corpus radar.
-
-**The stock sweep adds a third long-axis observation, and it agrees with the stacked probe
-rather than with anything shipped.** Its twelve charts all carry 8..18 of data on a
-145.035 pt axis with 10 pt labels, and PowerPoint drew **0..20 by 2** on every one of them
-— ten intervals at 14.504 pt, the same spacing the stacked probe accepted. The shipped
-rule gives 0..20 by 5, four intervals at 36.26 pt, so we draw five gridlines where
-PowerPoint draws eleven. That is the whole of the stock deck's SSIM shortfall and it is
-not a stock behaviour: the same data on a line chart would do the same thing.
-
-It also sharpens what the missing variable is *not*. This case and the stacked probe share
-an axis length (145 pt), a font (10 pt) and an accepted spacing (14.5 pt); the area
-probe's 120.95 pt cell refused 12.095 pt and the six-cell table's 30.9 pt cell refused
-15.43 pt. So the accepted set now spans 14.50 to 27.3 pt and the refused set 12.10 to
-15.43 pt, and they **overlap** — no threshold on spacing alone, at any axis length, orders
-all nine observations. Whatever the rule is, it is not a spacing threshold.
-
-#### The unit rule is not the power of ten below the span
-
-**101 readings, six probe decks, one machine.** The question that started this was narrow —
-how wide the forgiveness window `_DECADE_SLACK` opens below a power of ten should be — and
-it can only be seen on an **unanchored** value axis, which only a scatter has. Thirty such
-probes were built with the span falling under a tenth by a relative 1e-15, 2e-14, 1e-13,
-1e-11, 1e-9, 1e-6, 1e-4, 1e-2 and 5e-2, at three magnitudes, and exported. **All thirty
-came back with the same axis.** A span written as a plain 0.095 and a span one ulp under a
-tenth are drawn identically, so no experiment on this path can bracket a decade boundary,
-and no number fitted to one would mean anything. The slack stays where it was and now says
-so; `tools/make_axis_probe.py` and `tools/read_axis_probe.py` rebuild and re-read every
-deck below.
-
-What the same probes *did* settle is the rule itself. Sweeping the span at a fixed axis
-length, on an unanchored axis where nothing is rounded away:
-
-| data | PowerPoint | ours |
+| deck | probes | what it settled |
 | --- | --- | --- |
-| 0.1..0.11 | 0.098..0.112 by 0.002 | 0.095..0.115 by 0.005 |
-| 0.2..0.22 | 0.195..0.225 by 0.005 | 0.195..0.225 by 0.005 |
-| 0.5..0.55 | 0.49..0.56 by 0.01 | 0.49..0.56 by 0.01 |
-| 1.0..1.1 | 0.98..1.12 by 0.02 | 0.95..1.15 by 0.05 |
-| 2.0..2.2 | 1.95..2.25 by 0.05 | 1.9..2.3 by 0.1 |
-| 10..11 | 9.8..11.2 by 0.2 | 9.5..11.5 by 0.5 |
-| 50..55 | 49..56 by 1 | 49..56 by 1 |
-| 100..110 | 98..112 by 2 | 95..115 by 5 |
+| `axis-decade` | 30 | the span's decade is never asked; the slack is unmeasurable |
+| `axis-density` | 25 | the unit moves with the frame's height |
+| `axis-count` | 17 | eleven intervals accepted, twelve refused; label *size* drives it |
+| `axis-pad` | 12 | 5% of headroom at each end, bracketed from both sides |
+| `axis-shape` | 10 | on an anchored axis the headroom is 5% of the **maximum** |
+| `axis-bar` | 7 | a real bar chart obeys the same rule; 0..1842 is by **200** on a tall frame |
+| `axis-coarse` | 64 | **the count is a function of the frame, not of the plot** |
+| `axis-rung` | 147 | the N-meter: the count, exactly, over ten frames and five label sizes |
+| `axis-band` | 101 | the rung is one line box and the reserve 22 pt; a legend and a title come off the top |
+| `axis-wider` | 83 | the rung is the **face's** line box, not a constant 1.2 em |
+| `axis-bottom` | 43 | the bottom axis' own rung and reserve, at two label sizes and three label widths |
+| `axis-scatter` | 12 | a scatter's x axis is that same bottom axis, swept over six frame widths |
+| `axis-radar` | 16 | a radar's count is not the side axis' read off the frame |
+| `axis-ring` | 40 | the radial axis' own count, the N-meter over eight frames |
+| `axis-corpusradar` | 9 | the corpus radar replicated, one variable removed at a time |
 
-The pattern is exact, and it is a **count**, not a decade: the unit is the smallest step on
-the 1-2-5 ladder that is at least a **tenth of the range**, where the range is first padded
-by **5% at each end** (clamped at zero when the axis is anchored there). Then the extent is
-that padded range rounded outwards to whole units.
+**The count is read off the frame, and that is what a decade of contradictory readings
+turned on.** `axis-coarse` sweeps two datasets over eight frames on four chart types —
+scatter, column, line and area — and all four coarsen at *exactly* the same frame heights,
+although their plot rectangles differ by 14 pt because three of them reserve a band for
+category labels and a scatter does not. Fitted to the drawn plot instead, those 64
+readings have **no solution at all**: a 44.88 pt plot taking one interval and a 50.64 pt
+plot taking three force a rung under 5.8 pt, which the 74.16 pt plot's five intervals then
+contradict. That is why the old readings could not be ordered — they came from different
+types and were compared by their plots.
 
-Both halves are bracketed rather than assumed. Anchored data 0.3..4.8 takes unit 1 and
-0.3..4.76 takes 0.5, which puts the headroom in (4.17%, 5.04%] of the maximum; unanchored
-1.0..1.092 takes 0.02 and 1.0..1.09 takes 0.01, which puts it in (4.35%, 5.56%] of the
-range — 5% is the only round number in the intersection. 3.0..4.9 and 3.5..4.9 both take
-unit 1, so on an anchored axis the headroom is 5% of the **maximum** and not of the data
-range. The tenth is bracketed too: eleven intervals of the padded range are accepted
-(1.04..1.13 → 1.03..1.14 by 0.01) and twelve are refused (1.03..1.13 → 1.02..1.14 by 0.02).
+The N-meter is how the count was read rather than bracketed. Five datasets whose 1-2-5
+boundaries fall at N = 2, 3, 5, 10, 4, 8, 7 and 9 name every N from 1 to 11 by the units
+they draw together, so one cell of five slides reads the count exactly. Ten transition
+scans then walk the frame two points at a time either side of a step:
 
-Across all 94 scatter readings the rule gets **75 units exactly and all 94 extents**; the
-other 19 are a strict coarsening of its base unit, every one of them on a short axis. The
-shipped rule gets 29 units and 21 whole axes. The seven bar readings — a real column chart
-with a real category axis — are all seven exactly the base unit, so this is not a scatter
-behaviour.
+| label size | N=2 at | N=10 at | rung | reserve |
+| --- | --- | --- | --- | --- |
+| 6 pt | (51, 52] | (109, 110] | (7.13, 7.38] | (21.70, 22.11] |
+| 10 pt | (70, 71] | (168, 169] | (12.13, 12.38] | (21.52, 22.17] |
+| 14 pt | (90, 91] | (227, 228] | (17.00, 17.25] | (21.92, 22.64] |
+| 20 pt | (119, 120] | (314, 315] | (24.25, 24.50] | (21.34, 22.03] |
+| 28 pt | (158, 159] | — | (34.00, 34.50] | (21.56, 22.28] |
 
-**The five observations `AXIS_HALVING_RATIO` was fitted to are coarsened results.** They
-came from short frames, and on a long one PowerPoint draws them finer: a bar chart of
-0..1842 on the 145.0 pt plot the corpus uses draws **0..2000 by 200**, ten intervals, where
-the corpus deck's own 112–150 pt frames at 12 pt labels draw by 500. The base rule predicts
-200 and one coarsening step gives 500, so both are the same rule seen at two sizes — and
-fitting to only the small size is how the decade-and-halve shape got in.
+The rung is (1.2143, 1.225] ems and Aptos' own line box is 1.2207; the reserve's five
+brackets intersect at **(21.92, 22.03]**, which is `2 * EDGE_INSET_PT`. Arial labels cross
+their transition 4 to 9 pt lower — a *face* ratio and not PowerPoint's constant 1.2 em line
+box for running text — so the rung asks the face. The residual that leaves is the one
+`_bottom_label_band` already carries: PowerPoint's pitch is the face's full `hhea` spacing
+including `lineGap`, our metrics hold none, and an Arial axis is 0.33 pt per rung short.
 
-What still is not known is the **coarsening stage**, and these decks sharpen it without
-closing it. Holding the data and the font and varying only the frame:
+**A bottom axis is a different rung.** Four ems rather than one line box, bracketed to
+(4.00, 4.02] at 10 pt and (3.78, 4.18] at 20 pt, with a 23 pt reserve in (22, 24]. What
+four ems *is* was not identified, and it is not the label: "10" is 0.9 em wide and "10000"
+2.5 em, and both cross the same rungs at the same frame width. A label *wider* than the
+rung does push it — eight-digit labels cross 50 pt later — which is the `+ 0.4 em` term,
+and that family does not fit one rung: its two crossings ask for 0.40 and 0.93 ems. Wider
+still and PowerPoint stops choosing a unit at all: 0..9e6 in a 260 pt frame came back
+labelled 0, 4e6, 8e6 on an axis still ending at 1e7, which is a **skipped tick** rather
+than a 1-2-5 unit. Nothing here draws that.
 
-| plot height | PowerPoint | intervals | spacing |
-| --- | --- | --- | --- |
-| 358.8 pt | 1.02..1.14 by 0.02 | 6 | 59.8 pt |
-| 190.4 pt | 1.02..1.14 by 0.02 | 6 | 31.7 pt |
-| 135.3 pt | 1.02..1.14 by 0.02 | 6 | 22.6 pt |
-| 95.9 pt | 1.0..1.15 by 0.05 | 3 | 32.0 pt |
-| 56.5 pt | 1.0..1.2 by 0.1 | 2 | 28.3 pt |
-| 40.8 pt | 1.0..1.2 by 0.2 | 1 | 40.8 pt |
+`HORIZONTAL_MAX_INTERVALS` is **subsumed**, and it was an artefact of its probes' frames:
+all four sat on 160 to 200 pt frames, where the measured rule also says three or four. On
+a 684 pt frame it drew four intervals where PowerPoint draws ten. A scatter's x axis sweeps
+the same rungs at the same widths as a horizontal bar chart's, six for six.
 
-Three things are now eliminated, each by a probe built to eliminate it:
+**A radial axis is not the side axis seen sideways.** A radar's rings are counted off its
+own radius with no 22 pt of frame inset and no two end labels, and it pads nothing — with
+5% added its own ring sweep needs eleven intervals where ten is the most any axis takes.
+Nine replicas of `real-financial-report.pptx`'s radar, one variable removed at a time,
+agree: its two rings are a hundred over four rounded up the ladder to fifty, and four is
+what its 45.56 pt radius holds.
 
-* **Not the label's text.** 103..113 draws three-digit integers where 1.03..1.13 draws
-  four-character decimals, and the two coarsen at exactly the same frame heights. A bar
-  chart whose labels run 0.001..0.01 — 1842's label width at 9's magnitude — accepts ten
-  intervals at 14.5 pt, the same as one labelled 0..10.
-* **Not the magnitude.** Every sweep above repeats at three decades with identical results.
-* **Not a spacing floor.** The same 10 pt labels accept 14.5 pt on a 145.0 pt plot and
-  refuse 16.0 pt on a 95.9 pt one. Short plots demand *larger* steps, so whatever the
-  criterion is, it is not "the ticks must be N points apart" — which is the same verdict
-  the older tables reached from the other side, now with the accepted and refused sets
-  measured on one chart type, one font and one machine.
+**What the five misses are.** Four are the bottom axis with labels wider than its rung,
+where the single-rung approximation leaves two windows about 15 pt wide at each crossing —
+three of those four are the skipped-tick case above, which is a different mechanism
+altogether. The fifth is an Arial side axis crossing 5 pt early, which is the `lineGap` our
+metrics do not carry. Both are in the constants' docstrings with their brackets.
 
-It **is** font-driven in part: one 150 pt frame at 6, 10, 18 and 28 pt labels draws by
-0.02, 0.02, 0.05 and 0.2. And it is chart-type-driven in part, which the radar/bar bracket
-above already said.
-
-Whoever picks this up starts by implementing the base rule — it is measured, bracketed and
-simple — and then owes the coarsening stage a rule that turns 200 into 500 on the corpus'
-own frames. Shipping the base rule alone would draw eleven gridlines where PowerPoint draws
-four on exactly the short plots the corpus is made of, which is why nothing is changed
-here.
+**What this fixes in the corpus.** `real-financial-report.pptx`'s line chart — 43 of data
+on a 112.5 pt frame — drew 0..50 by 10 where PowerPoint draws **0..60 by 20**; it now draws
+PowerPoint's. That is the only chart in the corpus that moves, and it is the one the old
+section below called the case that exposes the problem. The other three corpus axes
+(0..6 by 1, 0..5000 by 1000, 0..2000 by 500) and the radar's two rings all come out
+unchanged, from the new rule rather than from the old one.
 
 #### Not done for the ten types that draw
 
@@ -3455,14 +3391,13 @@ types that landed this week reused nearly all of it. What is left, cheapest firs
    close it is written down under *Surface -- measured, and deferred*. Drawing several
    `c:*Chart` groups at once, and the second value axis that usually comes with them, is
    now the largest chart item left.
-5. **The value-axis tick density — and, it turns out, the unit rule under it.** 101
-   readings off six probe decks say the base unit is the finest 1-2-5 step of at least a
-   tenth of the range after 5% of headroom at each end, and that the decade-and-halve rule
-   we ship was fitted to *coarsened* results on small frames. The base rule is measured and
-   bracketed; what coarsens it on a short axis is still unknown, and shipping one without
-   the other would draw eleven gridlines where PowerPoint draws four. Start at "The unit
-   rule is not the power of ten below the span", which carries the readings, the brackets
-   and the three hypotheses they eliminate.
+5. ~~**The value-axis tick density — and, it turns out, the unit rule under it.**~~ — done
+   and measured; see "The value axis' tick rule, solved". 616 readings over fifteen probe
+   decks, 611 reproduced exactly. What is left of it is small and named there: a bottom
+   axis whose labels are wider than its rung is within one rung of PowerPoint rather than
+   on it, PowerPoint's own answer there is a *skipped* tick we do not draw, and an Arial
+   axis crosses its rung about 5 pt late because our metrics carry no `lineGap`. The
+   `lineGap` gap is one table away and would fix this and `_bottom_label_band` together.
 
 ## Non-goals
 
