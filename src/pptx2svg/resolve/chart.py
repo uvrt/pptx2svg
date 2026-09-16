@@ -647,7 +647,7 @@ def nice_axis_scale(
         # smallest one that shows anything.
         return 0.0, 1.0, 1.0
 
-    unit = 10.0 ** math.floor(math.log10(span))
+    unit = _decade(span)
     # A denormal span underflows the power of ten to zero; a span at the other end
     # overflows the strictly-outward rounding below to infinity.  Neither is a chart
     # anyone drew on purpose, and both used to raise out of the conversion.
@@ -722,13 +722,97 @@ def _floats_away_from_zero(data_minimum: float, data_maximum: float) -> bool:
 
 def _next_nice_unit(unit: float) -> float:
     """The next step up the 1-2-5 ladder from a unit already on it."""
-    magnitude = 10.0 ** math.floor(math.log10(unit))
+    magnitude = _decade(unit)
     mantissa = round(unit / magnitude, 6)
     if mantissa < 2:
         return 2 * magnitude
     if mantissa < 5:
         return 5 * magnitude
     return 10 * magnitude
+
+
+#: How far *below* a power of ten a value may fall and still count as having reached it.
+#:
+#: Not a fudge factor for the comparison in :func:`_decade` -- that comparison is a float
+#: comparison and decides exactly what it is asked -- but a statement about where axis
+#: spans come from.  A span is a subtraction of two numbers somebody typed into Excel, and
+#: that subtraction is not exact: ``0.24 - 0.14`` is ``0.09999999999999998`` and
+#: ``1.13 - 1.03`` is ``0.09999999999999987``.  An axis that steps by 0.005 for data whose
+#: span is, to any reader, a tenth is the wrong picture.
+#:
+#: ``log10``'s rounding used to provide a window of this kind here by accident, which is
+#: why the rule has always been the forgiving one; it was just narrower and uneven -- two
+#: ulps under a tenth was forgiven and ten ulps under it was not, so of those two
+#: subtractions the first got the right axis and the second did not.
+#:
+#: One part in a trillion is wide enough for any residue a subtraction of authored
+#: decimals can leave (those are a few ulps, ~1e-16 relative) and far narrower than a span
+#: that misses a decade because it was *written* that way: 9.999999999999 is promoted to
+#: the decade of 10, 9.9999999999 is not, and 9.99 is not by nine orders of magnitude.
+_DECADE_SLACK = 1e-12
+
+
+def _power_of_ten(exponent: int) -> float:
+    """``10 ** exponent`` as a float, from CPython's decimal parser rather than libm.
+
+    The parser is correctly rounded and is part of the interpreter, so this is the same
+    double on every platform; ``pow`` is libm and carries no such promise.  It also gives
+    the ends of the range as values instead of exceptions -- ``1e309`` is ``inf`` where
+    ``10.0 ** 309`` raises ``OverflowError``, and ``1e-324`` underflows to ``0.0`` --
+    which is what lets :func:`_decade` walk off either end and stop.
+    """
+    return float(f"1e{exponent}")
+
+
+def _decade(value: float) -> float:
+    """The largest power of ten *value* reaches, for a **finite, positive** *value*.
+
+    This is ``10.0 ** math.floor(math.log10(value))`` with ``log10``'s answer taken as a
+    guess and then checked, because that expression has no small errors -- it is exact or
+    it is out by a factor of ten.  ``log10(100.0)`` is exactly 2.0 on every mainstream
+    libm, since the true value is representable and correct rounding therefore demands it;
+    a merely *faithful* implementation may return ``1.9999999999999998``, and ``floor``
+    turns that one ulp into a unit of 10 where PowerPoint draws 100.  One measured slide
+    of the corpus re-lays out on it.  See ROADMAP.md section 0.2.
+
+    So the guess is corrected against the input.  Comparing a value against a power of
+    ten is an ordinary float comparison, decided by the same bits everywhere, where
+    comparing logarithms is decided by a transcendental.  At most one of the two walks
+    below can take a step: whichever direction the guess was wrong in, correcting it
+    makes the other direction's test false, so this cannot oscillate.  Both terminate at
+    the ends of the double range, where :func:`_power_of_ten` yields ``0.0`` (never above
+    *value*) and ``inf`` (never reached).
+
+    What it guarantees: the result depends on ``log10`` only through a guess it verifies,
+    so any ``log10`` accurate to better than a whole decade -- every real one -- gives the
+    same answer, on every platform.
+
+    What it does not: the ladder it ranks *value* against is the doubles nearest the
+    powers of ten, not the powers themselves, which for a negative exponent are not
+    representable (``1e-3`` is a hair *above* ten cubed's reciprocal).  Values within
+    :data:`_DECADE_SLACK` of a power of ten are deliberately counted as reaching it, so
+    the result may be a hair larger than *value* at the bottom of a decade; that is what
+    the callers want and what they already got.  At the ends of the range it returns the
+    only answers available: ``0.0`` for a value below the smallest positive power of ten
+    (a denormal span), and never ``inf``, since no finite value reaches ``1e309``.  A
+    zero result is not a usable unit, and :func:`nice_axis_scale` checks for it.
+    """
+    exponent = math.floor(math.log10(value))
+    while not _reaches_decade(value, exponent):
+        exponent -= 1
+    while _reaches_decade(value, exponent + 1):
+        exponent += 1
+    return _power_of_ten(exponent)
+
+
+def _reaches_decade(value: float, exponent: int) -> bool:
+    """Whether *value* reaches ``10 ** exponent``, give or take :data:`_DECADE_SLACK`.
+
+    The slack scales the power rather than the value so that it means the same thing in
+    every decade, and it is harmless at the ends: ``0.0`` stays ``0.0`` (every positive
+    value reaches it) and ``inf`` stays ``inf`` (no finite value does).
+    """
+    return value >= _power_of_ten(exponent) * (1.0 - _DECADE_SLACK)
 
 
 # --------------------------------------------------------------------------------------

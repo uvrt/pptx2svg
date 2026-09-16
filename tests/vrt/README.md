@@ -81,6 +81,8 @@ verified across the whole corpus and held there by
 That is not a rendering change — nothing in the render depends on the platform by design.
 Look at `tests/test_vrt.py`'s own tests first; they name the three ways it could happen
 (line endings, `PYTHONHASHSEED`, and a libm that disagrees about `log10` of a power of
-ten, which would move `real-financial-report/slide-04.svg` and nothing else). Do not
-rebaseline: a snapshot captured on one platform to satisfy another is a snapshot that has
-stopped meaning anything.
+ten — which used to move `real-financial-report/slide-04.svg` and nothing else, and no
+longer moves anything: `resolve/chart.py` verifies that exponent rather than trusting it,
+and `test_a_one_ulp_error_in_log10_does_not_move_a_snapshot` renders that deck with
+`log10` nudged both ways to prove it). Do not rebaseline: a snapshot captured on one
+platform to satisfy another is a snapshot that has stopped meaning anything.

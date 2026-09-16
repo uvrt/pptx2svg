@@ -17,7 +17,12 @@ import pytest
 from pptx2svg import ConvertOptions, convert_pptx_to_model
 from pptx2svg import model as m
 from pptx2svg.parse.chart import flat_chart_kind, parse_chart_space
-from pptx2svg.resolve.chart import format_number, nice_axis_scale
+from pptx2svg.resolve.chart import (
+    _decade,
+    _next_nice_unit,
+    format_number,
+    nice_axis_scale,
+)
 
 C = 'xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"'
 A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
@@ -224,6 +229,100 @@ def test_a_negative_minimum_extends_the_axis_below_zero():
 def test_a_flat_series_still_gets_a_usable_axis():
     minimum, maximum, unit = nice_axis_scale(0.0, 0.0)
     assert maximum > minimum and unit > 0
+
+
+def _log10_off_by_one_ulp(direction: float):
+    """``math.log10`` with every answer nudged one ulp, the way a faithful libm may."""
+    correctly_rounded = math.log10
+
+    def perturbed(value: float) -> float:
+        return math.nextafter(correctly_rounded(value), direction)
+
+    return perturbed
+
+
+@pytest.mark.parametrize("direction", [-math.inf, math.inf])
+def test_a_one_ulp_error_in_log10_does_not_move_the_axis(monkeypatch, direction):
+    """The property a tripwire in `tests/test_vrt.py` used to stand in for.
+
+    That one asserted this *platform* rounds `log10(100.0)` to 2.0.  This one asserts our
+    own code does not care, which is the half that survives being run somewhere else:
+    `log10` is perturbed by an ulp in both directions -- harsher than any real libm
+    disagreement, since a faithful implementation is only allowed to be wrong one way at a
+    time -- and every axis has to come out where it was.
+
+    0..100 is `real-financial-report.pptx` slide 4's radar, the one place in the corpus
+    where the ulp used to show: unit 100, halved to 50 by :data:`AXIS_HALVING_RATIO`, two
+    rings.  One ulp low under the old expression and `floor` gave 1, the unit became 10,
+    and the slide grew by five thousand characters of SVG.
+    """
+    monkeypatch.setattr(math, "log10", _log10_off_by_one_ulp(direction))
+
+    assert _decade(100.0) == 100.0
+    assert nice_axis_scale(0.0, 100.0, strict=False) == (0.0, 100.0, 50.0)
+    # The 1-2-5 ladder reads a magnitude the same way, and failed the same way: an ulp low
+    # made the magnitude of 100 be 10, the mantissa 10, and the "next" unit 100 again --
+    # a step that does not step, which silently ends the horizontal coarsening loop.
+    assert _next_nice_unit(100.0) == 200.0
+    # And the measured axes are unmoved, ulp or no ulp.
+    assert nice_axis_scale(0.0, 5.0) == (0.0, 6.0, 1.0)
+    assert nice_axis_scale(465.0, 4285.0) == (0.0, 5000.0, 1000.0)
+    assert nice_axis_scale(0.0, 0.07) == pytest.approx((0.0, 0.08, 0.01))
+
+
+def test_every_decade_of_the_double_range_is_found_exactly():
+    """The contract, stated on the helper rather than on a chart.
+
+    Ten to the something, at or below the value, with the next one up above it: that is
+    the whole of it, and it is what the axis rules are written against.  Swept over the
+    double range rather than sampled near one, because the failure being guarded against
+    is not a small one -- an exponent out by one is an axis out by a factor of ten, and
+    `log10` is no more exact at 1e-300 than it is at 100.
+    """
+    for exponent in range(-300, 301):
+        power = float(f"1e{exponent}")
+        for value in (power, power * 1.000001, power * 5, power * 9.999):
+            assert _decade(value) == power, (value, exponent)
+
+
+def test_a_span_a_hair_under_a_power_of_ten_is_still_that_power_of_ten():
+    """Spans are subtractions, and subtractions of decimals land just under round numbers.
+
+    ``0.24 - 0.14`` is ``0.09999999999999998``.  Nothing about that chart is a hundredth;
+    the axis wanted is the one for a span of 0.1, and :data:`_DECADE_SLACK` is what keeps
+    it.  `log10`'s rounding used to supply a window like this by accident, but a narrower
+    and less even one: it put ``0.24 - 0.14`` (two ulps under a tenth) in the right decade
+    and ``1.13 - 1.03`` (ten ulps under the same tenth) in the one below, an axis stepping
+    by 0.005 for data that spans a tenth.  Data like that is authored every day.
+
+    The slack is not a licence to round.  A span that genuinely falls short of a power of
+    ten still falls short of it: 9.9999999999 misses by a hundred times more than this
+    window reaches, and nothing anyone would author comes close to being that near.
+    """
+    assert _decade(0.24 - 0.14) == 0.1
+    assert _decade(1.13 - 1.03) == 0.1
+    assert _decade(1.13 - 0.13) == 1.0
+    assert _decade(9.99) == 1.0
+    assert _decade(9.9999999999) == 1.0
+    # Two ulps apart, and `floor(log10(...))` put them in different decades: the first
+    # rounds to exactly 2.0 and the second to 1.9999999999999998.  Both are a hundred, and
+    # agreeing that they are is also what makes an ulp *up* in `log10` a no-op here --
+    # every value an upward ulp could promote is inside this window already.
+    assert _decade(math.nextafter(100.0, 0.0)) == 100.0
+    assert _decade(math.nextafter(math.nextafter(100.0, 0.0), 0.0)) == 100.0
+
+
+def test_the_decade_helper_survives_the_ends_of_the_double_range():
+    """Where there is no power of ten to return, and what the callers do about it.
+
+    A denormal has none below it, so the helper says 0.0 and `nice_axis_scale` falls back
+    to its 0..1 axis -- the same answer, by the same guard, as before the helper existed.
+    Nothing finite reaches 1e309, so nothing comes back infinite.
+    """
+    assert _decade(5e-324) == 0.0
+    assert nice_axis_scale(0.0, 5e-324) == (0.0, 1.0, 1.0)
+    assert _decade(1e-320) == 1e-320
+    assert _decade(1.7976931348623157e308) == 1e308
 
 
 # -- Number formatting -----------------------------------------------------------------
