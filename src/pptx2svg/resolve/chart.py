@@ -537,37 +537,101 @@ ACCENT_KEYS = ("accent1", "accent2", "accent3", "accent4", "accent5", "accent6")
 VARY_COLOR_CYCLE_SHADE = 0.76
 VARY_COLOR_CYCLE_TINT = 0.23
 
-#: Below this many major units of span, the plain power of ten is halved.  See
-#: :func:`nice_axis_scale`; the threshold is somewhere in (1.842, 4.285] and 2 is the
-#: round number inside it.
+#: The most major intervals a value axis is ever divided into, and with it the base unit:
+#: the major unit is the finest 1-2-5 step that fits the padded range into this many.
 #:
-#: **A ladder was written to replace this and reverted.**  A scatter probe of 120..160
-#: came back 0..180 **by 20** where one halving gives 0..200 by 50, and stepping the unit
-#: down the 1-2-5 ladder while the span holds fewer than ~3.5 units reproduces that *and*
-#: all five observations this constant was fitted to.  Then the corpus radar refutes it:
-#: `real-financial-report.pptx`'s chart5 has 65..100 of data and PowerPoint's own export
-#: draws **two** rings, at radii 22.8 and 45.6 -- 0..100 by 50, a ratio of exactly 2.0
-#: accepted, where the scatter refused 3.2 on the same kind of axis.  No monotone ratio
-#: threshold produces both.
+#: **101 readings over six probe decks**, and the pattern is exact rather than fitted:
+#: 0.1..0.11 draws 0.098..0.112 by 0.002, 1.0..1.1 draws 0.98..1.12 by 0.02, 100..110
+#: draws 98..112 by 2.  The count is bracketed on both sides -- eleven intervals of the
+#: padded range are accepted (1.04..1.13 comes back 1.03..1.14 by 0.01) and twelve are
+#: refused (1.03..1.13 comes back 1.02..1.14 by 0.02) -- so the divisor is ten and the
+#: extent that grows out of it may hold eleven.
 #:
-#: What separates them is **axis length**, which makes both of these observations belong
-#: to the unsolved tick-density question rather than to unit selection: the radar's axis
-#: is 45.6 pt and takes 22.8 pt steps, the scatter's is 145.0 pt and takes 16.1 pt steps
-#: where 36.3 pt was available.  A target band of roughly 16 to 24 pt fits those two and
-#: every cell of the density table in ROADMAP.md -- and then dies on the same stacked
-#: probe that killed the last candidate, which accepts 14.5 pt.  See ROADMAP.md.
+#: This replaces "the power of ten below the span, halved under twice it", which
+#: reproduced 29 of the 94 scatter readings where this reproduces 75 exactly and every one
+#: of the 94 extents; the other 19 are this unit coarsened by
+#: :func:`side_axis_intervals`, every one of them on a short frame.  The five observations
+#: the old ratio was fitted to are *coarsened* results: a bar chart of 0..1842 on a 145 pt
+#: plot draws 0..2000 by **200**, and only on the corpus deck's own 112-150 pt frames does
+#: it draw by 500.
+AXIS_MAX_INTERVALS = 10
+
+#: Headroom added at each end of the data range before the unit is chosen, as a fraction
+#: of the range -- and **clamped at zero** on an axis anchored there.
 #:
-#: **101 readings since say the halving is the wrong shape**, and that the five
-#: observations above are coarsened results rather than base ones: on a tall frame
-#: PowerPoint draws 0..1842 by **200**, not by 500.  The base unit it picks is the finest
-#: 1-2-5 step of at least a tenth of the range after 5% of headroom at each end -- 75 of
-#: the 94 scatter readings exactly, the other 19 a coarsening of it on short axes, and
-#: every one of the 94 extents -- where this rule reproduces 29 units and 21 whole axes.
-#: It is **not changed here**: what coarsens it is still unmeasured, and shipping the base
-#: rule without that stage would draw eleven gridlines where PowerPoint draws four on the
-#: short plots the corpus is full of.  ROADMAP.md, "The unit rule is not the power of ten
-#: below the span", carries the readings and what they eliminate.
-AXIS_HALVING_RATIO = 2.0
+#: Bracketed from both sides.  Anchored 0.3..4.8 takes unit 1 and 0.3..4.76 takes 0.5,
+#: which puts it in (4.17%, 5.04%] of the maximum; unanchored 1.0..1.092 takes 0.02 and
+#: 1.0..1.09 takes 0.01, which puts it in (4.35%, 5.56%] of the range.  Five per cent is
+#: the only round number in the intersection.  On an **anchored** axis it is five per cent
+#: of the maximum and not of the data range: 3.0..4.9 and 3.5..4.9 both take unit 1, which
+#: they could not do if the floor entered the range.
+AXIS_HEADROOM = 0.05
+
+#: What a value axis up the **side** reserves before its first interval, as line boxes of
+#: its own tick labels: one at each end for the outermost labels' own height.
+#:
+#: See :func:`side_axis_intervals` for the measurement.
+AXIS_END_LABEL_LINES = 2
+
+#: What that axis reserves on top of those two line boxes, in points, independent of the
+#: label size and of the typeface.  It is the frame's own top and bottom insets --
+#: ``2 * EDGE_INSET_PT`` -- and the measurement says so to a tenth of a point.
+#:
+#: Solved from ten transition scans over five label sizes: with the rung at the label's
+#: line box, every font puts it in (21.3, 22.7] and their intersection is
+#: **(21.92, 22.03]**.  See :func:`side_axis_intervals`.
+AXIS_EDGE_RESERVE_PT = 2 * EDGE_INSET_PT
+
+#: What a **radial** axis -- a radar's, running from the centre to the rim -- can hold
+#: beyond its whole line boxes, in ems of one.  Its count is
+#: ``floor(radius / line_box + this)``, clamped to 1..:data:`AXIS_MAX_INTERVALS`.
+#:
+#: Measured on forty readings, the N-meter over eight frames: radii of 26.16 to 128.4 pt
+#: at 12.207 pt of line box take 3, 3, 4, 5, 6, 7, 8 and 10 intervals, which brackets this
+#: to **(0.857, 0.894]**.  Whether it is a fraction of the line box or a flat 10.7 pt is
+#: not separated -- every one of those forty is 10 pt -- and nine replicas of the corpus
+#: radar at 10 and 12 pt agree with either.
+#:
+#: **A radial axis is not the side axis seen sideways.**  The side rule on the same radius
+#: is out by two to four intervals in both directions, and on the diameter by three; this
+#: one has no 22 pt of frame inset in it and no two end labels, which is what the ring
+#: deck says and is also what a radar looks like -- its labels stack up one spoke rather
+#: than down the side of a plot.
+RADIAL_AXIS_SLACK_EM = 0.875
+
+#: The rung of a value axis along the **bottom**, in ems of its label size.
+#:
+#: A bottom axis is coarser than a side axis for the same data and the same length, and
+#: this is why: its rung is four ems where a side axis' is one line box.  Measured by
+#: scanning the frame width two points at a time either side of two transitions at 10 pt
+#: and sweeping a third at 20 pt, all with :data:`BOTTOM_AXIS_RESERVE_PT` held: the
+#: 10 pt scans bracket it to (4.00, 4.02] ems and the 20 pt sweep to (3.78, 4.18].
+#:
+#: What four ems *is* was not identified.  It is not the label -- "10" is 0.9 em wide and
+#: "10.000" 2.5 em, and both cross the rung at the same frame width.
+BOTTOM_AXIS_RUNG_EM = 4.0
+
+#: What a bottom axis reserves before its first rung, in points.  Bracketed to (22, 24] by
+#: the same scans -- the frame's two insets are 22.0 and sit at the very edge of it -- and
+#: 23 is the middle of the bracket rather than a number with a meaning.
+BOTTOM_AXIS_RESERVE_PT = 23.0
+
+#: The gap a bottom axis leaves beside a tick label wider than
+#: :data:`BOTTOM_AXIS_RUNG_EM`, in ems of the label size.
+#:
+#: Labels reading eight digits -- 4.3 ems wide as we measure them -- cross the rungs 50 pt
+#: of frame later than "10" and "10000" do, and those two cross them together at 0.9 and
+#: 2.5 ems.  So the rung is the greater of four ems and the widest label plus this gap.
+#:
+#: **The wide family does not fit one rung**, which is why this is a fitted number and not
+#: a bracket: its N=10 crossing asks for 0.40 ems and its N=5 crossing for 0.93, and no
+#: single value produces both.  0.4 is the one that reproduces the most of the sweep -- 30
+#: of the 34 readings whose labels are ten characters wide -- and three of the four it
+#: misses are where PowerPoint stops choosing a unit at all: 0..9e6 in a 260 pt frame came
+#: back labelled 0, 4e6, 8e6 on an axis still ending at 1e7, which is a *skipped* tick
+#: rather than a 1-2-5 unit.  Nothing here draws that, and in the 16 pt window where
+#: PowerPoint does, ours is one rung finer.  The fourth is the N=10 crossing, 17 pt late.
+BOTTOM_AXIS_LABEL_GAP_EM = 0.4
 
 #: Data that sits this far up its own range does not get an axis pulled back to zero.
 #:
@@ -584,64 +648,149 @@ AXIS_HALVING_RATIO = 2.0
 #: no probe has ever shown what PowerPoint does with one, so it keeps the zero anchor.
 AXIS_ZERO_ANCHOR_RATIO = 5.0 / 6.0
 
-#: A value axis **along the bottom** comes out coarser than one up the side for the same
-#: data and the same axis length, so once the interval is chosen it is stepped up until
-#: the axis holds no more than this many of them.  What it really is remains unknown --
-#: it is not a density limit, because the horizontal probe's 0..5 data came out 0..6 by 2
-#: where the identical data on a *vertical* axis of almost the same length (151.4 pt
-#: against 145.0 pt) came out 0..6 by 1.
-#:
-#: **Four, not five.**  It was five on that one horizontal-bar observation, which only
-#: bounds it below six.  Four scatter probes -- whose x axis is the same bottom axis --
-#: bracket it properly, and the discriminating one is ``x-float``: x from 0.5 to 4.5
-#: rounds to a 0..5 axis at unit 1, which is *five* intervals, and PowerPoint coarsened it
-#: to 0..6 by 2 anyway.  ``x-neg``'s -4..4 by 2 is **four** intervals and PowerPoint kept
-#: it, so the bracket is [4, 5).  The other two, 1..5 and 10..50, agree at either value.
-HORIZONTAL_MAX_INTERVALS = 4
-
 
 # --------------------------------------------------------------------------------------
 # Axis scaling
 # --------------------------------------------------------------------------------------
 
 
+def side_axis_intervals(available_pt: float, line_box_pt: float) -> int:
+    """How many major intervals a value axis **up the side** of a chart is divided into.
+
+    ``available_pt`` is the chart frame's height less its title and less a legend above or
+    below it -- what is left for the plot and its axis labels -- and ``line_box_pt`` is the
+    line box of the face the *tick labels* are drawn in.  The count is then
+
+    ``floor((available - 2 * EDGE_INSET_PT) / line_box) - 2``, clamped to 1..10.
+
+    **This is the coarsening stage, and it is one stage rather than two.**  There is no
+    separate "step the unit up when the plot is short": the same expression that caps a
+    tall chart at :data:`AXIS_MAX_INTERVALS` produces the by-500 axis on a 150 pt frame,
+    because the divisor in :func:`nice_axis_scale` is this count and not always ten.
+
+    **It is a function of the frame, not of the plot.**  That is what a decade of
+    contradictory readings turned on: four chart types -- scatter, column, line and area --
+    sweeping two datasets over eight frames coarsened at *exactly* the same frame heights,
+    although their plot rectangles differ by 14 pt because three of them reserve a band for
+    category labels and the scatter does not.  Fitted to the drawn plot instead, the 64
+    readings have no solution at all: a 44.88 pt plot taking one interval and a 50.64 pt
+    plot taking three force a rung under 5.8 pt, which the 74.16 pt plot's five intervals
+    then contradict.
+
+    **The rung is one line box of the label.**  Ten transition scans -- the frame walked
+    two points at a time either side of the height where the drawn unit changes, at 6, 10,
+    14, 20 and 28 pt labels -- bracket it to (1.2143, 1.225] ems, and Aptos' own line box
+    is 1.2207.  Arial labels cross their transition 4 to 9 pt lower, which is a *face*
+    ratio and not a constant one, so this asks the face rather than
+    :data:`~pptx2svg.text.measure.DEFAULT_LINE_HEIGHT_RATIO`.  The residual that leaves is
+    the one ``_bottom_label_band`` already carries and names: PowerPoint's pitch is the
+    face's full ``hhea`` spacing including ``lineGap``, which our metrics do not hold, so
+    an Arial axis is 0.33 pt per rung short and steps up about 5 pt of frame *early*: the
+    one reading in the whole sweep that this rule misses is an Arial axis at 160 pt taking
+    ten intervals where PowerPoint takes nine.
+
+    **The two line boxes and the 22 pt are separately measured.**  With the rung at the
+    line box, every font's own scans put the remaining reserve at 21.3 to 22.7 pt and the
+    five intersect at (21.92, 22.03] -- two frame insets -- and the 2 is what is left over
+    per font once that is fixed, one line box for the label at each end of the axis.
+
+    **Title and legend come off the top.**  A bottom legend on a 150 pt frame takes the
+    count from 8 to 6 and a title takes it to 6, which is exactly what subtracting the
+    bands ``_plot_rect`` already reserves for them predicts; a legend at the *right* left
+    the count at 8, so it is the height the furniture eats and not the furniture itself.
+    """
+    if not (math.isfinite(available_pt) and math.isfinite(line_box_pt)) or line_box_pt <= 0:
+        return AXIS_MAX_INTERVALS
+    rungs = (available_pt - AXIS_EDGE_RESERVE_PT) / line_box_pt
+    if not math.isfinite(rungs):
+        return AXIS_MAX_INTERVALS
+    return max(1, min(AXIS_MAX_INTERVALS, math.floor(rungs) - AXIS_END_LABEL_LINES))
+
+
+def radial_axis_intervals(radial_pt: float, line_box_pt: float) -> int:
+    """How many major intervals a **radial** axis -- a radar's rings -- is divided into.
+
+    ``radial_pt`` is the drawn radius, centre to rim, and ``line_box_pt`` the line box of
+    the ring labels' face.  See :data:`RADIAL_AXIS_SLACK_EM`; the radius is available
+    before the scale because a radar's geometry is set by its *category* labels, which is
+    why :meth:`ChartBuilder._build_radar` measures it first.
+    """
+    if not (math.isfinite(radial_pt) and math.isfinite(line_box_pt)) or line_box_pt <= 0:
+        return AXIS_MAX_INTERVALS
+    rungs = radial_pt / line_box_pt + RADIAL_AXIS_SLACK_EM
+    if not math.isfinite(rungs):
+        return AXIS_MAX_INTERVALS
+    return max(1, min(AXIS_MAX_INTERVALS, math.floor(rungs)))
+
+
+def bottom_axis_intervals(
+    available_pt: float, font_size_pt: float, widest_label_pt: float = 0.0
+) -> int:
+    """How many major intervals a value axis **along the bottom** is divided into.
+
+    The same shape as :func:`side_axis_intervals` with a wider rung and no end-label
+    allowance: ``floor((available - 23) / rung)``, clamped to 1..10, where the rung is the
+    greater of :data:`BOTTOM_AXIS_RUNG_EM` ems and the widest tick label plus
+    :data:`BOTTOM_AXIS_LABEL_GAP_EM`.  ``available_pt`` is the frame's width less a legend
+    beside it.
+
+    **It is the width, and only the width.**  Three frame heights over a width sitting on
+    a transition drew the same axis, and a horizontal bar chart and a *scatter's x axis*
+    sweep the same rungs at the same widths: 0.5..4.5 of scatter x comes back 0..6 by 2 at
+    160 and 200 pt of frame, 0..5 by 1 at 240, 300 and 400, and 0..5 by 0.5 at 684.  Those
+    six readings are what ``HORIZONTAL_MAX_INTERVALS`` used to approximate with a flat cap
+    of four: its probes all sat on 160 to 200 pt frames, where this rule also says three
+    or four, and it drew four intervals on a 684 pt frame where PowerPoint draws ten.
+    """
+    if not (math.isfinite(available_pt) and math.isfinite(font_size_pt)) or font_size_pt <= 0:
+        return AXIS_MAX_INTERVALS
+    rung = max(
+        BOTTOM_AXIS_RUNG_EM * font_size_pt,
+        widest_label_pt + BOTTOM_AXIS_LABEL_GAP_EM * font_size_pt,
+    )
+    if rung <= 0 or not math.isfinite(rung):
+        return AXIS_MAX_INTERVALS
+    rungs = math.floor((available_pt - BOTTOM_AXIS_RESERVE_PT) / rung)
+    return max(1, min(AXIS_MAX_INTERVALS, rungs))
+
+
 def nice_axis_scale(
     data_minimum: float,
     data_maximum: float,
-    horizontal: bool = False,
+    *,
+    intervals: int = AXIS_MAX_INTERVALS,
     strict: bool = True,
     anchor_zero: bool = True,
 ) -> tuple[float, float, float]:
     """``(minimum, maximum, major_unit)`` for a value axis PowerPoint would draw itself.
 
-    The major unit is the plain **power of ten** just below the span, halved when the span
-    is less than :data:`AXIS_HALVING_RATIO` of it.  That is not the "aim for N ticks" rule
-    every charting library uses, and the difference is not cosmetic -- N ticks cannot
-    produce both of these, which PowerPoint does:
+    The data range is padded by :data:`AXIS_HEADROOM` at each end, the major unit is the
+    finest 1-2-5 step that divides that padded range into no more than *intervals*, and
+    the extent is the padded range rounded outwards to whole units.  *intervals* is
+    :data:`AXIS_MAX_INTERVALS` for an axis with room for it and less for a short one; see
+    :func:`side_axis_intervals` and :func:`bottom_axis_intervals`, which is where the
+    frame comes in.
 
-    ===========  ==============  ==========
-    data         PowerPoint      intervals
-    ===========  ==============  ==========
-    0..5         0..6 by 1       6
-    0..9         0..10 by 1      10
-    -2..5        -3..6 by 1      9
-    0..1842      0..2000 by 500  4
-    0..4285      0..5000 by 1000 5
-    ===========  ==============  ==========
+    ===========  ==================  =============
+    data         PowerPoint          intervals
+    ===========  ==================  =============
+    0.1..0.11    0.098..0.112 x .002 7
+    1.0..1.1     0.98..1.12 x 0.02   7
+    100..110     98..112 x 2         7
+    0..5         0..6 x 1            6
+    0..9         0..10 x 1           10
+    -2..5        -3..6 x 1           9
+    0..1842      0..2000 x 200       10
+    ===========  ==================  =============
 
-    A sixth observation -- 120..160 of scatter data drawn 0..180 **by 20** on a 145 pt
-    axis, where this gives 0..200 by 50 -- is **not** reproduced, and deliberately so: the
-    rule that reproduces it contradicts the corpus radar.  See :data:`AXIS_HALVING_RATIO`.
+    The last one is the correction this rule carries: on a 145 pt plot PowerPoint draws
+    0..1842 by **200**, and the by-500 axis the old rule was fitted to is that same axis
+    coarsened by a 150 pt frame.
 
-    Both ends are rounded *strictly* outwards, so a series topping out at exactly 5 gets
-    an axis to 6 rather than one whose last bar touches the frame.  Both bumps are
-    measured: the first is what ``authoring-integration.pptx`` does, the second is the -3
-    on the negative-value probe whose data floor is -2.
-
-    ``strict=False`` turns that outward bump off, which is what a **radar** wants: the
-    same 0..5 data a bar chart takes to 6 stopped at exactly 5 on every radar probe, five
-    rings with the outermost passing through the largest point.  One discriminating
-    observation, and it is the whole of the difference -- the unit is chosen identically.
+    ``strict=False`` rounds the extent from the **data** rather than from the padded
+    range, which is what a **radar** wants: the same 0..5 data a bar chart takes to 6
+    stopped at exactly 5 on every radar probe, five rings with the outermost passing
+    through the largest point.  The unit is chosen identically.
 
     ``anchor_zero=False`` lets the domain leave zero out when the data sits far enough up
     its own range; see :data:`AXIS_ZERO_ANCHOR_RATIO`.  Only a **scatter** passes it, and
@@ -658,29 +807,23 @@ def nice_axis_scale(
         # smallest one that shows anything.
         return 0.0, 1.0, 1.0
 
-    unit = _decade(span)
+    # The headroom is clamped at zero on an anchored axis: a bar chart of positive data
+    # does not get a strip of axis below the bars.  A **radar** has none at all, which is
+    # the same measurement as its extent stopping at the data: with 5% added, its own ring
+    # sweep needs eleven intervals where ten is the most any axis takes, and its 0..5 data
+    # would take unit 1 where PowerPoint draws 0.5.
+    headroom = AXIS_HEADROOM * span if strict else 0.0
+    padded_low = low if anchored and low >= 0.0 else low - headroom
+    padded_high = high if anchored and high <= 0.0 else high + headroom
+
+    unit = _nice_unit((padded_high - padded_low) / max(1, intervals))
     # A denormal span underflows the power of ten to zero; a span at the other end
-    # overflows the strictly-outward rounding below to infinity.  Neither is a chart
-    # anyone drew on purpose, and both used to raise out of the conversion.
+    # overflows the rounding below to infinity.  Neither is a chart anyone drew on
+    # purpose, and both used to raise out of the conversion.
     if not math.isfinite(unit) or unit <= 0:
         return 0.0, 1.0, 1.0
-    if span / unit < AXIS_HALVING_RATIO:
-        unit /= 2
 
-    minimum, maximum = _axis_extent(
-        unit, low, high, data_minimum, data_maximum, strict, anchored
-    )
-    if horizontal:
-        # Counted on the *rounded* extent, not the data span: 0..5 of data becomes a
-        # 0..6 axis, and it is the six intervals in that which PowerPoint coarsens.
-        while (maximum - minimum) / unit > HORIZONTAL_MAX_INTERVALS:
-            stepped = _next_nice_unit(unit)
-            if not math.isfinite(stepped) or stepped <= unit:
-                break
-            unit = stepped
-            minimum, maximum = _axis_extent(
-                unit, low, high, data_minimum, data_maximum, strict, anchored
-            )
+    minimum, maximum = _axis_extent(unit, padded_low, padded_high, low, high, strict)
     if not (math.isfinite(minimum) and math.isfinite(maximum) and maximum > minimum):
         return 0.0, 1.0, 1.0
     return minimum, maximum, unit
@@ -688,39 +831,55 @@ def nice_axis_scale(
 
 def _axis_extent(
     unit: float,
+    padded_low: float,
+    padded_high: float,
     low: float,
     high: float,
-    data_minimum: float,
-    data_maximum: float,
     strict: bool = True,
-    anchored: bool = True,
 ) -> tuple[float, float]:
-    """Round the domain outwards to whole units, strictly past the data at both ends.
+    """Round the domain outwards to whole units, from the padded range or from the data.
 
-    ``strict=False`` rounds to a whole unit and stops there, which is the radar rule.
+    The padded range is what PowerPoint rounds, and that is measured rather than assumed:
+    0.3..4.9 is already clear of a 0..5 axis and PowerPoint draws 0..**6**, which no rule
+    reading the data alone produces.  All 94 extents in the scatter sweep come out of this,
+    the unanchored ones included -- 100..104 comes back 98..106 and 2010..2020 comes back
+    2005..2025, each a whole unit clear at both ends because 5% of their range carries them
+    past one.
 
-    ``anchored`` says the domain is held at zero, which is what stops the strict bump
-    from pushing a 0..5 axis down to -1: zero is the floor, not a datum to clear.  An
-    **unanchored** axis has no such floor and its low end bumps like its high end --
-    measured on the scatter probes, where 100..104 came back **98**..106 and 2010..2020
-    came back **2005**..2025, both a whole unit clear of the data at each end.
-
-    The strict bump is an approximation of what PowerPoint does, and the approximation is
-    now measured: it rounds outwards from a range padded by **5% at each end** rather than
-    from the data, which is the same answer whenever the data lands on a unit boundary and
-    a different one when it does not.  0.3..4.9 is the cheapest counter-example -- 4.9 is
-    already clear of a 0..5 axis, and PowerPoint draws 0..6 -- and the padded rule
-    reproduces all 94 extents measured, this one included.  Changing it is part of the
-    tick-density work, not of this function; see ROADMAP.md.
+    ``strict=False`` rounds from the data instead, which is the radar rule: 0..5 stops at
+    5 where a padded 0..5.25 would go to 6.
     """
-    maximum = math.ceil(high / unit) * unit
-    if strict and maximum <= data_maximum:
-        maximum += unit
-    minimum = math.floor(low / unit) * unit
-    bump_low = data_minimum < 0 if anchored else True
-    if strict and bump_low and minimum >= data_minimum:
-        minimum -= unit
+    ceiling = padded_high if strict else high
+    floor = padded_low if strict else low
+    # A tolerance, because a quotient that is a whole number on paper is often a hair over
+    # it in doubles -- 5.25 / 0.05 is 105.00000000000001 -- and a hair is a whole extra
+    # unit of axis once it is rounded outwards.
+    maximum = math.ceil(ceiling / unit - _EXTENT_SLACK) * unit
+    minimum = math.floor(floor / unit + _EXTENT_SLACK) * unit
     return minimum, maximum
+
+
+#: How far past a unit boundary a padded end may land and still be taken as on it.  The
+#: padded range is a product and a difference of authored decimals, so a boundary it lands
+#: on exactly arrives a few ulps either side of one; a tenth of one part in a billion is
+#: far wider than that residue and far narrower than any authored number's distance from a
+#: boundary.  Relative, because it is applied to the quotient by the unit, which is a small
+#: count of intervals.
+_EXTENT_SLACK = 1e-9
+
+
+def _nice_unit(value: float) -> float:
+    """The smallest 1-2-5 step at or above *value*, for a finite positive *value*."""
+    if not math.isfinite(value) or value <= 0:
+        return 0.0
+    decade = _decade(value)
+    if decade <= 0 or not math.isfinite(decade):
+        return 0.0
+    for step in (1.0, 2.0, 5.0):
+        candidate = step * decade
+        if value <= candidate * (1.0 + _DECADE_SLACK):
+            return candidate
+    return 10.0 * decade
 
 
 def _floats_away_from_zero(data_minimum: float, data_maximum: float) -> bool:
@@ -737,17 +896,6 @@ def _floats_away_from_zero(data_minimum: float, data_maximum: float) -> bool:
     if data_minimum < 0 and data_maximum < 0:
         return data_maximum < AXIS_ZERO_ANCHOR_RATIO * data_minimum
     return False
-
-
-def _next_nice_unit(unit: float) -> float:
-    """The next step up the 1-2-5 ladder from a unit already on it."""
-    magnitude = _decade(unit)
-    mantissa = round(unit / magnitude, 6)
-    if mantissa < 2:
-        return 2 * magnitude
-    if mantissa < 5:
-        return 5 * magnitude
-    return 10 * magnitude
 
 
 #: How far *below* a power of ten a value may fall and still count as having reached it.
@@ -778,8 +926,14 @@ def _next_nice_unit(unit: float) -> float:
 #: by 0.2, 1020..1140 by 20.  A span written as a plain 0.095 and one ten ulps under a
 #: tenth are drawn identically, so no experiment on this path can bracket a decade
 #: boundary: the unit PowerPoint picks is not a function of which decade the span falls in.
-#: What it *is* a function of is in ROADMAP.md, "The unit rule is not the power of ten
-#: below the span"; it is a tick-density answer, not one a constant here can carry.
+#: What it *is* a function of is :func:`nice_axis_scale` and the counts feeding it, which
+#: is why the axis those thirty probes drew is now the axis we draw.
+#:
+#: What is left for this constant is the other end of the same promise, in
+#: :func:`_nice_unit`: a target that lands a few ulps *above* a 1-2-5 rung takes that rung
+#: rather than the next one up.  A padded range of 5.25 over ten is 0.5250000000000001 on
+#: this machine, and a unit of 1 where PowerPoint draws 0.5 is the same wrong picture from
+#: the other side.
 #:
 #: So this number stays what it was, and stays labelled for what it is: an internal
 #: promise that two spans a few ulps apart are treated alike, chosen wide enough to cover
@@ -1784,7 +1938,6 @@ class ChartBuilder:
         categories = self._categories(series)
         value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
         category_axis = self._axis_for(0) or self._axis_of_kind("catAx")
-        scale = self._scale(series, value_axis)
         region = self._polar_region()
         category_font = self._label_font(category_axis)
         value_font = self._label_font(value_axis)
@@ -1792,9 +1945,14 @@ class ChartBuilder:
         labels = self._radar_category_labels(
             categories, category_axis, category_font, region
         )
+        # The geometry comes first here, and that is not a tidy-up: a radial axis' tick
+        # count is a function of its own radius (see :func:`radial_axis_intervals`), and
+        # the radius is set by the *category* labels, so it is knowable before the scale
+        # is.  Every other type asks the frame instead.
         centre, radius = self._radar_geometry(
             region, labels, category_font, len(categories)
         )
+        scale = self._scale(series, value_axis, radial_pt=radius)
 
         self._draw_background(region)
         self._draw_title()
@@ -2212,7 +2370,8 @@ class ChartBuilder:
         Every constant below is shared with a chart that already draws.  The x axis is the
         same coarse one a horizontal bar chart gets -- 1..5 of data came back 0..6 **by
         two** where the y axis over the same span takes ones -- which is
-        :data:`HORIZONTAL_MAX_INTERVALS`, measured here for the second time.
+        :func:`bottom_axis_intervals`, measured on a scatter's own x axis over six frame
+        widths.
         """
         series = self._series()
         x_axis, y_axis = self._scatter_axes()
@@ -2223,11 +2382,22 @@ class ChartBuilder:
         # **Neither axis is anchored at zero**, which every other type here is.  A bar has
         # to start at its axis; a scatter of years against a measurement would be destroyed
         # by it, and PowerPoint agrees -- see :data:`AXIS_ZERO_ANCHOR_RATIO`.
+        x_base = nice_axis_scale(*_span(xs), anchor_zero=False)
         x_scale = _apply_axis_limits(
-            nice_axis_scale(*_span(xs), horizontal=True, anchor_zero=False), x_axis
+            nice_axis_scale(
+                *_span(xs),
+                intervals=self._value_axis_intervals(x_axis, True, x_base),
+                anchor_zero=False,
+            ),
+            x_axis,
         )
         y_scale = _apply_axis_limits(
-            nice_axis_scale(*_span(ys), horizontal=False, anchor_zero=False), y_axis
+            nice_axis_scale(
+                *_span(ys),
+                intervals=self._value_axis_intervals(y_axis, False),
+                anchor_zero=False,
+            ),
+            y_axis,
         )
 
         x_font = self._label_font(x_axis)
@@ -3029,7 +3199,10 @@ class ChartBuilder:
         return None
 
     def _scale(
-        self, series: list[_Series], axis: c.SourceChartAxis | None
+        self,
+        series: list[_Series],
+        axis: c.SourceChartAxis | None,
+        radial_pt: float | None = None,
     ) -> tuple[float, float, float]:
         stacked = (self.plot.grouping or "clustered") in ("stacked", "percentStacked")
         if (self.plot.grouping or "") == "percentStacked":
@@ -3050,16 +3223,24 @@ class ChartBuilder:
 
         if not numbers:
             numbers = [0.0]
-        minimum, maximum, unit = nice_axis_scale(
-            min(numbers),
-            max(numbers),
-            horizontal=(self.plot.bar_direction or "col") == "bar",
-            # A radar stops at the data rather than a whole unit past it: 0..5 of data
-            # gives a 0..5 axis where the same data on a bar gives 0..6.
-            strict=not self._is_radar,
-        )
+        horizontal = (self.plot.bar_direction or "col") == "bar"
 
-        return _apply_axis_limits((minimum, maximum, unit), axis)
+        def scaled(intervals: int) -> tuple[float, float, float]:
+            return nice_axis_scale(
+                min(numbers),
+                max(numbers),
+                intervals=intervals,
+                # A radar stops at the data rather than a whole unit past it: 0..5 of data
+                # gives a 0..5 axis where the same data on a bar gives 0..6.
+                strict=not self._is_radar,
+            )
+
+        # The finest axis the data could take, which is the answer for a frame with room
+        # for ten intervals and the label estimate a narrower one is measured against.
+        provisional = scaled(AXIS_MAX_INTERVALS)
+        intervals = self._value_axis_intervals(axis, horizontal, provisional, radial_pt)
+        scale = provisional if intervals >= AXIS_MAX_INTERVALS else scaled(intervals)
+        return _apply_axis_limits(scale, axis)
 
     def _tick_texts(
         self, scale: tuple[float, float, float], axis: c.SourceChartAxis | None
@@ -3127,6 +3308,66 @@ class ChartBuilder:
             family_ea=family_ea,
             box_ea=font_box(family_ea, size) if family_ea else None,
         )
+
+    def _axis_band_height(self) -> float:
+        """The frame height a value axis up the side has to divide.
+
+        The title and a legend above or below come off it, in exactly the bands
+        :meth:`_plot_rect` reserves for them: measured on a 150 pt frame, where a bottom
+        legend took the interval count from 8 to 6 and a title took it to 6, both of which
+        those bands predict.  A legend at the *side* left the count alone, so nothing is
+        taken off for one.  See :func:`side_axis_intervals`.
+        """
+        height = self.frame.height
+        title = self._title_box()
+        if title is not None:
+            height -= TITLE_BAND_LINES * title.line_height
+        legend = self._legend_position()
+        if legend in ("b", "t", "tr") and not self._legend_overlays():
+            height -= LEGEND_BAND_LINES * self._legend_font().box.line_height
+        return height
+
+    def _axis_band_width(self) -> float:
+        """The frame width a value axis along the bottom has to divide.
+
+        The mirror of :meth:`_axis_band_height`, and the legend half of it is **not
+        measured**: a bottom legend is what was shown to come off the height, and no probe
+        put a side legend on a chart whose value axis runs along the bottom.  The band a
+        side legend takes is the one the plot already loses, so this is that same
+        measurement applied to the other axis rather than a second guess.
+        """
+        width = self.frame.width
+        legend = self._legend_position()
+        if legend in ("l", "r") and not self._legend_overlays():
+            width -= self._legend_side_width(self._legend_font())
+        return width
+
+    def _value_axis_intervals(
+        self,
+        axis: "c.SourceChartAxis | None",
+        horizontal: bool,
+        provisional: "tuple[float, float, float] | None" = None,
+        radial_pt: float | None = None,
+    ) -> int:
+        """How many major intervals this chart's value axis is divided into.
+
+        A bottom axis' rung depends on how wide its labels are, its labels depend on the
+        unit and the unit depends on the rung.  PowerPoint faces the same circle; this
+        settles it by measuring the labels of the finest axis the data could take -- the
+        *provisional* one, drawn at :data:`AXIS_MAX_INTERVALS` -- and asking the rung about
+        those.  A side axis does not read its labels at all, which is measured: three-digit
+        integers and four-character decimals coarsen at exactly the same frame heights.
+        """
+        font = self._label_font(axis)
+        if radial_pt is not None:
+            return radial_axis_intervals(radial_pt, font.box.line_height)
+        if not horizontal:
+            return side_axis_intervals(self._axis_band_height(), font.box.line_height)
+        widest = 0.0
+        if provisional is not None:
+            texts = [text for _, text in self._tick_texts(provisional, axis)]
+            widest = max((font.width(text) for text in texts), default=0.0)
+        return bottom_axis_intervals(self._axis_band_width(), font.size, widest)
 
     def _label_font(self, axis: c.SourceChartAxis | None) -> ChartFont:
         return self._font(axis.text_properties if axis is not None else None)
@@ -5562,9 +5803,12 @@ __all__ = [
     "ChartBuilder",
     "ChartStyle",
     "accent_colors",
+    "bottom_axis_intervals",
     "default_font_size",
     "font_box",
     "format_number",
     "nice_axis_scale",
+    "radial_axis_intervals",
+    "side_axis_intervals",
     "text_width",
 ]
