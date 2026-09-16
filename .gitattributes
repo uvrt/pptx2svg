@@ -1,0 +1,8 @@
+# Committed render snapshots are compared byte for byte (tests/test_vrt.py), so the bytes
+# in the working tree must be the bytes that were captured.  Git on Windows rewrites LF
+# to CRLF on checkout by default, which would fail every snapshot on four of the twelve
+# CI legs; `eol=lf` pins the checkout on every platform.  The test normalises line endings
+# on read as well, so a checkout that ignores this file still passes -- belt and braces,
+# because a snapshot that is red for a reason unrelated to rendering teaches people to
+# rebaseline without looking.
+tests/vrt/**/*.svg text eol=lf

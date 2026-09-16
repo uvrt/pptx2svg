@@ -453,6 +453,16 @@ Decks that are not ours to redistribute are not committed at all. `tests/conftes
 looks for those in the gitignored `scratch/`, and the tests that need one skip where it
 is absent.
 
+`tests/vrt/` holds a committed SVG of every slide of every fixture, and `tests/test_vrt.py`
+fails when a render stops matching one. It is a regression net, not a correctness check --
+it reports that the output *changed*, never that it is *right*, and the committed files
+freeze today's bugs along with today's behaviour. Read `tests/vrt/README.md` before
+trusting one, and rebaseline deliberately:
+
+```bash
+pytest tests/test_vrt.py --update-snapshots    # then read the diff
+```
+
 The metrics table in `pptx2svg/text/metrics.py` is **generated** from the font files in
 `packages/pptx2svg-fonts`. Do not edit it by hand:
 
