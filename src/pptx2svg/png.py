@@ -39,22 +39,50 @@ class RasterizerNotAvailable(RuntimeError):
     """No SVG-to-PNG backend is installed."""
 
 
+#: Backends in preference order.  resvg first: it takes the font arguments, so it is the
+#: only one that renders reproducibly, and it ships prebuilt wheels with no system
+#: library behind them.
+_BACKEND_MODULES: tuple[tuple[str, str], ...] = (
+    ("resvg", "resvg_py"),
+    ("cairosvg", "cairosvg"),
+)
+
+
+def _importable(module: str) -> bool:
+    """Whether *module* imports, treating **any** failure as "not available".
+
+    Deliberately not ``except ImportError``.  cairosvg is a Python wheel in front of a
+    *system* library, and with the wheel installed but libcairo missing -- the normal
+    state of a Mac or a slim container that never ran `brew install cairo` -- importing
+    it raises ``OSError('no library called "cairo-2" was found')``.  That is not an
+    ``ImportError``, so it escaped this probe and took down every caller, including the
+    ones that were about to choose resvg and never touch cairo at all.  A backend that
+    cannot be imported is unavailable; why it cannot is not this function's business.
+    """
+    try:
+        __import__(module)
+    except Exception:
+        return False
+    return True
+
+
 def available_backends() -> list[str]:
-    """Which rasterisation backends can be imported right now."""
-    found: list[str] = []
-    try:
-        import resvg_py  # noqa: F401
+    """Which rasterisation backends can be imported right now, best first."""
+    return [name for name, module in _BACKEND_MODULES if _importable(module)]
 
-        found.append("resvg")
-    except ImportError:
-        pass
-    try:
-        import cairosvg  # noqa: F401
 
-        found.append("cairosvg")
-    except ImportError:
-        pass
-    return found
+def _preferred_backend() -> str | None:
+    """The best backend that imports, without importing the others.
+
+    Separate from :func:`available_backends` because ``backend="auto"`` only needs the
+    winner, and probing further costs an import of a library we are not going to use --
+    which for cairosvg means loading a system library, the slowest and most fragile
+    import of the two.
+    """
+    for name, module in _BACKEND_MODULES:
+        if _importable(module):
+            return name
+    return None
 
 
 def svg_to_png(
@@ -90,13 +118,13 @@ def svg_to_png(
     """
     chosen = backend
     if chosen == "auto":
-        backends = available_backends()
-        if not backends:
+        preferred = _preferred_backend()
+        if preferred is None:
             raise RasterizerNotAvailable(
                 "no SVG rasterizer installed; run `pip install pptx2svg[png]` for resvg-py "
                 "(prebuilt wheels, no system dependencies) or `pip install pptx2svg[cairo]`"
             )
-        chosen = backends[0]  # type: ignore[assignment]
+        chosen = preferred  # type: ignore[assignment]
 
     if chosen == "resvg":
         bundled = bundled_font_dirs() if use_bundled_fonts else []

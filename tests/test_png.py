@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import builtins
 import struct
 
 import pytest
 
 from pptx2svg import ConvertOptions, convert_pptx_to_png
-from pptx2svg.png import available_backends, svg_to_png
+from pptx2svg.png import _preferred_backend, available_backends, svg_to_png
 
 pytestmark = pytest.mark.skipif(
     not available_backends(),
@@ -116,3 +117,47 @@ def test_caller_font_dirs_take_precedence_over_the_bundle(tmp_path):
     image = svg_to_png(TEXT_SVG, backend="resvg", font_dirs=[str(tmp_path)])
     assert image[:8] == PNG_MAGIC
     assert image == svg_to_png(TEXT_SVG, backend="resvg")
+
+
+# --------------------------------------------------------------------------------------
+# Backend discovery
+#
+# These probe discovery rather than rendering.  They inherit the module's skip, which is
+# harmless: with no rasteriser at all there is no preference to get wrong.
+# --------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def broken_cairo(monkeypatch):
+    """cairosvg installed, libcairo missing -- the normal state of a Mac without brew.
+
+    `import cairosvg` then raises OSError rather than ImportError, because cairocffi
+    looks for the *system* library at import time.
+    """
+    real_import = builtins.__import__
+    imported: list[str] = []
+
+    def fake_import(name, *args, **kwargs):
+        imported.append(name)
+        if name == "cairosvg":
+            raise OSError('no library called "cairo-2" was found')
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    return imported
+
+
+def test_a_backend_that_cannot_load_is_absent_rather_than_fatal(broken_cairo):
+    """The bug this guards: discovery caught ImportError only, so an OSError from
+    cairosvg took down callers that were about to choose resvg and never touch cairo."""
+    assert "cairosvg" not in available_backends()
+
+
+def test_auto_does_not_import_a_backend_it_will_not_use(broken_cairo):
+    """resvg wins on preference, so cairosvg must never be imported at all -- importing
+    it means loading a system library we have already decided not to use."""
+    if "resvg" not in available_backends():
+        pytest.skip("resvg-py is not installed; nothing to prefer over cairosvg")
+    broken_cairo.clear()
+    assert _preferred_backend() == "resvg"
+    assert "cairosvg" not in broken_cairo
