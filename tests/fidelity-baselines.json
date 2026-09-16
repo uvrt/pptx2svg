@@ -26,6 +26,177 @@
     ],
     "ssim": 0.9327
   },
+  "chart-gallery": {
+    "fonts": {
+      "available": [
+        "Aptos",
+        "Aptos Display"
+      ],
+      "conditional": [],
+      "hash": "ae15a1311a30",
+      "instead": [],
+      "missing": [],
+      "substituted": [],
+      "uncovered": ""
+    },
+    "histogram": 0.8169,
+    "slides": [
+      {
+        "coverage": 0.0825,
+        "histogram": 0.9921,
+        "mean_abs": 3.592,
+        "over10": 3.481,
+        "over64": 2.279,
+        "sparse": false,
+        "ssim": 0.5509
+      },
+      {
+        "coverage": 0.1377,
+        "histogram": 0.9989,
+        "mean_abs": 1.4,
+        "over10": 2.016,
+        "over64": 0.71,
+        "sparse": false,
+        "ssim": 0.931
+      },
+      {
+        "coverage": 0.0403,
+        "histogram": 0.6117,
+        "mean_abs": 2.359,
+        "over10": 3.261,
+        "over64": 1.648,
+        "sparse": false,
+        "ssim": 0.6683
+      },
+      {
+        "coverage": 0.3941,
+        "histogram": 0.9998,
+        "mean_abs": 4.216,
+        "over10": 4.294,
+        "over64": 2.865,
+        "sparse": false,
+        "ssim": 0.8814
+      },
+      {
+        "coverage": 0.0308,
+        "histogram": 0.6225,
+        "mean_abs": 1.325,
+        "over10": 2.473,
+        "over64": 0.667,
+        "sparse": false,
+        "ssim": 0.7759
+      },
+      {
+        "coverage": 0.1269,
+        "histogram": 0.9951,
+        "mean_abs": 12.766,
+        "over10": 10.774,
+        "over64": 9.754,
+        "sparse": false,
+        "ssim": 0.4068
+      },
+      {
+        "coverage": 0.2399,
+        "histogram": 0.9993,
+        "mean_abs": 2.119,
+        "over10": 2.054,
+        "over64": 1.512,
+        "sparse": false,
+        "ssim": 0.8968
+      },
+      {
+        "coverage": 0.1877,
+        "histogram": 0.9999,
+        "mean_abs": 0.623,
+        "over10": 0.747,
+        "over64": 0.383,
+        "sparse": false,
+        "ssim": 0.9717
+      },
+      {
+        "coverage": 0.3229,
+        "histogram": 0.9991,
+        "mean_abs": 16.925,
+        "over10": 15.165,
+        "over64": 14.611,
+        "sparse": false,
+        "ssim": 0.7924
+      },
+      {
+        "coverage": 0.0365,
+        "histogram": 0.7434,
+        "mean_abs": 2.153,
+        "over10": 2.98,
+        "over64": 1.415,
+        "sparse": false,
+        "ssim": 0.6826
+      },
+      {
+        "coverage": 0.0487,
+        "histogram": 0.9597,
+        "mean_abs": 5.523,
+        "over10": 4.809,
+        "over64": 3.584,
+        "sparse": false,
+        "ssim": 0.0503
+      },
+      {
+        "coverage": 0.1327,
+        "histogram": -0.047,
+        "mean_abs": 17.466,
+        "over10": 13.253,
+        "over64": 12.466,
+        "sparse": false,
+        "ssim": 0.5313
+      },
+      {
+        "coverage": 0.2423,
+        "histogram": 0.976,
+        "mean_abs": 16.923,
+        "over10": 15.13,
+        "over64": 13.599,
+        "sparse": false,
+        "ssim": 0.5805
+      },
+      {
+        "coverage": 0.0629,
+        "histogram": 0.9116,
+        "mean_abs": 8.45,
+        "over10": 6.281,
+        "over64": 5.443,
+        "sparse": false,
+        "ssim": 0.0689
+      },
+      {
+        "coverage": 0.2409,
+        "histogram": 0.1336,
+        "mean_abs": 22.023,
+        "over10": 24.069,
+        "over64": 20.743,
+        "sparse": false,
+        "ssim": 0.7612
+      },
+      {
+        "coverage": 0.2865,
+        "histogram": 0.9931,
+        "mean_abs": 14.748,
+        "over10": 12.442,
+        "over64": 11.722,
+        "sparse": false,
+        "ssim": 0.7307
+      },
+      {
+        "coverage": 0.2323,
+        "histogram": 0.9993,
+        "mean_abs": 11.223,
+        "over10": 9.56,
+        "over64": 8.057,
+        "sparse": false,
+        "ssim": 0.612
+      }
+    ],
+    "ssim": 0.6407
+  },
   "real-basic-theme": {
     "fonts": {
       "available": [

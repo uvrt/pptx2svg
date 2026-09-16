@@ -111,6 +111,7 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | --- | --- | --- | --- |
 | `table test.pptx` | **0.9895** | 0.9984 | pass |
 | `authoring-integration.pptx` | 0.9327 | 0.9984 | SSIM |
+| `chart-gallery.pptx` | 0.6407 | 0.8169 | SSIM |
 | `real-college-template.pptx` (local only) | 0.8003 | 0.8753 | SSIM, hist |
 | `real-basic-theme.pptx` | skipped | — | PowerPoint drew MS Gothic where the deck names ＭＳ Ｐゴシック |
 | `sample.pptx` | skipped | — | same |
@@ -118,7 +119,7 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | `real-product-page.pptx` | skipped | — | same |
 | `sample-issue-387.pptx` | skipped | — | same |
 
-**Five of eight fixtures cannot be scored at all, and that is the single biggest hole in
+**Five of nine fixtures cannot be scored at all, and that is the single biggest hole in
 this project's feedback loop.** Not because the renderer is wrong on them — because the
 oracle and the renderer disagree about which *face* to draw, so any number would measure
 font resolution rather than layout. Two routes close it, neither taken here because both
@@ -126,6 +127,10 @@ change the developer's machine rather than the repository: install Noto Sans JP 
 PowerPoint can see it (`~/Library/Fonts`) and re-export the three decks that name it, or
 rewrite the two Japanese decks' themes to name `MS Gothic` — the face PowerPoint actually
 resolves — instead of ＭＳ Ｐゴシック.
+
+`chart-gallery.pptx` is the fourth scorable deck and the only chart-heavy one; what its
+0.6407 is made of is in *3.2a* below, since almost all of it is a statement about chart
+types rather than about this deck.
 
 `real-college-template.pptx` escapes that trap: it names only Arial, Calibri and
 Wingdings, all of which this machine has, so it is **the first real-world deck measurable
@@ -592,6 +597,7 @@ image = page.render(scale=1280 / page.get_size()[0]).to_pil()
 | **−9074 has a fourth cause, and it survives sessions** | A presentation left open from an *earlier* session — windowless, unlisted in the Window menu, raising no dialog — makes every export fail −9074 with nothing visible to blame. One was found on arrival as `zz-bisect [Repaired]`, days old. `get name of every presentation` is the diagnostic the other health checks miss: it names the zombie where `count of presentations` and a dialog sweep both come back clean. `pkill` and relaunch is again the only fix. **Run the name check first** — −9074 genuinely does not mean “unapproved path”. |
 | A fifth input defect, and it **repairs** rather than hangs | A content-type `Override` whose `PartName` starts `//`. `tests/deckbuilder.py` prepends the leading slash itself, so a caller passing `f"/{part}"` produces one; the three chart probe fixtures did exactly that. Our reader never looks at `[Content_Types].xml`, so the suite passed, but PowerPoint opens such a deck as `<name> [Repaired]` -- and the export script then fails with −2700 "no presentation matched", because the repaired presentation's full name is no longer the path it was asked for. Fixed in `tests/test_chart.py`; check any new caller. |
 | **A third input defect with the hang signature** | Two series in one plot group both claiming `<c:idx val="0"/><c:order val="0"/>`. PowerPoint opens the deck and then never returns, exactly like the non-standard preset name and the partial `avLst` already listed. Out-of-order children of `c:ser` and `c:lineChart` (the schema's sequence is strict: `marker` before `dLbls`, the group-level `marker` *after* every `ser`) cost an earlier −9074 the same way. When a generated probe deck hangs, validate it against the schema sequence before suspecting the oracle. |
+| **A hand-written ChartEx cannot be opened at all** | Four `cx:chartSpace` parts — a treemap with `numDim type="size"`, the same with `type="val"`, a minimal waterfall, and a treemap naming an embedded workbook through `cx:externalData` — were tried at both `ppt/charts/chart18.xml` and the `chartEx18.xml` spelling PowerPoint itself uses. **Every one hangs PowerPoint inside `open`**, and a deck carrying one exports to *nothing*: `save ... as save as PDF` returns success and writes no file, after which every later export fails −9074 until `pkill`. The same deck without that one slide exports in seconds. So `chart-gallery.pptx` has no ChartEx slide — the acceptance test for a fixture is that PowerPoint opens it. Getting a real ChartEx into the corpus needs a deck Office wrote. |
 | The export script cannot clear that dialog | It is blocked inside `open` and never regains control. Dismissal has to run in a separate process, and **Escape does not work** — only a real button click does, matched across localisations (`Annuleren` on a Dutch install). |
 | `count of presentations` is not a health check | A wedged PowerPoint answers `0` while still refusing every file. |
 | Restarting re-raises the dialog | PowerPoint reopens the document it was killed over. Dismiss rather than restart; and after any restart, poll until it answers — an `open` sent mid-launch is refused instantly with −9074. |
@@ -732,9 +738,13 @@ Pure NumPy, dev-only, behind the `fidelity` extra; the library stays standard-li
 
 ### 0.4 Fixture corpus
 
-Eight fixtures is thin, **only three of them can be scored** (see the baseline table
+Nine fixtures is thin, **only four of them can be scored** (see the baseline table
 above), and **none contain SmartArt** — Phase 2 needed inputs before it needed code, and
-got them from 46 real decks outside the repository instead. Generate a synthetic corpus with `python-pptx`, one feature per slide (each preset
+got them from 46 real decks outside the repository instead. The chart half of this is
+now done rather than planned: `tests/fixtures/chart-gallery.pptx`, written by
+`tools/make_chart_gallery.py`, is one chart type per slide across every `c:*Chart` group
+element the reader knows, and it is authored in the theme's Aptos with no CJK anywhere
+precisely so the oracle scores it instead of skipping it. Generate a synthetic corpus with `python-pptx`, one feature per slide (each preset
 family, each fill type, each bullet scheme, each table configuration). **[pptx-renderer]**
 does this with a case generator and a support catalogue; the generated-corpus idea ports
 directly even though their generator does not.
@@ -2245,6 +2255,52 @@ says nothing about the *contents*, and that the four orientation bugs all lived 
 variant with no corpus deck behind it. Anything drawn, not just the box it is drawn in,
 needs its own assertion; a parsed field with no reader needs one too.
 
+### 3.2a What the chart gallery measures
+
+`tests/fixtures/chart-gallery.pptx` (written by `tools/make_chart_gallery.py`, one chart
+type per slide, 17 slides) is the first chart-heavy deck the oracle can score. Its mean is
+**SSIM 0.6407 / hist 0.8169**, and reading that as "charts are 64% right" would be wrong
+twice over — three of the seventeen slides are types we deliberately do not draw, and the
+rest are thin ink on white, where SSIM punishes a one-pixel shift like a missing element.
+The per-slide numbers are the measurement; the mean is not.
+
+| slide | type | SSIM | hist | cov | reading |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `barChart` col, rotated labels | 0.5509 | 0.9921 | 0.083 | bars and labels agree; the plot rectangle is a few pt wider than PowerPoint's |
+| 2 | `barChart` bar, bottom value axis, data labels | 0.9310 | 0.9989 | 0.138 | — |
+| 3 | `lineChart` | 0.6683 | 0.6117 | 0.040 | visually the same chart; 4% coverage of 1 pt strokes is what the number is |
+| 4 | `areaChart` stacked | 0.8814 | 0.9998 | 0.394 | — |
+| 5 | `scatterChart` | 0.7759 | 0.6225 | 0.031 | sparse, as slide 3 |
+| 6 | `bubbleChart` | 0.4068 | 0.9951 | 0.127 | **axis defect**: PowerPoint runs the y axis 0–12 by 2, we run 0–10 by 1 — it pads for the bubble *radii*, we pad for the centres |
+| 7 | `pieChart` | 0.8968 | 0.9993 | 0.240 | — |
+| 8 | `doughnutChart` | 0.9717 | 0.9999 | 0.188 | the best slide in the deck |
+| 9 | `ofPieChart` bar form | 0.7924 | 0.9991 | 0.323 | **packing defect**: our pie and bar are both visibly smaller than PowerPoint's. `OF_PIE_BAR_GAP_DIVISOR` was fitted to one observation and this is the second |
+| 10 | `radarChart` | 0.6826 | 0.7434 | 0.036 | rings and spokes agree exactly, including the ring count; sparse |
+| 11 | `stockChart` | **0.0503** | 0.9597 | 0.049 | **legend defect**: the series state `<a:ln><a:noFill/></a:ln>`, PowerPoint's legend keys are therefore invisible, ours are three filled accent swatches. On a slide that is 5% ink, three swatches are most of the ink |
+| 12 | `surfaceChart` | 0.5313 | −0.0470 | 0.133 | deferred by design: our empty frame against a full 3-D surface and its banded legend. The negative histogram is two unrelated images, which is the honest number |
+| 13 | `bar3DChart` | 0.5805 | 0.9760 | 0.242 | see 3.4 |
+| 14 | `line3DChart` | 0.0689 | 0.9116 | 0.063 | see 3.4 |
+| 15 | `pie3DChart` | 0.7612 | 0.1336 | 0.241 | see 3.4 |
+| 16 | `area3DChart` | 0.7307 | 0.9931 | 0.286 | see 3.4 |
+| 17 | combo | 0.6120 | 0.9993 | 0.232 | see 3.3 |
+
+Three defects are new and none of them were visible in the corpus before this deck:
+
+* **A bubble chart's value axis must clear the bubbles, not the centres.** Slide 6 is the
+  cleanest of the three: same data, same frame, a whole extra decade of headroom.
+* **A legend key ignores `<a:ln><a:noFill/></a:ln>` on its series.** Slide 11's stock
+  chart is the case that shows it, because a stock chart is the one type whose series are
+  routinely drawn with no line at all. The chart body is right; only the key is wrong.
+* **`ofPieChart`'s bar form packs too small.** `resolve/chart.OF_PIE_BAR_GAP_DIVISOR`
+  carries a note saying it rests on a single `gapWidth=100` reading; slide 9 is a second
+  reading of the same configuration and it disagrees.
+
+Slides 3, 5 and 10 are the reminder the `tools/fidelity.py` docstring already gives:
+**SSIM is not a percentage of correctness on sparse line art.** A line chart that is
+indistinguishable from PowerPoint's at a glance scores 0.67 because 4% of the pixels are
+ink and half a pixel of stroke displacement moves all of them. Chase slides 6, 9 and 11
+before chasing those.
+
 ### 3.3 Combo charts (M)
 
 Multiple `c:*Chart` groups sharing a category axis with a secondary value axis. The reader
@@ -2252,12 +2308,37 @@ already returns every group and each one's `c:axId` list, and the renderer picks
 group it can draw — so a combo chart whose *second* group is a bar still draws the bar.
 Drawing several groups at once, and the secondary axis, is not done.
 
+**Now measured, on `chart-gallery.pptx` slide 17** (a `barChart` and a `lineChart` over a
+secondary value axis that `crosses="max"` puts on the right): SSIM **0.6120**, histogram
+0.9993. We draw the four columns and nothing else; PowerPoint draws the columns, the
+margin line with its markers, the right-hand 0–16 axis and a two-entry legend. The
+histogram barely moves because the columns dominate the ink, which is a good illustration
+of why both gates are read together. The slide and
+`tests/vrt/chart-gallery/slide-17.svg` pin the defect until it is fixed.
+
 ### 3.4 3-D chart fallbacks (S)
 
 `bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents —
 `parse/chart.flat_chart_kind` does this and `bar3DChart` therefore already draws flat.
-**[pptx-renderer]** does the same and is explicit that it is not PowerPoint-perfect; no
-3-D chart has been compared against real output here either.
+**[pptx-renderer]** does the same and is explicit that it is not PowerPoint-perfect.
+
+**They have now been compared against real output**, on slides 13–16 of
+`chart-gallery.pptx`, and the flat fallback is a good deal further from PowerPoint than
+"drawn flat" suggests. PowerPoint draws a genuine perspective scene for all four: a floor,
+a back wall, gridlines that run into the depth, and a plot rectangle displaced and shrunk
+to make room for it.
+
+| slide | group | SSIM | hist | what PowerPoint drew instead |
+| --- | --- | --- | --- | --- |
+| 13 | `bar3DChart` | 0.5805 | 0.9760 | extruded boxes on a floor, the plot pushed right and up by the depth |
+| 14 | `line3DChart` | **0.0689** | 0.9116 | ribbons in depth — the least recognisable of the four |
+| 15 | `pie3DChart` | 0.7612 | **0.1336** | an ellipse half the height of our circle, with a shaded extruded side; the shading is what takes the histogram to 0.13 |
+| 16 | `area3DChart` | 0.7307 | 0.9931 | a 3-D box, and a value axis of 0–50 by 5 where ours is 0–60 by 10 |
+
+The axis disagreement on slide 16 is the useful part: the depth reservation changes the
+plot's height, the height decides the interval count (Phase 0's N-meter), and so a 3-D
+chart drawn flat gets a *different axis*, not merely different geometry. Any fix has to
+start there rather than with the ribbons.
 
 ---
 

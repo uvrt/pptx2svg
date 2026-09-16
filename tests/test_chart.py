@@ -5787,3 +5787,89 @@ def test_an_office_2016_chartex_frame_says_what_it_is(authoring):
     assert "Office 2016" in warning.message
     assert not any(w.code == "chart-unreadable" for w in options.warnings)
     assert isinstance(model.slides[0].elements[-1], m.ShapeElement)
+
+
+# --------------------------------------------------------------------------------------
+# The chart gallery fixture
+# --------------------------------------------------------------------------------------
+
+#: Slide number -> the ``c:*Chart`` group element it leads with, in the order
+#: `chart-gallery.pptx` puts them.  Written down here rather than read back out of the
+#: deck so that a slide reordered in `tools/make_chart_gallery.py` fails this test instead
+#: of silently renumbering what every other assertion about that deck means.
+GALLERY_SLIDES = (
+    "barChart",
+    "barChart",
+    "lineChart",
+    "areaChart",
+    "scatterChart",
+    "bubbleChart",
+    "pieChart",
+    "doughnutChart",
+    "ofPieChart",
+    "radarChart",
+    "stockChart",
+    "surfaceChart",
+    "bar3DChart",
+    "line3DChart",
+    "pie3DChart",
+    "area3DChart",
+    "barChart",  # the combo's first group; its `lineChart` is the one we drop
+)
+
+
+def test_the_chart_gallery_holds_one_of_every_group_element(chart_gallery):
+    """The fixture's coverage claim, checked against the file rather than its README.
+
+    Every ``c:*Chart`` element `parse/chart.CHART_GROUP_ELEMENTS` recognises has to appear
+    in this deck, because that is the whole reason it exists: the chart renderer is the
+    largest body of measured behaviour here and no other committed deck exercises more
+    than four of its types.  A group element added to the reader without a slide here is
+    a type nothing renders end to end.
+    """
+    from pptx2svg.parse.chart import CHART_GROUP_ELEMENTS
+
+    with zipfile.ZipFile(chart_gallery) as archive:
+        names = sorted(
+            (name for name in archive.namelist() if re.fullmatch(r"ppt/charts/chart\d+\.xml", name)),
+            key=lambda name: int(re.search(r"(\d+)", name).group(1)),
+        )
+        parts = [archive.read(name).decode("utf-8") for name in names]
+    assert len(parts) == len(GALLERY_SLIDES)
+    for number, (part, expected) in enumerate(zip(parts, GALLERY_SLIDES), start=1):
+        groups = re.findall(r"<c:(\w+Chart)[ >]", part)
+        assert groups[0] == expected, f"slide {number} leads with {groups[0]}"
+
+    present = {group for part in parts for group in re.findall(r"<c:(\w+Chart)[ >]", part)}
+    # `surface3DChart` is the one group element with no slide of its own: `surfaceChart`
+    # already covers the deferral, and `flat_chart_kind` maps the two to one answer.
+    assert set(CHART_GROUP_ELEMENTS) - present == {"surface3DChart"}
+
+
+def test_only_the_gallerys_surface_slide_refuses_to_draw(chart_gallery):
+    """Sixteen slides draw; the seventeenth says so and draws an empty frame.
+
+    `surfaceChart` is measured and deliberately deferred, and this is the committed
+    end-to-end evidence that the refusal is the *honest* one -- a warning naming the type,
+    plus a positioned but undrawn frame -- rather than a blank slide nobody notices.  It
+    is also the tripwire for the opposite mistake: if some future change starts drawing a
+    surface, this test and `tests/vrt/chart-gallery/slide-12.svg` both fail, which is the
+    right amount of noise for a chart type going from refused to drawn.
+    """
+    options = ConvertOptions()
+    model = convert_pptx_to_model(chart_gallery, options)
+
+    unsupported = [w for w in options.warnings if w.code == "chart-unsupported-type"]
+    assert len(unsupported) == 1
+    assert "surfaceChart" in unsupported[0].message
+    assert not any(w.code == "chart-unreadable" for w in options.warnings)
+
+    # An undrawn chart is a `ShapeElement` with neither fill nor outline, which is what
+    # `_empty_graphic_frame` produces; every other slide ends in a real chart.
+    frame = model.slides[11].elements[-1]
+    assert isinstance(frame, m.ShapeElement)
+    assert frame.fill is None and frame.outline is None
+    for number, slide in enumerate(model.slides, start=1):
+        if number == 12:
+            continue
+        assert isinstance(slide.elements[-1], m.ChartElement), f"slide {number}"

@@ -56,6 +56,12 @@ def financial() -> Path:
     return FIXTURE_DIR / "real-financial-report.pptx"
 
 
+@pytest.fixture(scope="session")
+def chart_gallery() -> Path:
+    """One chart type per slide -- see `tools/make_chart_gallery.py`, which writes it."""
+    return FIXTURE_DIR / "chart-gallery.pptx"
+
+
 #: Decks that are not ours to redistribute live outside the repository, in the gitignored
 #: `scratch/` directory, so a checkout can still use one when the developer has a copy.
 LOCAL_DIR = Path(__file__).resolve().parents[1] / "scratch"
