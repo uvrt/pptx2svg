@@ -64,7 +64,7 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8753,
+    "histogram": 0.8752,
     "slides": [
       {
         "coverage": 0.9828,
@@ -94,13 +94,13 @@
         "ssim": 0.7627
       },
       {
-        "coverage": 0.1826,
-        "histogram": 0.9899,
-        "mean_abs": 12.33,
-        "over10": 10.116,
-        "over64": 6.836,
+        "coverage": 0.182,
+        "histogram": 0.9884,
+        "mean_abs": 12.422,
+        "over10": 10.076,
+        "over64": 6.971,
         "sparse": false,
-        "ssim": 0.3721
+        "ssim": 0.3719
       },
       {
         "coverage": 0.5657,
