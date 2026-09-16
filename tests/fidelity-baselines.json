@@ -39,16 +39,16 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.817,
+    "histogram": 0.8172,
     "slides": [
       {
-        "coverage": 0.0825,
-        "histogram": 0.9925,
-        "mean_abs": 3.547,
-        "over10": 3.483,
-        "over64": 2.269,
+        "coverage": 0.0786,
+        "histogram": 0.996,
+        "mean_abs": 3.081,
+        "over10": 3.0,
+        "over64": 1.817,
         "sparse": false,
-        "ssim": 0.5611
+        "ssim": 0.6556
       },
       {
         "coverage": 0.1377,
@@ -186,16 +186,16 @@
         "ssim": 0.7307
       },
       {
-        "coverage": 0.2323,
-        "histogram": 0.9993,
-        "mean_abs": 11.223,
-        "over10": 9.56,
-        "over64": 8.057,
+        "coverage": 0.2136,
+        "histogram": 0.9994,
+        "mean_abs": 5.944,
+        "over10": 5.532,
+        "over64": 3.831,
         "sparse": false,
-        "ssim": 0.612
+        "ssim": 0.7384
       }
     ],
-    "ssim": 0.6413
+    "ssim": 0.6543
   },
   "real-basic-theme": {
     "fonts": {
