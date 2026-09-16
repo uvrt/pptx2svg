@@ -65,8 +65,10 @@ Host fonts
 Float formatting, and the libm underneath it
     Numbers are rounded to three decimals and formatted by Python's own dtoa, which is
     platform-independent; ``sin``/``cos``/``log10`` are not.  Perturbing every one of them
-    by an ulp changes exactly one snapshot, through one expression, and
-    :func:`test_the_platform_agrees_about_log10_of_a_power_of_ten` is the tripwire for it.
+    by an ulp used to change exactly one snapshot, through one expression in
+    `resolve/chart.py`; that expression now verifies what ``log10`` told it, and
+    :func:`test_a_one_ulp_error_in_log10_does_not_move_a_snapshot` renders the deck it
+    moved with ``log10`` nudged both ways and requires the committed bytes back.
 
 Rebaselining
 ------------
@@ -109,6 +111,11 @@ REBASELINE = "python -m pytest tests/test_vrt.py --update-snapshots"
 #: The deck the cross-process determinism check renders.  The largest in the corpus, and
 #: the one with charts and CJK text -- the two subsystems that iterate over sets.
 HASH_SEED_DECK = "real-financial-report.pptx"
+
+#: The deck the ``log10`` perturbation used to move, and the only one in the corpus it
+#: could: slide 4 is a radar spanning exactly 0..100.  See
+#: :func:`test_a_one_ulp_error_in_log10_does_not_move_a_snapshot`.
+LOG10_DECK = "real-financial-report.pptx"
 
 
 def render(deck: Path) -> list[str]:
@@ -262,36 +269,51 @@ def test_the_render_does_not_depend_on_the_font_bundle(monkeypatch, authoring, f
             )
 
 
-def test_the_platform_agrees_about_log10_of_a_power_of_ten():
-    """The one place a 1-ulp libm difference could rewrite a whole slide.
+@pytest.mark.parametrize("direction", [-math.inf, math.inf])
+def test_a_one_ulp_error_in_log10_does_not_move_a_snapshot(monkeypatch, direction):
+    """The one place a 1-ulp libm difference could rewrite a slide, and no longer can.
 
     Measured rather than reasoned about: perturbing *every* `math` transcendental in the
     render by one ulp -- systematically, in one direction, which is harsher than any real
-    libm disagreement -- moves not a byte of fifteen of the sixteen snapshots.  The
-    exception is `real-financial-report/slide-04.svg`, and perturbing one function at a
-    time narrows it to `log10` alone, through
+    libm disagreement, since a faithful implementation is only allowed to be wrong one way
+    at a time -- moved not a byte of fifteen of the sixteen snapshots.  The exception was
+    `real-financial-report/slide-04.svg`, and perturbing one function at a time narrowed
+    it to `log10` alone, through
 
         unit = 10.0 ** math.floor(math.log10(span))     # resolve/chart.py
 
     That slide's radar spans exactly 0..100, so ``log10`` returns exactly 2.0 and the axis
-    unit is 100.  One ulp low and ``floor`` gives 1, the unit becomes 10, and the chart
-    re-lays out: the document grows from 29,659 characters to 34,639.  `floor` after a
-    transcendental has no small errors -- it has no error at all, or a factor of ten.
+    unit is 100.  One ulp low and ``floor`` gave 1, the unit became 10, and the chart
+    re-laid out: 29,659 characters of SVG became 34,639.  `floor` after a transcendental
+    has no small errors -- it has no error at all, or a factor of ten.
 
-    Every mainstream libm returns 2.0 here, because the true value is exactly
-    representable and correct rounding therefore requires it; only a merely *faithful*
-    implementation is allowed to return the value below.  This test is the tripwire, so
-    that on a platform where that is not true the failure says which platform disagreed
-    about what, instead of one unexplained snapshot mismatch on one CI leg.  The durable
-    fix is in `resolve/chart.py`, not here: that expression amplifies an ulp into a
-    different chart and should not.
+    `resolve/chart.py` now verifies that exponent instead of trusting it (`_decade`), so
+    this is a test of *our* code rather than of the platform's: the same deck, rendered
+    with `log10` nudged an ulp each way, has to come out byte-identical to what is
+    committed.  It replaces a tripwire that asserted this machine's ``log10(100.0)`` is
+    2.0 -- true everywhere in practice, but it would have failed a correct build on a
+    merely faithful libm, which is the opposite of what a gate is for.
+    `tests/test_chart.py` holds the unit-level version of the same property.
     """
-    for exponent in range(-3, 7):
-        power = 10.0**exponent
-        assert math.floor(math.log10(power)) == exponent, (
-            f"this platform's log10({power!r}) is {math.log10(power)!r}, "
-            f"not {float(exponent)!r}: chart axis units are computed from "
-            f"floor(log10(span)) and will differ here"
+    deck = FIXTURE_DIR / LOG10_DECK
+    correctly_rounded = math.log10
+
+    def perturbed(value: float) -> float:
+        return math.nextafter(correctly_rounded(value), direction)
+
+    # The whole `math` module, not one file's import of it: the thing being simulated is a
+    # platform whose libm differs, which every caller in the render sees at once.  Undone
+    # before the comparison, the way the font-bundle test does it, so that a failure is
+    # reported by an unperturbed interpreter.
+    monkeypatch.setattr(math, "log10", perturbed)
+    documents = render(deck)
+    monkeypatch.undo()
+
+    for number, document in enumerate(documents, start=1):
+        expected = read_snapshot(snapshot_path(deck, number))
+        assert document == expected, (
+            f"{LOG10_DECK} slide {number} moves when log10 is off by one ulp "
+            f"towards {direction}:\n{describe_difference(expected, document)}"
         )
 
 

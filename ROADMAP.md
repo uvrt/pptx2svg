@@ -643,30 +643,57 @@ worse than none:
   Python's own dtoa, both platform-independent. libm is not: `sin`, `cos`, `log10` and
   friends may differ by an ulp between glibc, macOS and MSVC. Measured rather than argued
   — perturbing *every* transcendental in the render by one ulp, systematically, in one
-  direction, moves not a byte of fifteen of the sixteen snapshots. See the finding below
-  for the sixteenth.
+  direction, moved not a byte of fifteen of the sixteen snapshots. The sixteenth is the
+  finding below, and it has since been fixed; nothing in the corpus moves either way now.
 
-#### Found while proving that: `floor(log10(span))` amplifies an ulp into a different chart
+#### Found while proving that: `floor(log10(span))` amplified an ulp into a different chart — **fixed**
 
-`resolve/chart.py` picks an axis unit with
+`resolve/chart.py` picked an axis unit with
 
     unit = 10.0 ** math.floor(math.log10(span))
 
 `real-financial-report.pptx` slide 4 is a radar spanning exactly 0..100, so `log10` returns
 exactly 2.0 and the unit is 100. One ulp low — `1.9999999999999998` — and `floor` gives 1,
 the unit becomes 10, and the slide re-lays out: 29,659 characters of SVG become 34,639.
-That is the *only* byte anywhere in the corpus that a 1-ulp libm difference can move, and
-it does not move by a digit, it moves by a factor of ten.
+That was the *only* byte anywhere in the corpus that a 1-ulp libm difference could move,
+and it did not move by a digit, it moved by a factor of ten.
 
 Every mainstream libm returns 2.0 here, because the true value is exactly representable and
 correct rounding therefore requires it; only a merely *faithful* implementation is allowed
-to return the value below, which is why this has never been seen. It is a tripwire in
-`tests/test_vrt.py` for now (`test_the_platform_agrees_about_log10_of_a_power_of_ten`), so
-a platform that disagrees says so by name instead of producing one unexplained snapshot
-mismatch on one CI leg. **The durable fix belongs in `resolve/chart.py`** — snap the
-exponent, or derive the unit without a transcendental — and was left alone here because
-this phase was not to touch `src/`. A chart axis should not be one ulp away from a
-different chart.
+to return the value below, which is why no user ever hit this. It was worth fixing anyway:
+the failure mode is silent, total, and would have surfaced as one unexplained snapshot
+mismatch on somebody's CI leg.
+
+**The fix is `_decade()` in `resolve/chart.py`**, used by both sites that wanted a power of
+ten (the axis unit and the 1-2-5 ladder in `_next_nice_unit`). It takes
+`floor(log10(value))` as a *guess* and then checks it against the input, correcting by one
+step in whichever direction the logarithm rounded; comparing a value with a power of ten is
+an ordinary float comparison where comparing logarithms is a transcendental. Any `log10`
+accurate to better than a whole decade — every real one — now gives the same axis. Two
+details that were not free:
+
+- The powers come from `float(f"1e{n}")`, CPython's own correctly-rounded parser, not from
+  `10.0 ** n`, which is libm again and raises `OverflowError` at `1e309` where the parser
+  returns `inf`. That `inf`, and the `0.0` at `1e-324`, are what let the correction walk
+  off either end of the double range and stop.
+- A span is a subtraction of authored decimals and lands *just under* round numbers:
+  `0.24 - 0.14` is `0.09999999999999998` and `1.13 - 1.03` is `0.09999999999999987`. A
+  strict comparison puts the second in the decade below and steps that axis by 0.005.
+  `log10`'s rounding used to supply a forgiving window here by accident — which is why the
+  old behaviour was right on the first of those and wrong on the second — so the window is
+  now explicit and even: `_DECADE_SLACK = 1e-12`, wider than any such residue (a few ulps,
+  ~1e-16 relative) and nine orders of magnitude narrower than a span like 9.99 that misses
+  a decade because it was written that way. That window — between one part in 1e16 and one
+  in 1e12 below a power of ten — is the one place the fix deliberately changes an answer,
+  and it changes it towards the humane one. No snapshot and no fidelity score moves.
+
+The tripwire that stood in for the fix (`test_the_platform_agrees_about_log10_of_a_power_of_ten`)
+is **gone**, replaced by `test_a_one_ulp_error_in_log10_does_not_move_a_snapshot`: it
+renders that same deck with `log10` nudged an ulp each way and demands the committed bytes
+back. Asserting a property of the platform would now fail a *correct* build on a merely
+faithful libm — the opposite of what a gate is for — while asserting the property of our
+own code is what the snapshots actually depend on. `tests/test_chart.py` holds the
+unit-level version, driving `_decade` with the perturbed logarithm directly.
 
 `real-college-template.pptx` is **not** snapshotted: a render of it contains its text and
 its images, so committing one would redistribute a deck that is not ours to redistribute.
