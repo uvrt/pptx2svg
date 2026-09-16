@@ -556,6 +556,17 @@ VARY_COLOR_CYCLE_TINT = 0.23
 #: where 36.3 pt was available.  A target band of roughly 16 to 24 pt fits those two and
 #: every cell of the density table in ROADMAP.md -- and then dies on the same stacked
 #: probe that killed the last candidate, which accepts 14.5 pt.  See ROADMAP.md.
+#:
+#: **101 readings since say the halving is the wrong shape**, and that the five
+#: observations above are coarsened results rather than base ones: on a tall frame
+#: PowerPoint draws 0..1842 by **200**, not by 500.  The base unit it picks is the finest
+#: 1-2-5 step of at least a tenth of the range after 5% of headroom at each end -- 75 of
+#: the 94 scatter readings exactly, the other 19 a coarsening of it on short axes, and
+#: every one of the 94 extents -- where this rule reproduces 29 units and 21 whole axes.
+#: It is **not changed here**: what coarsens it is still unmeasured, and shipping the base
+#: rule without that stage would draw eleven gridlines where PowerPoint draws four on the
+#: short plots the corpus is full of.  ROADMAP.md, "The unit rule is not the power of ten
+#: below the span", carries the readings and what they eliminate.
 AXIS_HALVING_RATIO = 2.0
 
 #: Data that sits this far up its own range does not get an axis pulled back to zero.
@@ -693,6 +704,14 @@ def _axis_extent(
     **unanchored** axis has no such floor and its low end bumps like its high end --
     measured on the scatter probes, where 100..104 came back **98**..106 and 2010..2020
     came back **2005**..2025, both a whole unit clear of the data at each end.
+
+    The strict bump is an approximation of what PowerPoint does, and the approximation is
+    now measured: it rounds outwards from a range padded by **5% at each end** rather than
+    from the data, which is the same answer whenever the data lands on a unit boundary and
+    a different one when it does not.  0.3..4.9 is the cheapest counter-example -- 4.9 is
+    already clear of a 0..5 axis, and PowerPoint draws 0..6 -- and the padded rule
+    reproduces all 94 extents measured, this one included.  Changing it is part of the
+    tick-density work, not of this function; see ROADMAP.md.
     """
     maximum = math.ceil(high / unit) * unit
     if strict and maximum <= data_maximum:
@@ -749,6 +768,22 @@ def _next_nice_unit(unit: float) -> float:
 #: decimals can leave (those are a few ulps, ~1e-16 relative) and far narrower than a span
 #: that misses a decade because it was *written* that way: 9.999999999999 is promoted to
 #: the decade of 10, 9.9999999999 is not, and 9.99 is not by nine orders of magnitude.
+#:
+#: **The width is not measured, and a measurement went looking.**  Thirty scatter probes
+#: were built whose unanchored value-axis span falls under a power of ten by a relative
+#: 1e-15, 2e-14, 1e-13, 1e-11, 1e-9, 1e-6, 1e-4, 1e-2 and 5e-2 -- a ladder that steps clean
+#: over this constant -- and exported through PowerPoint (``tools/make_axis_probe.py``,
+#: deck ``axis-decade``).  **The shortfall changed nothing anywhere.**  Every probe on a
+#: given base came back with the same axis as its siblings: 1.02..1.14 by 0.02, 10.2..11.4
+#: by 0.2, 1020..1140 by 20.  A span written as a plain 0.095 and one ten ulps under a
+#: tenth are drawn identically, so no experiment on this path can bracket a decade
+#: boundary: the unit PowerPoint picks is not a function of which decade the span falls in.
+#: What it *is* a function of is in ROADMAP.md, "The unit rule is not the power of ten
+#: below the span"; it is a tick-density answer, not one a constant here can carry.
+#:
+#: So this number stays what it was, and stays labelled for what it is: an internal
+#: promise that two spans a few ulps apart are treated alike, chosen wide enough to cover
+#: any authored subtraction and narrow enough to promote nothing a reader would call short.
 _DECADE_SLACK = 1e-12
 
 
