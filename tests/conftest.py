@@ -12,6 +12,25 @@ def fixture_paths() -> list[Path]:
     return sorted(FIXTURE_DIR.glob("*.pptx"))
 
 
+def pytest_addoption(parser) -> None:
+    parser.addoption(
+        "--update-snapshots",
+        action="store_true",
+        default=False,
+        help=(
+            "rewrite the committed SVG in tests/vrt/ from the current render instead of "
+            "comparing against it. Read the diff before committing: every line of it is "
+            "a change in what a user sees. See tests/vrt/README.md."
+        ),
+    )
+
+
+@pytest.fixture(scope="session")
+def update_snapshots(request) -> bool:
+    """Whether ``--update-snapshots`` was passed; see :mod:`tests.test_vrt`."""
+    return bool(request.config.getoption("--update-snapshots"))
+
+
 @pytest.fixture(params=fixture_paths(), ids=lambda path: path.stem)
 def pptx_path(request) -> Path:
     return request.param

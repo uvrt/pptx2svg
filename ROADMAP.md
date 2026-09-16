@@ -605,19 +605,79 @@ image = page.render(scale=1280 / page.get_size()[0]).to_pil()
 corpus, exports each deck once, caches the PNGs by input SHA-256, and skips cleanly when
 PowerPoint is absent (so `pytest` still passes on Linux CI and other machines).
 
-### 0.2 Snapshot VRT (the regression net)
+### 0.2 Snapshot VRT (the regression net) — **done**
 
-Ground truth needs PowerPoint; regression detection does not. Commit our *own* rendered
-PNGs and fail on drift.
+Ground truth needs PowerPoint; regression detection does not. `tests/vrt/` carries one
+committed SVG per slide of every deck in `tests/fixtures/` — 16 files, 195 kB — and
+`tests/test_vrt.py` re-renders them and compares byte for byte. `--update-snapshots`
+rebaselines, and skips rather than passes, so the flag cannot produce a green run.
 
-- `tests/vrt/` with committed snapshots and a `--update-snapshots` flag.
-- Rendering is already deterministic (counter-based ids, generated font metrics) **and
-  the fonts are now pinned**: `pip install 'pptx2svg[fonts]'` and the default render
-  ignores the host entirely, which is what makes a committed PNG snapshot meaningful
-  across macOS and CI. Before that, snapshots would have differed by machine.
+**SVG, not the PNGs this section used to ask for.** A PNG additionally encodes resvg's
+version and its antialiasing, so bumping `resvg-py` would fail every fixture at once and
+read as a rendering regression — a gate that cries wolf on a dependency bump is a gate
+people learn to rebaseline through. It is also 3x the bytes (587 kB against 195 kB on this
+corpus) and, already compressed, those bytes never shrink, in the pack file or in history,
+on every rebaseline, forever. The SVG is the part we author; the rasteriser is somebody
+else's output and `tools/fidelity.py` already exercises it.
+
+The font bundle turns out **not** to be what makes this work, which is worth correcting
+here because this section claimed it was. The SVG path opens no font file at all: widths
+come from the generated tables in `text/metrics.py` and the `font-family` is a name for a
+rasteriser to resolve later. Measured — with the bundle and without it, all sixteen
+documents are identical to the byte; only `ConvertOptions.warnings` differ, which is why
+warnings are not snapshotted. The bundle is what makes a *PNG* reproducible. So these
+snapshots are meaningful on a bare checkout too, and nothing has to skip.
+
+What was verified rather than assumed, because a snapshot that differs per machine is
+worse than none:
+
+- **`PYTHONHASHSEED`.** Set iteration order varies between processes and never within one,
+  so rendering twice in one process proves nothing. Two subprocesses under two fixed,
+  different seeds agree, and a test keeps it that way.
+- **Line endings.** `.gitattributes` pins `tests/vrt/**.svg` to `eol=lf` so Git on Windows
+  cannot rewrite them on checkout; the test normalises on read as well, and asserts the
+  render itself emits no `\r` so that normalisation cannot mask a real change.
+- **Encoding.** Every read and write names UTF-8. These files carry Japanese, and this
+  repository has already lost a Windows run to `read_text()` following the locale.
+- **Float formatting across platforms.** Rounding is to three decimals and formatting is
+  Python's own dtoa, both platform-independent. libm is not: `sin`, `cos`, `log10` and
+  friends may differ by an ulp between glibc, macOS and MSVC. Measured rather than argued
+  — perturbing *every* transcendental in the render by one ulp, systematically, in one
+  direction, moves not a byte of fifteen of the sixteen snapshots. See the finding below
+  for the sixteenth.
+
+#### Found while proving that: `floor(log10(span))` amplifies an ulp into a different chart
+
+`resolve/chart.py` picks an axis unit with
+
+    unit = 10.0 ** math.floor(math.log10(span))
+
+`real-financial-report.pptx` slide 4 is a radar spanning exactly 0..100, so `log10` returns
+exactly 2.0 and the unit is 100. One ulp low — `1.9999999999999998` — and `floor` gives 1,
+the unit becomes 10, and the slide re-lays out: 29,659 characters of SVG become 34,639.
+That is the *only* byte anywhere in the corpus that a 1-ulp libm difference can move, and
+it does not move by a digit, it moves by a factor of ten.
+
+Every mainstream libm returns 2.0 here, because the true value is exactly representable and
+correct rounding therefore requires it; only a merely *faithful* implementation is allowed
+to return the value below, which is why this has never been seen. It is a tripwire in
+`tests/test_vrt.py` for now (`test_the_platform_agrees_about_log10_of_a_power_of_ten`), so
+a platform that disagrees says so by name instead of producing one unexplained snapshot
+mismatch on one CI leg. **The durable fix belongs in `resolve/chart.py`** — snap the
+exponent, or derive the unit without a transcendental — and was left alone here because
+this phase was not to touch `src/`. A chart axis should not be one ulp away from a
+different chart.
+
+`real-college-template.pptx` is **not** snapshotted: a render of it contains its text and
+its images, so committing one would redistribute a deck that is not ours to redistribute.
 
 Two layers, two jobs: snapshot VRT runs everywhere and catches regressions; the PowerPoint
-oracle runs on this Mac and catches *being wrong in the first place*.
+oracle runs on this Mac and catches *being wrong in the first place*. The gap between them
+is wider than it looks — `tests/fidelity-baselines.json` skips five of the seven committed
+decks (PowerPoint substituted the same CJK face, or this machine lacks Noto Sans JP), so
+for five of these seven, the snapshot is the *only* thing watching, and it is watching for
+change rather than for correctness. `tests/vrt/README.md` says so at the top and lists the
+known defects the committed bytes freeze in.
 
 ### 0.3 Metrics — **done**
 
