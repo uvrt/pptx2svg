@@ -71,7 +71,7 @@ rendering approaches.
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |
 | Pictures: crop, colour adjustments, tile, stretch | Complete |
 | Tables: merged cells, borders, fills, **table styles** | Complete; **all 74** built-in styles carried, every one measured out of PowerPoint; an id in neither the deck nor the catalogue now warns `table-style-unknown` instead of rendering a bare grid in silence; cell text takes a table style's `tcTxStyle` over the master's `otherStyle` |
-| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. Category labels wrap at whitespace, turn 45° only when their widest unbreakable token still will not fit, and are **cut with an ellipsis** when a turned one is wider than the frame's height allows. Every other chart type warns and draws an empty frame |
+| Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. **Combo charts** -- several groups over one plot area with a secondary value axis -- are drawn, measured over 76 probe slides. Category labels wrap at whitespace, turn 45° only when their widest unbreakable token still will not fit, and are **cut with an ellipsis** when a turned one is wider than the frame's height allows. Every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
 | 3-D, bevel, reflection | **Not rendered** |
@@ -2317,14 +2317,15 @@ needs its own assertion; a parsed field with no reader needs one too.
 
 `tests/fixtures/chart-gallery.pptx` (written by `tools/make_chart_gallery.py`, one chart
 type per slide, 17 slides) is the first chart-heavy deck the oracle can score. Its mean is
-**SSIM 0.6407 / hist 0.8169**, and reading that as "charts are 64% right" would be wrong
+**SSIM 0.6543 / hist 0.8172** (0.6413 / 0.8170 when this table was first written; slides 1
+and 17 moved in 3.3), and reading that as "charts are 65% right" would be wrong
 twice over — three of the seventeen slides are types we deliberately do not draw, and the
 rest are thin ink on white, where SSIM punishes a one-pixel shift like a missing element.
 The per-slide numbers are the measurement; the mean is not.
 
 | slide | type | SSIM | hist | cov | reading |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `barChart` col, rotated labels | 0.5509 | 0.9921 | 0.083 | bars and labels agree; the plot rectangle is a few pt wider than PowerPoint's |
+| 1 | `barChart` col, rotated labels | 0.6556 | 0.9960 | 0.083 | was 0.5611 before `c:overlap` entered the bar-width divisor (3.3); the plot rectangle is still a few pt wider than PowerPoint's |
 | 2 | `barChart` bar, bottom value axis, data labels | 0.9310 | 0.9989 | 0.138 | — |
 | 3 | `lineChart` | 0.6683 | 0.6117 | 0.040 | visually the same chart; 4% coverage of 1 pt strokes is what the number is |
 | 4 | `areaChart` stacked | 0.8814 | 0.9998 | 0.394 | — |
@@ -2340,7 +2341,7 @@ The per-slide numbers are the measurement; the mean is not.
 | 14 | `line3DChart` | 0.0689 | 0.9116 | 0.063 | see 3.4 |
 | 15 | `pie3DChart` | 0.7612 | 0.1336 | 0.241 | see 3.4 |
 | 16 | `area3DChart` | 0.7307 | 0.9931 | 0.286 | see 3.4 |
-| 17 | combo | 0.6120 | 0.9993 | 0.232 | see 3.3 |
+| 17 | combo | **0.7384** | 0.9994 | 0.232 | was 0.6120: both groups, the right-hand axis and the two-entry legend are drawn now. See 3.3 |
 
 Three defects are new and none of them were visible in the corpus before this deck:
 
@@ -2359,20 +2360,138 @@ indistinguishable from PowerPoint's at a glance scores 0.67 because 4% of the pi
 ink and half a pixel of stroke displacement moves all of them. Chase slides 6, 9 and 11
 before chasing those.
 
-### 3.3 Combo charts (M)
+### 3.3 Combo charts — **done**
 
-Multiple `c:*Chart` groups sharing a category axis with a secondary value axis. The reader
-already returns every group and each one's `c:axId` list, and the renderer picks the first
-group it can draw — so a combo chart whose *second* group is a bar still draws the bar.
-Drawing several groups at once, and the secondary axis, is not done.
+Several `c:*Chart` groups over one plot area, with a secondary value axis. `barChart`,
+`lineChart` and `areaChart` in any combination are now drawn together; `chart-gallery`
+slide 17 went from SSIM **0.6120 to 0.7384** and its histogram from 0.9993 to 0.9994.
 
-**Now measured, on `chart-gallery.pptx` slide 17** (a `barChart` and a `lineChart` over a
-secondary value axis that `crosses="max"` puts on the right): SSIM **0.6120**, histogram
-0.9993. We draw the four columns and nothing else; PowerPoint draws the columns, the
-margin line with its markers, the right-hand 0–16 axis and a two-entry legend. The
-histogram barely moves because the columns dominate the ink, which is a good illustration
-of why both gates are read together. The slide and
-`tests/vrt/chart-gallery/slide-17.svg` pin the defect until it is fixed.
+**Six probe decks, 76 slides**, written by `tools/make_combo_probe.py` and read back by
+`tools/read_combo_probe.py`. `--check` renders the same deck through this library and
+prints the residual against the export, which is the assertion SSIM cannot make: **every
+plot edge on all 76 slides lands within 0.04 pt of PowerPoint's**, and every tick label on
+both axes matches, with the two exceptions named at the end.
+
+| deck | slides | what it settled |
+| --- | --- | --- |
+| `combo-order` | 9 | the paint order is a **precedence by type**, not the document order |
+| `combo-domain` | 8 | a value axis' domain comes from the series attached to **it** |
+| `combo-side` | 35 | the secondary axis obeys the same frame-derived interval rule |
+| `combo-plot` | 9 | what the secondary axis does to the plot rectangle, and where it goes |
+| `combo-bar` | 11 | bar geometry across groups; `gapWidth` and `overlap` |
+| `combo-legend` | 4 | legend composition, order and key width |
+
+#### Draw order is a type precedence
+
+Three pairs — bar/line, bar/area and line/area — were each authored **twice, with the two
+`c:*Chart` elements swapped**, and the six exports come back as *three* pictures. The area
+is under the bars in both spellings of bar+area, the line over the bars in both of
+bar+line, and over the area in both of line+area. So the order is
+
+    areaChart → barChart → lineChart
+
+and two groups of the same type keep the order the file wrote them in (`g-bar-bar` draws
+the first one first), which makes it a stable sort rather than a reordering.
+
+**The colours do not follow it.** A line group written first still takes accent1 and the
+bar group after it accent2, while the bars are still painted first — `c:idx` numbers the
+series and the precedence only decides who covers whom. Two mechanisms, and reading one
+off the other would have been wrong in both directions.
+
+#### The two axes are independent, and counted by the same rule
+
+`combo-domain` holds a bar group at 0..9 and moves the line group beside it over 0..0.5,
+0..5, 0..50 and 0..500 on the secondary axis: **the left axis does not move**, staying
+0..10 by 1 in all four. The control — both groups naming the *primary* axis — does move
+it, to 0..60 by 10 and 0..600 by 100. So the domain follows `c:axId` and not the plot.
+
+**They do not share a tick count either.** On `combo-side`'s `s150-C` the left axis draws
+six labels and the right nine, over one plot, meeting only at the two ends. "Make them
+share tick counts" is refuted outright.
+
+What they *do* share is the interval count the **frame** asks for. `combo-side` puts the
+five-dataset N-meter from `axis-rung` on the secondary axis at five frame heights and
+reads the count back off the drawn unit; the five readings at each height intersect at
+exactly one value — **1, 3, 6, 8 and 10 for frames of 60, 90, 120, 150 and 180 pt** —
+and those are the five counts `side_axis_intervals` returns for the same frames. Ten more
+slides put the meter on the *primary* of the same charts and read the same counts back.
+The hard-won lesson from `axis-coarse` holds on the secondary axis: the count is a
+function of the frame, and the two plots here are identical anyway.
+
+#### The band on the right is the band on the left
+
+`_value_label_band` is one formula now, fed each axis' own labels. Measured to 0.04 pt over
+five label widths: a right-hand axis labelled 0..6 reserves 21.07 pt, one labelled 0..10 or
+0..60 reserves 26.41 and one labelled 0..600 reserves 31.75 — and the same deck's *left*
+axis labelled 0..600 reserves 31.75 as well. The labels themselves are the mirror image:
+the right column begins 9.70 pt past the plot's right edge at three label widths, where
+the left column ends 9.70 pt before it begins.
+
+`c:crosses` decides the side and **`c:axPos` decides nothing**: a secondary axis written
+`axPos="l"` with `crosses="max"` came out on the right in the same place as the `axPos="r"`
+one beside it. A `c:delete`d secondary axis reserves nothing — the plot runs to the plain
+11.0 pt inset — while its series is still drawn and still scaled by it.
+
+#### Bars
+
+A bar group in a combo keeps the **whole category band**: the line group beside it takes no
+slot, and a bar drawn against a line is the same width as the same bar drawn alone. Two bar
+groups do not cluster into one band either — each divides the band by its own series count
+and they are drawn over each other — and each group uses **its own `gapWidth`**: groups
+stating 50 and 300 drew 57.6 pt and 21.6 pt bars in one band, so neither value wins.
+
+**`c:overlap` belongs in the bar-width divisor and was missing from it.** Two charts say
+so, both to inside the 0.24 pt PowerPoint quantises a bar width to: `chart-gallery`
+slide 1 (five categories, two series, `gapWidth` 150, `overlap` −27 on a 250.59 pt plot)
+draws 13.2 pt bars where the divisor without the overlap term asks for 14.32 and with it
+for 13.29, and `combo-bar`'s `g-overlap` agrees on a 427.18 pt plot with 22.56 against
+24.41 and 22.66. A stacked group is unaffected — `slots` is 1, so the term is zero — which
+is why `real-college-template`'s `overlap=100` stacked chart does not move. Fixing it took
+**slide 1 from 0.5611 to 0.6556**, which is the second-largest gain in this branch and was
+found by a probe built for something else.
+
+#### The legend
+
+Entries come out in **paint order**, not document order: the same two groups written both
+ways round legend identically, bars first and line last, at the same x. And **one line
+group widens every key to the line key's width**: the bar keys of a bar-plus-line chart
+came back 19.200 pt wide — not the 5.49 pt swatch — and 5.49 pt tall. The width is a
+decision for the chart and the height one for the series.
+
+#### What is not drawn, and why
+
+* **Two value axes on the same side.** `crosses="autoZero"` on the secondary axis puts it
+  on the *left*, inside the primary, and PowerPoint narrows the plot for two stacked label
+  columns. Its inner column measured 21.42 pt against the outer one's 26.41 for the same
+  label, and the 4.99 pt between them is not any constant in this file. One reading is not
+  a rule, so this case falls back to drawing the first group alone — `p-seczero` is the
+  one probe slide whose plot is wrong, by 21.38 pt, and it is wrong on purpose.
+* **A horizontal (`barDir="bar"`) combo**, which would put the value axis along the bottom
+  and the secondary along the top. No probe has measured it; it falls back too.
+* **A group type outside `areaChart` / `barChart` / `lineChart`** — a pie beside a bar, a
+  scatter beside a line. PowerPoint does not author them and no probe has drawn one.
+
+Each of those keeps the old behaviour — the first drawable group, alone — which is a worse
+picture than PowerPoint's but not a wrong one.
+
+#### Two residuals worth naming
+
+* **A right legend with a secondary axis composes at −0.31 pt.** Measured once, on
+  `combo-legend`'s `l-right`: the legend key lands where it would with no secondary axis at
+  all (0.04 pt), and the plot gives up a further 15.1 pt where the composition shipped here
+  — the legend band plus what the label column takes beyond the plain inset — predicts
+  15.41. A sweep of the secondary label width with a right legend would settle the third of
+  a point.
+* **`LEGEND_ENTRY_GAP_EM = 0.5` is refuted and nothing replaces it yet.** The gap between
+  entries in a horizontal legend is solvable from the pitch between consecutive keys, and
+  four charts give four answers: **0.77 em** (`chart-gallery` slide 1, two bar entries on a
+  288 pt frame), **1.03 em** (slide 3, three line entries on 648 pt), **1.12 em** (slide 17,
+  a combo on 648 pt) and **1.15 em** (`combo-legend`'s `l-bottom`, a combo on 480 pt). The
+  pitch difference *within* a chart is exactly the text-width difference, so the gap is
+  constant per chart and our advance widths are right to 0.3%; what it is a function of is
+  not. It is worth a sweep of its own — entry counts, name widths, key types and frame
+  widths — because it moves every chart with a legend below or above it, not only combos,
+  and it is the largest remaining error on gallery slide 17.
 
 ### 3.4 3-D chart fallbacks (S)
 
@@ -3568,11 +3687,12 @@ types that landed this week reused nearly all of it. What is left, cheapest firs
 3. **Data-label wrapping**, **`bestFit` actually moving a label**, and **three-or-more
    line legend entries** -- each a known-missing detail with a named symptom above.
    Category-label wrapping is done; the data-label kind is a separate path.
-4. **Combo charts and the secondary axis.** `bubbleChart`, `ofPieChart` and `stockChart`
-   have landed; `surfaceChart` is measured and deliberately deferred, and what would
-   close it is written down under *Surface -- measured, and deferred*. Drawing several
-   `c:*Chart` groups at once, and the second value axis that usually comes with them, is
-   now the largest chart item left.
+4. ~~**Combo charts and the secondary axis.**~~ -- done and measured over 76 probe
+   slides; see 3.3. `bubbleChart`, `ofPieChart` and `stockChart` had already landed, and
+   `surfaceChart` is measured and deliberately deferred under *Surface -- measured, and
+   deferred*. What 3.3 leaves open is named there: two value axes on one side, a
+   horizontal combo, and a horizontal legend's inter-entry gap -- the last of which is not
+   a combo problem at all and is now the largest chart item left.
 5. ~~**The value-axis tick density — and, it turns out, the unit rule under it.**~~ — done
    and measured; see "The value axis' tick rule, solved". 616 readings over fifteen probe
    decks, 611 reproduced exactly. What is left of it is small and named there: a bottom

@@ -742,11 +742,11 @@ def area_3d() -> bytes:
 def combo() -> bytes:
     """Slide 17 -- a combo: ``barChart`` and ``lineChart`` over a **secondary** axis.
 
-    This slide pins a known defect rather than a working feature.  The renderer draws the
-    first group it can and nothing else, so the line series and the right-hand axis are
-    both dropped; PowerPoint draws all three.  Four axes: the primary pair, plus a
-    deleted secondary category axis and a secondary value axis that ``crosses='max'``
-    puts on the right.
+    Four axes: the primary pair, plus a deleted secondary category axis and a secondary
+    value axis that ``crosses='max'`` puts on the right.  This slide pinned the defect
+    ROADMAP.md 3.3 was written around -- the renderer drew the first group it could and
+    dropped the rest -- and now pins the fix; it is the one chart in the corpus that
+    exercises two value axes at once.
     """
     bars = (
         "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"

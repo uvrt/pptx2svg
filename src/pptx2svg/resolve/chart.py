@@ -44,8 +44,10 @@ Three things that look like bugs and are not:
 
 from __future__ import annotations
 
+import copy
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
 from .. import model as m
@@ -353,6 +355,25 @@ BUBBLE_CHART_KINDS = frozenset({"bubbleChart"})
 #: a real stock chart lacks are suppressed by the *file*, which writes
 #: ``<a:ln><a:noFill/></a:ln>`` on each series; nothing in the renderer hides them.
 STOCK_CHART_KINDS = frozenset({"stockChart"})
+
+#: The group elements a **combo** chart may be built out of, **in the order PowerPoint
+#: paints them**.  A chart whose groups are all in this tuple is drawn as one picture;
+#: anything else falls back to drawing the first group alone.
+#:
+#: **The order is a precedence by type and not the document order**, which is the one way
+#: round it is easy to get backwards.  Measured on ``combo-order``: three pairs --
+#: bar/line, bar/area and line/area -- were each authored twice with the two
+#: ``c:*Chart`` elements swapped, and the six exports come out in *three* distinct
+#: pictures, not six.  The area is under the bars in both spellings of bar+area, the line
+#: is over the bars in both spellings of bar+line, and over the area in both of
+#: line+area.  Two groups of the *same* type keep their document order (``g-bar-bar``
+#: draws the first one first), which is what makes this a stable sort rather than a
+#: reordering.
+#:
+#: The colours do **not** follow this order: a line group written first still takes
+#: accent1 and the bar group after it accent2, so ``c:idx`` numbers the series and the
+#: precedence only decides who covers whom.
+COMBO_CHART_KINDS = ("areaChart", "barChart", "lineChart")
 
 #: ``c:crossBetween`` decides whether the points sit at the centres of the category bands
 #: or on the band edges, and it is optional.  **An area chart that states none draws as
@@ -1579,6 +1600,11 @@ class _Series:
     vary_fills: list[m.Fill] = field(default_factory=list)
     #: Line-chart only: the stroke along the points, and the marker drawn at each.
     line: m.Outline | None = None
+    #: Whether this series' own group legends with a **rule and its marker** rather than
+    #: with a filled swatch.  Carried on the series rather than asked of the chart,
+    #: because a combo's groups disagree: the bar series of a bar-plus-line chart keeps
+    #: its swatch while the line series beside it takes the rule.
+    line_keyed: bool = False
     marker_symbol: str | None = None
     marker_size: float = DEFAULT_MARKER_SIZE_PT
     marker_fill: m.Fill | None = None
@@ -1609,9 +1635,15 @@ class ChartBuilder:
         resolve_outline,
         resolve_text,
         resolve_typeface=lambda typeface: typeface,
+        plots: Sequence[c.SourceChartPlot] | None = None,
     ) -> None:
         self.chart = chart
         self.plot = plot
+        #: Every drawable group in the plot area, in **document** order.  ``plot`` is the
+        #: first of them and stays the one the frame's own decisions -- the title, the
+        #: category axis, the legend -- are taken from; see :meth:`_drawn_plots` for the
+        #: shape a combo has to be for the rest to be drawn beside it.
+        self.plots = list(plots) if plots else [plot]
         self.frame = _Rect(0.0, 0.0, width_pt, height_pt)
         self.style = style
         self._resolve_fill = resolve_fill
@@ -1620,6 +1652,10 @@ class ChartBuilder:
         self._resolve_typeface = resolve_typeface
         self.elements: list[m.SlideElement] = []
         self._title_cache: "tuple[m.TextBody, FontBox] | None | object" = _UNSET
+        #: Forced on for every group of a combo that holds one, because a chart with a
+        #: line group in it widens *every* legend key to the line key's width.  See
+        #: :meth:`_line_legend_keys`.
+        self.line_legend_keys = False
 
     # -- public -------------------------------------------------------------------------
 
@@ -2498,35 +2534,99 @@ class ChartBuilder:
                 self._centred_label(parts, labels.font, x, y)
 
     def _build_cartesian(self) -> tuple[list[m.SlideElement], m.ChartData]:
-        series = self._series()
+        """Every group this chart draws, over one plot rectangle and up to two value axes.
+
+        With one group this is what it always was.  With several -- a **combo** -- the
+        groups are drawn in the precedence :data:`COMBO_CHART_KINDS` records, each against
+        the axis its own ``c:axId`` names, and the two axes are scaled **separately**:
+        measured on ``combo-domain``, where a bar group of 0..9 kept its 0..10 left axis
+        while the line group beside it moved a right axis over 0..0.6, 0..6, 0..60 and
+        0..600 without touching it.  The same deck's control -- both groups on the primary
+        axis -- does move it, to 0..60 and 0..600, which is what says the domain follows
+        the attachment and not the plot.
+
+        **The two axes do not share a tick count.**  On ``combo-side``'s ``s150-C`` the
+        left axis drew six labels and the right nine, over the same plot height and
+        meeting only at the two ends.  What they do share is the *interval count the frame
+        asks for*: see :meth:`_axis_scale`.
+        """
+        groups = [self._for_plot(plot) for plot in self._drawn_plots()]
+        if self._line_legend_keys():
+            # `self` draws the furniture -- the legend and the plot rectangle it reserves
+            # for -- and is not one of the clones, so it has to be told as well.
+            self.line_legend_keys = True
+            for group in groups:
+                group.line_legend_keys = True
+        drawn = [(group, group._series()) for group in groups]
+        series = [item for _, items in drawn for item in items]
         categories = self._categories(series)
-        value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
+
+        # `_drawn_plots` has already refused anything `_combo_axes` cannot place, so the
+        # fallback here only ever runs for a single group whose own axis crosses at max.
+        value_axis, second_axis = self._combo_axes() or (
+            self._axis_for(1) or self._axis_of_kind("valAx"),
+            None,
+        )
         category_axis = self._axis_for(0) or self._axis_of_kind("catAx")
 
-        scale = self._scale(series, value_axis)
+        def attached(axis: "c.SourceChartAxis | None") -> list:
+            return [pair for pair in drawn if self._plot_value_axis(pair[0].plot) is axis]
+
+        primary = attached(value_axis) or [drawn[0]]
+        scale = self._axis_scale(primary, value_axis)
         # Each axis carries its own `c:txPr`, and they disagree in real files.
         value_font = self._label_font(value_axis)
         category_font = self._label_font(category_axis)
-        tick_texts = self._tick_texts(scale, value_axis)
+        tick_texts = primary[0][0]._tick_texts(scale, value_axis)
+
+        secondary = attached(second_axis) if second_axis is not None else []
+        second_scale = self._axis_scale(secondary, second_axis) if secondary else None
+        second_font = self._label_font(second_axis) if secondary else None
+        second_texts = (
+            secondary[0][0]._tick_texts(second_scale, second_axis) if secondary else None
+        )
+        # A `c:delete`d secondary axis still scales its own series -- it is hidden, not
+        # absent -- but reserves no band and draws no labels.  Measured on ``p-secdel``,
+        # whose plot runs to the same 11.0 pt right inset as the chart with no secondary
+        # axis at all while its line series is still drawn across the wider plot.
+        shown = bool(secondary) and _labels_shown(second_axis)
 
         plot_rect = self._plot_rect(
-            tick_texts, categories, value_font, category_font, scale
+            tick_texts,
+            categories,
+            value_font,
+            category_font,
+            scale,
+            second_texts=second_texts if shown else None,
+            second_font=second_font if shown else None,
         )
+        second_band = (
+            self._value_label_band([text for _, text in second_texts], second_font)
+            - EDGE_INSET_PT
+            if shown and second_texts and second_font is not None
+            else 0.0
+        )
+
+        def scale_for(group: "ChartBuilder") -> tuple[float, float, float]:
+            if second_scale is not None and any(group is other for other, _ in secondary):
+                return second_scale
+            return scale
 
         self._draw_background(plot_rect)
         self._draw_title()
+        # The secondary axis' gridlines go under the primary's, and unlike the primary's
+        # they keep the one at the crossing: measured on ``p-secgrid``, where the
+        # secondary drew eleven lines and the primary ten, the secondary's first.
+        if secondary and second_scale is not None:
+            secondary[0][0]._draw_gridlines(
+                plot_rect, second_scale, second_axis, skip_crossing=False
+            )
         self._draw_gridlines(plot_rect, scale, value_axis)
-        if self._is_area:
-            self._draw_areas(plot_rect, series, categories, scale)
-        elif self._is_line:
-            self._draw_lines(plot_rect, series, categories, scale)
-            if self._is_stock:
-                # Drawn over the series, which is the order PowerPoint emitted them in.
-                self._draw_hi_low_lines(plot_rect, series, categories, scale)
-                self._draw_up_down_bars(plot_rect, series, categories, scale)
-        else:
-            self._draw_bars(plot_rect, series, categories, scale)
+        for group, items in drawn:
+            group._draw_marks(plot_rect, items, categories, scale_for(group))
         self._draw_axis_lines(plot_rect, scale, value_axis, category_axis)
+        if secondary:
+            self._draw_second_axis_line(plot_rect, second_axis)
         self._draw_labels(
             plot_rect,
             scale,
@@ -2537,8 +2637,18 @@ class ChartBuilder:
             value_font,
             category_font,
         )
-        self._draw_data_labels(plot_rect, series, categories, scale)
-        self._draw_legend(plot_rect, series)
+        if shown and second_texts and second_font is not None and second_scale is not None:
+            self._labels_down_right(
+                plot_rect,
+                [
+                    (self._value_to_y(plot_rect, value, second_scale), text)
+                    for value, text in second_texts
+                ],
+                second_font,
+            )
+        for group, items in drawn:
+            group._draw_data_labels(plot_rect, items, categories, scale_for(group))
+        self._draw_legend(plot_rect, series, second_band=second_band)
 
         data = m.ChartData(
             kind=c.flat_chart_kind(self.plot.kind),
@@ -2562,6 +2672,62 @@ class ChartBuilder:
             legend_position=self._legend_position(),
         )
         return self.elements, data
+
+    def _axis_scale(
+        self, pairs: list, axis: "c.SourceChartAxis | None"
+    ) -> tuple[float, float, float]:
+        """The scale one value axis draws, from the groups attached to **it**.
+
+        The domain is the union of what each attached group reaches, asked group by group
+        so that a stacked group beside a clustered one contributes its sums rather than
+        its individual values.  Everything else -- the interval count, the format code,
+        the stated limits -- comes from the first group on the axis.
+
+        **A secondary axis counts its intervals by the same frame rule as the primary**,
+        which is measured and not assumed: ``combo-side`` put the five-dataset N-meter on
+        the secondary axis at five frame heights and read the count back off the drawn
+        unit.  The five readings at each height intersect at exactly one count -- 1, 3, 6,
+        8 and 10 for frames of 60, 90, 120, 150 and 180 pt -- and those are the five
+        counts :func:`side_axis_intervals` returns for the same frames.  Ten more slides
+        put the meter on the *primary* of the same charts and read the same counts back,
+        so the two axes are one rule applied twice, not one axis leading the other.
+        """
+        lead, lead_series = pairs[0]
+        numbers = [value for group, items in pairs for value in group._axis_reach(items)]
+        return lead._scale(lead_series, axis, numbers=numbers)
+
+    def _draw_marks(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """This group's own marks: its areas, its lines or its bars."""
+        if self._is_area:
+            self._draw_areas(rect, series, categories, scale)
+        elif self._is_line:
+            self._draw_lines(rect, series, categories, scale)
+            if self._is_stock:
+                # Drawn over the series, which is the order PowerPoint emitted them in.
+                self._draw_hi_low_lines(rect, series, categories, scale)
+                self._draw_up_down_bars(rect, series, categories, scale)
+        else:
+            self._draw_bars(rect, series, categories, scale)
+
+    def _draw_second_axis_line(
+        self, rect: _Rect, axis: "c.SourceChartAxis | None"
+    ) -> None:
+        """The secondary value axis' own line, up the plot's right edge.
+
+        Measured on ``combo-plot``: a stroke from the plot's top to its bottom at exactly
+        the right edge, beside the primary axis' identical stroke up the left one.
+        """
+        if axis is None or axis.delete:
+            return
+        self._line(
+            rect.right, rect.top, rect.right, rect.bottom, self._axis_outline(axis.outline)
+        )
 
     def _build_scatter(self) -> tuple[list[m.SlideElement], m.ChartData]:
         """A scatter: **both axes are value axes and there is no category axis at all.**
@@ -3165,6 +3331,9 @@ class ChartBuilder:
                 # -- so what turns either off is the series' own markup: `<a:ln><a:noFill/>`
                 # for the line, `<c:symbol val="none"/>` for the marker, each measured.
                 self._read_line_style(item, source, source.index)
+                # The key shape follows the series, not the chart: a combo's bar series
+                # keeps its swatch while the line beside it takes a rule.
+                item.line_keyed = True
                 if self._is_radar and (source.marker is None or not source.marker.size):
                     # Measured on the probe: a radar series stating no `c:size` draws a
                     # 6 pt marker, not ECMA-376's 7.
@@ -3376,9 +3545,15 @@ class ChartBuilder:
         """
         longest = max((len(item.values) for item in series), default=0)
         labels: list[str] = []
-        for source in self.plot.series:
-            if any(source.categories):
-                labels = list(source.categories)
+        # Every drawn group, in document order: a combo's groups share one category axis
+        # and need not all carry `c:cat` -- the gallery's line group does, but a group
+        # that did not would otherwise number its categories from 1 beside labelled bars.
+        for plot in self.plots:
+            for source in plot.series:
+                if any(source.categories):
+                    labels = list(source.categories)
+                    break
+            if labels:
                 break
         if len(labels) >= longest:
             return labels
@@ -3406,28 +3581,137 @@ class ChartBuilder:
                 return axis
         return None
 
-    def _scale(
-        self,
-        series: list[_Series],
-        axis: c.SourceChartAxis | None,
-        radial_pt: float | None = None,
-    ) -> tuple[float, float, float]:
-        stacked = (self.plot.grouping or "clustered") in ("stacked", "percentStacked")
-        if (self.plot.grouping or "") == "percentStacked":
-            # Measured: PowerPoint labels 0%, 10% ... 100%.
-            return 0.0, 1.0, 0.1
+    # -- combo charts -----------------------------------------------------------------
 
-        numbers: list[float] = []
-        if stacked:
+    def _for_plot(self, plot: c.SourceChartPlot) -> "ChartBuilder":
+        """This builder, reading a different group of the same chart.
+
+        A shallow copy, so ``elements`` is the *same* list: every clone draws into one
+        output in the order it is asked to.  It is what keeps the seventy-odd
+        ``self.plot`` readers in this class working unchanged on a chart with several
+        groups -- each group is drawn by a builder for which it *is* ``self.plot``.
+        """
+        clone = copy.copy(self)
+        clone.plot = plot
+        return clone
+
+    def _plot_value_axis(self, plot: c.SourceChartPlot) -> "c.SourceChartAxis | None":
+        """The value axis *this* group is attached to, by its own ``c:axId``."""
+        return self._for_plot(plot)._axis_for(1) or self._axis_of_kind("valAx")
+
+    def _combo_axes(self) -> "tuple[c.SourceChartAxis | None, c.SourceChartAxis | None] | None":
+        """The chart's value axes as ``(left, right)``, or ``None`` if they cannot be placed.
+
+        **``c:crosses`` decides the side and ``c:axPos`` decides nothing.**  Measured on
+        ``combo-plot``: a secondary axis written ``axPos="l"`` with ``crosses="max"`` came
+        out on the right, in the same place as the ``axPos="r"`` one beside it, and the
+        same axis with ``crosses="autoZero"`` came out on the **left**, inside the primary
+        axis, with the plot narrowing to make room for two label columns.
+
+        That last shape -- two value axes on the same side -- is drawn by PowerPoint and
+        is *not* drawn here: its inner label column measured 21.42 pt against the outer
+        one's 26.41 pt for the same label, and one reading is not a rule.  This returns
+        ``None`` for it, which sends the chart back to drawing one group.
+        """
+        axes: list[c.SourceChartAxis | None] = []
+        for plot in self.plots:
+            axis = self._plot_value_axis(plot)
+            if not any(axis is seen for seen in axes):
+                axes.append(axis)
+        if len(axes) == 1:
+            return axes[0], None
+        right = [axis for axis in axes if axis is not None and axis.crosses == "max"]
+        left = [axis for axis in axes if not any(axis is other for other in right)]
+        if len(left) == 1 and len(right) == 1:
+            return left[0], right[0]
+        return None
+
+    def _drawn_plots(self) -> list[c.SourceChartPlot]:
+        """Every group drawn on this chart, in paint order.
+
+        A combo is drawn whole only when its groups are the three that share a category
+        axis (:data:`COMBO_CHART_KINDS`), every bar among them runs the same way up, and
+        their value axes can be placed on opposite sides of the plot.  Anything else --
+        a pie beside a bar, a horizontal bar in a combo, two value axes on one side --
+        falls back to the one group this renderer picked before combos were drawn at all,
+        which is a worse picture than PowerPoint's but not a wrong one.
+        """
+        if len(self.plots) < 2:
+            return [self.plot]
+        kinds = [c.flat_chart_kind(plot.kind) for plot in self.plots]
+        if any(kind not in COMBO_CHART_KINDS for kind in kinds):
+            return [self.plot]
+        # `barDir="bar"` turns the value axis along the bottom and the secondary axis
+        # along the top, which no probe has measured.
+        if any(
+            (plot.bar_direction or "col") != "col"
+            for plot, kind in zip(self.plots, kinds)
+            if kind == "barChart"
+        ):
+            return [self.plot]
+        if self._combo_axes() is None:
+            return [self.plot]
+        # A stable sort, so two groups of one type keep the order the file wrote them in.
+        return sorted(self.plots, key=lambda plot: COMBO_CHART_KINDS.index(
+            c.flat_chart_kind(plot.kind)
+        ))
+
+    def _line_legend_keys(self) -> bool:
+        """Whether this chart's legend keys are rules rather than swatches.
+
+        **One line group turns every key into a rule**, which is measured rather than
+        assumed: on ``combo-legend`` the bar series of a bar-plus-line chart came back
+        with a key 19.200 pt wide -- the line key's width, not the 5.49 pt swatch -- and
+        5.49 pt tall.  So the *width* is a decision for the chart and the *shape* one for
+        the series.  A chart with no line group is unaffected, which is why a plain bar
+        chart's key is unchanged.
+        """
+        return any(self._for_plot(plot)._is_line_keyed for plot in self._drawn_plots())
+
+    @property
+    def _is_line_keyed(self) -> bool:
+        """Whether *this* group's series take a line key rather than a swatch."""
+        return bool(
+            self._is_line
+            or (self._is_scatter and not self._is_bubble)
+            or (self._is_radar and self._radar_style != "filled")
+        )
+
+    def _axis_reach(self, series: list[_Series]) -> list[float]:
+        """The values this group's own marks reach on its value axis.
+
+        Split out of :meth:`_scale` because a **combo** puts several groups on one axis
+        and each reaches its own way: a stacked group reaches the sum of its category
+        where a clustered one beside it reaches its tallest bar, so the axis' domain is
+        the union of what each group answers here rather than one sum over all of them.
+        """
+        if (self.plot.grouping or "clustered") in ("stacked", "percentStacked"):
             # A stacked bar reaches the sum of its category, and the positive and negative
             # halves of that category stack away from zero independently.
+            numbers: list[float] = []
             length = max((len(item.values) for item in series), default=0)
             for index in range(length):
                 column = [_at(item.values, index) for item in series]
                 numbers.append(sum(value for value in column if value and value > 0))
                 numbers.append(sum(value for value in column if value and value < 0))
+            return numbers
+        return [value for item in series for value in item.values if value is not None]
+
+    def _scale(
+        self,
+        series: list[_Series],
+        axis: c.SourceChartAxis | None,
+        radial_pt: float | None = None,
+        numbers: list[float] | None = None,
+    ) -> tuple[float, float, float]:
+        if (self.plot.grouping or "") == "percentStacked":
+            # Measured: PowerPoint labels 0%, 10% ... 100%.
+            return 0.0, 1.0, 0.1
+
+        if numbers is None:
+            numbers = self._axis_reach(series)
         else:
-            numbers = [value for item in series for value in item.values if value is not None]
+            numbers = list(numbers)
 
         if not numbers:
             numbers = [0.0]
@@ -3584,6 +3868,19 @@ class ChartBuilder:
         legend = self.chart.legend
         return self._font(legend.text_properties if legend is not None else None)
 
+    def _value_label_band(self, texts: list[str], font: ChartFont) -> float:
+        """What a column of value-axis tick labels takes off the frame's edge, in points.
+
+        **The band on the right of a secondary axis is this same formula**, fed that axis'
+        own labels -- measured to 0.04 pt on ``combo-domain`` and ``combo-plot`` over five
+        label widths: a right-hand axis labelled 0..6 reserved 21.07 pt, one labelled
+        0..10 or 0..60 reserved 26.41 and one labelled 0..600 reserved 31.75, which are
+        the 21.11 / 26.45 / 31.79 this returns.  The same deck's left-hand axis labelled
+        0..600 reserved 31.75 as well, so the two sides are one rule and not two.
+        """
+        widest = max((font.width(text) for text in texts), default=0.0)
+        return FRAME_PADDING_PT + widest + font.box.descent + VALUE_LABEL_GAP_EM * font.size
+
     def _plot_rect(
         self,
         tick_texts: list[tuple[float, str]],
@@ -3591,6 +3888,9 @@ class ChartBuilder:
         value_font: ChartFont,
         category_font: ChartFont,
         scale: tuple[float, float, float],
+        *,
+        second_texts: list[tuple[float, str]] | None = None,
+        second_font: ChartFont | None = None,
     ) -> _Rect:
         frame = self.frame
         value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
@@ -3623,14 +3923,7 @@ class ChartBuilder:
 
         left = frame.left + EDGE_INSET_PT
         if show_left:
-            widest = max((left_font.width(text) for text in down_left), default=0.0)
-            left = (
-                frame.left
-                + FRAME_PADDING_PT
-                + widest
-                + left_font.box.descent
-                + VALUE_LABEL_GAP_EM * left_font.size
-            )
+            left = frame.left + self._value_label_band(down_left, left_font)
 
         # **``midCat`` centres the first and last category label on the plot's own edges**,
         # so half of each hangs outside it and the plot narrows to make room.  Measured on
@@ -3645,7 +3938,18 @@ class ChartBuilder:
             overhang_right = category_font.width(categories[-1]) / 2
             left = max(left, frame.left + EDGE_INSET_PT + overhang_left)
 
-        right = frame.right - EDGE_INSET_PT - overhang_right
+        # A secondary value axis takes its own label column off the *right* edge, in
+        # place of the plain inset.  Measured on ``combo-plot``: with no secondary axis
+        # the plot's right inset is 11.0 pt and with one it is the label band above.  A
+        # secondary axis that states `c:delete` takes nothing -- ``p-secdel``'s plot runs
+        # to the same 11.0 pt inset as the chart with no second axis at all, with the
+        # series still drawn.
+        second_band = (
+            self._value_label_band([text for _, text in second_texts], second_font)
+            if second_texts and second_font is not None
+            else EDGE_INSET_PT
+        )
+        right = frame.right - second_band - overhang_right
         if horizontal and show_values:
             # The value axis runs along the bottom now, and its last label is centred on
             # the plot's right edge, so half of it hangs outside.  Measured 13.67 pt
@@ -3675,7 +3979,20 @@ class ChartBuilder:
                 # it already ends in its own trailing pad.  Measured on
                 # real-financial-report's two bar charts, whose legends are Japanese and
                 # of different lengths -- both were over by exactly 11.0 pt, the inset.
-                right = frame.right - self._legend_side_width(legend_font) - overhang_right
+                #
+                # A secondary axis' labels go *between* the plot and that band, so the two
+                # reserves compose: the legend keeps the place it would have had on its
+                # own -- measured to 0.04 pt on ``combo-legend``'s ``l-right`` -- and the
+                # plot gives up the label column on top of it.  **One reading, residual
+                # -0.31 pt**: the drawn plot ended at 399.08 pt where this predicts
+                # 398.77.  A sweep of the secondary label width with a right legend is
+                # what would settle the third of a point.
+                right = (
+                    frame.right
+                    - self._legend_side_width(legend_font)
+                    - (second_band - EDGE_INSET_PT)
+                    - overhang_right
+                )
             elif legend == "l":
                 # On the left the value-label column follows the legend instead of the
                 # frame edge, so the band contributes one edge inset less.  Measured:
@@ -4139,16 +4456,8 @@ class ChartBuilder:
     def _legend_side_width(self, font: ChartFont, *, per_point: bool = False) -> float:
         # Only the entries actually drawn: a series struck out by `c:legendEntry` would
         # otherwise reserve width for a label nobody sees, shifting the plot rectangle.
-        deleted = self.chart.legend.deleted_entries if self.chart.legend else set()
-        if per_point:
-            # A pie legends its *categories*, not its series.
-            names = self._legend_names(per_point=True)
-        else:
-            names = [
-                source.name.plain or ""
-                for index, source in enumerate(self.plot.series)
-                if source.name is not None and index not in deleted
-            ]
+        # A pie legends its *categories*, not its series.
+        names = self._legend_names(per_point=per_point)
         widest = max((font.width(name) for name in names), default=0.0)
         key, key_gap = self._legend_key_size(font)
         natural = (
@@ -4245,7 +4554,16 @@ class ChartBuilder:
         rect: _Rect,
         scale: tuple[float, float, float],
         axis: c.SourceChartAxis | None,
+        *,
+        skip_crossing: bool = True,
     ) -> None:
+        """``skip_crossing`` leaves out the gridline the category axis already draws.
+
+        True for the primary axis and **False for a secondary one**, which is measured:
+        on ``p-secgrid`` the secondary axis drew eleven gridlines for its eleven ticks
+        where the primary drew ten for the same eleven, the missing one being the
+        category axis' own line.
+        """
         if axis is None or not axis.major_gridlines:
             return
         outline = self._axis_outline(axis.major_gridline_outline)
@@ -4253,16 +4571,18 @@ class ChartBuilder:
         # A gridline runs *across* the value axis, so `barDir="bar"` turns them vertical.
         # Measured on the horizontal probe: three vertical lines at the ticks for 2, 4 and
         # 6, with the one for 0 left out because the category axis already draws it.
-        axis_position = self._category_axis_position(rect, scale, None)
+        axis_position = (
+            self._category_axis_position(rect, scale, None) if skip_crossing else None
+        )
         for value in self._tick_values(scale):
             if horizontal:
                 x = self._value_to_x(rect, value, scale)
-                if abs(x - axis_position) < 0.01:
+                if axis_position is not None and abs(x - axis_position) < 0.01:
                     continue
                 self._line(x, rect.top, x, rect.bottom, outline)
             else:
                 y = self._value_to_y(rect, value, scale)
-                if abs(y - axis_position) < 0.01:
+                if axis_position is not None and abs(y - axis_position) < 0.01:
                     continue
                 self._line(rect.left, y, rect.right, y, outline)
 
@@ -4299,12 +4619,26 @@ class ChartBuilder:
         if gap_width is None:
             gap_width = DEFAULT_GAP_WIDTH
         slots = 1 if stacked else len(series)
-        # `gapWidth` is the gap between category groups expressed as a percentage of one
-        # bar's width, so the band holds `slots` bars plus `gapWidth/100` of one more.
-        # The schema bounds it to 0..500 and a file is free to ignore that; at -100 on a
-        # single series the divisor is exactly zero, which used to abort the conversion.
-        bar_size = band / max(slots + gap_width / 100.0, MIN_BAR_SLOTS)
         overlap = self.plot.overlap if self.plot.overlap is not None else 0.0
+        # `gapWidth` is the gap between category groups expressed as a percentage of one
+        # bar's width, so the band holds `slots` bars plus `gapWidth/100` of one more --
+        # **less what `c:overlap` takes back**, because overlapping bars share their
+        # neighbours' width and the cluster gets wider bars in the same band.
+        #
+        # The overlap term was missing here and two charts say so, both to inside the
+        # 0.24 pt PowerPoint quantises bar widths to: ``chart-gallery`` slide 1 (five
+        # categories, two series, gapWidth 150, overlap -27 on a 250.59 pt plot) drew
+        # 13.2 pt bars where the divisor without it asks for 14.32 and with it for 13.29,
+        # and the ``combo-bar`` probe ``g-overlap`` (the same settings on a 427.18 pt
+        # plot) drew 22.56 against 24.41 and 22.66.  A stacked group is unaffected --
+        # ``slots`` is 1, so the term is zero -- which is why
+        # ``real-college-template``'s ``overlap=100`` chart does not move.
+        #
+        # The schema bounds `gapWidth` to 0..500 and a file is free to ignore that; at
+        # -100 on a single series the divisor is exactly zero, which used to abort the
+        # conversion, and an overlap past 100 can drive it negative the same way.
+        slack = slots + gap_width / 100.0 - (slots - 1) * overlap / 100.0
+        bar_size = band / max(slack, MIN_BAR_SLOTS)
         step = bar_size * (1.0 - overlap / 100.0)
         cluster = bar_size + step * (slots - 1)
 
@@ -4918,6 +5252,34 @@ class ChartBuilder:
                 box=box,
             )
 
+    def _labels_down_right(
+        self,
+        rect: _Rect,
+        labels: list[tuple[float, str]],
+        font: ChartFont,
+    ) -> None:
+        """A secondary value axis' labels: left-aligned in the column right of the plot.
+
+        The mirror of :meth:`_labels_down_left`, and measured to be exactly that.  On
+        ``combo-plot`` the right-hand column began 9.70 pt past the plot's right edge at
+        three label widths -- 481.29 against a plot ending at 471.59, 449.25 against
+        439.55, 465.27 against 455.57 -- and the left-hand column on the same slides ended
+        9.70 pt before the plot began.  One gap, two sides.
+        """
+        box = font.box
+        left = rect.right + box.descent + VALUE_LABEL_GAP_EM * box.size
+        width = max(self.frame.right - left, box.size)
+        for y, text in labels:
+            if not text:
+                continue
+            self._text(
+                self._label_body(text, font, align="l"),
+                left=left,
+                width=width,
+                baseline=y + box.ink_centre,
+                box=box,
+            )
+
     def _labels_along_bottom(
         self,
         rect: _Rect,
@@ -5245,8 +5607,12 @@ class ChartBuilder:
         if gap_width is None:
             gap_width = DEFAULT_GAP_WIDTH
         slots = 1 if stacked else len(series)
-        size = band / max(slots + gap_width / 100.0, MIN_BAR_SLOTS)
         overlap = self.plot.overlap if self.plot.overlap is not None else 0.0
+        # The same divisor `_draw_bars` uses, overlap term and all; the two drift apart
+        # into a label that no longer sits on its bar if either changes alone.
+        size = band / max(
+            slots + gap_width / 100.0 - (slots - 1) * overlap / 100.0, MIN_BAR_SLOTS
+        )
         step = size * (1.0 - overlap / 100.0)
         cluster = size + step * (slots - 1)
         band_start = (rect.top if horizontal else rect.left) + (
@@ -5279,13 +5645,18 @@ class ChartBuilder:
         Alpha/Beta/Gamma/Delta, and its band matches the series formula fed those names.
         """
         deleted = self.chart.legend.deleted_entries if self.chart.legend else set()
+        # Every drawn group, in **paint** order, which is the order the entries come out
+        # in: measured on ``combo-legend``, where a line group written *first* still
+        # legends after the bar group written second, in the same place and with the same
+        # widths as the deck that writes them the other way round.
+        sources = [source for plot in self._drawn_plots() for source in plot.series]
         if not per_point:
             return [
                 source.name.plain or ""
-                for index, source in enumerate(self.plot.series)
+                for index, source in enumerate(sources)
                 if source.name is not None and index not in deleted
             ]
-        for source in self.plot.series:
+        for source in sources:
             if any(source.categories):
                 return [
                     name
@@ -5301,7 +5672,14 @@ class ChartBuilder:
         *,
         per_point: bool = False,
         categories: list[str] | None = None,
+        second_band: float = 0.0,
     ) -> None:
+        """``second_band`` is what a secondary value axis takes beyond the plain edge
+        inset, which a legend at the **side** has to clear.  Measured once, on
+        ``combo-legend``'s ``l-right``: the legend key landed 430.14 pt from the frame's
+        left edge, 0.04 pt from where it lands with no secondary axis at all, while the
+        plot itself gave up a further 15.1 pt.  So the band moves the plot and not the
+        legend, and the lead gap is measured from the far side of the label column."""
         position = self._legend_position()
         if position is None or not series:
             return
@@ -5361,7 +5739,7 @@ class ChartBuilder:
             # is the plain edge inset and not the 6.5 pt the label column starts at.
             x = self.frame.left + EDGE_INSET_PT
         else:
-            x = rect.right + LEGEND_SIDE_LEAD_EM * box.size
+            x = rect.right + second_band + LEGEND_SIDE_LEAD_EM * box.size
         # A stacked legend is centred on the frame and each entry is centred in its row.
         # Measured against both bar charts in real-financial-report.pptx: baselines land
         # within 0.18 pt, where treating the row like the horizontal band's off-centre
@@ -5400,7 +5778,7 @@ class ChartBuilder:
         drawn bubble 3.1 pt small, because the legend reserve also feeds the region the
         largest bubble is sized against.
         """
-        if (
+        if self.line_legend_keys or (
             self._is_line
             or (self._is_scatter and not self._is_bubble)
             or (self._is_radar and self._radar_style != "filled")
@@ -5428,7 +5806,7 @@ class ChartBuilder:
     ) -> None:
         box = font.box
         centre = baseline - box.ink_centre
-        if item.line is not None and (self._is_line or self._is_scatter or self._is_radar):
+        if item.line_keyed and item.line is not None:
             # A line key: the stroke across the whole swatch width with the series'
             # marker centred on it.  Measured on the radar legend probe and confirmed on
             # a line chart's, where the marker's centre landed 0.17 pt off the midpoint.
@@ -5436,8 +5814,20 @@ class ChartBuilder:
             if item.marker_symbol:
                 self._marker((x + swatch / 2, centre), item)
         else:
+            # **A swatch in a combo is as wide as the chart's key and as tall as a
+            # swatch.**  Measured on ``combo-legend``: the bar keys of a bar-plus-line
+            # chart came back 19.200 pt wide -- the line key's width, not the 5.49 pt
+            # swatch -- and 5.49 pt tall.  On a chart with no line group the two numbers
+            # are the same and this is the square every bar and pie legend measured.
+            #
+            # A series whose *own* group legends with a rule but which has no line to draw
+            # -- a stock chart's, whose `<a:ln><a:noFill/></a:ln>` is exactly that -- is a
+            # case PowerPoint answers by drawing **nothing at all**, and neither shape is
+            # right for it.  It keeps the square it has always had rather than being
+            # quietly changed by a measurement that is not about it; see ROADMAP.md 3.2a.
+            height = swatch if item.line_keyed else LEGEND_SWATCH_EM * font.size
             self._rect(
-                _Rect(x, centre - swatch / 2, x + swatch, centre + swatch / 2),
+                _Rect(x, centre - height / 2, x + swatch, centre + height / 2),
                 fill=item.fill,
                 outline=None,
             )

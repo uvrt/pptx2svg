@@ -917,13 +917,14 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
     if source is None:
         return give_up("chart-unreadable", f"has a chart part ({part}) with no c:chart in it")
 
-    plot = _first_drawable_plot(source)
-    if plot is None:
+    plots = _drawable_plots(source)
+    if not plots:
         kinds = ", ".join(sorted({p.kind for p in source.plots})) or "nothing"
         return give_up(
             "chart-unsupported-type",
             f"holds {kinds}, which is not rendered yet; drawing an empty frame",
         )
+    plot = plots[0]
 
     transform = _resolve_transform(context, node.transform)
     if transform.extent_width <= 0 or transform.extent_height <= 0:
@@ -945,6 +946,9 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         ),
         # `c:txPr` may name `+mn-lt` rather than a face; expanding it needs the theme.
         resolve_typeface=lambda typeface: _resolve_chart_typeface(chart_context, typeface),
+        # Every drawable group, not only the first: a combo chart is several of them over
+        # one plot area.  `ChartBuilder` decides which of them it can draw together.
+        plots=plots,
     )
     children, data = builder.build()
 
@@ -962,18 +966,18 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
     )
 
 
-def _first_drawable_plot(source) -> "object | None":
-    """The first plot group this renderer knows how to draw.
+def _drawable_plots(source) -> list:
+    """Every plot group this renderer knows how to draw, in document order.
 
-    ``barChart``, ``lineChart``, ``pieChart``, ``doughnutChart`` and ``radarChart`` (and
-    their 3-D spellings, drawn flat).  A combo chart whose
-    *first* group is a line but whose second is a bar still draws the bar, which is a
-    better picture than an empty frame and is why this scans rather than taking ``[0]``.
+    ``barChart``, ``lineChart``, ``areaChart``, ``pieChart``, ``doughnutChart``,
+    ``radarChart`` and the rest (and their 3-D spellings, drawn flat).  A chart holding
+    several of them is a **combo**, and whether they can be drawn together is
+    :meth:`~pptx2svg.resolve.chart.ChartBuilder._drawn_plots`' decision rather than this
+    one -- it needs the axes, which are the chart's and not the group's.  What this
+    guarantees is only that the *first* entry is drawable, so a chart whose first group
+    is one we do not draw still draws the second.
     """
-    for plot in source.plots:
-        if flat_chart_kind(plot.kind) in DRAWABLE_CHART_KINDS:
-            return plot
-    return None
+    return [plot for plot in source.plots if flat_chart_kind(plot.kind) in DRAWABLE_CHART_KINDS]
 
 
 def _chart_context(context: ResolveContext, source, part: str) -> ResolveContext:

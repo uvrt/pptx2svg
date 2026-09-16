@@ -3750,6 +3750,8 @@ def test_a_line_chart_legends_with_a_rule_and_its_marker():
 class _FakeLine:
     """Just enough of a builder for `_legend_key_size` to answer "a line chart"."""
 
+    #: Set by a combo whose groups disagree; this one answers for itself.
+    line_legend_keys = False
     _is_line = True
     _is_scatter = False
     _is_radar = False
@@ -4651,6 +4653,7 @@ def test_a_scatter_legends_with_a_rule_and_its_marker():
     )
 
     class _FakeScatter:
+        line_legend_keys = False
         _is_line = False
         _is_scatter = True
         _is_bubble = False
@@ -5244,6 +5247,7 @@ def test_a_bubble_legends_with_a_swatch_not_a_rule():
     )
 
     class _FakeBubble:
+        line_legend_keys = False
         _is_line = False
         _is_scatter = True
         _is_bubble = True
@@ -5950,3 +5954,505 @@ def test_only_the_gallerys_surface_slide_refuses_to_draw(chart_gallery):
         if number == 12:
             continue
         assert isinstance(slide.elements[-1], m.ChartElement), f"slide {number}"
+
+
+# -- Combo charts ----------------------------------------------------------------------
+#
+# Every number asserted here was read out of a PowerPoint export of the probe decks
+# `tools/make_combo_probe.py` writes; `tools/read_combo_probe.py --check` is the same
+# comparison over all 76 probe slides at once.
+
+COMBO_CATS = ("C1", "C2", "C3", "C4", "C5")
+COMBO_AXES = (90000, 90001, 90002, 90003)
+
+
+def combo_series(index: int, name: str, values) -> str:
+    points = "".join(f"<c:pt idx='{i}'><c:v>{v!r}</c:v></c:pt>" for i, v in enumerate(values))
+    cats = "".join(
+        f"<c:pt idx='{i}'><c:v>{name}</c:v></c:pt>" for i, name in enumerate(COMBO_CATS)
+    )
+    return (
+        f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        f"<c:pt idx='0'><c:v>{name}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        f"<c:cat><c:strRef><c:strCache><c:ptCount val='5'/>{cats}"
+        "</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+        f"<c:ptCount val='5'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+    )
+
+
+def combo_group(kind: str, series: str, *, secondary: bool = False, extra: str = "") -> str:
+    cat_id, val_id = (
+        (COMBO_AXES[2], COMBO_AXES[3]) if secondary else (COMBO_AXES[0], COMBO_AXES[1])
+    )
+    ids = f"<c:axId val='{cat_id}'/><c:axId val='{val_id}'/>"
+    if kind == "bar":
+        return (
+            "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"
+            f"{series}{extra}{ids}</c:barChart>"
+        )
+    if kind == "hbar":
+        return (
+            "<c:barChart><c:barDir val='bar'/><c:grouping val='clustered'/>"
+            f"{series}{extra}{ids}</c:barChart>"
+        )
+    if kind == "line":
+        return f"<c:lineChart><c:grouping val='standard'/>{series}{extra}{ids}</c:lineChart>"
+    if kind == "area":
+        return f"<c:areaChart><c:grouping val='standard'/>{series}{extra}{ids}</c:areaChart>"
+    raise AssertionError(kind)
+
+
+def combo_axes(
+    *,
+    second: bool = True,
+    second_crosses: str = "max",
+    second_delete: bool = False,
+    second_gridlines: bool = False,
+) -> str:
+    def cat(ax_id, cross_id, delete=False):
+        return (
+            f"<c:catAx><c:axId val='{ax_id}'/><c:delete val='{1 if delete else 0}'/>"
+            f"<c:axPos val='b'/><c:tickLblPos val='nextTo'/>"
+            f"<c:crossAx val='{cross_id}'/><c:crosses val='autoZero'/></c:catAx>"
+        )
+
+    def val(ax_id, cross_id, position, crosses, delete=False, gridlines=True):
+        return (
+            f"<c:valAx><c:axId val='{ax_id}'/><c:delete val='{1 if delete else 0}'/>"
+            f"<c:axPos val='{position}'/>"
+            + ("<c:majorGridlines/>" if gridlines else "")
+            + "<c:tickLblPos val='nextTo'/>"
+            f"<c:crossAx val='{cross_id}'/><c:crosses val='{crosses}'/>"
+            "<c:crossBetween val='between'/></c:valAx>"
+        )
+
+    out = cat(COMBO_AXES[0], COMBO_AXES[1]) + val(
+        COMBO_AXES[1], COMBO_AXES[0], "l", "autoZero"
+    )
+    if second:
+        out += val(
+            COMBO_AXES[3],
+            COMBO_AXES[2],
+            "r",
+            second_crosses,
+            delete=second_delete,
+            gridlines=second_gridlines,
+        )
+        out += cat(COMBO_AXES[2], COMBO_AXES[3], delete=True)
+    return out
+
+
+def combo_xml(groups: str, *, legend: str | None = None, **axes) -> str:
+    return (
+        "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        + groups
+        + combo_axes(**axes)
+        + "</c:plotArea>"
+        + (f"<c:legend><c:legendPos val='{legend}'/></c:legend>" if legend else "")
+        + "</c:chart>"
+    )
+
+
+def _build_all(body: str, *, width: float = 480.0, height: float = 260.0):
+    """Lay out a chart the way `resolve/view` does: every drawable group, not only the first."""
+    from pptx2svg.resolve.chart import ChartBuilder, ChartStyle
+
+    source = chart(body)
+    return ChartBuilder(
+        source,
+        source.plots[0],
+        plots=list(source.plots),
+        width_pt=width,
+        height_pt=height,
+        style=ChartStyle(
+            font_family="Aptos",
+            font_size=10.0,
+            color=m.ResolvedColor(hex="#000000"),
+            accents=[
+                m.ResolvedColor(hex="#4472C4"),
+                m.ResolvedColor(hex="#ED7D31"),
+                m.ResolvedColor(hex="#A5A5A5"),
+            ],
+        ),
+        resolve_fill=_fake_fill,
+        resolve_outline=_fake_outline,
+        resolve_text=lambda rich, text, size, align: m.TextBody(),
+    ).build()
+
+
+BAR_ONLY = combo_group("bar", combo_series(0, "Bars", (2.7, 9.0, 5.0, 7.2, 4.1)))
+LINE_SECOND = combo_group(
+    "line", combo_series(1, "Line", (1.5, 5.0, 2.8, 4.0, 2.3)), secondary=True
+)
+
+
+def _combo_bars(children):
+    """Every drawn bar, left to right.
+
+    A legend key is a filled shape too, and in a combo it is 19.2 pt wide -- wider than
+    the ``> 10 pt`` `_bars` separates on -- so this asks for height as well.  A marker is
+    6 pt in both.
+    """
+    return sorted(
+        (
+            child
+            for child in children
+            if isinstance(child, m.ShapeElement)
+            and isinstance(child.fill, m.SolidFill)
+            and child.text_body is None
+            and child.transform.extent_width > 10 * 12700
+            and child.transform.extent_height > 10 * 12700
+        ),
+        key=lambda child: child.transform.offset_x,
+    )
+
+
+def _combo_bar_widths(children):
+    return sorted({round(bar.transform.extent_width / 12700, 2) for bar in _combo_bars(children)})
+
+
+def _plot_edges(children):
+    """The plot rectangle's left and right, read off the gridlines that span it."""
+    lines = [
+        child
+        for child in children
+        if isinstance(child, m.ConnectorElement)
+        and child.transform.extent_height == 0
+        and child.transform.extent_width > 100 * 12700
+    ]
+    return (
+        min(line.transform.offset_x for line in lines) / 12700,
+        max(
+            line.transform.offset_x + line.transform.extent_width for line in lines
+        )
+        / 12700,
+    )
+
+
+def _legend_keys(children, *, below: float):
+    """The filled legend swatches: the solid shapes in the band under the plot.
+
+    A line entry's *marker* is a filled shape in that band too, and 6 pt across, which is
+    what the width bound is for.
+    """
+    return [
+        child
+        for child in children
+        if isinstance(child, m.ShapeElement)
+        and isinstance(child.fill, m.SolidFill)
+        and child.text_body is None
+        and child.transform.offset_y / 12700 > below
+        and child.transform.extent_width > 10 * 12700
+    ]
+
+
+def _text_at(children):
+    """Every text run as ``(x, text)``.
+
+    A list and not a dict: the two value axes of a combo print the same numbers, and
+    keying on the text loses one column into the other.
+    """
+    return [
+        (
+            child.transform.offset_x / 12700,
+            "".join(run.text for p in child.text_body.paragraphs for run in p.runs),
+        )
+        for child in children
+        if isinstance(child, m.ShapeElement) and child.text_body is not None
+    ]
+
+
+def test_a_combo_draws_every_group_and_not_only_the_first():
+    """The defect ROADMAP.md 3.3 recorded: the renderer drew one group and dropped the rest."""
+    children, data = _build_all(combo_xml(BAR_ONLY + LINE_SECOND))
+    assert [s.name for s in data.series] == ["Bars", "Line"]
+    assert len(_combo_bars(children)) == 5
+    assert _polyline_points(children), "the line group drew nothing"
+
+
+def test_a_combo_paints_bars_over_areas_and_lines_over_bars():
+    """**A precedence by type, not the document order.**
+
+    Measured on ``combo-order``: three pairs authored twice with the two ``c:*Chart``
+    elements swapped came back as three pictures, not six.  The area is under the bars in
+    both spellings, the line over the bars in both, and over the area in both.
+    """
+    from pptx2svg.resolve.chart import COMBO_CHART_KINDS
+
+    assert COMBO_CHART_KINDS == ("areaChart", "barChart", "lineChart")
+
+    bars = combo_group("bar", combo_series(0, "Bars", (2.7, 9.0, 5.0, 7.2, 4.1)))
+    line = combo_group("line", combo_series(1, "Line", (1.5, 5.0, 2.8, 4.0, 2.3)))
+    forward, _ = _build_all(combo_xml(bars + line))
+    backward, _ = _build_all(combo_xml(line + bars))
+
+    def order(children):
+        bars = {id(bar) for bar in _combo_bars(children)}
+        kinds = []
+        for child in children:
+            if not isinstance(child, m.ShapeElement) or child.text_body is not None:
+                continue
+            if id(child) in bars:
+                kinds.append("bar")
+            elif isinstance(child.geometry, m.CustomGeometry) and isinstance(child.fill, m.NoFill):
+                kinds.append("line")
+        return [kind for index, kind in enumerate(kinds) if index == 0 or kinds[index - 1] != kind]
+
+    assert order(forward) == ["bar", "line"]
+    # Swapping the two groups in the file changes nothing about who covers whom.
+    assert order(backward) == ["bar", "line"]
+
+
+def test_a_combo_colours_its_series_in_document_order_not_paint_order():
+    """``c:idx`` numbers the series; the paint precedence only decides who covers whom.
+
+    Measured on ``combo-order``'s ``o-line-col``, where the line group written first took
+    accent1 and the bar group after it accent2 -- while the bars were still painted first.
+    """
+    line = combo_group("line", combo_series(0, "Line", (1.5, 5.0, 2.8, 4.0, 2.3)))
+    bars = combo_group("bar", combo_series(1, "Bars", (2.7, 9.0, 5.0, 7.2, 4.1)))
+    children, data = _build_all(combo_xml(line + bars))
+    assert {bar.fill.color.hex.upper() for bar in _combo_bars(children)} == {"#ED7D31"}
+    # `data.series` is in paint order, as the legend is, so the line is named rather than
+    # indexed -- its accent follows `c:idx`, which the file wrote first.
+    drawn = {item.name: item.color.hex.upper() for item in data.series}
+    assert drawn == {"Line": "#4472C4", "Bars": "#ED7D31"}
+
+
+@pytest.mark.parametrize("high,ticks", [(5.0, 7), (50.0, 7), (500.0, 7), (0.5, 7)])
+def test_a_secondary_axis_does_not_move_the_primary_one(high, ticks):
+    """**A value axis' domain comes from the series attached to it**, not from the chart.
+
+    Measured on ``combo-domain``: the bar group's 0..10 left axis held while the line
+    group beside it ran 0..0.6, 0..6, 0..60 and 0..600 on the right.
+    """
+    line = combo_group(
+        "line",
+        combo_series(1, "Line", (high * 0.3, high, high * 0.55, high * 0.8, high * 0.45)),
+        secondary=True,
+    )
+    _, data = _build_all(combo_xml(BAR_ONLY + line))
+    assert (data.value_axis.minimum, data.value_axis.maximum, data.value_axis.major_unit) == (
+        0.0,
+        10.0,
+        1.0,
+    )
+
+
+def test_two_groups_on_one_axis_do_move_it():
+    """The control for the test above: a shared axis reaches both groups.
+
+    ``combo-domain``'s ``d-shared50`` and ``d-shared500`` drew 0..60 by 10 and 0..600 by
+    100 for the same bar group whose own reach is 9.
+    """
+    line = combo_group("line", combo_series(1, "Line", (15.0, 50.0, 27.5, 40.0, 22.5)))
+    _, data = _build_all(combo_xml(BAR_ONLY + line, second=False))
+    assert (data.value_axis.maximum, data.value_axis.major_unit) == (60.0, 10.0)
+
+
+def test_the_two_axes_do_not_share_a_tick_count():
+    """PowerPoint does not force the secondary axis onto the primary's gridlines.
+
+    ``combo-side``'s ``s150-C``: six labels down the left and nine down the right, over
+    one plot, meeting only at the two ends.  What they share is the interval count the
+    *frame* asks for -- both axes are divided by ``side_axis_intervals`` of the same
+    band -- which is a different thing from the count of ticks that ends up drawn.
+    """
+    line = combo_group(
+        "line", combo_series(1, "Line", (1.14, 3.8, 2.09, 3.04, 1.71)), secondary=True
+    )
+    children, _ = _build_all(combo_xml(BAR_ONLY + line), height=150.0)
+    numbers = [
+        (x, text)
+        for x, text in _text_at(children)
+        if text.replace(".", "").replace("-", "").isdigit()
+    ]
+    left = sorted(float(text) for x, text in numbers if x < 100)
+    right = sorted(float(text) for x, text in numbers if x > 300)
+    assert left == [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
+    assert right == [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+
+
+def test_a_secondary_axis_reserves_the_same_band_on_the_right_as_the_left_one():
+    """Measured to 0.04 pt over five label widths on ``combo-domain`` and ``combo-plot``."""
+    from pptx2svg.resolve.chart import ChartFont, font_box
+
+    font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
+    for high, reserve in ((5.0, 21.07), (50.0, 26.41), (500.0, 31.75)):
+        line = combo_group(
+            "line",
+            combo_series(1, "Line", (high * 0.3, high, high * 0.55, high * 0.8, high * 0.45)),
+            secondary=True,
+        )
+        children, _ = _build_all(combo_xml(BAR_ONLY + line))
+        assert 480.0 - _plot_edges(children)[1] == pytest.approx(reserve, abs=0.06)
+
+
+def test_a_deleted_secondary_axis_reserves_nothing_and_still_scales_its_series():
+    """``p-secdel``: the plot runs to the plain 11.0 pt inset and the line is still drawn."""
+    children, data = _build_all(
+        combo_xml(BAR_ONLY + LINE_SECOND, second_delete=True)
+    )
+    assert 480.0 - _plot_edges(children)[1] == pytest.approx(11.0, abs=0.06)
+    assert [s.name for s in data.series] == ["Bars", "Line"]
+    assert _polyline_points(children)
+
+
+def test_two_value_axes_on_one_side_fall_back_to_one_group():
+    """``p-seczero`` -- a secondary axis that ``crosses="autoZero"`` -- is **not drawn**.
+
+    PowerPoint stacks the two label columns on the left and narrows the plot for both.
+    Its inner column measured 21.42 pt against the outer one's 26.41 for the same label,
+    and one reading is not a rule, so this draws the first group alone rather than a
+    plausible guess.  ROADMAP.md 3.3 records it.
+    """
+    _, data = _build_all(combo_xml(BAR_ONLY + LINE_SECOND, second_crosses="autoZero"))
+    assert [s.name for s in data.series] == ["Bars"]
+
+
+def test_a_horizontal_bar_in_a_combo_falls_back_to_one_group():
+    """`barDir="bar"` puts the value axis along the bottom and the secondary along the
+    top, which no probe has measured."""
+    bars = combo_group("hbar", combo_series(0, "Bars", (2.7, 9.0, 5.0, 7.2, 4.1)))
+    _, data = _build_all(combo_xml(bars + LINE_SECOND))
+    assert [s.name for s in data.series] == ["Bars"]
+
+
+def test_a_pie_beside_a_bar_falls_back_to_one_group():
+    """Only the three group types that share a category axis are drawn together."""
+    pie = (
+        "<c:pieChart>"
+        + combo_series(1, "Pie", (1.0, 2.0, 3.0, 4.0, 5.0))
+        + "</c:pieChart>"
+    )
+    _, data = _build_all(combo_xml(BAR_ONLY + pie))
+    assert [s.name for s in data.series] == ["Bars"]
+
+
+def test_each_bar_group_keeps_its_own_gap_width_and_the_whole_category_band():
+    """Measured on ``combo-bar``.
+
+    ``g-bar-line``: the bar group of a bar-plus-line combo draws the same 34.18 pt bar it
+    draws alone -- the line group takes no slot.  ``g-gap-clash``: two bar groups stating
+    ``gapWidth`` 50 and 300 drew 57.6 and 21.6 pt bars in one band, so neither group's
+    value wins and each divides the band by its own.
+    """
+    wide = combo_group(
+        "bar",
+        combo_series(0, "Wide", (2.7, 9.0, 5.0, 7.2, 4.1)),
+        extra="<c:gapWidth val='50'/>",
+    )
+    narrow = combo_group(
+        "bar",
+        combo_series(1, "Narrow", (2.1, 7.0, 3.9, 5.6, 3.2)),
+        secondary=True,
+        extra="<c:gapWidth val='300'/>",
+    )
+    children, _ = _build_all(combo_xml(wide + narrow))
+    left, right = _plot_edges(children)
+    band = (right - left) / 5
+    assert _combo_bar_widths(children) == [
+        pytest.approx(band / 4.0, abs=0.02),
+        pytest.approx(band / 1.5, abs=0.02),
+    ]
+
+
+def test_overlap_narrows_the_bars_it_slides_together():
+    """``c:overlap`` is in the divisor, which two charts say and this used to miss.
+
+    ``chart-gallery`` slide 1 -- five categories, two series, ``gapWidth`` 150,
+    ``overlap`` -27 on a 250.59 pt plot -- drew 13.2 pt bars where the divisor without the
+    overlap term asks for 14.32 and with it for 13.29, and ``combo-bar``'s ``g-overlap``
+    agrees on a 427.18 pt plot with 22.56 against 24.41 and 22.66.  Both are inside the
+    0.24 pt PowerPoint quantises a bar width to.
+    """
+    series = combo_series(0, "One", (2.7, 9.0, 5.0, 7.2, 4.1)) + combo_series(
+        1, "Two", (2.1, 7.0, 3.9, 5.6, 3.2)
+    )
+    bars = combo_group(
+        "bar", series, extra="<c:gapWidth val='150'/><c:overlap val='-27'/>"
+    )
+    children, _ = _build_all(combo_xml(bars, second=False))
+    left, right = _plot_edges(children)
+    band = (right - left) / 5
+    assert _combo_bar_widths(children) == [
+        pytest.approx(band / (2 + 1.5 + 0.27), abs=0.02)
+    ]
+
+
+def test_a_stacked_group_is_untouched_by_the_overlap_term():
+    """``slots`` is one, so ``(slots - 1) * overlap`` is zero.  This is what keeps
+    ``real-college-template``'s ``overlap=100`` stacked chart where it was."""
+    series = combo_series(0, "One", (2.7, 9.0, 5.0, 7.2, 4.1)) + combo_series(
+        1, "Two", (2.1, 7.0, 3.9, 5.6, 3.2)
+    )
+    stacked = (
+        "<c:barChart><c:barDir val='col'/><c:grouping val='stacked'/>"
+        + series
+        + "<c:gapWidth val='75'/><c:overlap val='100'/>"
+        f"<c:axId val='{COMBO_AXES[0]}'/><c:axId val='{COMBO_AXES[1]}'/></c:barChart>"
+    )
+    children, _ = _build_all(combo_xml(stacked, second=False))
+    left, right = _plot_edges(children)
+    band = (right - left) / 5
+    assert _combo_bar_widths(children) == [pytest.approx(band / 1.75, abs=0.02)]
+
+
+def test_a_combo_legends_in_paint_order_and_widens_every_key_to_the_line_key():
+    """Measured on ``combo-legend``.
+
+    ``l-bottom`` and ``l-reversed`` are the same two groups written both ways round and
+    they legend identically -- bars first, line last, at the same x -- so the legend
+    follows the paint precedence and not the document order.  And the bar keys came back
+    **19.200 pt wide and 5.49 pt tall**: the width is the chart's, the height the swatch's.
+    """
+    from pptx2svg.resolve.chart import LEGEND_SWATCH_EM, LINE_LEGEND_KEY_PT
+
+    bars = combo_group(
+        "bar",
+        combo_series(0, "Bar one", (2.7, 9.0, 5.0, 7.2, 4.1))
+        + combo_series(1, "Bar two", (2.1, 7.0, 3.9, 5.6, 3.2)),
+    )
+    line = combo_group(
+        "line", combo_series(2, "Line one", (1.5, 5.0, 2.8, 4.0, 2.3)), secondary=True
+    )
+    forward, _ = _build_all(combo_xml(bars + line, legend="b"))
+    backward, _ = _build_all(combo_xml(line + bars, legend="b"))
+
+    def entries(children):
+        return [
+            (text, round(x, 2)) for x, text in _text_at(children)
+            if text.startswith(("Bar", "Line"))
+        ]
+
+    assert [name for name, _ in entries(forward)] == ["Bar one", "Bar two", "Line one"]
+    assert entries(backward) == entries(forward)
+
+    keys = _legend_keys(forward, below=230.0)
+    assert len(keys) == 2
+    for key in keys:
+        assert key.transform.extent_width / 12700 == pytest.approx(LINE_LEGEND_KEY_PT)
+        assert key.transform.extent_height / 12700 == pytest.approx(LEGEND_SWATCH_EM * 10.0)
+
+
+def test_a_line_chart_on_its_own_still_legends_with_a_square_swatch_when_it_has_no_line():
+    """The stock chart's case, and the one this deliberately leaves alone.
+
+    A series whose own group legends with a rule but which states
+    ``<a:ln><a:noFill/></a:ln>`` has no rule to draw, and PowerPoint draws **nothing**
+    there.  Neither our square nor a 19.2 x 5.49 bar is right, so it keeps the square it
+    has always had rather than being changed by a measurement that is not about it.
+    """
+    from pptx2svg.resolve.chart import LINE_LEGEND_KEY_PT
+
+    series = combo_series(0, "Flat", (1.5, 5.0, 2.8, 4.0, 2.3)).replace(
+        "<c:cat>", "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:cat>"
+    )
+    line = combo_group("line", series)
+    children, _ = _build_all(combo_xml(line, second=False, legend="b"))
+    keys = _legend_keys(children, below=230.0)
+    assert len(keys) == 1
+    assert keys[0].transform.extent_width == keys[0].transform.extent_height
+    assert keys[0].transform.extent_width / 12700 == pytest.approx(LINE_LEGEND_KEY_PT)
