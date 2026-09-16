@@ -39,16 +39,16 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8169,
+    "histogram": 0.817,
     "slides": [
       {
         "coverage": 0.0825,
-        "histogram": 0.9921,
-        "mean_abs": 3.592,
-        "over10": 3.481,
-        "over64": 2.279,
+        "histogram": 0.9925,
+        "mean_abs": 3.547,
+        "over10": 3.483,
+        "over64": 2.269,
         "sparse": false,
-        "ssim": 0.5509
+        "ssim": 0.5611
       },
       {
         "coverage": 0.1377,
@@ -195,7 +195,7 @@
         "ssim": 0.612
       }
     ],
-    "ssim": 0.6407
+    "ssim": 0.6413
   },
   "real-basic-theme": {
     "fonts": {
