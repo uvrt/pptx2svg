@@ -1979,10 +1979,14 @@ within 0.14 pt and on the axis exactly.
 
 What the measurement said that the reasoning did not:
 
-* **The axis rule is not "aim for N ticks".** It is the plain power of ten below the span,
-  halved when the span is under twice it. No tick target reproduces both 0..9 → 0..10 by 1
-  (ten intervals) and 0..1842 → 0..2000 by 500 (four). Both ends round *strictly*
-  outwards, so data topping out at 5 gets an axis to 6.
+* **The axis rule is the plain power of ten below the span, halved when the span is under
+  twice it** — and that is what is shipped, but it is **wrong**, as a later measurement
+  says below. It was read as "not a tick target" because no target reproduces both
+  0..9 → 0..10 by 1 (ten intervals) and 0..1842 → 0..2000 by 500 (four); on a taller frame
+  PowerPoint draws that second one **by 200**, ten intervals, so the pair was one rule seen
+  at two frame sizes and the fit went to the shape of the smaller one. See "The unit rule
+  is not the power of ten below the span". Both ends round *strictly* outwards here, where
+  PowerPoint rounds outwards from a range padded 5% at each end.
 * **The tick-mark allowance is reserved whether or not tick marks are drawn.**
   `majorTickMark="none"` and `"out"` produced byte-identical plot rectangles.
 * **The default axis and gridline colour is black at 0.5 pt, not grey.** Charts written by
@@ -2098,6 +2102,94 @@ probe's 120.95 pt cell refused 12.095 pt and the six-cell table's 30.9 pt cell r
 15.43 pt. So the accepted set now spans 14.50 to 27.3 pt and the refused set 12.10 to
 15.43 pt, and they **overlap** — no threshold on spacing alone, at any axis length, orders
 all nine observations. Whatever the rule is, it is not a spacing threshold.
+
+#### The unit rule is not the power of ten below the span
+
+**101 readings, six probe decks, one machine.** The question that started this was narrow —
+how wide the forgiveness window `_DECADE_SLACK` opens below a power of ten should be — and
+it can only be seen on an **unanchored** value axis, which only a scatter has. Thirty such
+probes were built with the span falling under a tenth by a relative 1e-15, 2e-14, 1e-13,
+1e-11, 1e-9, 1e-6, 1e-4, 1e-2 and 5e-2, at three magnitudes, and exported. **All thirty
+came back with the same axis.** A span written as a plain 0.095 and a span one ulp under a
+tenth are drawn identically, so no experiment on this path can bracket a decade boundary,
+and no number fitted to one would mean anything. The slack stays where it was and now says
+so; `tools/make_axis_probe.py` and `tools/read_axis_probe.py` rebuild and re-read every
+deck below.
+
+What the same probes *did* settle is the rule itself. Sweeping the span at a fixed axis
+length, on an unanchored axis where nothing is rounded away:
+
+| data | PowerPoint | ours |
+| --- | --- | --- |
+| 0.1..0.11 | 0.098..0.112 by 0.002 | 0.095..0.115 by 0.005 |
+| 0.2..0.22 | 0.195..0.225 by 0.005 | 0.195..0.225 by 0.005 |
+| 0.5..0.55 | 0.49..0.56 by 0.01 | 0.49..0.56 by 0.01 |
+| 1.0..1.1 | 0.98..1.12 by 0.02 | 0.95..1.15 by 0.05 |
+| 2.0..2.2 | 1.95..2.25 by 0.05 | 1.9..2.3 by 0.1 |
+| 10..11 | 9.8..11.2 by 0.2 | 9.5..11.5 by 0.5 |
+| 50..55 | 49..56 by 1 | 49..56 by 1 |
+| 100..110 | 98..112 by 2 | 95..115 by 5 |
+
+The pattern is exact, and it is a **count**, not a decade: the unit is the smallest step on
+the 1-2-5 ladder that is at least a **tenth of the range**, where the range is first padded
+by **5% at each end** (clamped at zero when the axis is anchored there). Then the extent is
+that padded range rounded outwards to whole units.
+
+Both halves are bracketed rather than assumed. Anchored data 0.3..4.8 takes unit 1 and
+0.3..4.76 takes 0.5, which puts the headroom in (4.17%, 5.04%] of the maximum; unanchored
+1.0..1.092 takes 0.02 and 1.0..1.09 takes 0.01, which puts it in (4.35%, 5.56%] of the
+range — 5% is the only round number in the intersection. 3.0..4.9 and 3.5..4.9 both take
+unit 1, so on an anchored axis the headroom is 5% of the **maximum** and not of the data
+range. The tenth is bracketed too: eleven intervals of the padded range are accepted
+(1.04..1.13 → 1.03..1.14 by 0.01) and twelve are refused (1.03..1.13 → 1.02..1.14 by 0.02).
+
+Across all 94 scatter readings the rule gets **75 units exactly and all 94 extents**; the
+other 19 are a strict coarsening of its base unit, every one of them on a short axis. The
+shipped rule gets 29 units and 21 whole axes. The seven bar readings — a real column chart
+with a real category axis — are all seven exactly the base unit, so this is not a scatter
+behaviour.
+
+**The five observations `AXIS_HALVING_RATIO` was fitted to are coarsened results.** They
+came from short frames, and on a long one PowerPoint draws them finer: a bar chart of
+0..1842 on the 145.0 pt plot the corpus uses draws **0..2000 by 200**, ten intervals, where
+the corpus deck's own 112–150 pt frames at 12 pt labels draw by 500. The base rule predicts
+200 and one coarsening step gives 500, so both are the same rule seen at two sizes — and
+fitting to only the small size is how the decade-and-halve shape got in.
+
+What still is not known is the **coarsening stage**, and these decks sharpen it without
+closing it. Holding the data and the font and varying only the frame:
+
+| plot height | PowerPoint | intervals | spacing |
+| --- | --- | --- | --- |
+| 358.8 pt | 1.02..1.14 by 0.02 | 6 | 59.8 pt |
+| 190.4 pt | 1.02..1.14 by 0.02 | 6 | 31.7 pt |
+| 135.3 pt | 1.02..1.14 by 0.02 | 6 | 22.6 pt |
+| 95.9 pt | 1.0..1.15 by 0.05 | 3 | 32.0 pt |
+| 56.5 pt | 1.0..1.2 by 0.1 | 2 | 28.3 pt |
+| 40.8 pt | 1.0..1.2 by 0.2 | 1 | 40.8 pt |
+
+Three things are now eliminated, each by a probe built to eliminate it:
+
+* **Not the label's text.** 103..113 draws three-digit integers where 1.03..1.13 draws
+  four-character decimals, and the two coarsen at exactly the same frame heights. A bar
+  chart whose labels run 0.001..0.01 — 1842's label width at 9's magnitude — accepts ten
+  intervals at 14.5 pt, the same as one labelled 0..10.
+* **Not the magnitude.** Every sweep above repeats at three decades with identical results.
+* **Not a spacing floor.** The same 10 pt labels accept 14.5 pt on a 145.0 pt plot and
+  refuse 16.0 pt on a 95.9 pt one. Short plots demand *larger* steps, so whatever the
+  criterion is, it is not "the ticks must be N points apart" — which is the same verdict
+  the older tables reached from the other side, now with the accepted and refused sets
+  measured on one chart type, one font and one machine.
+
+It **is** font-driven in part: one 150 pt frame at 6, 10, 18 and 28 pt labels draws by
+0.02, 0.02, 0.05 and 0.2. And it is chart-type-driven in part, which the radar/bar bracket
+above already said.
+
+Whoever picks this up starts by implementing the base rule — it is measured, bracketed and
+simple — and then owes the coarsening stage a rule that turns 200 into 500 on the corpus'
+own frames. Shipping the base rule alone would draw eleven gridlines where PowerPoint draws
+four on exactly the short plots the corpus is made of, which is why nothing is changed
+here.
 
 #### Not done for the ten types that draw
 
@@ -3363,12 +3455,14 @@ types that landed this week reused nearly all of it. What is left, cheapest firs
    close it is written down under *Surface -- measured, and deferred*. Drawing several
    `c:*Chart` groups at once, and the second value axis that usually comes with them, is
    now the largest chart item left.
-5. **The value-axis tick density.** Still unsolved, and the stock sweep has made it
-   firmer rather than looser: the accepted spacings now run 14.50 to 27.3 pt and the
-   refused ones 12.10 to 15.43 pt, and they **overlap**, so no threshold on spacing alone
-   orders the nine observations at any axis length. It is the whole of the stock probe
-   deck's shortfall and the only visible difference between our render of the area deck
-   and PowerPoint's.
+5. **The value-axis tick density — and, it turns out, the unit rule under it.** 101
+   readings off six probe decks say the base unit is the finest 1-2-5 step of at least a
+   tenth of the range after 5% of headroom at each end, and that the decade-and-halve rule
+   we ship was fitted to *coarsened* results on small frames. The base rule is measured and
+   bracketed; what coarsens it on a short axis is still unknown, and shipping one without
+   the other would draw eleven gridlines where PowerPoint draws four. Start at "The unit
+   rule is not the power of ten below the span", which carries the readings, the brackets
+   and the three hypotheses they eliminate.
 
 ## Non-goals
 

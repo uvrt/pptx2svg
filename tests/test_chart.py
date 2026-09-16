@@ -298,6 +298,10 @@ def test_a_span_a_hair_under_a_power_of_ten_is_still_that_power_of_ten():
     The slack is not a licence to round.  A span that genuinely falls short of a power of
     ten still falls short of it: 9.9999999999 misses by a hundred times more than this
     window reaches, and nothing anyone would author comes close to being that near.
+
+    Its **width** is not measured and cannot be on this oracle -- PowerPoint draws a span
+    of 0.095 and a span one ulp under a tenth identically, so nothing observable moves when
+    the window does.  See :data:`_DECADE_SLACK` and the test below.
     """
     assert _decade(0.24 - 0.14) == 0.1
     assert _decade(1.13 - 1.03) == 0.1
@@ -310,6 +314,67 @@ def test_a_span_a_hair_under_a_power_of_ten_is_still_that_power_of_ten():
     # every value an upward ulp could promote is inside this window already.
     assert _decade(math.nextafter(100.0, 0.0)) == 100.0
     assert _decade(math.nextafter(math.nextafter(100.0, 0.0), 0.0)) == 100.0
+
+
+#: Every pair of two-decimal numbers a tenth apart whose ratio leaves a scatter's value
+#: axis unanchored leaves one of exactly four residues in the subtraction: none, ten ulps,
+#: twenty-six, ninety.  PowerPoint was given all four and drew all four **alike**, every
+#: one of them stepping by 0.02, so whatever we do with a residue, the one thing it may
+#: not do is depend on its size.
+AUTHORED_TENTH_PAIRS = ((1.00, 1.10), (1.03, 1.13), (2.16, 2.26), (7.94, 8.04))
+
+
+def test_the_residue_of_an_authored_subtraction_never_changes_the_axis():
+    """The evenness :data:`_DECADE_SLACK` exists for, and PowerPoint agrees it is right.
+
+    ``1.10 - 1.00`` lands a hair *above* a tenth, ``1.13 - 1.03`` ten ulps under it,
+    ``2.26 - 2.16`` twenty-six and ``8.04 - 7.94`` ninety.  Nothing about those four charts
+    differs to a reader, and PowerPoint draws all four with the same unit -- measured, one
+    probe each, ``tools/make_axis_probe.py`` deck ``axis-decade``.  Under
+    ``floor(log10(span))`` the last three fall into the decade of a hundredth and the first
+    does not, so a chart of 1.00..1.10 got an axis by 0.05 and its neighbour 1.03..1.13 one
+    by 0.01: five times the gridlines for a tenth of data either way.
+
+    The unit we pick is **not** PowerPoint's 0.02 -- that is the tick-density divergence
+    recorded in ROADMAP.md, and the test below pins it -- but it is the same for all four,
+    which is the whole of what a residue is allowed to do.
+    """
+    for low, high in AUTHORED_TENTH_PAIRS:
+        minimum, maximum, unit = nice_axis_scale(low, high, anchor_zero=False)
+        assert unit == pytest.approx(0.05), (low, high)
+        assert minimum <= low and maximum >= high
+
+
+def test_powerpoint_ignores_the_decade_of_a_span_on_an_unanchored_axis():
+    """A measurement kept as a test because it refutes the shape, not a constant.
+
+    :data:`_DECADE_SLACK` decides which decade a span that falls just under a power of ten
+    belongs to, and the only axis where that decision survives to be drawn is an
+    unanchored one -- a scatter's.  Thirty such probes, with the span under a tenth by a
+    relative 1e-15 through 5e-2, came back from PowerPoint with **one** axis between them:
+
+    ========================  =====================  ======================
+    data                      PowerPoint             ours
+    ========================  =====================  ======================
+    1.03..1.13 (10 ulps)      1.02..1.14 by 0.02     1.0..1.15 by 0.05
+    1.03..1.1299999999        1.02..1.14 by 0.02     1.02..1.13 by 0.01
+    1.03..1.125 (a flat .095) 1.02..1.14 by 0.02     1.02..1.13 by 0.01
+    ========================  =====================  ======================
+
+    A five-per-cent shortfall and a one-ulp shortfall drawn identically is not a wide
+    forgiveness window; it is a rule that never asks which decade the span is in.  So the
+    slack's width is unmeasurable here, no number is fitted to these, and what we draw is
+    asserted instead so the divergence is recorded rather than latent.
+    """
+    assert nice_axis_scale(1.03, 1.13, anchor_zero=False) == pytest.approx((1.0, 1.15, 0.05))
+    assert nice_axis_scale(1.03, 1.1299999999, anchor_zero=False) == pytest.approx(
+        (1.02, 1.13, 0.01)
+    )
+    assert nice_axis_scale(1.03, 1.125, anchor_zero=False) == pytest.approx((1.02, 1.13, 0.01))
+    # And the extent rule diverges too: PowerPoint rounds outwards from a range padded by
+    # 5% at each end, which clears a datum sitting exactly on a unit boundary and clears
+    # one that does not as well.  0.3..4.9 came back 0..6 by 1.
+    assert nice_axis_scale(0.3, 4.9) == pytest.approx((0.0, 5.0, 1.0))
 
 
 def test_the_decade_helper_survives_the_ends_of_the_double_range():
