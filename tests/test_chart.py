@@ -7,6 +7,7 @@ where each constant came from and what its residual against the measurement is.
 
 from __future__ import annotations
 
+import collections
 import math
 import re
 import zipfile
@@ -941,6 +942,262 @@ def test_clustered_series_sit_side_by_side_inside_the_category_band(probe_deck):
     assert bars[0].transform.extent_width / 12700.0 == pytest.approx(
         band / 3.5, abs=0.1
     )
+
+
+# -- The horizontal legend sweep -------------------------------------------------------
+#
+# `LEGEND_ENTRY_GAP_EM = 0.5` said the gap between entries in a bottom or top legend was a
+# constant, and ROADMAP.md 3.3 refuted it on four charts that solved for four gaps.  It is
+# not a constant, and it is not a residue either: the run is padded by a fifth of its own
+# natural width, split into `n + 1` parts, so the gap grows with the names and a wider
+# frame does not touch it.  See `LEGEND_ENTRY_SLACK`.
+#
+# These are eight of the 88 probe slides behind that rule (`tools/make_legend_probe.py`,
+# read back by `tools/read_legend_probe.py`), chosen to span what the sweep varied: entry
+# count, name width, key type, font size and the 0.9-of-the-frame cap.  Every x is the
+# **drawn key's left edge** in points from the frame's left edge, measured out of
+# PowerPoint's own PDF export as an exact vector coordinate.
+
+#: All eight probes share this frame, so only the entries differ.
+LEGEND_FRAME = (480 * 12700, 260 * 12700)
+
+LEGEND_SWEEP = {
+    # Two entries: the smallest run in the sweep.
+    "n-2": (
+        {"names": ["Wi", "Wii"]},
+        [218.441, 243.867],
+    ),
+    # Seven: the gap has grown from 3.79 pt to 5.16 pt on the same frame, which a constant
+    # gap cannot do and a distributed one would do backwards.
+    "n-7": (
+        {"names": ["Wi", "Wii", "Wiii", "Wiiii", "Wiiiii", "Wiiiiii", "Wiiiiiii"]},
+        [124.901, 152.352, 182.193, 214.423, 249.044, 286.055, 325.456],
+    ),
+    "k-bar": (
+        {"names": ["Wm", "Wmm", "Wmmm"]},
+        [182.505, 216.484, 258.993],
+    ),
+    # The same names with a line key, whose cell is 24.0 pt against the swatch's 10.985 --
+    # so the same three names sit 2 pt further apart as well as 13.7 pt further along.
+    "k-line": (
+        {"names": ["Wm", "Wmm", "Wmmm"], "kind": "line"},
+        [160.683, 209.630, 267.107],
+    ),
+    # 14 pt type: the whole layout is in ems and scales, which is what says the gap is not
+    # a fixed number of points.
+    "z-14": (
+        {"names": ["Wm", "Wmm", "Wmmm"], "size": 1400},
+        [159.206, 206.779, 266.293],
+    ),
+    # **The cap.**  Three long names whose natural padding would take the run past 0.9 of
+    # the frame, so the gap is the leftover instead -- 16.29 pt where the uncapped rule
+    # asks for 18.34.
+    "w-lll": (
+        {"names": ["Wmmmmmmmmmmmm"] * 3},
+        [43.798, 182.364, 320.930],
+    ),
+    # Six entries against the same cap, where it leaves almost nothing: a 0.77 pt gap.
+    "c6-06": (
+        {"names": ["Wmmmmmm"] * 6},
+        [28.281, 100.150, 172.019, 243.888, 315.758, 387.627],
+    ),
+    # A top legend lays out exactly like a bottom one; only the baseline differs.
+    "p-t": (
+        {"names": ["Wm", "Wmm", "Wmmm"], "legend": "t"},
+        [182.505, 216.484, 258.993],
+    ),
+}
+
+#: Worst residual across the eight is 0.05 pt; 0.6 pt is about one pixel at the 1280 px
+#: the fidelity harness scores at.
+LEGEND_TOLERANCE_PT = 0.1
+
+
+def legend_chart_xml(*, names, kind="col", size=1000, legend="b"):
+    """One legend probe chart: one series per name, and nothing else of interest."""
+    series = ""
+    for index, name in enumerate(names):
+        series += (
+            f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+            "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+            f"<c:pt idx='0'><c:v>{name}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+            + (
+                "<c:marker><c:symbol val='circle'/><c:size val='5'/></c:marker>"
+                if kind == "line"
+                else ""
+            )
+            + "<c:cat><c:strRef><c:strCache><c:ptCount val='2'/>"
+            "<c:pt idx='0'><c:v>C1</c:v></c:pt>"
+            "<c:pt idx='1'><c:v>C2</c:v></c:pt></c:strCache></c:strRef></c:cat>"
+            "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+            "<c:ptCount val='2'/><c:pt idx='0'><c:v>3.0</c:v></c:pt>"
+            "<c:pt idx='1'><c:v>9.0</c:v></c:pt></c:numCache></c:numRef></c:val>"
+            + ("<c:smooth val='0'/>" if kind == "line" else "")
+            + "</c:ser>"
+        )
+    ids = "<c:axId val='100002'/><c:axId val='100003'/>"
+    group = (
+        f"<c:lineChart><c:grouping val='standard'/><c:varyColors val='0'/>{series}"
+        f"<c:marker val='1'/>{ids}</c:lineChart>"
+        if kind == "line"
+        else "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"
+        f"<c:varyColors val='0'/>{series}<c:gapWidth val='150'/>{ids}</c:barChart>"
+    )
+    return (
+        "<?xml version='1.0' encoding='UTF-8' standalone='yes'?>"
+        "<c:chartSpace xmlns:c='http://schemas.openxmlformats.org/drawingml/2006/chart' "
+        "xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main' "
+        "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'>"
+        "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>" + group +
+        "<c:catAx><c:axId val='100002'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='b'/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100003'/>"
+        "<c:crosses val='autoZero'/><c:auto val='1'/><c:lblAlgn val='ctr'/>"
+        "<c:lblOffset val='100'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        "</c:plotArea>"
+        f"<c:legend><c:legendPos val='{legend}'/><c:overlay val='0'/></c:legend>"
+        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+        "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>"
+        f"<a:defRPr sz='{size}'/></a:pPr><a:endParaRPr lang='en-US'/></a:p></c:txPr>"
+        "</c:chartSpace>"
+    ).encode()
+
+
+@pytest.fixture(scope="module")
+def legend_deck(authoring):
+    """`authoring-integration.pptx` with the eight legend probe charts spliced in."""
+    from tests.deckbuilder import derive_deck
+
+    chart_type = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+    parts, relationships, overrides, shapes = {}, [], {}, ""
+    for index, (name, (kwargs, _)) in enumerate(LEGEND_SWEEP.items()):
+        part = f"ppt/charts/legend{index}.xml"
+        parts[part] = legend_chart_xml(**kwargs)
+        overrides[part] = chart_type
+        relationships.append(
+            (
+                f"rIdLegend{index}",
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+                f"../charts/legend{index}.xml",
+            )
+        )
+        shapes += (
+            f"<p:graphicFrame><p:nvGraphicFramePr>"
+            f"<p:cNvPr id='{300 + index}' name='{name}'/>"
+            "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+            f"<p:xfrm><a:off x='0' y='0'/>"
+            f"<a:ext cx='{LEGEND_FRAME[0]}' cy='{LEGEND_FRAME[1]}'/></p:xfrm>"
+            "<a:graphic><a:graphicData "
+            "uri='http://schemas.openxmlformats.org/drawingml/2006/chart'>"
+            "<c:chart xmlns:c='http://schemas.openxmlformats.org/drawingml/2006/chart' "
+            "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships' "
+            f"r:id='rIdLegend{index}'/></a:graphicData></a:graphic></p:graphicFrame>"
+        )
+
+    deck = convert_pptx_to_model(
+        derive_deck(
+            authoring,
+            parts=parts,
+            shapes_xml=shapes,
+            slide_relationships=relationships,
+            overrides=overrides,
+        )
+    )
+    charts = [e for e in deck.slides[0].elements if isinstance(e, m.ChartElement)]
+    # The fixture's own chart comes first in z-order, then the probes.
+    return dict(zip(LEGEND_SWEEP, charts[1:]))
+
+
+def _legend_key_xs(chart):
+    """Every legend key's left edge, in points from the frame's left edge.
+
+    The keys are the marks outside the plot rectangle's rows, all on one line of their
+    own: a swatch is a small square shape and a line key a horizontal connector with the
+    series' marker on it, so the rules are preferred where they exist and the marker is
+    never mistaken for a key.  Keys are taken by the row they share rather than one at a
+    time, because a data label or an axis title would also sit outside the plot.
+    """
+    _, top, _, bottom = _plot_rect(chart)
+    outside = [
+        child
+        for child in chart.children
+        if not (top - 1.0 <= _pt(child.transform.offset_y) <= bottom + 1.0)
+    ]
+    rules = [
+        child
+        for child in outside
+        if isinstance(child, m.ConnectorElement)
+        and child.transform.extent_height == 0
+        and _pt(child.transform.extent_width) > 10.0
+    ]
+    candidates = rules or [
+        child
+        for child in outside
+        if isinstance(child, m.ShapeElement)
+        and child.text_body is None
+        # Square to within the EMU the transform rounds to, and swatch-sized.  Exact
+        # equality fails: the same square at two x positions rounds to two widths.
+        and abs(child.transform.extent_width - child.transform.extent_height) < 300
+        and _pt(child.transform.extent_width) < 12.0
+    ]
+    rows = collections.Counter(round(_pt(c.transform.offset_y), 2) for c in candidates)
+    if not rows:
+        return []
+    band = rows.most_common(1)[0][0]
+    return sorted(
+        _pt(child.transform.offset_x)
+        for child in candidates
+        if abs(_pt(child.transform.offset_y) - band) < 0.05
+    )
+
+
+@pytest.mark.parametrize("name", list(LEGEND_SWEEP))
+def test_the_legend_sweep_reproduces_powerpoints_entry_positions(name, legend_deck):
+    expected = LEGEND_SWEEP[name][1]
+    ours = _legend_key_xs(legend_deck[name])
+    assert len(ours) == len(expected), f"{name}: {len(ours)} keys, expected {len(expected)}"
+    for index, (mine, truth) in enumerate(zip(ours, expected)):
+        assert mine == pytest.approx(truth, abs=LEGEND_TOLERANCE_PT), (
+            f"{name} key {index}: PowerPoint {truth:.3f}, ours {mine:.3f}"
+        )
+
+
+def test_the_legend_gap_grows_with_the_entries_and_ignores_the_frame():
+    """The two facts that separate this rule from the two readings it replaces.
+
+    A **constant** gap would leave the pitch alone as the names grow; a gap
+    **distributed** across an available width would shrink it, and would move when the
+    frame moved.  The measured pitch does neither, and this states it without the export.
+    """
+    from pptx2svg.resolve.chart import LEGEND_BAND_MAX_FRACTION, LEGEND_ENTRY_SLACK
+
+    def gap(widths, frame):
+        total = sum(widths)
+        slack = min(
+            LEGEND_ENTRY_SLACK * total, LEGEND_BAND_MAX_FRACTION * frame - total
+        )
+        return max(slack, 0.0) / (len(widths) + 1)
+
+    narrow = gap([30.0, 40.0, 50.0], 240.0)
+    wide = gap([30.0, 40.0, 50.0], 720.0)
+    assert narrow == pytest.approx(wide)
+
+    # Twice the content, twice the gap -- the sign a distributed layout gets backwards.
+    assert gap([60.0, 80.0, 100.0], 720.0) == pytest.approx(2 * wide)
+
+    # And the cap: entries whose padding would overflow get whatever is left of 0.9 of the
+    # frame, which is what `w-lll` and `c6-06` above measure.
+    assert gap([60.0, 80.0, 100.0], 300.0) == pytest.approx((270.0 - 240.0) / 4)
 
 
 # -- The variant sweep -----------------------------------------------------------------
@@ -3750,12 +4007,17 @@ def test_a_line_chart_legends_with_a_rule_and_its_marker():
 class _FakeLine:
     """Just enough of a builder for `_legend_key_size` to answer "a line chart"."""
 
+    from pptx2svg.resolve.chart import ChartBuilder as _Builder
+
     #: Set by a combo whose groups disagree; this one answers for itself.
     line_legend_keys = False
     _is_line = True
     _is_scatter = False
     _is_radar = False
     _radar_style = "marker"
+    #: The predicate `_legend_key_size` asks, borrowed rather than restated so the fake
+    #: cannot drift from the rule it is standing in for.
+    _line_legend_key = _Builder._line_legend_key
 
 
 
@@ -4659,6 +4921,7 @@ def test_a_scatter_legends_with_a_rule_and_its_marker():
         _is_bubble = False
         _is_radar = False
         _radar_style = "marker"
+        _line_legend_key = ChartBuilder._line_legend_key
 
     font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
     assert ChartBuilder._legend_key_size(_FakeScatter(), font) == (
@@ -5253,6 +5516,7 @@ def test_a_bubble_legends_with_a_swatch_not_a_rule():
         _is_bubble = True
         _is_radar = False
         _radar_style = "marker"
+        _line_legend_key = ChartBuilder._line_legend_key
 
     font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
     key, _ = ChartBuilder._legend_key_size(_FakeBubble(), font)
