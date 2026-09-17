@@ -370,14 +370,14 @@
       {
         "coverage": 0.1748,
         "histogram": 0.9991,
-        "mean_abs": 2.201,
-        "over10": 3.85,
-        "over64": 1.315,
+        "mean_abs": 2.199,
+        "over10": 3.846,
+        "over64": 1.313,
         "sparse": false,
-        "ssim": 0.8597
+        "ssim": 0.8607
       }
     ],
-    "ssim": 0.9112
+    "ssim": 0.9114
   },
   "real-product-page": {
     "fonts": {
@@ -438,7 +438,7 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9819,
+    "histogram": 0.9805,
     "slides": [
       {
         "coverage": 0.0127,
@@ -450,22 +450,22 @@
         "ssim": 1.0
       },
       {
-        "coverage": 0.0316,
-        "histogram": 0.9847,
-        "mean_abs": 2.678,
-        "over10": 2.26,
-        "over64": 1.415,
+        "coverage": 0.0308,
+        "histogram": 0.9857,
+        "mean_abs": 2.361,
+        "over10": 2.14,
+        "over64": 1.277,
         "sparse": false,
-        "ssim": 0.547
+        "ssim": 0.5957
       },
       {
-        "coverage": 0.0328,
-        "histogram": 0.9914,
-        "mean_abs": 3.901,
-        "over10": 2.719,
-        "over64": 2.166,
+        "coverage": 0.028,
+        "histogram": 0.9822,
+        "mean_abs": 2.214,
+        "over10": 1.981,
+        "over64": 1.293,
         "sparse": false,
-        "ssim": 0.2391
+        "ssim": 0.5373
       },
       {
         "coverage": 0.0273,
@@ -495,7 +495,7 @@
         "ssim": 0.74
       }
     ],
-    "ssim": 0.6788
+    "ssim": 0.7367
   },
   "sample-issue-387": {
     "fonts": {
