@@ -1016,3 +1016,59 @@ def test_the_wrap_tolerance_is_too_small_to_admit_a_whole_glyph():
     assert 0.00231 < WRAP_TOLERANCE_RATIO < 0.00813
     # A box one glyph short of eleven still fits only ten, however the slack rounds.
     assert _cjk_line_counts(11 * 32.0 - 32.0)[0] == 10
+
+
+def _cjk_wrap(text: str, width_pt: float, size_pt: float = 32.0) -> list[str]:
+    from pptx2svg.units import PX_PER_PT
+
+    paragraph = make_paragraph(text, font_size=size_pt, font_family_ea="Noto Sans JP")
+    lines = wrap_paragraph(paragraph, width_pt * PX_PER_PT, size_pt)
+    return ["".join(s.text for s in line.segments) for line in lines]
+
+
+@pytest.mark.parametrize("forbidden", ["、", "。", "」", "ー", "っ", "ゞ", "ァ", "）"])
+def test_a_japanese_line_never_begins_with_a_forbidden_character(forbidden):
+    """Kinsoku: the character before it comes down too rather than leave it at the head.
+
+    Measured on `tools/make_cjk_wrap_probe.py`'s `k` family -- a box exactly ten glyphs
+    wide with the punctuation as the eleventh character.  PowerPoint put nine on the
+    first line in every case, which is push-out and not hanging punctuation.
+    """
+    lines = _cjk_wrap("東" * 10 + forbidden + "東" * 9, 320.0)
+    assert lines[0] == "東" * 9, lines
+    assert lines[1].startswith("東" + forbidden), lines
+
+
+def test_a_japanese_line_never_ends_with_an_opening_bracket():
+    lines = _cjk_wrap("東" * 9 + "「" + "東" * 10, 320.0)
+    assert lines[0] == "東" * 9, lines
+    assert lines[1].startswith("「"), lines
+
+
+def test_two_forbidden_characters_in_a_row_push_back_once_more():
+    """One pass is not enough: moving 、 down would leave 。 at the head instead."""
+    lines = _cjk_wrap("東" * 10 + "、。" + "東" * 8, 320.0)
+    assert lines[0] == "東" * 9, lines
+    assert lines[1].startswith("東、。"), lines
+
+
+def test_kinsoku_never_empties_a_line():
+    """A forbidden character with nothing to push back onto stays where it is.
+
+    Pushing the line's last token down would move the problem rather than solve it, and
+    a paragraph of nothing but punctuation would otherwise loop forever.
+    """
+    assert _cjk_wrap("、" * 6, 64.0) == ["、、", "、、", "、、"]
+
+
+def test_the_kinsoku_classes_hold_no_character_latin_wrapping_can_see():
+    """Latin wrapping must not move: every member is East Asian by `is_cjk`.
+
+    The same classes have ASCII members -- ``)``, ``.``, ``,`` -- and admitting those
+    would change where an English paragraph breaks, which no probe here measured.
+    """
+    from pptx2svg.text.measure import is_cjk
+    from pptx2svg.text.wrap import NOT_LINE_END, NOT_LINE_START
+
+    assert not NOT_LINE_START & NOT_LINE_END
+    assert all(is_cjk(ord(char)) for char in NOT_LINE_START | NOT_LINE_END)

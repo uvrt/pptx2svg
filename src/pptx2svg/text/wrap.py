@@ -55,6 +55,24 @@ DEFAULT_FONT_SIZE = 18.0
 #: see ROADMAP.md.
 WRAP_TOLERANCE_RATIO = 0.005
 
+#: Characters a line may not *begin* with (行頭禁則), and which therefore pull their
+#: left-hand neighbour down with them when a break would land before one.
+#:
+#: Every member is inside :func:`~pptx2svg.text.measure.is_cjk`'s ranges, which is
+#: deliberate and is tested: the ASCII members of the same class -- ``)``, ``.``, ``,`` --
+#: would change where *Latin* wraps, and nothing here measured that.
+NOT_LINE_START = frozenset(
+    "、。，．・：；？！゛゜ゝゞヽヾ々ー゠"       # punctuation, iteration and length marks
+    "ぁぃぅぇぉっゃゅょゎゕゖ"                     # small hiragana
+    "ァィゥェォッャュョヮヵヶ"                     # small katakana
+    "）］｝〕〉》」』】〗〙〟｠"               # closing brackets and quotes
+)
+
+#: Characters a line may not *end* with (行末禁則), which go down to the next line
+#: instead.  Same containment rule as :data:`NOT_LINE_START`.
+NOT_LINE_END = frozenset("（［｛〔〈《「『【〖〘〝｟")
+
+
 @dataclass
 class LineSegment:
     text: str
@@ -227,6 +245,43 @@ def _trim_trailing_spaces(segments: list[LineSegment]) -> list[LineSegment]:
     return segments
 
 
+def _kinsoku_pushback(current: list[_Token], token: _Token) -> int:
+    """How many of ``current``'s trailing tokens must go down with ``token``.
+
+    Japanese forbids a line that *begins* with a closing bracket, a small kana, a
+    sound mark or a full stop, and one that *ends* with an opening bracket.  PowerPoint
+    honours both by moving the offending character's neighbour down with it -- 追い出し,
+    push-out -- and the loop here is why one pass is not enough: two forbidden characters
+    in a row, or an opening bracket that lands at the line end only because something was
+    already pushed down, each need another turn.
+
+    Measured rather than assumed, in three respects.  ``tools/make_cjk_wrap_probe.py``'s
+    ``k`` family puts each class of character at the break in a box whose width is known
+    to the quarter point: PowerPoint moved the neighbour down in all seven, including for
+    two punctuation marks in a row.  Its ``q`` family then tried the two attributes that
+    might have governed it: **``hangingPunct`` makes no difference at all** -- the
+    alternative layout, where the character hangs past the right edge, is not what this
+    PowerPoint does with either setting -- while **``eaLnBrk="0"`` turns the rule off**
+    and lets 、 open a line.  ``eaLnBrk`` defaults to on and every master in this corpus
+    writes it on, so the rule is applied unconditionally here; reading the attribute is
+    what a deck that turns it off would need and no deck in the corpus does.
+
+    A line is never emptied: pushing its last token down would move the problem rather
+    than solve it, and PowerPoint does not do that either.
+    """
+    moved = 0
+    while True:
+        kept = len(current) - moved
+        if kept <= 1:
+            return 0
+        head = current[kept].text if moved else token.text
+        tail = current[kept - 1].text
+        if head[:1] in NOT_LINE_START or tail[-1:] in NOT_LINE_END:
+            moved += 1
+            continue
+        return moved
+
+
 def _layout_tokens(
     tokens: list[_Token],
     available_width: float,
@@ -272,16 +327,19 @@ def _layout_tokens(
             continue
 
         # The line is full. Whether we may break here or not, the token moves down --
-        # but a leading space on the new line is dropped.
+        # but a leading space on the new line is dropped.  Kinsoku may take one or more
+        # of the line's own trailing tokens down with it; see :func:`_kinsoku_pushback`.
+        moved = _kinsoku_pushback(current, token)
+        carried = current[len(current) - moved:] if moved else []
+        current = current[: len(current) - moved] if moved else current
         segments = _trim_trailing_spaces(_merge_segments(current))
         if segments:
             lines.append(WrappedLine(segments=segments))
         if token.breakable and _is_space_only(token.text):
-            current = []
-            current_width = 0.0
+            current = carried
         else:
-            current = [token]
-            current_width = token.width
+            current = carried + [token]
+        current_width = sum(item.width for item in current)
 
     if current:
         segments = _trim_trailing_spaces(_merge_segments(current))
