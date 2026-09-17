@@ -15,6 +15,7 @@ end-to-end inputs. They exercise structures that are awkward to synthesise by ha
 | `real-product-page.pptx`      | hand-authored  | 1      | rounded rectangles, ellipses, text boxes           |
 | `real-financial-report.pptx`  | hand-authored  | 4      | CJK text, tables, charts, dense layouts            |
 | `sample.pptx`                 | PowerPoint     | 6      | assorted shapes and text                           |
+| `sample-cjk.pptx`             | `tools/make_cjk_deck.py`, from `sample.pptx` | 6 | the same deck with a Japanese face both renderers draw — the only scorable CJK deck |
 | `sample-issue-387.pptx`       | PowerPoint     | 1      | regression case for text layout                    |
 | `authoring-integration.pptx`  | python-pptx    | 1      | one of each element type: shape, picture, connector, table, chart |
 | `chart-gallery.pptx`          | `tools/make_chart_gallery.py` | 17 | one chart type per slide: every `c:*Chart` group element the reader knows |

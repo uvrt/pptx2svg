@@ -72,13 +72,13 @@ both learned from decks that this harness was happily scoring:
    body text obliges *both* renderers to invent a face, and two independently-invented
    fallbacks are not a measurement of anything.  So coverage is read from the faces'
    own cmaps instead.
-3. **A face PowerPoint resolved differently.**  Coverage is necessary and not
-   sufficient.  ``sample.pptx`` names ＭＳ Ｐゴシック through its theme's ``Jpan`` script
-   entry, this machine has it, and PowerPoint's export embeds ``MS-Gothic`` and
-   ``MS-Mincho`` -- never ``MS-PGothic``.  Those are two different faces inside one
-   ``.ttc``: MS Gothic advances every CJK glyph a full em, MS PGothic is proportional
-   and runs 0.648 em to 1.0 for katakana.  Nothing this renderer does can close a gap
-   that begins with different outlines at different widths.
+3. **A face PowerPoint drew that the deck never named.**  Coverage is necessary and not
+   sufficient.  ``sample.pptx`` resolves its Japanese through ＭＳ Ｐゴシック, this machine
+   has that face, and PowerPoint's export embeds ``MS-Gothic`` and ``MS-Mincho`` --
+   never ``MS-PGothic``.  Those are two different faces inside one ``.ttc``: MS Gothic
+   advances every CJK glyph a full em, MS PGothic is proportional and runs 0.648 em to
+   1.0 for katakana.  Nothing this renderer does can close a gap that begins with
+   different outlines at different widths.
 
 Check 3 reads ``/BaseFont`` out of PowerPoint's PDF, which is the thing the comment above
 :func:`font_profile` warns against doing -- for a different purpose.  It warns against
@@ -89,9 +89,15 @@ exception to it.
 The cost is real and worth stating: two decks that used to score, ``sample`` (0.06) and
 ``real-basic-theme`` (0.97), are now skipped.  The 0.97 was not wrong so much as not
 about this library -- its Japanese runs were our MS PGothic against PowerPoint's MS
-Gothic, and it passed because there is not much Japanese on those slides.  The way to get
-them back is the one this file has always recommended: make the face PowerPoint resolves
-match the face the deck names, then re-export.
+Gothic, and it passed because there is not much Japanese on those slides.
+
+Both remain skipped, because ＭＳ Ｐゴシック is unresolvable by this PowerPoint under any
+spelling and is not ours to install where it would not be.  Seven exports establish what
+*would* move them and what would not -- the table is in :func:`font_profile` -- and the
+one lever that works is naming, in ``<a:ea>``, a face both renderers draw.
+``tools/make_cjk_deck.py`` takes it: it derives ``sample-cjk.pptx``, the first Japanese
+deck in this corpus where both sides ink the face the deck asks for, without editing the
+two decks that record the real-world case.
 
 The bundled substitutes are what we *ship*; ``pptx2svg fonts --check`` and
 ``tests/test_fonts.py`` cover those.  They are deliberately not the reference here.
@@ -99,6 +105,11 @@ The bundled substitutes are what we *ship*; ``pptx2svg fonts --check`` and
 Dev-only.  This needs numpy, pillow, pypdfium2, fontTools and a rasteriser; the library
 itself stays standard-library-only, which is why this lives in ``tools/`` and not in
 ``src/``.
+
+Setting the machine up -- which fonts to install where, and how to undo it -- is in
+``FONTS.md`` under "Making the oracle draw Japanese".  It is there rather than here
+because it is a change to the machine, not to this file, and because the next person to
+wonder why a Japanese deck is skipped will be reading that page.
 
 Usage::
 
@@ -304,8 +315,64 @@ LICENSED_FONT_DIRECTORIES = (
 PROFILE_PATH = ROOT / "tests" / "font-profile.local.json"
 
 
-def _faces_in(path: str) -> list[tuple[set[str], str, int, str]]:
-    """``(family names, style, weight, PostScript name)`` for every face in a file.
+def _instance_names(font, postscript: str) -> tuple[set[str], list[str]]:
+    """``(extra family names, instance PostScript names)`` for a variable font.
+
+    Everything else in this file reads a font file as one static face, which is what
+    nameID 1 and nameID 6 describe.  A variable font breaks that in both directions at
+    once, and ``NotoSansJP[wght].ttf`` -- the one this project ships -- is the worst case
+    of it: its default instance is **Thin**, so nameID 1 says "Noto Sans JP Thin" and
+    nameID 6 says "NotoSansJP-Thin", while the file supplies the whole 100--900 family
+    and every renderer here draws Regular and Bold out of it.
+
+    Read as a static, then, the file answers to a name no deck asks for and claims a
+    PostScript name no export contains, so a deck naming "Noto Sans JP" reports the face
+    *missing* while it sits in ``~/Library/Fonts``, and the ``/BaseFont`` check calls
+    PowerPoint's Regular a substitution.  Both are wrong, and both are wrong in the
+    confident direction.
+
+    So for a font with an ``fvar`` table:
+
+    * nameID 16 -- the typographic family, "Noto Sans JP" -- is a name the file really
+      does supply, because the axis reaches every weight of it.  This is the one place
+      nameID 16 is a *fact* rather than fontdb's preference; see
+      :func:`addressable_font_files` for the other, opposite one.
+    * each named instance contributes the PostScript name an export will carry.  Core
+      Text synthesises that as ``{nameID 6}_{instance subfamily}`` when the instance
+      declares no ``postScriptNameID`` of its own, which is why PowerPoint's PDFs name
+      ``NotoSansJP-Thin_Regular`` and ``NotoSansJP-Thin_Bold``.  Measured from the
+      exports, not assumed: the widths in ``real-product-page.pdf`` match this file at
+      ``wght=400`` and ``wght=700`` exactly and no other weight at all.
+    """
+    if "fvar" not in font:
+        return set(), []
+    names: set[str] = set()
+    instances: list[str] = []
+    table = font["name"]
+    for record in table.names:
+        if record.nameID != 16:
+            continue
+        try:
+            value = (record.toUnicode() or "").strip()
+        except Exception:
+            continue
+        if value:
+            names.add(value)
+    for instance in font["fvar"].instances:
+        declared = getattr(instance, "postscriptNameID", 0xFFFF)
+        if declared not in (0, 0xFFFF):
+            own = table.getDebugName(declared)
+            if own:
+                instances.append(own.strip())
+                continue
+        subfamily = table.getDebugName(instance.subfamilyNameID)
+        if postscript and subfamily:
+            instances.append(f"{postscript}_{subfamily.strip().replace(' ', '')}")
+    return names, instances
+
+
+def _faces_in(path: str) -> list[tuple[set[str], str, int, str, list[str]]]:
+    """``(family names, style, weight, PostScript name, instance names)`` per face.
 
     Style is one of ``regular``/``bold``/``italic``/``bolditalic``, taken from the OS/2
     selection flags rather than the subfamily string, which is localised and creative
@@ -314,6 +381,10 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int, str]]:
     Filenames lie -- ``calibril.ttf`` is "Calibri Light", ``YuGothR.ttc`` is "Yu Gothic"
     -- and matching a deck's ``typeface="Calibri Light"`` against a filename stem is how
     the old profile decided Calibri Light was missing while it sat right there.
+
+    A variable font is a family in one file rather than a face, so it contributes more
+    names than its nameID 1 and more PostScript names than its nameID 6 -- see
+    :func:`_instance_names`, which is empty for every static.
     """
     from fontTools.ttLib import TTCollection, TTFont
 
@@ -326,7 +397,7 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int, str]]:
     except Exception:  # unreadable, bitmap-only, or a format fontTools declines
         return []
 
-    result: list[tuple[set[str], str, int, str]] = []
+    result: list[tuple[set[str], str, int, str, list[str]]] = []
     for font in fonts:
         try:
             table = font["name"]
@@ -370,6 +441,8 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int, str]]:
                 postscript = postscript or value.strip()
             else:
                 names.add(value.strip())
+        extra, instances = _instance_names(font, postscript)
+        names |= extra
         if not names:
             continue
         try:
@@ -380,7 +453,7 @@ def _faces_in(path: str) -> list[tuple[set[str], str, int, str]]:
         bold = bool(selection & 0x20)
         italic = bool(selection & 0x01)
         style = ("bold" if bold else "") + ("italic" if italic else "") or "regular"
-        result.append((names, style, weight, postscript))
+        result.append((names, style, weight, postscript, instances))
     return result
 
 
@@ -409,12 +482,13 @@ def scan_licensed_fonts() -> dict[str, dict]:
             digest = hashlib.sha256()
             with open(path, "rb") as handle:
                 digest.update(handle.read())
-            for families, style, weight, postscript in faces:
+            for families, style, weight, postscript, instances in faces:
                 entry = {
                     "path": path,
                     "sha256": digest.hexdigest()[:16],
                     "weight": weight,
                     "postscript": postscript,
+                    "instances": instances,
                 }
                 for family in families:
                     styles = found.setdefault(family, {})
@@ -444,11 +518,16 @@ def scan_licensed_fonts() -> dict[str, dict]:
 #: commit, same decks, same PDFs, opposite verdicts, no error anywhere.  A wrong answer
 #: in the direction of confidence is the worst kind, so this one is fatal, not a warning.
 #:
+#: ``instances`` was added the same way and for the same reason, when the bundled Noto
+#: Sans JP was installed to make three Japanese decks measurable: a variable font's
+#: nameID 6 is its *default* instance, PowerPoint's export names the instance it drew,
+#: and a profile without this field makes every such export look like a substitution.
+#:
 #: Declared rather than derived from a sample so that the writer can *assert* against it:
 #: add a field to a face entry without listing it here and ``--write-profile`` fails on
 #: the spot, which is the moment the schema really changed.  Listing it then changes the
 #: hash, which retires every profile written under the old shape.
-_FACE_FIELDS = ("path", "postscript", "sha256", "weight")
+_FACE_FIELDS = ("instances", "path", "postscript", "sha256", "weight")
 _PROFILE_FIELDS = ("directories", "faces", "schema")
 
 #: Fingerprint of the shape above.  Stamped into every profile and refused on mismatch.
@@ -629,10 +708,16 @@ def load_profile() -> dict | None:
 #: With one exception, added after this comment turned out to be wrong about a deck in
 #: the corpus.  ``sample.pptx`` writes ``<a:ea typeface=""/>`` in both font collections
 #: and sets Japanese body text anyway, so ``+mn-ea`` has nothing to expand to -- and the
-#: face it actually resolves through is ``<a:font script="Jpan" typeface="ＭＳ Ｐゴシック"/>``
-#: in that same skipped list.  For an East Asian script the list is not noise, it is the
+#: face *this renderer* resolves through is ``<a:font script="Jpan" typeface="ＭＳ Ｐゴシック"/>``
+#: in that same skipped list.  For an East Asian script the list is not noise, it is a
 #: resolution path, so those four entries are read separately by
 #: :func:`script_faces` instead of being discarded with the rest.
+#:
+#: "A resolution path", not "the" one.  PowerPoint 16.x on macOS reaches the list for
+#: ``real-financial-report`` and does not reach it for ``sample``; both were measured by
+#: rewriting the entry and re-exporting, and :func:`font_profile` has the table.  Reading
+#: it here is still right -- it is what *we* draw, and a face we draw and PowerPoint does
+#: not is exactly the input difference the skip rules exist to notice.
 #:
 #: Matches the whole element so it can be *removed*.  This used to truncate the theme at
 #: the first script font instead, which threw away everything after it -- including the
@@ -776,15 +861,36 @@ def _pdf_base_fonts(pdf: Path) -> set[str]:
     Read from the file rather than through a text API so that a face used for a single
     glyph still shows up.  The ``AAAAAE+`` subset prefix an embedded font carries is
     stripped; it is assigned per document and means nothing across exports.
+
+    ``_`` is in the character class because Core Text puts it there: an instance of a
+    variable font is named ``NotoSansJP-Thin_Regular``.  Leaving it out truncated that to
+    ``NotoSansJP-Thin``, which happened to be the file's own nameID 6 and so happened to
+    match -- a right answer for a wrong reason, and only for this one font.  A PDF name
+    is a PDF name; read all of it and let :func:`_instance_names` supply the other side.
     """
     data = pdf.read_bytes()
     found: set[str] = set()
-    for match in re.finditer(rb"/BaseFont\s*/([A-Za-z0-9+#,.\-]+)", data):
+    for match in re.finditer(rb"/BaseFont\s*/([A-Za-z0-9_+#,.\-]+)", data):
         name = match.group(1).decode("latin-1")
         if len(name) > 7 and name[6] == "+":
             name = name[7:]
         found.add(name)
     return found
+
+
+def _postscript_names(styles: dict) -> set[str]:
+    """Every PostScript name a profile family can appear under in an export.
+
+    One per static cut, plus one per named instance of a variable font: the export names
+    the *instance* PowerPoint drew, not the file's default.  Comparing only the default
+    is how ``NotoSansJP-Thin_Regular`` would read as a substitution for Noto Sans JP.
+    """
+    names: set[str] = set()
+    for entry in styles.values():
+        if entry.get("postscript"):
+            names.add(entry["postscript"])
+        names.update(entry.get("instances") or ())
+    return names
 
 
 #: Why there is still no "PowerPoint fell back to X, so we will too" table here.
@@ -849,9 +955,40 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
       therefore no behaviour here to reproduce -- only a font this copy of PowerPoint
       cannot see.
 
-      What would make these two decks measurable is unchanged and is not something this
-      file can do: register MS PGothic where PowerPoint can find it -- on Windows it is a
-      separately addressable family and this does not arise -- and re-export the oracle.
+      Which raises the practical question of what, if anything, a deck could say to make
+      this PowerPoint draw a Japanese face on purpose.  Seven exports answer it, each a
+      copy of a corpus deck with one theme string changed, each read back through its
+      PDF's ``/BaseFont`` entries:
+
+      =====================  =============================  ========================
+      deck                   theme edit                     what PowerPoint drew
+      =====================  =============================  ========================
+      ``real-basic-theme``   -- (as committed)              MS-Gothic, MS-Mincho
+      ``real-basic-theme``   ``Jpan`` -> ``MS PGothic``     MS-Gothic, MS-Mincho
+      ``real-basic-theme``   ``Jpan`` -> ``MS Gothic``      MS-Gothic, MS-Mincho
+      ``real-basic-theme``   ``a:ea`` -> ＭＳ Ｐゴシック         MS-Gothic, MS-Mincho
+      ``real-basic-theme``   ``a:ea`` -> ``Noto Sans JP``   MS-Gothic, MS-Mincho
+      ``sample``             ``Jpan`` -> ``Noto Sans JP``   MS-Gothic, MS-Mincho
+      ``sample``             ``a:ea`` -> ``Noto Sans JP``   ``NotoSansJP-Thin_*``
+      =====================  =============================  ========================
+
+      ＭＳ Ｐゴシック is unresolvable here under either spelling, so the authored face can
+      never be drawn on this machine -- that much was already known.  What is new is that
+      **nothing writable in ``real-basic-theme``'s theme changes its answer**, including
+      a face this PowerPoint draws happily in three other decks.  Its Japanese runs name
+      a *Latin* face as their own ``a:ea`` -- Lato, Arial, Raleway -- and PowerPoint
+      discards that and supplies its own Japanese default without consulting the theme.
+      ``sample``'s runs say ``+mn-ea``, and there the scheme's ``<a:ea>`` slot is the
+      lever that works while its ``Jpan`` entry is not consulted at all.
+
+      That last part does not generalise: ``real-financial-report``'s ``Jpan`` entries
+      *are* consulted -- rewriting its 游ゴシック pair to ``MS Mincho`` takes
+      YuGothic-Regular out of the export and puts MS-Mincho in.  Why one deck reaches the
+      script list and another does not is unsettled, and it does not need settling to act
+      on the part that is measured: the way to make a Japanese deck scorable here is to
+      name, in ``<a:ea>``, a face both renderers draw.  That is
+      ``tools/make_cjk_deck.py`` and the ``sample-cjk`` deck it derives -- taken without
+      editing the two decks that record the real-world case.
     """
     faces = (profile or {}).get("faces", {})
     named = requested_faces(deck)
@@ -895,23 +1032,17 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
                 )
                 if not exclusive:
                     continue
-                postscript = {
-                    entry.get("postscript")
-                    for entry in faces[face].values()
-                    if entry.get("postscript")
-                }
+                postscript = _postscript_names(faces[face])
                 if postscript and not (postscript & drawn):
                     substituted.append(face)
             substituted.sort()
             # What it drew *instead*, so the skip line says something a reader can act
             # on.  Only the faces the deck never named: those are the substitutes.
             if substituted:
-                named_ps = {
-                    entry.get("postscript")
-                    for face in usable
-                    for entry in faces[face].values()
-                }
-                instead = sorted(drawn - {p for p in named_ps if p})
+                named_ps: set[str] = set()
+                for face in usable:
+                    named_ps |= _postscript_names(faces[face])
+                instead = sorted(drawn - named_ps)
 
     digest = hashlib.sha256()
     for face in available:

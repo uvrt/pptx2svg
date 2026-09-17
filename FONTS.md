@@ -360,6 +360,16 @@ Two things to know when reading a deck's XML:
 * **A Latin face named as the East Asian one is ignored.** Decks really do write
   `<a:ea typeface="Raleway"/>`, and PowerPoint draws their Japanese in a Japanese face
   anyway. So does this library: a candidate that cannot draw kana loses to one that can.
+* **Step 3 is what *we* do; PowerPoint reaches it only sometimes.** Measured by rewriting
+  the entry and re-exporting: `real-financial-report.pptx`'s `script="Jpan"` pair does
+  decide its export — 游ゴシック draws YuGothic-Regular, and rewriting the pair to
+  `MS Mincho` draws MS-Mincho instead. `sample.pptx`'s does not: pointing it at Noto Sans
+  JP changes nothing, while filling that theme's empty `<a:ea>` with the same name is
+  decisive. And where a run names a Latin face as its own `<a:ea>`, as
+  `real-basic-theme.pptx` does, PowerPoint substitutes its own Japanese default and no
+  theme edit reaches it at all. Why one deck reaches the script list and another does not
+  is unsettled. This library reaches it in all three cases, which is a difference in
+  *input* rather than in rendering, and `tools/fidelity.py` skips rather than scores it.
 
 One run can therefore be two faces, and it is split into separate `<tspan>` chunks that
 each name their own, because rasterisers fall back per chunk rather than per glyph.
@@ -543,6 +553,59 @@ pptx2svg deck.pptx -f png --system-fonts
 The script pins the download by SHA-256 and refuses a changed payload rather than
 substituting silently. You accept Microsoft's terms; this project does not grant you any
 right to the file.
+
+## Making the oracle draw Japanese (developer setup)
+
+`tools/fidelity.py` scores our render against PowerPoint's, and it refuses to score a
+deck whose two renderers drew different faces. Three decks in the corpus name **Noto Sans
+JP**, and on a machine that does not have it PowerPoint substitutes a face of its own, so
+all three were skipped rather than scored. The fix is to give PowerPoint the same file we
+ship — which is ours to install, because it is the OFL copy in this repository.
+
+```bash
+# install, from our own bundled file, for this user only
+cp "packages/pptx2svg-fonts/src/pptx2svg_fonts/files/NotoSansJP[wght].ttf" ~/Library/Fonts/
+
+# undo
+rm "~/Library/Fonts/NotoSansJP[wght].ttf"
+```
+
+**User-level (`~/Library/Fonts`), not `/Library/Fonts`.** The profile that
+`tools/fidelity.py --write-profile` writes is per-machine already; a system-wide install
+changes what every other application sees for no gain here. Restart PowerPoint afterwards
+— it reads the font list once at launch. Then:
+
+```bash
+python3 tools/fidelity.py --write-profile      # the profile must be rewritten
+osascript tools/powerpoint_export_pdf.applescript "$HOME/pptx2svg-oracle/DECK.pptx" \
+                                                  "$HOME/pptx2svg-oracle/DECK.pdf"
+```
+
+Copy the file; do not symlink it. Confirm it took by reading the re-exported PDF's
+`/BaseFont` entries — they should name `NotoSansJP-Thin_Regular` and
+`NotoSansJP-Thin_Bold`.
+
+Those names look alarming and are correct. `NotoSansJP[wght].ttf` is a variable font
+whose **default instance is Thin**, so its PostScript name is `NotoSansJP-Thin` and Core
+Text names each instance it draws `{that}_{Style}`. The widths in the export match this
+file at `wght=400` and `wght=700` exactly and no other weight at all, and resvg
+instantiates the same axis: rendering through the variable font at `font-weight: 400` is
+byte-identical to rendering through a statically instantiated 400 cut. Both sides draw
+Regular and Bold; neither draws Thin.
+
+**Installing this font does not change our SVG output.** The SVG path opens no font file
+— widths come from the generated tables in `text/metrics.py` — so all 33 committed VRT
+snapshots stay byte-identical across the install. If one moves, the install is not the
+reason.
+
+Nothing above helps the other two Japanese decks. `sample.pptx` and
+`real-basic-theme.pptx` resolve their Japanese to **ＭＳ Ｐゴシック**, which this copy of
+PowerPoint cannot use under any spelling and which is Microsoft's to distribute, not
+ours. They stay skipped; `tools/make_cjk_deck.py` has the seven exports that establish
+what would and would not move them, and derives `sample-cjk.pptx`, which names a face
+both renderers draw.
+
+---
 
 ## The licensing boundary
 

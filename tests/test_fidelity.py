@@ -120,6 +120,31 @@ def test_font_profile_partitions_faces_and_is_hashable():
     )
 
 
+def test_the_cjk_deck_is_exactly_what_its_generator_writes(tmp_path):
+    """``sample-cjk.pptx`` is a derivation, and this is what keeps it one.
+
+    The fixture's whole claim is that it is ``sample.pptx`` with two theme strings
+    changed and nothing else -- which is what lets ``sample.pptx`` stay the file md-pptx
+    generated while a scorable Japanese deck exists alongside it.  A claim like that is
+    worth exactly as much as the check behind it: edit the derived deck by hand, or edit
+    ``sample.pptx`` without regenerating, and the provenance in
+    ``tests/fixtures/FIXTURES-README.md`` quietly stops being true.
+
+    Byte-for-byte rather than "the themes match", because the point is that *nothing
+    else* moved, and because the generator writes each entry back through its own
+    ``ZipInfo`` precisely so that two runs agree.
+    """
+    import make_cjk_deck
+
+    derived = tmp_path / "sample-cjk.pptx"
+    replacements = make_cjk_deck.write_deck(FIXTURES / "sample.pptx", derived)
+    assert replacements == 8, replacements
+    assert derived.read_bytes() == (FIXTURES / "sample-cjk.pptx").read_bytes(), (
+        "tests/fixtures/sample-cjk.pptx is not what tools/make_cjk_deck.py writes; "
+        "regenerate it rather than editing either deck by hand"
+    )
+
+
 def test_font_profile_hash_changes_when_a_face_changes():
     """The guard that stops a score from being compared across a font change."""
     local = _profile()
