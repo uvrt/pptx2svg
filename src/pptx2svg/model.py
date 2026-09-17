@@ -605,11 +605,33 @@ class ChartAxisScale:
 
 
 @dataclass
+class Chart3DView:
+    """``c:view3D`` -- the camera a 3-D chart's scene was authored with.
+
+    Carried, not drawn: the scene itself is rendered flat (see :attr:`ChartData.three_d`),
+    and this is the record of what the flattening threw away.  ``None`` fields are
+    elements the file did not state; the defaults they take are PowerPoint's rather than
+    the schema's, and which is which is documented on
+    :class:`~pptx2svg.parse.chart.SourceChartView3D`.
+    """
+
+    #: Degrees of pitch and yaw.
+    rot_x: float | None = None
+    rot_y: float | None = None
+    #: Depth and height, each as a percentage of the scene's width.
+    depth_percent: float | None = None
+    h_percent: float | None = None
+    #: ``c:rAngAx`` -- right-angle axes, which turns the perspective off.
+    right_angle_axes: bool | None = None
+    perspective: float | None = None
+
+
+@dataclass
 class ChartData:
     """What a chart plots, independent of how it was drawn."""
 
     #: The OOXML group element, with 3-D variants already mapped to their 2-D equivalent
-    #: (``bar3DChart`` -> ``barChart``).
+    #: (``bar3DChart`` -> ``barChart``).  :attr:`three_d` is what that mapping erases.
     kind: str
     series: list[ChartSeries] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
@@ -620,6 +642,13 @@ class ChartData:
     value_axis: ChartAxisScale | None = None
     #: ``b`` / ``t`` / ``l`` / ``r`` / ``tr``, or ``None`` when there is no legend.
     legend_position: str | None = None
+    #: Whether the group was authored as a 3-D spelling.  Such a chart is
+    #: **drawn flat**, and warns ``chart-3d-flattened`` when it is.  Its value axis is
+    #: still the one PowerPoint would draw: a 3-D axis is not padded, which is measured
+    #: and is why this flag has to survive the mapping to :attr:`kind`.
+    three_d: bool = False
+    #: ``c:view3D``, when the file states it.  Nothing draws from it yet.
+    view_3d: Chart3DView | None = None
 
 
 @dataclass

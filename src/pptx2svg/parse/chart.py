@@ -78,6 +78,12 @@ _THREE_D_EQUIVALENT = {
     "surface3DChart": "surfaceChart",
 }
 
+#: Every group element that is a 3-D spelling.  :func:`flat_chart_kind` erases this, and
+#: the difference is not cosmetic: a 3-D value axis is **not padded**, so a chart that
+#: forgets which spelling it came from draws the wrong numbers.  See
+#: :func:`~pptx2svg.resolve.chart.nice_axis_scale` and ROADMAP.md 3.4.
+THREE_D_CHART_KINDS = frozenset(_THREE_D_EQUIVALENT)
+
 #: ``c:catAx`` / ``c:valAx`` / ``c:dateAx`` / ``c:serAx`` -- the four axis elements.
 AXIS_ELEMENTS = ("catAx", "valAx", "dateAx", "serAx")
 
@@ -85,6 +91,15 @@ AXIS_ELEMENTS = ("catAx", "valAx", "dateAx", "serAx")
 def flat_chart_kind(kind: str) -> str:
     """The 2-D chart a 3-D one degrades to; every other name is returned unchanged."""
     return _THREE_D_EQUIVALENT.get(kind, kind)
+
+
+def is_three_d_kind(kind: str) -> bool:
+    """Whether this group element was authored as a 3-D spelling.
+
+    Five of them, of which four draw: ``surface3DChart`` is deferred along with the 2-D
+    surface it maps to, and refuses rather than flattening.
+    """
+    return kind in THREE_D_CHART_KINDS
 
 
 # --------------------------------------------------------------------------------------
@@ -309,6 +324,49 @@ class SourceChartPlot:
 
 
 @dataclass
+class SourceChartView3D:
+    """``c:view3D`` -- the camera a 3-D chart's scene is drawn through.
+
+    Every field is ``None``-able because **absent is not defaulted here either**, and for
+    this element the difference is visible: a chart with no ``c:view3D`` at all and one
+    with an empty ``<c:view3D/>`` are drawn differently by PowerPoint.  Measured on
+    ``view3d-view``'s ``absent`` and ``empty`` probes -- the same chart on the same frame
+    came back with a 94.08 pt value axis and a 155.04 pt one.
+
+    What the element's absence means, measured on that deck rather than read off the
+    schema: the ``absent`` probe is identical to 0.001 pt to the ``rotX=15 rotY=20
+    depthPercent=100 rAngAx=0`` probe and to that same probe with ``perspective=30``,
+    which is PowerPoint's own 3-D default *except* for ``rAngAx`` -- ECMA-376 gives that
+    one a default of 1, and the picture PowerPoint draws is the one a 0 draws.
+
+    Nothing reads these yet.  They are carried because the geometry they decide is
+    measurable and unmeasured: see ROADMAP.md 3.4 for what each does to the plot
+    rectangle, and why the count that follows from it is still open.
+    """
+
+    #: ``c:rotX`` -- pitch, in degrees, -90..90.  Positive tips the floor towards the
+    #: viewer, and it is what takes the plot's height: a 195 pt frame's value axis ran
+    #: 147.6 pt at ``rotX=0`` and 84.96 pt at ``rotX=90``.
+    rot_x: float | None = None
+    #: ``c:rotY`` -- yaw, in degrees, 0..360.  Measured to move the scene sideways only:
+    #: seven values from 0 to 340 drew the same 127.4-127.7 pt axis.
+    rot_y: float | None = None
+    #: ``c:depthPercent`` -- the scene's depth as a percentage of its width, 20..2000.
+    depth_percent: float | None = None
+    #: ``c:hPercent`` -- the scene's height as a percentage of its width, 5..500.
+    #: Measured to be exactly that ratio: 20/50/100/200 came back as 0.1995, 0.4975,
+    #: 0.991 and 1.965 of the drawn width.  Absent, PowerPoint computes one from the
+    #: frame, which is the open part of the geometry.
+    h_percent: float | None = None
+    #: ``c:rAngAx`` -- right-angle axes, which turns the perspective off.
+    right_angle_axes: bool | None = None
+    #: ``c:perspective`` -- 0..240, and ignored while :attr:`right_angle_axes` is true.
+    #: Measured: ``rAngAx=1`` with ``perspective=120`` is identical to ``rAngAx=1``
+    #: alone, and with ``rAngAx=0`` the same 120 takes the axis from 94.08 to 61.68 pt.
+    perspective: float | None = None
+
+
+@dataclass
 class SourceChartLegend:
     position: str | None = None
     overlay: bool = False
@@ -328,6 +386,8 @@ class SourceChart:
     title: SourceChartText | None = None
     auto_title_deleted: bool = False
     legend: SourceChartLegend | None = None
+    #: ``c:view3D``.  Present only when the file states the element.
+    view_3d: SourceChartView3D | None = None
     #: ``c:dispBlanksAs`` -- ``gap`` (default), ``zero`` or ``span``.
     display_blanks_as: str | None = None
     plot_visible_only: bool | None = None
@@ -380,6 +440,7 @@ def parse_chart_space(chart_space: Element | None) -> SourceChart | None:
         # and an automatic title is what a single-series chart gets for free.
         auto_title_deleted=_flag(child(chart, "autoTitleDeleted"), default=False),
         legend=_legend(child(chart, "legend")),
+        view_3d=_view_3d(child(chart, "view3D")),
         display_blanks_as=attr(child(chart, "dispBlanksAs"), "val"),
         plot_visible_only=_optional_flag(child(chart, "plotVisOnly")),
         fill=parse_fill(child(chart_space, "spPr")),
@@ -613,6 +674,24 @@ def _legend(legend: Element | None) -> SourceChartLegend | None:
         fill=parse_fill(sp_pr),
         outline=parse_outline(sp_pr),
         deleted_entries=deleted,
+    )
+
+
+def _view_3d(view: Element | None) -> SourceChartView3D | None:
+    """``c:view3D`` -> :class:`SourceChartView3D`, or ``None`` when the element is absent.
+
+    An element with no children still returns a record, all of whose fields are ``None``:
+    the two are different pictures, and only the record can tell them apart.
+    """
+    if view is None:
+        return None
+    return SourceChartView3D(
+        rot_x=num_attr(child(view, "rotX"), "val"),
+        rot_y=num_attr(child(view, "rotY"), "val"),
+        depth_percent=num_attr(child(view, "depthPercent"), "val"),
+        h_percent=num_attr(child(view, "hPercent"), "val"),
+        right_angle_axes=_optional_flag(child(view, "rAngAx")),
+        perspective=num_attr(child(view, "perspective"), "val"),
     )
 
 

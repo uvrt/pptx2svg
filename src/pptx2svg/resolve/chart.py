@@ -964,10 +964,21 @@ def nice_axis_scale(
     0..1842 by **200**, and the by-500 axis the old rule was fitted to is that same axis
     coarsened by a 150 pt frame.
 
-    ``strict=False`` rounds the extent from the **data** rather than from the padded
-    range, which is what a **radar** wants: the same 0..5 data a bar chart takes to 6
-    stopped at exactly 5 on every radar probe, five rings with the outermost passing
-    through the largest point.  The unit is chosen identically.
+    ``strict=False`` drops the headroom and rounds the extent from the **data** rather
+    than from the padded range.  Two kinds of chart want it, and both are measured:
+
+    * a **radar** -- the same 0..5 data a bar chart takes to 6 stopped at exactly 5 on
+      every radar probe, five rings with the outermost passing through the largest point;
+    * a **3-D chart** -- ``view3d-meter``'s 0..50 dataset came back 0..50 on all seven
+      frames and all three 3-D group elements, never the 0..55 or 0..60 a 5% headroom
+      produces, and its 0..96 dataset came back 0..100 where the headroom gives 0..120.
+      Fed back through this function, **the padded rule cannot draw what PowerPoint drew
+      at any interval count** -- 34 of the two decks' 52 3-D cells have no solution at all --
+      while the bare rule solves every one of the 52.  The two ``barChart`` controls on
+      the same deck, the same frames and the same export are the other way round: padded
+      solves both and bare solves neither.  See ROADMAP.md 3.4.
+
+    The unit is chosen identically either way, from the range this leaves.
 
     ``anchor_zero=False`` lets the domain leave zero out when the data sits far enough up
     its own range; see :data:`AXIS_ZERO_ANCHOR_RATIO`.  Only a **scatter** passes it, and
@@ -1730,6 +1741,16 @@ class ChartBuilder:
         return c.flat_chart_kind(self.plot.kind) in STOCK_CHART_KINDS
 
     @property
+    def _is_three_d(self) -> bool:
+        """Whether any group in this plot area was authored as a 3-D spelling.
+
+        Asked of the whole plot area rather than of one group because the value axis is
+        the *chart's* and a combo would otherwise get two answers for one axis.  In
+        practice PowerPoint will not author a 3-D group beside a 2-D one at all.
+        """
+        return any(c.is_three_d_kind(plot.kind) for plot in self.plots)
+
+    @property
     def _radar_style(self) -> str:
         """``c:radarStyle``, normalised to what PowerPoint actually draws.
 
@@ -1741,6 +1762,16 @@ class ChartBuilder:
         return "filled" if style == "filled" else "marker"
 
     def build(self) -> tuple[list[m.SlideElement], m.ChartData]:
+        elements, data = self._build()
+        # The 3-D facts are attached here rather than at each `m.ChartData` call because
+        # they are properties of the *chart*, not of the layout that drew it: whichever
+        # branch ran, a `bar3DChart` is still a `bar3DChart` and its `c:view3D` is still
+        # the camera it asked for.
+        data.three_d = self._is_three_d
+        data.view_3d = _resolve_view_3d(self.chart.view_3d)
+        return elements, data
+
+    def _build(self) -> tuple[list[m.SlideElement], m.ChartData]:
         if self._is_radar:
             return self._build_radar()
         if self._is_of_pie:
@@ -3765,8 +3796,10 @@ class ChartBuilder:
                 max(numbers),
                 intervals=intervals,
                 # A radar stops at the data rather than a whole unit past it: 0..5 of data
-                # gives a 0..5 axis where the same data on a bar gives 0..6.
-                strict=not self._is_radar,
+                # gives a 0..5 axis where the same data on a bar gives 0..6.  **So does a
+                # 3-D chart**, and that is measured rather than borrowed: see
+                # :func:`nice_axis_scale`.
+                strict=not (self._is_radar or self._is_three_d),
             )
 
         # The finest axis the data could take, which is the answer for a frame with room
@@ -6142,6 +6175,24 @@ CHART_TEXT_BODY = m.BodyProperties(
 
 #: Distinguishes "no title" from "not resolved yet" in the title cache.
 _UNSET = object()
+
+
+def _resolve_view_3d(view: "c.SourceChartView3D | None") -> m.Chart3DView | None:
+    """``c:view3D`` into the render model, field for field and value for value.
+
+    Nothing is defaulted on the way through.  A ``None`` here is the file's silence, and
+    the geometry that silence implies is measured but unbuilt -- see ROADMAP.md 3.4.
+    """
+    if view is None:
+        return None
+    return m.Chart3DView(
+        rot_x=view.rot_x,
+        rot_y=view.rot_y,
+        depth_percent=view.depth_percent,
+        h_percent=view.h_percent,
+        right_angle_axes=view.right_angle_axes,
+        perspective=view.perspective,
+    )
 
 
 def _first_run_font(body: m.TextBody) -> tuple[str | None, float | None]:

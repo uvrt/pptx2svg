@@ -111,7 +111,7 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | --- | --- | --- | --- |
 | `table test.pptx` | **0.9895** | 0.9984 | pass |
 | `authoring-integration.pptx` | 0.9327 | 0.9984 | SSIM |
-| `chart-gallery.pptx` | 0.6407 | 0.8169 | SSIM |
+| `chart-gallery.pptx` | 0.6619 | 0.8147 | SSIM |
 | `real-college-template.pptx` (local only) | 0.8003 | 0.8753 | SSIM, hist |
 | `real-basic-theme.pptx` | skipped | — | PowerPoint drew MS Gothic where the deck names ＭＳ Ｐゴシック |
 | `sample.pptx` | skipped | — | same |
@@ -129,7 +129,7 @@ rewrite the two Japanese decks' themes to name `MS Gothic` — the face PowerPoi
 resolves — instead of ＭＳ Ｐゴシック.
 
 `chart-gallery.pptx` is the fourth scorable deck and the only chart-heavy one; what its
-0.6407 is made of is in *3.2a* below, since almost all of it is a statement about chart
+0.6619 is made of is in *3.2a* below, since almost all of it is a statement about chart
 types rather than about this deck.
 
 `real-college-template.pptx` escapes that trap: it names only Arial, Calibri and
@@ -2317,8 +2317,9 @@ needs its own assertion; a parsed field with no reader needs one too.
 
 `tests/fixtures/chart-gallery.pptx` (written by `tools/make_chart_gallery.py`, one chart
 type per slide, 17 slides) is the first chart-heavy deck the oracle can score. Its mean is
-**SSIM 0.6601 / hist 0.8153** (0.6413 / 0.8170 when this table was first written; slides 1
-and 17 moved in 3.3, and every slide with a horizontal legend moved in 3.5), and reading that as "charts are 65% right" would be wrong
+**SSIM 0.6619 / hist 0.8147** (0.6413 / 0.8170 when this table was first written; slides 1
+and 17 moved in 3.3, every slide with a horizontal legend moved in 3.5, and slide 16 moved
+in 3.4), and reading that as "charts are 65% right" would be wrong
 twice over — three of the seventeen slides are types we deliberately do not draw, and the
 rest are thin ink on white, where SSIM punishes a one-pixel shift like a missing element.
 The per-slide numbers are the measurement; the mean is not.
@@ -2340,7 +2341,7 @@ The per-slide numbers are the measurement; the mean is not.
 | 13 | `bar3DChart` | 0.5844 | 0.9760 | 0.242 | see 3.4 |
 | 14 | `line3DChart` | 0.0723 | 0.9108 | 0.063 | see 3.4 |
 | 15 | `pie3DChart` | 0.7612 | 0.1336 | 0.241 | see 3.4 |
-| 16 | `area3DChart` | 0.7340 | 0.9931 | 0.286 | see 3.4 |
+| 16 | `area3DChart` | **0.7648** | 0.9837 | 0.286 | was 0.7340 / 0.9931: its axis is PowerPoint's 0–50 by 5 now rather than 0–60 by 10, which is more ink in the right places and slightly more black on a slide whose scene is a raster. See 3.4 |
 | 17 | combo | **0.7433** | 0.9994 | 0.232 | was 0.6120: both groups, the right-hand axis and the two-entry legend are drawn now. See 3.3 and 3.5 |
 
 Three defects are new and none of them were visible in the corpus before this deck:
@@ -2491,11 +2492,16 @@ picture than PowerPoint's but not a wrong one.
   sweep that settled it is **3.5**; one rule gives all four, because the gap is a function
   of the entries and not of the chart.
 
-### 3.4 3-D chart fallbacks (S)
+### 3.4 3-D chart fallbacks (S) — **the numbers are done, the scene is not**
 
 `bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents —
 `parse/chart.flat_chart_kind` does this and `bar3DChart` therefore already draws flat.
 **[pptx-renderer]** does the same and is explicit that it is not PowerPoint-perfect.
+
+Since then: `c:view3D` is read, the 3-D spelling survives the flattening, the value axis
+is the one PowerPoint draws, and every such chart warns `chart-3d-flattened` rather than
+passing a simplified picture off as a faithful one. The camera is measured and **not**
+built; what is left of it is at the end of this section.
 
 **They have now been compared against real output**, on slides 13–16 of
 `chart-gallery.pptx`, and the flat fallback is a good deal further from PowerPoint than
@@ -2551,12 +2557,117 @@ a half-fitted camera, and it is a different argument from the one against drawin
 | 13 | `bar3DChart` | 0.5844 | 0.9760 | extruded boxes on a floor, the plot pushed right and up by the depth |
 | 14 | `line3DChart` | **0.0723** | 0.9108 | ribbons in depth — the least recognisable of the four |
 | 15 | `pie3DChart` | 0.7612 | **0.1336** | an ellipse half the height of our circle, with a shaded extruded side; the shading is what takes the histogram to 0.13 |
-| 16 | `area3DChart` | 0.7340 | 0.9931 | a 3-D box, and a value axis of 0–50 by 5 where ours is 0–60 by 10 |
+| 16 | `area3DChart` | 0.7340 → **0.7648** | 0.9931 → 0.9837 | a 3-D box, and a value axis of 0–50 by 5 where ours drew 0–60 by 10 |
 
-The axis disagreement on slide 16 is the useful part: the depth reservation changes the
-plot's height, the height decides the interval count (Phase 0's N-meter), and so a 3-D
-chart drawn flat gets a *different axis*, not merely different geometry. Any fix has to
-start there rather than with the ribbons.
+#### The axis is now PowerPoint's, and the reason is not the one recorded here
+
+Two probe decks — `view3d-meter` (59 slides) and `view3d-view` (54), written by
+`tools/make_view3d_probe.py` and read back by `tools/read_view3d_probe.py` — sweep the
+frame and then `c:view3D` one element at a time on a `bar3DChart`, with `line3DChart`,
+`area3DChart` and a flat `barChart` control on the same deck and the same export. The
+text is vector, so each slide's value axis, its tick labels' own centres and the category
+labels' centres are read exactly; **all of it lands on a 0.24 pt grid**, which is the
+300 dpi the scene beside it is rasterised at.
+
+**The recorded causal chain was half right, and the half it got wrong is the half that
+was drawing the wrong numbers.** Slide 16's frame is 336 pt tall: it is at the interval
+cap of ten either way, so the depth reservation cannot be what changes its axis. What
+changes it is the *range*:
+
+> **A 3-D value axis has no headroom.** The unit is the finest 1-2-5 step that divides the
+> **unpadded** data range into no more than *N* intervals, and the extent is the data
+> rounded outwards to whole units — the rule a radar already had, which is
+> `nice_axis_scale(strict=False)`.
+
+0..50 of data came back 0..50 on all seven frames of the `bar3DChart` sweep and on the
+`line3DChart`, `area3DChart` and stacked `area3DChart` beside it — never the 0..55 or
+0..60 a 5% headroom produces; 0..96 came back 0..100, never 0..120. Fed back through
+`nice_axis_scale`, **the padded rule has no solution at any interval count** on 34 of the
+two decks' 52 3-D cells, and the bare rule solves all 52. The two flat `barChart` controls
+are the exact mirror: padded solves both, bare solves neither. That is what makes this a
+property of the 3-D spelling rather than of the export, the machine or the data.
+
+(A "cell" is the probes sharing a frame and a view. The N-meter's datasets have their
+1-2-5 boundaries at different counts, so their drawn units name the count between them;
+`tools/read_view3d_probe.py --solve` is that intersection, printed per probe and per
+cell.)
+
+Shipped, gated on the spelling, which is why `flat_chart_kind` no longer erases it:
+`SourceChartPlot.kind` always carried it but `m.ChartData.kind` did not, and the resolver
+now carries `three_d` and the parsed `c:view3D` through to the render model. The corpus
+moves by exactly one slide — gallery 16 draws 0–50 by 5, and 13 (0–60 by 10) and 14
+(0–30 by 5) were already right and stay right.
+
+#### The count is read off the *drawn* plot, and that is what is still open
+
+`side_axis_intervals` is not refuted, it is fed the wrong number. Reading the count back
+out of each cell's drawn unit:
+
+| the count as a function of | misses, over the 52 cells |
+| --- | --- |
+| the **frame** — the flat rule | refuted outright: six cells on one and the same 120 pt frame need N = 1, 3–4 and 5–8, which no function of the frame produces |
+| `side_axis_intervals(drawn plot height)` | 40 |
+| `side_axis_intervals(drawn plot height + 22)` | 20 |
+| **`side_axis_intervals(drawn plot height + 36)`** | **0** |
+| `floor(drawn plot height / pitch) − 1` | 1 |
+
+and **36 pt is the flat chart's own furniture** — 10.01 pt of top inset plus a 25.87 pt
+category-label band, measured on the same deck's controls. So the count really is read off
+the frame less a depth reservation, exactly as this section claimed; what the reservation
+does to the *range* was the part that was wrong.
+
+The reservation itself is a camera, and it is not shipped:
+
+* **`c:hPercent` is exactly the scene's height over its width.** 20, 50, 100 and 200 came
+  back as 0.1995, 0.4975, 0.991 and 1.965 of the drawn width. (500 came back as 4.0, not
+  5.0, on a 195 pt frame — unexplained, one reading.)
+* **Absent, PowerPoint computes one from the frame**, and that auto value is what makes
+  the plot height a function of the frame's aspect: it came out 0.0369, 0.0824, 0.1287,
+  0.1747, 0.2436, 0.3308 and 0.4547 over the seven frames. It is close to the available
+  plot area's own aspect and not equal to it — 0.2438 measured against 0.2456 at 195 pt —
+  and that 0.7% is unexplained.
+* **The scene is scaled isotropically and centred.** Seven `rotX` values from 0 to 90 hold
+  height/width at 0.2444 ± 0.001 while both shrink, so the box's proportions are fixed
+  before the camera and the fit only scales it.
+* **The vertical reservation is linear in `depthPercent`, with an offset.**
+  `D_y / W = 0.0068 + 0.0515 · depth` reproduces all seven depths from 20% to 2000% to
+  0.001 of the width, and transfers to a second frame. The offset is a reservation the
+  scene takes at zero depth and is not identified.
+* **It is not `sin(rotX)`.** `0.0515 / sin(15°)` is 0.199, and the same ratio is 0.2007
+  for rotX 30, 45, 60 and 90 but 0.193 at 15 and 0.178 at 5. The small-angle end is where
+  the *width* becomes the binding constraint instead of the height, which is a second
+  branch and is why those readings do not belong on the same curve.
+* **`rotY` does not touch the count.** Seven values from 0 to 340 drew the same
+  127.44–127.68 pt axis; it moves the scene sideways only. `rAngAx=1` ignores
+  `c:perspective` — stated as 120, the reading is identical to the chart with no
+  perspective at all — and with `rAngAx=0` that same 120 takes the axis from 94.08 to
+  61.68 pt.
+* **An absent `c:view3D` is not an empty one.** The same chart on the same frame drew a
+  94.08 pt axis with the element absent and a 155.04 pt axis with `<c:view3D/>` present.
+  The absent case is identical to 0.001 pt to `rotX=15 rotY=20 depthPercent=100 rAngAx=0`
+  — **ECMA-376 gives `rAngAx` a default of 1** and the picture PowerPoint draws is the one
+  a 0 draws. Both are recorded on `SourceChartView3D`; neither is applied.
+
+What that leaves for whoever finishes it: the auto `hPercent`, the width-binding branch,
+`rotY`'s horizontal projection, the perspective projection (`rAngAx=0`, which is what the
+element's *absence* selects), and a category-label band that is not constant — it ran
+25.63 to 30.91 pt across the view sweep where a flat chart's is 25.87. Five parameters and
+two branches, against 113 probe readings that already exist and two tools that take them.
+It is a session, not a line.
+
+**Not shipped on purpose.** A reservation fitted to within a few per cent predicts the
+count correctly almost everywhere and wrongly near a transition, and a wrong count is a
+wrong axis — the same class of defect this section exists to record. The range rule above
+is measured, decoupled from the count, and right at every frame; the count stays as wrong
+as it was, which is "too fine on a short frame", and is now wrong in one place instead of
+two.
+
+#### What the four still get wrong
+
+The scene: floor, back wall, depth, extrusion and shading. Every 3-D chart now emits one
+`chart-3d-flattened` warning naming its group element and saying what is missing, which is
+the difference between a silent wrong picture and a declared one — and a different code
+from `chart-unsupported-type`, which means nothing was drawn at all.
 
 ### 3.5 The horizontal legend's inter-entry gap — **done**
 
