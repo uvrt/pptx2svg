@@ -979,3 +979,40 @@ def test_a_line_that_is_entirely_sheared_carries_its_advance_on_a_spacer():
     # then steps a full line below it rather than onto it.
     assert _line_dys(svg) == [0.0, 68.27], svg
     assert '<tspan x="9.6" dy="0" text-anchor="start"> </tspan>' in svg, svg
+
+
+def _cjk_line_counts(width_pt: float, size_pt: float = 32.0, count: int = 40) -> list[int]:
+    """Characters per line for ``count`` full-width glyphs in a box ``width_pt`` wide."""
+    from pptx2svg.units import PX_PER_PT
+
+    paragraph = make_paragraph("東" * count, font_size=size_pt, font_family_ea="Noto Sans JP")
+    lines = wrap_paragraph(paragraph, width_pt * PX_PER_PT, size_pt)
+    return [len("".join(s.text for s in line.segments)) for line in lines]
+
+
+def test_a_cjk_line_fits_exactly_the_characters_the_box_is_wide():
+    """PowerPoint's budget is ``sum of advances <= width``, inclusive and with no slack.
+
+    Measured by `tools/make_cjk_wrap_probe.py` over 53 slides: a box of ``k * size``
+    points fits exactly ``k`` of a 1 em glyph at three box widths and five font sizes,
+    and a box a **quarter of a point** narrower fits ``k - 1``.  Noto Sans JP advances
+    every ideograph and every kana at exactly 1 em, which is what makes the count exact.
+    """
+    for k in (5, 10, 15):
+        for size in (12.0, 18.0, 32.0):
+            assert _cjk_line_counts(k * size, size)[0] == k, (k, size)
+
+
+def test_the_wrap_tolerance_is_too_small_to_admit_a_whole_glyph():
+    """The slack is an allowance for our own measurement error, not a model of anything.
+
+    It has to cover the OpenType ``kern`` PowerPoint applies to Japanese and we do not --
+    up to 0.684% of a line over `sample-cjk` -- without ever admitting a character
+    PowerPoint rejects, which on that deck overhangs by 0.813%.  At 2% it admitted one,
+    and `sample-cjk` slide 2 broke a character late because of it.
+    """
+    from pptx2svg.text.wrap import WRAP_TOLERANCE_RATIO
+
+    assert 0.00231 < WRAP_TOLERANCE_RATIO < 0.00813
+    # A box one glyph short of eleven still fits only ten, however the slack rounds.
+    assert _cjk_line_counts(11 * 32.0 - 32.0)[0] == 10
