@@ -241,7 +241,7 @@ def prediction(probe: dict, axis_pt: float = 0.0) -> tuple[float, float, float]:
         intervals = chartmod.radial_axis_intervals(axis_pt, box.line_height)
     else:
         if probe.get("legend") in ("b", "t", "tr"):
-            height_pt -= chartmod.LEGEND_BAND_LINES * box.line_height
+            height_pt -= chartmod.legend_row_pitch(box) + chartmod.LEGEND_BAND_PAD_PT
         if probe.get("title"):
             # An unstyled chart title is Arial 18 pt, which is the fallback any unstyled
             # text box gets and what `_title_size` returns when nothing names a size.

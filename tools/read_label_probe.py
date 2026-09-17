@@ -218,7 +218,7 @@ def predict(item: dict, read: dict) -> tuple[float, str, str]:
     font = chartmod.ChartFont(family=face, box=chartmod.font_box(face, size))
     height = item["frame"][1] / PT
     if item.get("legend") in ("b", "t", "tr"):
-        height -= chartmod.LEGEND_BAND_LINES * font.box.line_height
+        height -= chartmod.legend_row_pitch(font.box) + chartmod.LEGEND_BAND_PAD_PT
     if item.get("title"):
         height -= chartmod.TITLE_BAND_LINES * chartmod.font_box("Arial", 18.0).line_height
     allowance = max(
@@ -291,7 +291,7 @@ def main() -> int:
             # The legend's own band is inside the reserve but outside the label band.
             reserve = read["reserve"]
             if item.get("legend") == "b":
-                reserve -= chartmod.LEGEND_BAND_LINES * chartmod.font_box(face, size).line_height
+                reserve -= chartmod.legend_row_pitch(chartmod.font_box(face, size)) + chartmod.LEGEND_BAND_PAD_PT
             cjk = any(ord(ch) > 0x2E80 for ch in theirs)
             verdict = (
                 "cjk, no verdict"

@@ -57,7 +57,13 @@ import pypdfium2.raw as raw
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from make_legend_probe import FRAME_OFF, probes_for  # noqa: E402
-from read_axis_probe import _mul, chartmod, labels, path_points  # noqa: E402
+from read_axis_probe import (  # noqa: E402
+    _mul,
+    chartmod,
+    horizontal_strokes,
+    labels,
+    path_points,
+)
 
 
 def _matrix(obj):
@@ -164,20 +170,36 @@ def read_page(probe: dict, page) -> dict | None:
 # --------------------------------------------------------------------------------------
 
 
-def ours(deck: Path) -> list[dict]:
+def ours(deck: Path, *, side: bool = False) -> list[dict]:
     """Per chart: the frame, the legend font, and each entry's name and advance width.
 
     Collected by instrumenting the resolver rather than by parsing the SVG, because the
     advance width is the number wanted and the SVG only carries a position.
+
+    ``side`` keeps every legend rather than only the horizontal ones, and adds the
+    baselines we draw so a wrapped legend's rows can be compared row by row.
     """
     from pptx2svg.resolve import chart as chartmod
 
     rows: list[dict] = []
     original = chartmod.ChartBuilder._draw_legend
+    original_entry = chartmod.ChartBuilder._legend_entry
+
+    def entry(self, item, x, baseline, swatch, gap, font, **extra):
+        if rows:
+            rows[-1].setdefault("baselines", []).append(
+                round(baseline - self.frame.top, 3)
+            )
+            # The text's own left edge, which is what the export reports: the key is
+            # centred in its cell and the name follows the key and its gap.
+            rows[-1].setdefault("text_x", []).append(
+                round(x + swatch + gap - self.frame.left, 3)
+            )
+        return original_entry(self, item, x, baseline, swatch, gap, font, **extra)
 
     def record(self, rect, series, *, per_point=False, categories=None, second_band=0.0):
         position = self._legend_position()
-        if position in ("b", "t", "tr") and series:
+        if position is not None and series and (side or position in ("b", "t", "tr")):
             font = self._legend_font()
             swatch, gap = self._legend_key_size(font)
             if per_point:
@@ -197,21 +219,45 @@ def ours(deck: Path) -> list[dict]:
                     "cell": self._legend_key_cell(font),
                     "names": names,
                     "advance": [font.width(name) for name in names],
+                    "widths": [
+                        self._legend_key_cell(font) + font.width(name) for name in names
+                    ],
+                    "frame_height": self.frame.height,
+                    "plot": (
+                        round(rect.left, 3),
+                        round(rect.top, 3),
+                        round(rect.right, 3),
+                        round(rect.bottom, 3),
+                    ),
+                    "baselines": [],
+                    "text_x": [],
+                    "rows": self._legend_grid(
+                        self._legend_entry_widths(font, per_point=per_point)
+                    )[0],
+                    "band": self._legend_band_height(font, per_point=per_point),
                     "position": position,
                 }
             )
+        elif side:
+            # A slide with no legend at all still has to occupy its slot, or every later
+            # slide reads against the wrong chart.  The ``legend-band`` deck's controls
+            # are exactly that.
+            rows.append({"position": None, "size": 0.0, "baselines": [], "text_x": [],
+                         "widths": [], "rows": 0})
         return original(
             self, rect, series, per_point=per_point, categories=categories,
             second_band=second_band,
         )
 
     chartmod.ChartBuilder._draw_legend = record
+    chartmod.ChartBuilder._legend_entry = entry
     try:
         import pptx2svg
 
         pptx2svg.convert_pptx_to_svg(deck.read_bytes())
     finally:
         chartmod.ChartBuilder._draw_legend = original
+        chartmod.ChartBuilder._legend_entry = original_entry
     return rows
 
 
@@ -442,9 +488,210 @@ def cells(path: Path, only: str | None) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------------------
+# Wrapped legends: a side legend's rows, and a horizontal legend's second row
+# --------------------------------------------------------------------------------------
+
+
+def text_objects(page) -> list[tuple[str, float, float]]:
+    """Every drawn text run as ``(text, x, baseline)`` in page points.
+
+    :func:`labels` reports a text *rectangle*, whose vertical centre carries the run's own
+    ink and so moves with the characters in it.  A wrapped legend's question is where the
+    **baselines** are, and a text object's matrix carries exactly that: the translation is
+    the pen position the run started at.  PowerPoint emits one text object per drawn line,
+    which is what makes a wrapped entry readable line by line.
+    """
+    out: list[tuple[str, float, float]] = []
+    textpage = raw.FPDFText_LoadPage(page)
+    for obj, kind, parent in walk(page):
+        if kind != raw.FPDF_PAGEOBJ_TEXT:
+            continue
+        matrix = _mul(parent, _matrix(obj))
+        buffer = ctypes.create_string_buffer(2048)
+        count = raw.FPDFTextObj_GetText(
+            obj, textpage, ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ushort)), 2048
+        )
+        text = bytes(buffer)[: max(count * 2 - 2, 0)].decode("utf-16-le", "replace")
+        text = text.replace("\x00", "").strip()
+        if text:
+            out.append((text, round(matrix[4], 3), round(matrix[5], 3)))
+    raw.FPDFText_ClosePage(textpage)
+    return out
+
+
+def _frame_box(probe: dict, page) -> tuple[float, float, float, float]:
+    """The chart frame as ``(left, top, width, height)`` in page points, y measured down.
+
+    Every probe slide puts its frame at the same offset, so this is the deck's geometry
+    rather than a reading.
+    """
+    _, height = page.get_size()
+    cx, cy = probe["frame"]
+    return (
+        FRAME_OFF[0] / 12700,
+        height - FRAME_OFF[1] / 12700,
+        cx / 12700,
+        cy / 12700,
+    )
+
+
+def _legend_words(probe: dict) -> list[str]:
+    """Each legend name with its spaces squeezed out.
+
+    A drawn line is matched by *containment* rather than by equality: pdfium reports a run
+    the way the PDF stores it, and a justified or kerned line comes back with spaces
+    inserted mid-word (``'Wmmm Wmmm W mmm'`` for one 8 pt entry), so comparing whole words
+    drops exactly the lines a wrapped legend is read for.
+    """
+    return [name.replace(" ", "") for name in entry_names(probe)]
+
+
+def _legend_lines(probe: dict, page, frame) -> list[tuple[str, float, float]]:
+    """The legend's drawn lines as ``(text, x, baseline-from-frame-top)``.
+
+    A line of a wrapped entry is a run made only of the words the entry names are built
+    from, which is what separates it from a category label or a value.
+    """
+    names = _legend_words(probe)
+    left, top, _, _ = frame
+    out = []
+    for text, x, y in text_objects(page.raw):
+        squeezed = text.replace(" ", "")
+        if squeezed and any(squeezed in name for name in names):
+            out.append((text, round(x - left, 3), round(top - y, 3)))
+    return sorted(out, key=lambda row: (row[2], row[1]))
+
+
+def _plot_edges(page) -> tuple[float | None, float | None]:
+    """The plot's ``(top, bottom)`` in page points, from the long horizontal strokes.
+
+    The lowest is the category axis line and the highest is the top major gridline, which
+    stands at the value axis' maximum -- the plot's own top edge.  A bottom legend moves
+    the first and a top legend the second, and the band each takes is the frame edge less
+    the line.
+    """
+    strokes = [row for row in horizontal_strokes(page.raw) if row[2] - row[1] > 60.0]
+    if not strokes:
+        return (None, None)
+    return (max(row[0] for row in strokes), min(row[0] for row in strokes))
+
+
+def side(path: Path, only: str | None) -> int:
+    """A **side** legend's rows: every drawn line's baseline from the frame's top."""
+    probes = probes_for(path)
+    doc = pdfium.PdfDocument(path)
+    mine_all = ours(path.with_suffix(".pptx"), side=True)
+    worsts: list[tuple[str, float]] = []
+    for index, probe in enumerate(probes):
+        if only and only not in probe["key"]:
+            continue
+        page = doc[index]
+        frame = _frame_box(probe, page)
+        lines = _legend_lines(probe, page, frame)
+        mine = mine_all[index] if index < len(mine_all) else None
+        size = mine["size"] if mine else 10.0
+        print(
+            f"{probe['key']:10s} frame {frame[2]:5.0f}x{frame[3]:5.0f} size {size:4.1f} "
+            f"n={len(probe['groups'][0]['names'])}"
+        )
+        previous = None
+        for text, x, y in lines:
+            step = "" if previous is None else f"  +{y - previous:6.3f}"
+            print(f"    y {y:8.3f}{step:>10s}  x {x:7.3f}  {text}")
+            previous = y
+        if mine and lines:
+            # Each drawn entry against the measured line nearest it, which for a model
+            # that is right is that entry's own first line.
+            deltas = [
+                ours_y - min((y for _, _, y in lines), key=lambda y: abs(y - ours_y))
+                for ours_y in mine["baselines"]
+            ]
+            dx = [
+                ours_x - min((x for _, x, _ in lines), key=lambda x: abs(x - ours_x))
+                for ours_x in mine["text_x"]
+            ]
+            worst = max((abs(d) for d in deltas + dx), default=0.0)
+            worsts.append((probe["key"], worst))
+            pretty = "  ".join(f"{d:+6.2f}" for d in deltas)
+            print(
+                f"    ours dy {pretty}   dx {max(dx, key=abs):+6.2f}   worst {worst:5.2f}"
+            )
+    if worsts:
+        key, worst = max(worsts, key=lambda row: row[1])
+        print(f"\nworst baseline residual {worst:.2f} pt on {key}")
+    return 0
+
+
+def rows(path: Path, only: str | None) -> int:
+    """A **horizontal** legend that needs more than one row.
+
+    Prints each row's entries and the plot's bottom edge, which is what says how much
+    band the extra rows took.
+    """
+    probes = probes_for(path)
+    doc = pdfium.PdfDocument(path)
+    mine_all = ours(path.with_suffix(".pptx"), side=True)
+    worsts: list[tuple[str, float]] = []
+    for index, probe in enumerate(probes):
+        if only and only not in probe["key"]:
+            continue
+        page = doc[index]
+        frame = _frame_box(probe, page)
+        lines = _legend_lines(probe, page, frame)
+        mine = mine_all[index] if index < len(mine_all) else None
+        top, bottom = _plot_edges(page)
+        # The frame's own bottom edge, in the page's y-up space, less the axis line: what
+        # the category labels and the legend together take out of the frame.  The top band
+        # is the mirror of it, which is what a ``t`` legend comes out of.
+        band = None if bottom is None else round(bottom - (frame[1] - frame[3]), 3)
+        band_top = None if top is None else round(frame[1] - top, 3)
+        # Group the drawn lines into bands of one baseline each.
+        bands: list[list[tuple[str, float, float]]] = []
+        for entry in lines:
+            if bands and abs(entry[2] - bands[-1][0][2]) < 2.0:
+                bands[-1].append(entry)
+            else:
+                bands.append([entry])
+        size = mine["size"] if mine else 10.0
+        total = sum(mine["widths"]) if mine else float("nan")
+        print(
+            f"{probe['key']:10s} frame {frame[2]:5.0f} size {size:4.1f} "
+            f"sumW {total:7.2f} ({total / frame[2]:5.3f} frame) rows {len(bands)} "
+            f"band {band if band is not None else float('nan'):7.3f} "
+            f"top {band_top if band_top is not None else float('nan'):7.3f}"
+        )
+        for band_rows in bands:
+            xs = "  ".join(f"{x:7.2f}" for _, x, _ in band_rows)
+            print(f"    y {band_rows[0][2]:8.3f}  n={len(band_rows):2d}  x {xs}")
+        if mine and lines and len(lines) == len(mine["baselines"]):
+            # Row-major on both sides: the export is sorted by baseline then by x, and
+            # the resolver draws the grid the same way.
+            dx = [a - b for a, b in zip(mine["text_x"], [row[1] for row in lines])]
+            dy = [a - b for a, b in zip(mine["baselines"], [row[2] for row in lines])]
+            worst = max(max(abs(v) for v in dx), max(abs(v) for v in dy))
+            worsts.append((probe["key"], worst))
+            print(
+                "    ours dx " + " ".join(f"{v:+6.2f}" for v in dx)
+                + "  dy " + " ".join(f"{v:+6.2f}" for v in dy)
+            )
+        if mine:
+            print(f"    ours rows {mine['rows']}  band {mine.get('band', 0.0):7.3f}")
+    if worsts:
+        key, worst = max(worsts, key=lambda row: row[1])
+        print(f"\nworst legend entry residual {worst:.2f} pt on {key}")
+    return 0
+
+
 def main() -> int:
     path = Path(sys.argv[1]).expanduser()
     arguments = sys.argv[2:]
+    if "--side" in arguments:
+        arguments.remove("--side")
+        return side(path, arguments[0] if arguments else None)
+    if "--rows" in arguments:
+        arguments.remove("--rows")
+        return rows(path, arguments[0] if arguments else None)
     if "--cells" in arguments:
         arguments.remove("--cells")
         return cells(path, arguments[0] if arguments else None)

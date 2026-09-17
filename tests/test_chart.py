@@ -1200,6 +1200,304 @@ def test_the_legend_gap_grows_with_the_entries_and_ignores_the_frame():
     assert gap([60.0, 80.0, 100.0], 300.0) == pytest.approx((270.0 - 240.0) / 4)
 
 
+# -- The wrapped legend sweep ----------------------------------------------------------
+#
+# Two regimes the sweep above does not reach, both measured on their own probe decks
+# (`tools/make_legend_probe.py`'s `legend-side`, `legend-row`, `legend-band` and
+# `legend-face` tables, read back by `tools/read_legend_probe.py --side` / `--rows`):
+#
+# * a **side** legend whose entries are too wide for its band, which wraps them and opens
+#   every row's pitch to match the deepest one;
+# * a **horizontal** legend whose entries pass 0.9 of the frame, which PowerPoint lays out
+#   as a grid of equal columns rather than one row.
+#
+# Every number below is a text object's **pen position** in PowerPoint's export, in points
+# from the frame's top-left corner: `x` is where the name's box starts and `baseline` is
+# what its matrix translates to.  A wrapped entry contributes its **first** line, which is
+# the row's own baseline; the continuation lines are drawn by the text renderer inside the
+# width the entry is given and are not what the row arithmetic decides.
+
+#: Frames the two families use.  The side probes are narrow so the 0.4-of-the-frame band
+#: cap binds and the entries have to wrap.
+SIDE_FRAME = (300 * 12700, 260 * 12700)
+ROW_FRAME = (480 * 12700, 260 * 12700)
+
+WORD = "Wmmm"
+
+
+def _phrase(count: int) -> str:
+    return " ".join([WORD] * count)
+
+
+SIDE_LEGEND_SWEEP = {
+    # The control: three entries that fit on one line each.  The shipped rule already got
+    # this right and it has to keep doing so.
+    "sv-n3": (
+        {"names": [WORD] * 3, "legend": "r", "frame": SIDE_FRAME},
+        [(255.365, 114.000), (255.365, 132.240), (255.365, 150.240)],
+    ),
+    # One entry over two lines: every row opens from 18.08 pt to 30.16, and the block of
+    # opened rows is centred on the frame.  Ours used to centre each entry in its *opened*
+    # row, which put the whole block 5.9 pt low.
+    "sw-t3": (
+        {"names": [_phrase(3), WORD, WORD], "legend": "r", "frame": SIDE_FRAME},
+        [(218.825, 96.000), (218.825, 126.240), (218.825, 156.240)],
+    ),
+    # Three lines: the pitch opens twice, which is the reading the old
+    # `LEGEND_WRAPPED_PITCH_EM` only ever extrapolated.
+    "sw-t5": (
+        {"names": [_phrase(5), WORD, WORD], "legend": "r", "frame": SIDE_FRAME},
+        [(218.825, 77.760), (218.825, 120.000), (218.825, 162.240)],
+    ),
+    # The wrapped entry in the middle: every row still takes the deepest entry's pitch, so
+    # the block is the same as `sw-t3`'s with the lines in a different place.
+    "sw-mid": (
+        {"names": [WORD, _phrase(3), WORD], "legend": "r", "frame": SIDE_FRAME},
+        [(218.825, 96.000), (218.825, 126.240), (218.825, 156.240)],
+    ),
+    # Five entries, one of them wrapped: the block grows and stays centred.
+    "sw-n5": (
+        {"names": [_phrase(3)] + [WORD] * 4, "legend": "r", "frame": SIDE_FRAME},
+        [
+            (218.825, 65.760),
+            (218.825, 96.000),
+            (218.825, 126.240),
+            (218.825, 156.240),
+            (218.825, 186.480),
+        ],
+    ),
+    # A **left** legend wraps exactly like a right one, which ours did not: it measured the
+    # wrap against the frame's far edge and so never wrapped at all.
+    "sw-left": (
+        {"names": [_phrase(3), WORD, WORD], "legend": "l", "frame": SIDE_FRAME},
+        [(18.859, 96.000), (18.859, 126.240), (18.859, 156.240)],
+    ),
+}
+
+WRAPPED_ROW_SWEEP = {
+    # Three entries, two to a row: the columns are as wide as the widest entry and packed
+    # with no gap, and the second row starts under the first rather than centring itself.
+    "rw3-16": (
+        {"names": ["W" + "m" * 16] * 3, "frame": ROW_FRAME},
+        [(94.97, 230.640), (251.36, 230.640), (94.97, 248.640)],
+    ),
+    # **Six entries come back 3 + 3, not 4 + 2**, though four of them fit: the row count is
+    # taken first and the entries are then divided over it.  This is the slide that refutes
+    # a greedy fill.
+    "rw6-08": (
+        {"names": ["W" + "m" * 8] * 6, "frame": ROW_FRAME},
+        [
+            (119.14, 230.640),
+            (207.29, 230.640),
+            (295.43, 230.640),
+            (119.14, 248.640),
+            (207.29, 248.640),
+            (295.43, 248.640),
+        ],
+    ),
+    # Seven entries, three to a row: 3 + 3 + 1, which a balanced split would make 3 + 2 + 2.
+    "rw7-14": (
+        {"names": ["W" + "m" * 14] * 7, "frame": ROW_FRAME},
+        [
+            (42.37, 212.400),
+            (181.70, 212.400),
+            (321.02, 212.400),
+            (42.37, 230.640),
+            (181.70, 230.640),
+            (321.02, 230.640),
+            (42.37, 248.640),
+        ],
+    ),
+    # **Unequal entries**, on a frame the model was not fitted to: the column is the widest
+    # entry's width and the short ones sit in the same grid.
+    "rv-5": (
+        {
+            "names": ["W" + "m" * k for k in (6, 14, 3, 18, 9)],
+            "frame": (420 * 12700, 260 * 12700),
+        },
+        [
+            (47.91, 212.400),
+            (221.36, 212.400),
+            (47.91, 230.640),
+            (221.36, 230.640),
+            (47.91, 248.640),
+        ],
+    ),
+    # A **top** legend wraps downward from the same first baseline a single row gets.
+    "rwt-16": (
+        {"names": ["W" + "m" * 16] * 3, "legend": "t", "frame": ROW_FRAME},
+        [(94.97, 17.280), (251.36, 17.280), (94.97, 35.280)],
+    ),
+}
+
+#: Worst residual across the eleven is 0.63 pt on the baseline and 0.02 pt on x.  The
+#: baseline's share is `FontBox.ink_centre`, whose own five measurements span 0.11 em and
+#: which every centred label in this file inherits.
+WRAPPED_TOLERANCE_PT = 0.7
+
+
+def _wrapped_deck(authoring, sweep):
+    """`authoring-integration.pptx` with one probe chart per entry, each at its own frame."""
+    from tests.deckbuilder import derive_deck
+
+    chart_type = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+    parts, relationships, overrides, shapes = {}, [], {}, ""
+    for index, (name, (kwargs, _)) in enumerate(sweep.items()):
+        arguments = dict(kwargs)
+        frame = arguments.pop("frame")
+        part = f"ppt/charts/wrapped{index}.xml"
+        parts[part] = legend_chart_xml(**arguments)
+        overrides[part] = chart_type
+        relationships.append(
+            (
+                f"rIdWrapped{index}",
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+                f"../charts/wrapped{index}.xml",
+            )
+        )
+        shapes += (
+            f"<p:graphicFrame><p:nvGraphicFramePr>"
+            f"<p:cNvPr id='{400 + index}' name='{name}'/>"
+            "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+            f"<p:xfrm><a:off x='0' y='0'/>"
+            f"<a:ext cx='{frame[0]}' cy='{frame[1]}'/></p:xfrm>"
+            "<a:graphic><a:graphicData "
+            "uri='http://schemas.openxmlformats.org/drawingml/2006/chart'>"
+            "<c:chart xmlns:c='http://schemas.openxmlformats.org/drawingml/2006/chart' "
+            "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships' "
+            f"r:id='rIdWrapped{index}'/></a:graphicData></a:graphic></p:graphicFrame>"
+        )
+
+    deck = convert_pptx_to_model(
+        derive_deck(
+            authoring,
+            parts=parts,
+            shapes_xml=shapes,
+            slide_relationships=relationships,
+            overrides=overrides,
+        )
+    )
+    charts = [e for e in deck.slides[0].elements if isinstance(e, m.ChartElement)]
+    return dict(zip(sweep, charts[1:]))
+
+
+@pytest.fixture(scope="module")
+def side_legend_deck(authoring):
+    return _wrapped_deck(authoring, SIDE_LEGEND_SWEEP)
+
+
+@pytest.fixture(scope="module")
+def wrapped_row_deck(authoring):
+    return _wrapped_deck(authoring, WRAPPED_ROW_SWEEP)
+
+
+def _legend_label_pens(chart, names):
+    """Each legend name's pen position as ``(x, baseline)`` from the frame's top-left.
+
+    A legend entry is drawn as a text box positioned by its *top*, because that is what
+    the renderer takes; the baseline is recovered with the same first-baseline rule the
+    resolver used to place it, so the numbers are comparable with a text object's matrix
+    in PowerPoint's export.  Category labels carry category text and so are never picked
+    up by the name match.
+    """
+    from pptx2svg.resolve.chart import font_box
+
+    wanted = collections.Counter(names)
+    first_baseline = font_box("Aptos", 10.0).first_baseline
+    out = []
+    for child in chart.children:
+        if not isinstance(child, m.ShapeElement) or child.text_body is None:
+            continue
+        text = "".join(
+            run.text
+            for paragraph in child.text_body.paragraphs
+            for run in paragraph.runs
+        )
+        if wanted[text]:
+            out.append(
+                (
+                    _pt(child.transform.offset_x),
+                    _pt(child.transform.offset_y) + first_baseline,
+                )
+            )
+    return sorted(out, key=lambda row: (round(row[1], 1), row[0]))
+
+
+@pytest.mark.parametrize("name", list(SIDE_LEGEND_SWEEP))
+def test_a_wrapped_side_legend_sits_where_powerpoint_puts_it(name, side_legend_deck):
+    arguments, expected = SIDE_LEGEND_SWEEP[name]
+    ours = _legend_label_pens(side_legend_deck[name], arguments["names"])
+    assert len(ours) == len(expected), f"{name}: {len(ours)} entries, want {len(expected)}"
+    for index, (mine, truth) in enumerate(zip(ours, expected)):
+        assert mine[0] == pytest.approx(truth[0], abs=WRAPPED_TOLERANCE_PT), (
+            f"{name} entry {index} x: PowerPoint {truth[0]:.3f}, ours {mine[0]:.3f}"
+        )
+        assert mine[1] == pytest.approx(truth[1], abs=WRAPPED_TOLERANCE_PT), (
+            f"{name} entry {index} baseline: PowerPoint {truth[1]:.3f}, ours {mine[1]:.3f}"
+        )
+
+
+@pytest.mark.parametrize("name", list(WRAPPED_ROW_SWEEP))
+def test_a_horizontal_legend_past_the_cap_wraps_into_powerpoints_grid(
+    name, wrapped_row_deck
+):
+    arguments, expected = WRAPPED_ROW_SWEEP[name]
+    ours = _legend_label_pens(wrapped_row_deck[name], arguments["names"])
+    assert len(ours) == len(expected), f"{name}: {len(ours)} entries, want {len(expected)}"
+    for index, (mine, truth) in enumerate(zip(ours, expected)):
+        assert mine[0] == pytest.approx(truth[0], abs=WRAPPED_TOLERANCE_PT), (
+            f"{name} entry {index} x: PowerPoint {truth[0]:.3f}, ours {mine[0]:.3f}"
+        )
+        assert mine[1] == pytest.approx(truth[1], abs=WRAPPED_TOLERANCE_PT), (
+            f"{name} entry {index} baseline: PowerPoint {truth[1]:.3f}, ours {mine[1]:.3f}"
+        )
+
+
+def test_the_legend_grid_takes_the_row_count_before_the_column_count():
+    """The arithmetic six equal entries refute a greedy fill with.
+
+    Four of them fit across the cap, and PowerPoint still draws **3 + 3**: the rows are
+    counted first and the entries divided over them.  Stated here without the export, the
+    way the gap rule's own invariants are.
+    """
+    from pptx2svg.resolve.chart import ChartBuilder, _Rect
+
+    def grid(count, width, frame):
+        builder = ChartBuilder.__new__(ChartBuilder)
+        builder.frame = _Rect(0.0, 0.0, frame, 260.0)
+        return ChartBuilder._legend_grid(builder, [width] * count)
+
+    # Entries that fit on one row are not a grid at all.
+    assert grid(3, 120.0, 480.0) == (1, 3)
+    # Six at 88.14 pt: four fit across 0.9 * 480, and the answer is two rows of three.
+    assert grid(6, 88.14, 480.0) == (2, 3)
+    # Seven at 139.32: three fit, so three rows -- and the last holds the one left over.
+    assert grid(7, 139.32, 480.0) == (3, 3)
+    # One entry wider than the cap still gets a column of its own rather than none.
+    assert grid(2, 600.0, 480.0) == (2, 1)
+
+
+def test_a_second_legend_row_takes_the_measured_band_off_the_plot(authoring):
+    """What the extra rows cost the plot, differenced the way the probe measured it.
+
+    A chart's plot bottom is its category axis line, and the only thing that differs
+    between these three charts is how many rows their legend needs -- so the difference is
+    the legend's band and nothing else.  PowerPoint's own axis lines sit 49.048, 65.631 and
+    83.714 pt above the frame's bottom edge for one, two and three rows of a 10 pt Aptos
+    legend: **16.583 pt for the second row and 18.083 for the third**, where a plain
+    multiple of the row would make both 18.083.  See `LEGEND_WRAP_BAND_TRIM_PT`.
+    """
+    sweep = {
+        "one": ({"names": ["W" + "m" * 26], "frame": ROW_FRAME}, []),
+        "two": ({"names": ["W" + "m" * 26] * 2, "frame": ROW_FRAME}, []),
+        "three": ({"names": ["W" + "m" * 26] * 3, "frame": ROW_FRAME}, []),
+    }
+    charts = _wrapped_deck(authoring, sweep)
+    bottoms = {name: _plot_rect(chart)[3] for name, chart in charts.items()}
+    assert bottoms["one"] - bottoms["two"] == pytest.approx(16.583, abs=0.1)
+    assert bottoms["two"] - bottoms["three"] == pytest.approx(18.083, abs=0.1)
+
+
 # -- The variant sweep -----------------------------------------------------------------
 #
 # A second six-chart probe covering the barChart variants no deck in the corpus has:
