@@ -114,8 +114,8 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | `chart-gallery.pptx` | 0.6747 | 0.8147 | SSIM |
 | `real-college-template.pptx` (local only) | 0.8003 | 0.8753 | SSIM, hist |
 | `sample-issue-387.pptx` | **0.9897** | 1.0000 | pass |
-| `real-financial-report.pptx` | 0.9112 | 0.9988 | SSIM |
-| `sample-cjk.pptx` (derived) | 0.6788 | 0.9819 | SSIM |
+| `real-financial-report.pptx` | 0.9114 | 0.9988 | SSIM |
+| `sample-cjk.pptx` (derived) | 0.7367 | 0.9805 | SSIM |
 | `real-basic-theme.pptx` | skipped | — | resolves Japanese to ＭＳ Ｐゴシック, which this PowerPoint cannot use |
 | `sample.pptx` | skipped | — | same |
 | `real-product-page.pptx` | skipped | — | ⚡📱🔒: no face either deck names can draw them |
@@ -147,10 +147,126 @@ work:
 So the third route is the one taken for CJK: `tools/make_cjk_deck.py` **derives**
 `sample-cjk.pptx` from `sample.pptx` with that one theme slot filled with Noto Sans JP,
 leaving `sample.pptx` untouched. It is the first Japanese deck in this corpus where both
-sides ink the face the deck asks for. Its 0.6788 is a measurement of our Japanese
-*layout*, and slide 3 says what is wrong with it: a wrapped continuation line in a
-mixed-format CJK paragraph is drawn on top of the first line instead of below it, and on
-slide 2 our break point is one character later than PowerPoint's.
+sides ink the face the deck asks for. Its score is a measurement of our Japanese
+*layout*, and the two defects the first measurement named are **both fixed**: slide 3's
+overlapping line and slide 2's late break. 0.6788 → 0.7367 for the deck, slide 3
+0.2391 → 0.5373 and slide 2 0.5470 → 0.5957.
+
+#### What the two defects turned out to be, and what the probes refuted
+
+**Slide 3 was a bug in the line advance, and the "mixed-format" clue named the wrong
+thing.** The condition is not a format change as such: it is an *italic* run in a face
+with no italic, which `render/text.py` detaches into a sheared `<text>` sibling because
+SVG will not transform a `<tspan>`. A line's `dy` is the only record of where that line
+sits — `<text y>` is the first baseline and every line after it is a relative step — and
+the detached run took the prefix carrying the `dy` with it. The rest of the line then drew
+on the line above *and every line below it came up one advance too high as well*. A tab
+stop at the head of a line lost the same prefix by a different route. The position and the
+advance now come apart, and a line whose every run is sheared away carries the advance on
+a spacer.
+
+**Slide 2 was the comparison at the boundary, and it is the one worth reading the probe
+for.** `tools/make_cjk_wrap_probe.py` / `read_cjk_wrap_probe.py` are that probe; its
+readers have the `--check` mode that renders through this library and prints the residual
+against the export. Fifty-three slides of one 1 em character repeated in a box of
+`k * size + delta`:
+
+* **PowerPoint's budget is exact.** It fits `k` characters at `delta = 0` and `k - 1` at
+  `delta = -0.25 pt`, at three box widths and five font sizes. The rule is
+  `sum of advances <= width - lIns - rIns - marL`, inclusive, with **no slack at all**.
+* **The widths were not wrong**, which is the second time this project has suspected CJK
+  widths and been refuted: Noto Sans JP advances every ideograph and every kana at
+  1.000 em and so do we, bold included.
+* **The inset was not wrong either.** `lIns`, `rIns` and `marL` all leave the budget, one
+  for one, and a box that is ten glyphs plus both insets fits exactly ten.
+
+So the 2% tolerance was never a model of PowerPoint. It is an allowance for *our*
+measurement error, and that error is now measured: **PowerPoint applies the face's
+OpenType `kern` feature to Japanese and we do not.** Noto Sans JP kerns キス and ンプ by
+-30/1000 em and ト、 by -20/1000, read out of its GPOS table and confirmed against the
+pen origins in the export. A line we measure is therefore *wider* than the one PowerPoint
+lays out, by 0% to 0.684% over this deck's fifteen lines. Slide 3 needs at least 0.231%
+of that to keep a nineteenth character PowerPoint keeps; slide 2's twenty-first character
+overhangs by 0.813% and PowerPoint rejects it. `WRAP_TOLERANCE_RATIO` is now 0.005, the
+middle of that window; 0.02 sat above all of it.
+
+**No constant is right in general**, and it is better to say so than to discover it: a
+string of nothing but kerned pairs — キスキスキス — loses 1.5% of its width to `kern`,
+outside the window above. *Modelling `kern` is the fix*, and it is the one open item this
+section leaves: it needs a pair table in `text/metrics.py`, an extractor change in
+`tools/extract_font_metrics.py`, and the same in `FontToolsTextMeasurer`, which reads
+`hmtx` and stops.
+
+#### Kinsoku: a third defect, measured and fixed
+
+Japanese forbids a line that *begins* with a closing bracket, a small kana, a sound mark
+or a full stop, and one that *ends* with an opening bracket. We broke between any two CJK
+characters. The probe's `k` family puts each class at the break in a box known to the
+quarter point: PowerPoint moved the neighbour down in all seven cases, including for two
+marks in a row, so it pushes out (追い出し) rather than hanging the character past the
+edge. The `q` family then tried the two attributes that might have owned the rule, and
+**`hangingPunct` makes no difference with either setting** while **`eaLnBrk="0"` turns the
+rule off**. `eaLnBrk` defaults to on and every master here writes it on, so `text/wrap.py`
+applies the rule unconditionally; reading the attribute is what a deck that turns it off
+would need, and the corpus has none. No corpus score moves — no corpus line breaks at one
+of these characters — but `sample`'s snapshot does.
+
+#### Slides 4 and 6: horizontal is exact, vertical is not
+
+Both were unexplained and neither is the same defect. Read against the export's pen
+origins, **every horizontal position on slide 4 matches PowerPoint to the point**: the
+three bullet glyphs at 43.2, 79.2 and 115.2 pt, the three text starts at 70.2, 101.7 and
+133.2, and the Latin digit after six kana at 262.2. Slide 6's title matches its centre
+exactly at 360.0 pt. Slide 6's *subtitle* is 1 pt left of PowerPoint's, and that is the
+kerning above seen from the other side: the line carries -53/1000 em of `kern`, so the
+width we centre it on is ~1.7 pt too wide and half of that lands on the left edge. Its
+title, which has no kern pair in it, is exactly right — the two together are as clean a
+confirmation as the GPOS table.
+
+What is left on both slides is **vertical**, and the probe's `g` family says it is not a
+small residue. Twenty slides of two one-line paragraphs, holding one font size and
+sweeping the other:
+
+| | PowerPoint | ours | error |
+| --- | --- | --- | --- |
+| 32 → 12 pt, `spcBef` 20% | 22.08 pt | 17.28 | -4.80 |
+| 32 → 24 | 36.00 | 34.56 | -1.44 |
+| 32 → 32 | 46.08 | 46.08 | 0 |
+| 32 → 40 | 54.96 | 57.60 | +2.64 |
+| 12 → 32 | 41.04 | 46.08 | +5.04 |
+| 40 → 32 | 48.00 | 46.08 | -1.92 |
+
+**Our advance is right only when the two sizes are equal**, which is exactly why slide 4's
+three same-size advances are correct and its two size-changing ones are 1.7 and 1.9 pt
+out. Three further readings fall out of the `spcBef = 0` rows and none of them is our
+model:
+
+* between two paragraphs at 32 pt with no spacing at all the advance is **37.92 pt**
+  (1.185 em), not the 1.2 em `DEFAULT_LINE_HEIGHT_RATIO` asserts;
+* *within* one wrapped paragraph at the same size and face it is **38.88 pt** (1.215 em) —
+  so a paragraph boundary is not a line advance plus a gap, and neither number is 1.2;
+* the advance is **not a linear function of the two sizes**: 32 → 12 measures 18.96 where
+  the 32 → 32 and 32 → 24 rows predict 18.12 for any function of the form
+  `below(first) + above(second)`.
+
+This is deliberately **not fixed here**. `DEFAULT_LINE_HEIGHT_RATIO` governs Latin
+spacing too, the 1.2 constant is the result of its own measurement across eleven faces
+(see `text/measure.py`), and six numbers from one script are not enough to replace it.
+
+One number in this section went **down**, and it is the case `tools/fidelity.py`'s own
+docstring warns about: `sample-cjk`'s histogram fell 0.9819 → 0.9805 while its SSIM rose
+0.6788 → 0.7367. Slide 3 is where it happens, and every other column there improved —
+mean absolute error 3.901 → 2.214, pixels over 10% 2.719 → 1.981, coverage 3.28% → 2.80%.
+Removing ink we drew and PowerPoint did not shrinks the mask the score is a mean over.
+The probe family that would settle it is written and committed; what it needs is the same
+sweep on a Latin face, which would say whether 1.185/1.215 is a property of Noto Sans JP
+or of PowerPoint.
+
+**One last thing the probe found and this does not fix.** A paragraph with a hanging
+indent and *no bullet* (`marL` 32 pt, `indent` -32 pt) gets the full box width for its
+first line in PowerPoint — it fits eleven glyphs where we fit ten. With a bullet, which
+is every case in the corpus, PowerPoint budgets from the text start and we agree. So the
+defect is confined to the bullet-less hanging indent, and no deck here has one.
 
 `chart-gallery.pptx` is the fourth scorable deck and the only chart-heavy one; what its
 0.6747 is made of is in *3.2a* below, since almost all of it is a statement about chart
@@ -208,6 +324,17 @@ With fonts eliminated as a variable, what remains is layout, and it is concentra
 * **Text displacement of 1–2 px** on body copy is what slides 6 and 7 are made of, and
   `tools/fidelity.py`'s own docstring warns that SSIM is unusually sensitive to exactly
   that on thin high-contrast content.
+* **The OpenType `kern` feature is not modelled at all**, and it is now the largest named
+  term left in Japanese layout: it is why `WRAP_TOLERANCE_RATIO` cannot be zero, why
+  `sample-cjk`'s centred subtitle sits 1 pt left of PowerPoint's, and why no constant
+  tolerance is right for a heavily kerned string. Measured above; see *What the two
+  defects turned out to be*.
+* **The paragraph advance is only right when two consecutive paragraphs share a font
+  size.** Twenty probe slides put the error between -4.80 and +5.04 pt, and the same
+  measurement says the 1.2 em line box is 1.185 em between paragraphs and 1.215 em within
+  one. `DEFAULT_LINE_HEIGHT_RATIO` governs Latin too, so this needs the same sweep on a
+  Latin face before anything moves; the probe family is written (`g` in
+  `tools/make_cjk_wrap_probe.py`).
 
 The bold/italic and paragraph-spacing defects that used to head this list are **fixed**:
 bold now inherits through the placeholder cascade, `spcBef` and `spcAft` add rather than

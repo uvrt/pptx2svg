@@ -918,3 +918,157 @@ def test_italic_is_left_to_the_font_when_the_font_has_one():
     svg = text_svg(one_run("Slanted", font_size=18, italic=True, font_family="Calibri"))
     assert 'font-style="italic"' in svg
     assert "skewX" not in svg
+
+
+def _line_dys(svg: str) -> list[float]:
+    """Every ``dy`` in the main ``<text>``, in document order."""
+    body = re.search(r"<text [^>]*>(.*?)</text>", svg, re.S).group(1)
+    return [float(value) for value in re.findall(r'dy="([-\d.]+)"', body)]
+
+
+def test_a_wrap_that_lands_on_a_sheared_run_still_advances_the_line():
+    """The continuation line's `dy` may not be lost with the run that carried it.
+
+    A sheared italic leaves the parent `<text>` flow for a `<text>` sibling of its own,
+    and when it is the first thing on a line it used to take the line's `dy` with it.
+    Nothing left in the flow then recorded the advance, so the rest of that line drew on
+    the line above -- two lines on one baseline -- and every line below it came up one
+    advance too high as well, because `dy` is relative.
+    """
+    properties = dict(font_size=42.667, font_family="Calibri", font_family_ea="Noto Sans JP")
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun("通常テキスト、", m.RunProperties(**properties)),
+                    m.TextRun("斜体テキスト", m.RunProperties(italic=True, **properties)),
+                    m.TextRun("、後続", m.RunProperties(**properties)),
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body, width=4000000, height=2000000)
+    # Three lines: 通常テキスト、 / 斜体テキスト、 / 後続.  The sheared run opens the
+    # second, so the `、` that follows it is the first flowing tspan on that line and
+    # has to carry the advance.
+    assert _line_dys(svg) == [0.0, 68.27, 68.27], svg
+    # The advance rides on the piece that follows the shear, which keeps its own x.
+    second = re.findall(r'<tspan x="([-\d.]+)" dy="68.27"', svg)
+    assert second and float(second[0]) > 300, svg
+
+
+def test_a_line_that_is_entirely_sheared_carries_its_advance_on_a_spacer():
+    """Every run on the line detached, so a space-only tspan records the advance.
+
+    Without it the line after this one is drawn one advance too high: the sheared
+    `<text>` siblings are positioned absolutely and contribute nothing to the flow.
+    """
+    properties = dict(font_size=42.667, font_family="Calibri", font_family_ea="Noto Sans JP")
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun("斜体テキストの", m.RunProperties(italic=True, **properties)),
+                    m.TextRun("後続テキスト", m.RunProperties(**properties)),
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body, width=4000000, height=2000000)
+    # Line 1 is nothing but the sheared run, so its advance sits on a spacer; line 2
+    # then steps a full line below it rather than onto it.
+    assert _line_dys(svg) == [0.0, 68.27], svg
+    assert '<tspan x="9.6" dy="0" text-anchor="start"> </tspan>' in svg, svg
+
+
+def _cjk_line_counts(width_pt: float, size_pt: float = 32.0, count: int = 40) -> list[int]:
+    """Characters per line for ``count`` full-width glyphs in a box ``width_pt`` wide."""
+    from pptx2svg.units import PX_PER_PT
+
+    paragraph = make_paragraph("東" * count, font_size=size_pt, font_family_ea="Noto Sans JP")
+    lines = wrap_paragraph(paragraph, width_pt * PX_PER_PT, size_pt)
+    return [len("".join(s.text for s in line.segments)) for line in lines]
+
+
+def test_a_cjk_line_fits_exactly_the_characters_the_box_is_wide():
+    """PowerPoint's budget is ``sum of advances <= width``, inclusive and with no slack.
+
+    Measured by `tools/make_cjk_wrap_probe.py` over 53 slides: a box of ``k * size``
+    points fits exactly ``k`` of a 1 em glyph at three box widths and five font sizes,
+    and a box a **quarter of a point** narrower fits ``k - 1``.  Noto Sans JP advances
+    every ideograph and every kana at exactly 1 em, which is what makes the count exact.
+    """
+    for k in (5, 10, 15):
+        for size in (12.0, 18.0, 32.0):
+            assert _cjk_line_counts(k * size, size)[0] == k, (k, size)
+
+
+def test_the_wrap_tolerance_is_too_small_to_admit_a_whole_glyph():
+    """The slack is an allowance for our own measurement error, not a model of anything.
+
+    It has to cover the OpenType ``kern`` PowerPoint applies to Japanese and we do not --
+    up to 0.684% of a line over `sample-cjk` -- without ever admitting a character
+    PowerPoint rejects, which on that deck overhangs by 0.813%.  At 2% it admitted one,
+    and `sample-cjk` slide 2 broke a character late because of it.
+    """
+    from pptx2svg.text.wrap import WRAP_TOLERANCE_RATIO
+
+    assert 0.00231 < WRAP_TOLERANCE_RATIO < 0.00813
+    # A box one glyph short of eleven still fits only ten, however the slack rounds.
+    assert _cjk_line_counts(11 * 32.0 - 32.0)[0] == 10
+
+
+def _cjk_wrap(text: str, width_pt: float, size_pt: float = 32.0) -> list[str]:
+    from pptx2svg.units import PX_PER_PT
+
+    paragraph = make_paragraph(text, font_size=size_pt, font_family_ea="Noto Sans JP")
+    lines = wrap_paragraph(paragraph, width_pt * PX_PER_PT, size_pt)
+    return ["".join(s.text for s in line.segments) for line in lines]
+
+
+@pytest.mark.parametrize("forbidden", ["、", "。", "」", "ー", "っ", "ゞ", "ァ", "）"])
+def test_a_japanese_line_never_begins_with_a_forbidden_character(forbidden):
+    """Kinsoku: the character before it comes down too rather than leave it at the head.
+
+    Measured on `tools/make_cjk_wrap_probe.py`'s `k` family -- a box exactly ten glyphs
+    wide with the punctuation as the eleventh character.  PowerPoint put nine on the
+    first line in every case, which is push-out and not hanging punctuation.
+    """
+    lines = _cjk_wrap("東" * 10 + forbidden + "東" * 9, 320.0)
+    assert lines[0] == "東" * 9, lines
+    assert lines[1].startswith("東" + forbidden), lines
+
+
+def test_a_japanese_line_never_ends_with_an_opening_bracket():
+    lines = _cjk_wrap("東" * 9 + "「" + "東" * 10, 320.0)
+    assert lines[0] == "東" * 9, lines
+    assert lines[1].startswith("「"), lines
+
+
+def test_two_forbidden_characters_in_a_row_push_back_once_more():
+    """One pass is not enough: moving 、 down would leave 。 at the head instead."""
+    lines = _cjk_wrap("東" * 10 + "、。" + "東" * 8, 320.0)
+    assert lines[0] == "東" * 9, lines
+    assert lines[1].startswith("東、。"), lines
+
+
+def test_kinsoku_never_empties_a_line():
+    """A forbidden character with nothing to push back onto stays where it is.
+
+    Pushing the line's last token down would move the problem rather than solve it, and
+    a paragraph of nothing but punctuation would otherwise loop forever.
+    """
+    assert _cjk_wrap("、" * 6, 64.0) == ["、、", "、、", "、、"]
+
+
+def test_the_kinsoku_classes_hold_no_character_latin_wrapping_can_see():
+    """Latin wrapping must not move: every member is East Asian by `is_cjk`.
+
+    The same classes have ASCII members -- ``)``, ``.``, ``,`` -- and admitting those
+    would change where an English paragraph breaks, which no probe here measured.
+    """
+    from pptx2svg.text.measure import is_cjk
+    from pptx2svg.text.wrap import NOT_LINE_END, NOT_LINE_START
+
+    assert not NOT_LINE_START & NOT_LINE_END
+    assert all(is_cjk(ord(char)) for char in NOT_LINE_START | NOT_LINE_END)
