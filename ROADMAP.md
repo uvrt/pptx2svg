@@ -1044,8 +1044,8 @@ appears.
 
 ## Phase 3 — Charts
 
-**Effort: XL. 3.1 is done and 3.2 has ten of its types; combo charts, the secondary axis
-and `surfaceChart` are not.**
+**Effort: XL. 3.1 is done, 3.2 has ten of its types, and 3.3's combo charts and secondary
+axis landed with them; `surfaceChart` and the 3-D scene are what remain.**
 
 No shortcut: unlike SmartArt, PowerPoint does *not* cache a rendered chart. The
 `c:chartSpace` part holds data plus styling, and the renderer must do axis scaling, tick
@@ -2492,7 +2492,7 @@ picture than PowerPoint's but not a wrong one.
   sweep that settled it is **3.5**; one rule gives all four, because the gap is a function
   of the entries and not of the chart.
 
-### 3.4 3-D chart fallbacks (S) — **the numbers are done, the scene is not**
+### 3.4 3-D chart fallbacks (M–L) — **the numbers are done, the scene is not**
 
 `bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents —
 `parse/chart.flat_chart_kind` does this and `bar3DChart` therefore already draws flat.
