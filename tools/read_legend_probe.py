@@ -57,7 +57,7 @@ import pypdfium2.raw as raw
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from make_legend_probe import FRAME_OFF, probes_for  # noqa: E402
-from read_axis_probe import _mul, labels, path_points  # noqa: E402
+from read_axis_probe import _mul, chartmod, labels, path_points  # noqa: E402
 
 
 def _matrix(obj):
@@ -108,7 +108,7 @@ def entry_names(probe: dict) -> list[str]:
     Paint order is ``areaChart -> barChart -> lineChart`` (ROADMAP.md 3.3), which for a
     combo is not the document order.  A pie legends its **categories**.
     """
-    order = {"area": 0, "col": 1, "scatter": 1, "pie": 1, "line": 2}
+    order = {"area": 0, "col": 1, "scatter": 1, "pie": 1, "line": 2, "stock": 2}
     names: list[str] = []
     for group in sorted(probe["groups"], key=lambda g: order[g["kind"]]):
         names.extend(group["names"])
@@ -318,9 +318,136 @@ def check(path: Path, only: str | None) -> int:
     return 0
 
 
+def read_text_row(probe: dict, page) -> dict | None:
+    """The legend's **labels** only, for a legend whose keys may not be drawn at all.
+
+    :func:`read_page` needs a key path per entry and so cannot read a chart whose keys are
+    invisible, which is the whole subject of the ``legend-nokey`` deck.  Every entry there
+    is named ``W``, ``Wm``, ``Wmm``... so each label's ink starts at the same left side
+    bearing and the pitch between two labels is the pitch between two layout cells with no
+    font residue in it.
+    """
+    wanted = entry_names(probe)
+    runs = [row for row in labels(page) if row[0] in wanted]
+    if len(runs) < len(wanted):
+        return None
+    band = statistics.median(row[2] for row in runs)
+    runs = [row for row in runs if abs(row[2] - band) < 4.0]
+    runs.sort(key=lambda row: row[1])
+    if len(runs) != len(wanted):
+        return None
+    paths = page_paths(page)
+    keys = [
+        box
+        for box in paths
+        if abs((box[1] + box[3]) / 2 - band) < 7.0
+        and box[2] - box[0] < 40.0
+        and box[3] - box[1] < 12.0
+        and box[0] < runs[-1][1]
+    ]
+    return {
+        "names": [row[0] for row in runs],
+        "text_left": [round(row[1], 3) for row in runs],
+        "text_right": [round(row[1] + row[4], 3) for row in runs],
+        "keys": [(round(b[0], 3), round(b[2], 3)) for b in sorted(keys)],
+        "band_y": round(band, 3),
+    }
+
+
+def solve_cell(read: dict, mine: dict) -> dict:
+    """The one unknown a ``legend-nokey`` slide leaves: the width of the entry's key cell.
+
+    3.5's layout is ``W(i) = cell + advance(i)``, ``gap = 0.2 * sum(W) / (n + 1)`` and the
+    run centred on the frame plus 0.75 pt.  Hold that rule and let ``cell`` float, and one
+    slide determines it twice over:
+
+    * from the **pitch** between two labels, which is ``advance(i) + gap + cell``;
+    * from the **lead**, the first label's ink less the run's computed start, which must
+      come back as one left side bearing shared by every slide in the deck.
+
+    The two agreeing is what says the layout is the measured one with a different cell,
+    rather than a different layout.
+    """
+    advance = mine["advance"]
+    text = read["text_left"]
+    n = len(advance)
+    frame_width = mine["frame_width"]
+    pitches = [b - a for a, b in zip(text, text[1:])]
+    # `pitch(i) - advance(i)` is `cell + gap`, one reading per consecutive pair.
+    residues = [p - a for p, a in zip(pitches, advance[:-1])]
+    total_advance = sum(advance)
+    mean = statistics.mean(residues) if residues else float("nan")
+    # cell + 0.2 * (n * cell + sum advance) / (n + 1) = mean
+    cell = (mean - chartmod.LEGEND_ENTRY_SLACK * total_advance / (n + 1)) / (
+        1.0 + chartmod.LEGEND_ENTRY_SLACK * n / (n + 1)
+    )
+
+    def lead_for(candidate: float) -> float:
+        total = n * candidate + total_advance
+        slack = min(
+            chartmod.LEGEND_ENTRY_SLACK * total,
+            chartmod.LEGEND_BAND_MAX_FRACTION * frame_width - total,
+        )
+        gap = max(slack, 0.0) / (n + 1)
+        run = total + gap * (n - 1)
+        start = (
+            mine["frame_left"]
+            + (frame_width - run) / 2
+            + chartmod.LEGEND_HORIZONTAL_OFFSET_PT
+        )
+        return text[0] - (start + candidate)
+
+    return {
+        "residues": [round(r, 3) for r in residues],
+        "spread": (max(residues) - min(residues)) if residues else 0.0,
+        "cell": cell,
+        "cell_em": cell / mine["size"],
+        "lsb_fitted": lead_for(cell),
+        "lsb_swatch": lead_for(chartmod.LEGEND_ENTRY_KEY_EM * mine["size"]),
+        "lsb_line": lead_for(chartmod.LINE_LEGEND_ENTRY_KEY_PT),
+        "lsb_none": lead_for(0.0),
+        "keys": len(read["keys"]),
+    }
+
+
+def cells(path: Path, only: str | None) -> int:
+    """Solve each slide for its legend key **cell**, the ``legend-nokey`` deck's subject."""
+    probes = probes_for(path)
+    doc = pdfium.PdfDocument(path)
+    mine_all = ours(path.with_suffix(".pptx"))
+    print(
+        f"{'key':12s} {'frame':>6s} {'n':>2s} {'keys':>4s} {'cell':>7s} {'em':>6s} "
+        f"{'spread':>6s} {'lsb@fit':>7s} {'lsb@sw':>7s} {'lsb@ln':>7s} {'lsb@0':>7s}  residues"
+    )
+    for index, probe in enumerate(probes):
+        if only and only not in probe["key"]:
+            continue
+        page = doc[index]
+        read = read_text_row(probe, page.raw)
+        mine = mine_all[index] if index < len(mine_all) else None
+        if read is None or mine is None:
+            print(f"{probe['key']:12s}  -- not read --")
+            continue
+        if mine["position"] not in ("b", "t"):
+            print(f"{probe['key']:12s}  {mine['position']} legend: text {read['text_left']} "
+                  f"keys {read['keys']}")
+            continue
+        answer = solve_cell(read, mine)
+        print(
+            f"{probe['key']:12s} {mine['frame_width']:6.1f} {len(read['names']):2d} "
+            f"{answer['keys']:4d} {answer['cell']:7.3f} {answer['cell_em']:6.4f} "
+            f"{answer['spread']:6.3f} {answer['lsb_fitted']:7.3f} {answer['lsb_swatch']:7.3f} "
+            f"{answer['lsb_line']:7.3f} {answer['lsb_none']:7.3f}  {answer['residues']}"
+        )
+    return 0
+
+
 def main() -> int:
     path = Path(sys.argv[1]).expanduser()
     arguments = sys.argv[2:]
+    if "--cells" in arguments:
+        arguments.remove("--cells")
+        return cells(path, arguments[0] if arguments else None)
     if "--check" in arguments:
         arguments.remove("--check")
         return check(path, arguments[0] if arguments else None)

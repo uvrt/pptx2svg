@@ -4013,11 +4013,15 @@ class _FakeLine:
     line_legend_keys = False
     _is_line = True
     _is_scatter = False
+    _is_bubble = False
     _is_radar = False
     _radar_style = "marker"
-    #: The predicate `_legend_key_size` asks, borrowed rather than restated so the fake
-    #: cannot drift from the rule it is standing in for.
+    #: The predicates `_legend_key_size` asks, borrowed rather than restated so the fake
+    #: cannot drift from the rules it is standing in for.  A group with no rule to draw
+    #: takes the swatch instead; these fakes all have one.
     _line_legend_key = _Builder._line_legend_key
+    _is_line_keyed = _Builder._is_line_keyed
+    _draws_a_rule = staticmethod(lambda: True)
 
 
 
@@ -4922,6 +4926,8 @@ def test_a_scatter_legends_with_a_rule_and_its_marker():
         _is_radar = False
         _radar_style = "marker"
         _line_legend_key = ChartBuilder._line_legend_key
+        _is_line_keyed = ChartBuilder._is_line_keyed
+        _draws_a_rule = staticmethod(lambda: True)
 
     font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
     assert ChartBuilder._legend_key_size(_FakeScatter(), font) == (
@@ -5517,6 +5523,8 @@ def test_a_bubble_legends_with_a_swatch_not_a_rule():
         _is_radar = False
         _radar_style = "marker"
         _line_legend_key = ChartBuilder._line_legend_key
+        _is_line_keyed = ChartBuilder._is_line_keyed
+        _draws_a_rule = staticmethod(lambda: True)
 
     font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
     key, _ = ChartBuilder._legend_key_size(_FakeBubble(), font)
@@ -5537,6 +5545,130 @@ def test_a_bubble_draws_no_line_and_no_marker():
     ]
     assert presets.count("ellipse") == 3
     assert set(presets) <= {"ellipse"}
+
+
+# -- the bubble axis' clearance --------------------------------------------------------
+#
+# `tools/make_bubble_probe.py` writes a 40-slide deck and `tools/read_bubble_probe.py`
+# reads the drawn domain back off its tick labels.  38 of the 40 agree exactly, units
+# included; the two that do not are at `bubbleScale` 250 and 300 and are named in
+# ROADMAP.md 3.2a.  The gallery's own data is what the numbers below are.
+
+#: ``chart-gallery`` slide 6's two series, which is the data ``bubble-axis``' ``z`` family
+#: sweeps: x of 2..10 and y of 2..9.  On the probe's bare 480 x 260 pt frame PowerPoint
+#: runs **both** axes 0..12 by 2 at the default scale.
+GALLERY_BUBBLES = (
+    ((2.0, 4.0, 6.0, 8.0, 10.0), (5.0, 8.0, 4.0, 9.0, 6.0), (14.0, 32.0, 9.0, 40.0, 21.0)),
+    ((3.0, 5.5, 7.0, 9.5), (2.0, 6.5, 7.5, 3.5), (25.0, 12.0, 30.0, 18.0)),
+)
+
+
+def _drawn_ticks(children, vertical: bool) -> list[float]:
+    """The numbers one axis drew, low to high.
+
+    Both axes of a bubble chart are value axes and routinely draw the *same* numbers, so
+    they are told apart by position: the x axis is the one row of labels sharing a y, and
+    everything numeric that is not on it belongs to the y axis.
+    """
+    out = []
+    for child in children:
+        if not isinstance(child, m.ShapeElement) or child.text_body is None:
+            continue
+        text = "".join(
+            run.text for p in child.text_body.paragraphs for run in p.runs
+        )
+        try:
+            value = float(text)
+        except ValueError:
+            continue
+        out.append((child.transform.offset_x, child.transform.offset_y, value))
+    if not out:
+        return []
+    row = max((y for _, y, _ in out), key=lambda y: sum(other == y for _, other, _ in out))
+    across = [item for item in out if item[1] == row]
+    if vertical:
+        rest = [item for item in out if item[1] != row]
+        return [value for _, _, value in sorted(rest, key=lambda item: -item[1])]
+    return [value for _, _, value in sorted(across)]
+
+
+def _bubble_axes(**kwargs):
+    children, data = _build(
+        bubble_chart_xml(
+            series=GALLERY_BUBBLES, names=("Region", "Channel"), fixed=False, **kwargs
+        ),
+        width=480.0,
+        height=260.0,
+    )
+    assert data.kind == "bubbleChart"
+    return _drawn_ticks(children, False), _drawn_ticks(children, True)
+
+
+def test_a_bubble_axis_clears_the_bubbles_and_not_their_centres():
+    """``chart-gallery`` slide 6's data is what found this: PowerPoint runs both axes
+    0..12 by 2 where padding for the data points alone gives 0..10 by 1."""
+    x, y = _bubble_axes()
+    assert y == [0, 2, 4, 6, 8, 10, 12]
+    assert x == [0, 2, 4, 6, 8, 10, 12]
+
+
+def test_the_bubble_axis_moves_with_the_scale_and_the_data_does_not():
+    """The experiment that separates padding for ink from padding for numbers.
+
+    ``bubble-axis``' ``z`` family holds one chart's data and sweeps ``c:bubbleScale``:
+    the y axis is 0..10 by 1 at 10, 25 and 50 and 0..12 by 2 at 75, 100 and above.  The
+    step between those two is the whole finding -- no rule reading the *values* can move
+    an axis when no value moved.
+    """
+    assert _bubble_axes(scale=50)[1] == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    assert _bubble_axes(scale=75)[1] == [0, 2, 4, 6, 8, 10, 12]
+
+
+def test_the_bubble_clearance_leaves_room_for_the_largest_bubble_wherever_it_sits():
+    """``d-inner`` against ``d-outer``: the same four points, with the 100-size bubble in
+    the middle of both ranges and then on the y maximum.  PowerPoint draws 0..12 for both,
+    so the room is made for the **chart's** largest radius and not for the extreme point's
+    own -- reading the extreme point's radius gives 0..10 on ``d-inner``."""
+    xs, ys = (2.0, 5.0, 8.0, 9.0), (2.0, 9.0, 5.0, 3.0)
+    for sizes in ((5.0, 5.0, 100.0, 5.0), (5.0, 100.0, 5.0, 5.0)):
+        children, _ = _build(
+            bubble_chart_xml(series=((xs, ys, sizes),), fixed=False),
+            width=480.0,
+            height=260.0,
+        )
+        assert _drawn_ticks(children, True) == [0, 2, 4, 6, 8, 10, 12], sizes
+
+
+def test_the_clearance_never_adds_itself_to_the_five_per_cent_headroom():
+    """They are a maximum, not a sum, and ``bubble-axis`` settles it outright: at
+    ``bubbleScale=50`` the sum rounds the axis to 0..12 and PowerPoint draws 0..10."""
+    from pptx2svg.resolve.chart import nice_axis_scale
+
+    # 0..9 of data on a plot whose largest radius is 7.3% of its height.
+    assert nice_axis_scale(2.0, 9.0, intervals=10, anchor_zero=False, clearance=0.0728) == (
+        pytest.approx(0.0),
+        pytest.approx(10.0),
+        pytest.approx(1.0),
+    )
+    # A scatter -- no clearance at all -- is untouched by any of this.
+    assert nice_axis_scale(2.0, 9.0, intervals=10, anchor_zero=False) == (
+        pytest.approx(0.0),
+        pytest.approx(10.0),
+        pytest.approx(1.0),
+    )
+
+
+def test_the_clearance_is_rechecked_after_the_domain_is_rounded():
+    """Rounding outwards makes the span larger, and the room a bubble needs is a fraction
+    of that span, so a domain that cleared the ink before rounding can fail after.
+    ``bubble-axis`` at ``bubbleScale=150`` solves to 0..10.885, rounds to 0..12, and the
+    bubble sitting on the data minimum of 2 then hangs 0.08 units below the floor --
+    PowerPoint draws -2..12."""
+    from pptx2svg.resolve.chart import nice_axis_scale
+
+    assert nice_axis_scale(
+        2.0, 9.0, intervals=10, anchor_zero=False, clearance=0.17323
+    ) == (pytest.approx(-2.0), pytest.approx(12.0), pytest.approx(2.0))
 
 
 def test_a_bubbles_label_stands_further_off_than_a_markers():
@@ -5734,6 +5866,34 @@ def test_the_two_plots_are_packed_across_the_polar_region(name):
     centres = sorted({round(_wedge[0][0], 1) for _wedge in _wedges(children)})
     assert centres[0] == pytest.approx(centre_x, abs=0.05)
     assert centres[-1] == pytest.approx(second_x, abs=0.05)
+
+
+def test_a_short_ofpie_centres_its_run_instead_of_stretching_it():
+    """The defect ``chart-gallery`` slide 9 turned out to be, and the clamp's first
+    measurement.
+
+    ``ofpie-clamp``'s 520 x 200 pt frame leaves a 498 x 178 pt region, whose width law asks
+    for a radius of 153.2 and whose height allows 89.0 -- exactly half of it, which is what
+    PowerPoint drew.  The run is then ``divisor * radius`` wide and **centred**, so its left
+    edge sits 104.375 pt inside the region rather than on it; pinning the two plots to the
+    region's edges put them 104 pt out here and 160 pt out on a 600 pt frame.
+
+    Nine such slides across five frames and both forms agree to 0.005 pt.  The
+    ``ofpie-pack`` sweep is the other half of the same reading: while the width binds, the
+    drawn span *is* the region's width on all 23 of its slides, so the two rules are one.
+    """
+    for of_pie_type, first_x, second_x in (("bar", 204.375, None), ("pie", 148.75, 393.5)):
+        children, _ = _build(
+            of_pie_chart_xml(of_pie_type=of_pie_type), width=520.0, height=200.0
+        )
+        radius = _plots(children)[0][0][0]
+        assert radius == pytest.approx(89.0, abs=0.02), of_pie_type
+        # `region.left + (region.width - divisor * radius) / 2 + radius`, with the divisor
+        # 3.25 for the bar form and 4.5 for the pie one.  `_wedges` rounds to a tenth.
+        centres = sorted({round(wedge[0][0], 1) for wedge in _wedges(children)})
+        assert centres[0] == pytest.approx(first_x, abs=0.1), of_pie_type
+        if second_x is not None:
+            assert centres[-1] == pytest.approx(second_x, abs=0.1)
 
 
 def test_the_bar_form_packs_by_a_different_divisor():
@@ -6319,6 +6479,33 @@ def combo_xml(groups: str, *, legend: str | None = None, **axes) -> str:
     )
 
 
+def _chart_builder(body: str, *, width: float = 480.0, height: float = 260.0):
+    """The builder :func:`_build_all` would have driven, for asking it a question directly."""
+    from pptx2svg.resolve.chart import ChartBuilder, ChartStyle
+
+    source = chart(body)
+    return ChartBuilder(
+        source,
+        source.plots[0],
+        plots=list(source.plots),
+        width_pt=width,
+        height_pt=height,
+        style=ChartStyle(
+            font_family="Aptos",
+            font_size=10.0,
+            color=m.ResolvedColor(hex="#000000"),
+            accents=[
+                m.ResolvedColor(hex="#4472C4"),
+                m.ResolvedColor(hex="#ED7D31"),
+                m.ResolvedColor(hex="#A5A5A5"),
+            ],
+        ),
+        resolve_fill=_fake_fill,
+        resolve_outline=_fake_outline,
+        resolve_text=lambda rich, text, size, align: m.TextBody(),
+    )
+
+
 def _build_all(body: str, *, width: float = 480.0, height: float = 260.0):
     """Lay out a chart the way `resolve/view` does: every drawable group, not only the first."""
     from pptx2svg.resolve.chart import ChartBuilder, ChartStyle
@@ -6701,25 +6888,60 @@ def test_a_combo_legends_in_paint_order_and_widens_every_key_to_the_line_key():
         assert key.transform.extent_height / 12700 == pytest.approx(LEGEND_SWATCH_EM * 10.0)
 
 
-def test_a_line_chart_on_its_own_still_legends_with_a_square_swatch_when_it_has_no_line():
-    """The stock chart's case, and the one this deliberately leaves alone.
+def test_a_line_chart_with_no_line_draws_no_legend_key_at_all():
+    """The stock chart's case, measured on ``legend-nokey`` -- ROADMAP.md 3.2a.
 
     A series whose own group legends with a rule but which states
     ``<a:ln><a:noFill/></a:ln>`` has no rule to draw, and PowerPoint draws **nothing**
-    there.  Neither our square nor a 19.2 x 5.49 bar is right, so it keeps the square it
-    has always had rather than being changed by a measurement that is not about it.
+    there: three bare line series came back with no key path on the page.  We used to draw
+    a filled square, which on ``chart-gallery``'s stock chart was most of the slide's ink.
     """
-    from pptx2svg.resolve.chart import LINE_LEGEND_KEY_PT
-
     series = combo_series(0, "Flat", (1.5, 5.0, 2.8, 4.0, 2.3)).replace(
         "<c:cat>", "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:cat>"
     )
     line = combo_group("line", series)
     children, _ = _build_all(combo_xml(line, second=False, legend="b"))
-    keys = _legend_keys(children, below=230.0)
-    assert len(keys) == 1
-    assert keys[0].transform.extent_width == keys[0].transform.extent_height
-    assert keys[0].transform.extent_width / 12700 == pytest.approx(LINE_LEGEND_KEY_PT)
+    assert _legend_keys(children, below=230.0) == []
+
+
+def test_a_chart_with_no_rule_anywhere_lays_its_legend_out_on_the_swatch_cell():
+    """The other half of the same reading, and the one that moves the *labels*.
+
+    ``legend-nokey`` solves each slide for the cell the layout advances by, from the pitch
+    between labels and from the run's centring independently.  A line chart whose every
+    series is bare comes back on the **1.0984 em swatch cell** rather than the 24.0 pt line
+    cell, at three frame widths and at two, three, four and five entries; one series
+    keeping its rule puts the whole chart back on 24.002 pt.
+    """
+    from pptx2svg.resolve.chart import (
+        LEGEND_ENTRY_KEY_EM,
+        LEGEND_SWATCH_EM,
+        LEGEND_SWATCH_GAP_EM,
+        LINE_LEGEND_ENTRY_KEY_PT,
+        LINE_LEGEND_KEY_GAP_PT,
+        LINE_LEGEND_KEY_PT,
+        ChartFont,
+        font_box,
+    )
+
+    bare = combo_series(0, "Flat", (1.5, 5.0, 2.8, 4.0, 2.3)).replace(
+        "<c:cat>", "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr><c:cat>"
+    )
+    ruled = combo_series(1, "Ruled", (2.5, 4.0, 3.8, 3.0, 1.3))
+    font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
+
+    builder = _chart_builder(combo_xml(combo_group("line", bare), second=False, legend="b"))
+    assert builder._legend_key_size(font) == (
+        pytest.approx(LEGEND_SWATCH_EM * 10.0),
+        pytest.approx(LEGEND_SWATCH_GAP_EM * 10.0),
+    )
+    assert builder._legend_key_cell(font) == pytest.approx(LEGEND_ENTRY_KEY_EM * 10.0)
+
+    both = _chart_builder(
+        combo_xml(combo_group("line", bare + ruled), second=False, legend="b")
+    )
+    assert both._legend_key_size(font) == (LINE_LEGEND_KEY_PT, LINE_LEGEND_KEY_GAP_PT)
+    assert both._legend_key_cell(font) == pytest.approx(LINE_LEGEND_ENTRY_KEY_PT)
 
 
 # -- 3-D charts, drawn flat --------------------------------------------------------------

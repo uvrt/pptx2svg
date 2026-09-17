@@ -111,7 +111,7 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | --- | --- | --- | --- |
 | `table test.pptx` | **0.9895** | 0.9984 | pass |
 | `authoring-integration.pptx` | 0.9327 | 0.9984 | SSIM |
-| `chart-gallery.pptx` | 0.6619 | 0.8147 | SSIM |
+| `chart-gallery.pptx` | 0.6747 | 0.8147 | SSIM |
 | `real-college-template.pptx` (local only) | 0.8003 | 0.8753 | SSIM, hist |
 | `real-basic-theme.pptx` | skipped | — | PowerPoint drew MS Gothic where the deck names ＭＳ Ｐゴシック |
 | `sample.pptx` | skipped | — | same |
@@ -129,7 +129,7 @@ rewrite the two Japanese decks' themes to name `MS Gothic` — the face PowerPoi
 resolves — instead of ＭＳ Ｐゴシック.
 
 `chart-gallery.pptx` is the fourth scorable deck and the only chart-heavy one; what its
-0.6619 is made of is in *3.2a* below, since almost all of it is a statement about chart
+0.6747 is made of is in *3.2a* below, since almost all of it is a statement about chart
 types rather than about this deck.
 
 `real-college-template.pptx` escapes that trap: it names only Arial, Calibri and
@@ -2317,9 +2317,10 @@ needs its own assertion; a parsed field with no reader needs one too.
 
 `tests/fixtures/chart-gallery.pptx` (written by `tools/make_chart_gallery.py`, one chart
 type per slide, 17 slides) is the first chart-heavy deck the oracle can score. Its mean is
-**SSIM 0.6619 / hist 0.8147** (0.6413 / 0.8170 when this table was first written; slides 1
-and 17 moved in 3.3, every slide with a horizontal legend moved in 3.5, and slide 16 moved
-in 3.4), and reading that as "charts are 65% right" would be wrong
+**SSIM 0.6747 / hist 0.8147** (0.6413 / 0.8170 when this table was first written; slides 1
+and 17 moved in 3.3, every slide with a horizontal legend moved in 3.5, slide 16 moved in
+3.4, and slides 6, 9 and 11 moved in **3.2b**), and reading that as "charts are 67% right"
+would be wrong
 twice over — three of the seventeen slides are types we deliberately do not draw, and the
 rest are thin ink on white, where SSIM punishes a one-pixel shift like a missing element.
 The per-slide numbers are the measurement; the mean is not.
@@ -2331,12 +2332,12 @@ The per-slide numbers are the measurement; the mean is not.
 | 3 | `lineChart` | 0.6906 | 0.5920 | 0.040 | visually the same chart; 4% coverage of 1 pt strokes is what the number is. The legend gap (3.5) took the SSIM up and the histogram down, both for that reason |
 | 4 | `areaChart` stacked | 0.8814 | 0.9998 | 0.394 | — |
 | 5 | `scatterChart` | 0.7759 | 0.6225 | 0.031 | sparse, as slide 3 |
-| 6 | `bubbleChart` | 0.4149 | 0.9950 | 0.127 | **axis defect**: PowerPoint runs the y axis 0–12 by 2, we run 0–10 by 1 — it pads for the bubble *radii*, we pad for the centres |
+| 6 | `bubbleChart` | **0.5512** | 0.9942 | 0.090 | was 0.4149. Both axes run 0–12 by 2 now rather than 0–10 by 1: the domain clears the bubbles' *ink*. Pixels differing by more than 10% went 10.7 to 3.8. See 3.2b |
 | 7 | `pieChart` | 0.8968 | 0.9993 | 0.240 | — |
 | 8 | `doughnutChart` | 0.9717 | 0.9999 | 0.188 | the best slide in the deck |
-| 9 | `ofPieChart` bar form | 0.8056 | 0.9991 | 0.323 | **packing defect**: our pie and bar are both visibly smaller than PowerPoint's. `OF_PIE_BAR_GAP_DIVISOR` was fitted to one observation and this is the second |
+| 9 | `ofPieChart` bar form | **0.8979** | 0.9990 | 0.272 | was 0.8056, and **not** the divisor defect this table used to call it: the radius was right to 1%, the two plots were in the wrong place. Pixels over 10% went 14.9 to 2.2. See 3.2b |
 | 10 | `radarChart` | 0.7106 | 0.7318 | 0.036 | rings and spokes agree exactly, including the ring count; sparse |
-| 11 | `stockChart` | **0.0499** | 0.9593 | 0.049 | **legend defect**: the series state `<a:ln><a:noFill/></a:ln>`, PowerPoint's legend keys are therefore invisible, ours are three filled accent swatches. On a slide that is 5% ink, three swatches are most of the ink |
+| 11 | `stockChart` | 0.0384 | 0.9608 | 0.045 | was 0.0499 and the picture is **right** now: the three wrong swatches are gone and the legend lays out on PowerPoint's own cell. Every other number improved — histogram 0.9593 to 0.9608, mean absolute error 5.53 to 5.02, pixels over 10% 4.81 to 4.40 — and the SSIM fell anyway. See below and 3.2b |
 | 12 | `surfaceChart` | 0.5313 | −0.0470 | 0.133 | deferred by design: our empty frame against a full 3-D surface and its banded legend. The negative histogram is two unrelated images, which is the honest number |
 | 13 | `bar3DChart` | 0.5844 | 0.9760 | 0.242 | see 3.4 |
 | 14 | `line3DChart` | 0.0723 | 0.9108 | 0.063 | see 3.4 |
@@ -2344,22 +2345,180 @@ The per-slide numbers are the measurement; the mean is not.
 | 16 | `area3DChart` | **0.7648** | 0.9837 | 0.286 | was 0.7340 / 0.9931: its axis is PowerPoint's 0–50 by 5 now rather than 0–60 by 10, which is more ink in the right places and slightly more black on a slide whose scene is a raster. See 3.4 |
 | 17 | combo | **0.7433** | 0.9994 | 0.232 | was 0.6120: both groups, the right-hand axis and the two-entry legend are drawn now. See 3.3 and 3.5 |
 
-Three defects are new and none of them were visible in the corpus before this deck:
-
-* **A bubble chart's value axis must clear the bubbles, not the centres.** Slide 6 is the
-  cleanest of the three: same data, same frame, a whole extra decade of headroom.
-* **A legend key ignores `<a:ln><a:noFill/></a:ln>` on its series.** Slide 11's stock
-  chart is the case that shows it, because a stock chart is the one type whose series are
-  routinely drawn with no line at all. The chart body is right; only the key is wrong.
-* **`ofPieChart`'s bar form packs too small.** `resolve/chart.OF_PIE_BAR_GAP_DIVISOR`
-  carries a note saying it rests on a single `gapWidth=100` reading; slide 9 is a second
-  reading of the same configuration and it disagrees.
+Three defects were new when this table was written and none of them were visible in the
+corpus before this deck. **All three are measured now**; 3.2b is what they came to, and
+two of them were not what this table said they were.
 
 Slides 3, 5 and 10 are the reminder the `tools/fidelity.py` docstring already gives:
 **SSIM is not a percentage of correctness on sparse line art.** A line chart that is
 indistinguishable from PowerPoint's at a glance scores 0.67 because 4% of the pixels are
-ink and half a pixel of stroke displacement moves all of them. Chase slides 6, 9 and 11
-before chasing those.
+ink and half a pixel of stroke displacement moves all of them.
+
+**Slide 11 is now the sharpest example of that in the corpus, and it is worth reading
+before trusting any number in this table.** Its picture became right and its score went
+*down*. SSIM here is a mean over the pixels that are ink in *either* image, and the three
+swatches we used to draw were a twelfth of that mask scoring 0.28 where the slide's own
+average is 0.05. Deleting them removed more mask than loss, so the ratio fell while the
+picture improved. The unnormalised quantity says what actually happened: the total
+structural loss over the mask fell from **42577 to 39502**, and every other metric the
+harness records moved the right way. What is left of slide 11's 0.04 is its gridlines and
+axis sitting about a pixel off PowerPoint's, which is slide 1's plot-rectangle defect and
+not the legend's.
+
+### 3.2b The gallery's three defects, measured — **done**
+
+Three probe decks, **91 slides**, against 3.2a's three readings. Two of the three
+diagnoses in that table were wrong about the cause while being right about the symptom,
+which is the whole reason they were probed rather than patched.
+
+| deck | slides | tool | what it settled |
+| --- | --- | --- | --- |
+| `legend-nokey` | 16 | `make_legend_probe.py` | what a legend key with nothing to draw does to the layout |
+| `ofpie-pack` / `-region` / `-clamp` | 47 | `make_ofpie_probe.py` | `OF_PIE_BAR_GAP_DIVISOR` over its whole range, and the height clamp |
+| `bubble-axis` | 40 | `make_bubble_probe.py` | what a bubble chart's value axis pads for |
+
+| slide | before | after |
+| --- | --- | --- |
+| 6 `bubbleChart` | 0.4149 | **0.5512** |
+| 9 `ofPieChart` | 0.8056 | **0.8979** |
+| 11 `stockChart` | 0.0499 | 0.0384, and right — see 3.2a |
+
+`chart-gallery` **0.6619 → 0.6747** SSIM, histogram unchanged at 0.8147. The other three
+scored decks do not move by a digit, and slides 6, 9 and 11 are the only VRT snapshots
+that change.
+
+#### A key with no rule to draw keeps a *narrower* slot
+
+`legend-nokey` names every entry `W`, `Wm`, `Wmm`… so each label's ink begins at the same
+side bearing and the pitch between two labels is the pitch between two layout cells with
+no font residue in it. Each slide then determines the one unknown — the cell — twice
+over: from the pitch, and from the run's centring, which must come back as **one** left
+side bearing shared by every slide in the deck. It does, at −0.366 pt, the same residual
+3.5 already carries.
+
+* **Nothing is drawn.** Three bare line series produced no key path on the page at all.
+  Our filled accent swatch was invented.
+* **The cell is the swatch's.** 1.0984 em against the swatch cell's 1.0985, at three frame
+  widths and at two, three, four and five entries. Reading the 24.0 pt line cell there is
+  8.5 pt out on the first label and reading *no* cell 7.5 pt the other way, so this is not
+  a close call.
+* **The marker survives the rule.** The same three series with `<c:symbol val="circle"/>`
+  draw the marker alone, centred in that same cell to 0.07 pt. What is lost is the stroke,
+  not the slot.
+* **It is a decision for the chart, not the series.** One series keeping its rule puts all
+  three entries back on the 24.002 pt cell, and the bare ones beside it simply leave their
+  slot empty. Three mixtures say so, and the key count on the page is the number of series
+  that still have a rule.
+* **A real `c:stockChart` reads as a line chart**, both ways round, and a **side** legend
+  agrees to 0.008 pt with no probe of its own having been fitted to it.
+
+`_is_line_keyed` therefore asks `_draws_a_rule()` as well as the group's shape, and
+`_legend_entry` has a third branch. `chart-gallery` slide 11 is the case; nothing else in
+the corpus states `<a:ln><a:noFill/></a:ln>` on a line series.
+
+#### `OF_PIE_BAR_GAP_DIVISOR` is right, and slide 9 was never about it
+
+3.2a called slide 9 a second reading of a constant fitted to one observation. It is not.
+`ofpie-pack`'s 23 slides sweep `gapWidth` over 0, 25, 50, 100, 150, 200 and 300 and
+`secondPieSize` over 25, 50, 75, 100 and 125, plus five cross terms and six pie-form
+controls, and **`r = W / (2 + s + g/200)` reproduces every one to 0.004 pt** — a residual
+of one part in 25 000 on the divisor. The bar form is read twice per slide because the
+second plot is an exact rectangle, `s*r` wide and `2*s*r` tall, and the two agree. The
+`/200` is a fitted slope now rather than the natural reading of one observation, and the
+constant's docstring says so.
+
+`ofpie-region` then holds those two at the gallery's values and moves only the furniture —
+no title, a title, a bottom, top or right legend, and both — in both forms, twelve slides
+agreeing to 0.033 pt. So the polar region is right too.
+
+**What slide 9 actually is: the height clamp gives back the width it did not use.**
+`_of_pie_geometry` caps the radius at half the region's height, and while the *width* is
+what binds — every slide of `ofpie-pack` — pinning the first plot's left edge to the
+region's left and the second's right edge to its right is the same thing as centring the
+run. Once the region is short enough for the height to bind they part company, and
+`ofpie-clamp` says which one PowerPoint does. On nine slides across five frames and both
+forms:
+
+* the cap is **exactly half the region's height**, to 0.005 pt;
+* the drawn run is **`divisor * radius`** wide and its midpoint is the region's own, to
+  0.005 pt.
+
+Pinning to the edges was up to **160.6 pt** out on a 600 pt frame. `chart-gallery` slide 9
+is on that side of the line — its 498 pt region asks for a radius of 153.2 and its height
+allows 129.9 — which is why the two plots were visibly in the wrong place and why the
+radius, which the table called too small, was within 1%.
+
+#### A bubble chart's value axis clears the ink, and it measures it against the *height*
+
+`bubble-axis` sweeps `c:bubbleScale` at fixed data, which is the discriminating
+experiment: it changes every radius and no value at all, so a domain that moves with it is
+padding for ink. It moves. The same chart draws **0–10 by 1** at scale 10, 25 and 50 and
+**0–12 by 2** at 75, 100 and above.
+
+The rule is that the domain must leave room for every mark's own circle:
+
+    span >= vmax + clearance * span     and     span >= clearance * span - vmin
+
+with `clearance` the largest drawn radius as a fraction of the axis' length — a linear
+equation per end, because the radius is fixed *before* the axis is (the region a bubble is
+sized against is frame-derived and not the plot, `BUBBLE_REGION_INSET_PT`). The five per
+cent headroom every other axis takes becomes a **floor** rather than an addition: summing
+the two rounds scale 50's axis to 0–12 where PowerPoint draws 0–10.
+
+Three things about it are measured rather than reasoned, and two are surprising:
+
+* **The radius is the chart's largest, wherever it sits.** `d-inner` puts the biggest
+  bubble in the middle of both ranges and `d-outer` puts it on the y maximum; PowerPoint
+  draws the same 0–12 for both. Reading the extreme *point's* own radius gives 0–10 on
+  `d-inner`.
+* **Both axes measure the clearance against the plot's HEIGHT.** Reading the x axis
+  against its own width agrees with 25 of the 40 slides and against the height with 38,
+  and the fifteen it settles are not marginal: at `bubbleScale=150` the width reading
+  leaves x at 0–12 where PowerPoint draws −2–14. A square plot could not tell the two
+  apart; these are 437 × 224.
+* **The clearance is rechecked after the domain is rounded.** Rounding outwards enlarges
+  the span, and the room a bubble needs is a fraction of the span, so a domain that cleared
+  the ink can fail after rounding. At scale 150 the solve gives 0–10.885, the rounding
+  gives 0–12, and at 0–12 the bubble on the data's own minimum of 2 hangs 0.08 units below
+  the floor — PowerPoint draws −2–12. One unit each way settles it; at scale 300 it takes
+  two.
+
+**The circularity closes after exactly one pass, and iterating further would oscillate.**
+The clearance needs the plot rectangle and the plot rectangle needs the domain's tick
+labels, so the unpadded domain's rectangle is what the clearance is computed from. Going
+round again is not merely unnecessary but wrong: a domain that goes negative moves its own
+value labels *inside* the plot, which grows the plot, which shrinks the clearance, which no
+longer needs the negative. The single pass is what PowerPoint's own answers match.
+
+**38 of the 40 slides agree exactly, units included.** The two that do not are at
+`bubbleScale` 250 and 300 — `m-lift-l`, where PowerPoint's y runs 0–45 against our 0–40 and
+its x −2–16 against our 0–14, and `eb-12`, where PowerPoint takes unit 5 and runs −5–20
+where we take 2 and run −2–18. Both are one step of a second-order effect at radii above a
+quarter of the plot; no corpus chart is near them, and one reading each is not a rule.
+
+#### Two residuals worth naming
+
+* **The title band is not a constant times its line height, and there are now two readings
+  that say so.** `TITLE_BAND_LINES = 1.4769` is an 18 pt Arial fit whose own docstring asks
+  to be re-measured if a differently sized title ever disagrees. One has.
+  `ofpie-clamp`'s `c-gallery` — a default-size title, which resolves here to 18 pt and a
+  20.109 pt line box — wants a band of **30.03** against the 29.70 this computes, a ratio
+  of 1.4931. `chart-gallery` slide 9's 14 pt title, line box 15.641, wants **20.44**
+  against the 23.10 this computes, a ratio of **1.3068**. The two ratios differ by 14% and
+  a straight line through them has a negative intercept, so neither is a rule and fitting
+  one to two points would be worse than the honest single-font fit that is there. The same
+  2.66 pt appears independently on slide 6, whose largest bubble is 64.27 pt where
+  PowerPoint draws 63.65 — the bubble region and the polar region take the same band, so it
+  is one error seen twice. A title-size sweep read through the height clamp, which is the
+  one construction that puts a region height on the page as a length, would settle it.
+* **The bar form's own height clamp disagrees, once.** `_of_pie_geometry` also caps the
+  radius at `region.height / (2 * s)`, because a second bar wider than the pie runs out of
+  height first. The one probe frame short enough to reach it — `ofpie-clamp`'s 520 × 220 at
+  `gapWidth=300`, `secondPieSize=125` — drew a pie of radius 49.496 where the cap asks for
+  79.2, and a bar 99.0 pt wide where `s*r` is 61.9, so PowerPoint's bar and pie stop
+  agreeing on a radius at all there. The cap is kept, because without it such a chart draws
+  a bar taller than its own region; what PowerPoint replaces it with is one observation and
+  is not carried as a rule.
 
 ### 3.3 Combo charts — **done**
 

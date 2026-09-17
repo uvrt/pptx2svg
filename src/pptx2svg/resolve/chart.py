@@ -181,6 +181,18 @@ LEGEND_HORIZONTAL_OFFSET_PT = 0.75
 #: ratios rather than the tidy 1.5 both are close to -- rounding the band cost 0.46 pt of
 #: plot height, which moved every gridline by a pixel.  They are a one-font fit and should
 #: be re-measured if a chart with a differently sized title ever disagrees.
+#:
+#: **One now does, and it is left here as the honest single-font fit rather than refitted
+#: to two disagreeing points.**  A region height is readable as a length wherever an
+#: ``ofPieChart``'s radius is capped by it, and two such readings want two different
+#: ratios: ``ofpie-clamp``'s default-size title (18 pt, a 20.109 pt line box) wants a band
+#: of 30.03 against the 29.70 this gives, a ratio of 1.4931, while ``chart-gallery``
+#: slide 9's 14 pt title (15.641 pt line box) wants 20.44 against 23.10, a ratio of
+#: **1.3068**.  The same 2.66 pt appears independently on slide 6, whose largest bubble is
+#: 64.27 pt where PowerPoint draws 63.65, because the bubble region takes the same band.
+#: A straight line through the two points has a negative intercept, so this is not a
+#: constant times the line height and no two-point fit is worth having.  A title-size sweep
+#: read through that clamp would settle it; see ROADMAP.md 3.2b.
 TITLE_BAND_LINES = 1.4769
 TITLE_BASELINE_ASCENTS = 1.5046
 
@@ -587,6 +599,24 @@ DEFAULT_SIZE_REPRESENTS = "area"
 BUBBLE_LABEL_SIDE_GAP_PT = 8.494
 BUBBLE_LABEL_EDGE_GAP_PT = 7.0
 
+# **A bubble chart's value axis clears the bubbles, not their centres.**  There is no
+# constant for it -- the rule is a linear equation and lives in :func:`_clearance_extent`
+# and :meth:`ChartBuilder._build_scatter` -- but ``tools/make_bubble_probe.py``'s 40 slides
+# are what settled it and the three things they refuted belong beside the sizes above:
+#
+# * the domain follows the **ink**.  One chart's data at nine ``c:bubbleScale`` values
+#   draws 0..10 by 1 at 10, 25 and 50 and 0..12 by 2 at 75, 100 and above.  Nothing that
+#   reads the values can move an axis when no value moved.
+# * the room is made for the **chart's largest** radius wherever it sits, the same
+#   reference :data:`DEFAULT_SIZE_REPRESENTS` takes -- ``d-inner`` and ``d-outer`` draw the
+#   same axis with the big bubble in the middle and on the maximum.
+# * both axes measure that radius against the plot's **height**.  38 of the 40 slides
+#   agree that way and 25 the other; a square plot cannot tell them apart and these are
+#   437 x 224.
+#
+# 38 of 40 exactly, units included.  The two misses are at ``bubbleScale`` 250 and 300 and
+# are named in ROADMAP.md 3.2b.
+
 # -- ofPieChart -----------------------------------------------------------------------
 #
 # Twenty-four probe charts across two decks.  The two plots are packed across the **same
@@ -615,9 +645,17 @@ DEFAULT_OF_PIE_GAP_WIDTH = 100.0
 #: The bar form packs differently, and the divisor is **not** the pie's.  Its bar is
 #: ``s*r`` wide and ``2*s*r`` tall -- the same vertical extent a second pie of that size
 #: would have -- and the gap between the pie and the bar is **half** what it is between
-#: two pies: ``r = W / (2 + s + g/200)`` reproduces 61.068 at ``s=0.75`` and 66.157 at
-#: ``s=0.5``, both exact.  Only ``gapWidth=100`` was measured on the bar form, so the
-#: ``/200`` is the natural reading of one observation rather than a fitted slope.
+#: two pies: ``r = W / (2 + s + g/200)``.
+#:
+#: **The ``/200`` is a fitted slope now.**  It used to be the natural reading of a single
+#: ``gapWidth=100`` observation and said so here; ``ofpie-pack``'s 23 slides sweep
+#: ``gapWidth`` over 0, 25, 50, 100, 150, 200 and 300 and ``secondPieSize`` over 25, 50,
+#: 75, 100 and 125, with five cross terms and six pie-form controls, and **every one comes
+#: back to 0.004 pt on the radius** -- one part in 25 000 of the divisor.  Each slide reads
+#: the radius twice, because the second plot is an exact rectangle ``s*r`` wide and
+#: ``2*s*r`` tall, and the two agree.  ``chart-gallery`` slide 9 was recorded in
+#: ROADMAP.md 3.2a as a second reading that disagreed; it is not about this constant at
+#: all -- see :meth:`ChartBuilder._of_pie_geometry`.
 OF_PIE_BAR_GAP_DIVISOR = 2.0
 
 #: The main pie is rotated so the aggregated slice is **centred at three o'clock**,
@@ -931,6 +969,48 @@ def bottom_axis_intervals(
     return max(1, min(AXIS_MAX_INTERVALS, rungs))
 
 
+def _clearance_extent(
+    low: float, high: float, data_minimum: float, data_maximum: float, clearance: float
+) -> tuple[float, float]:
+    """Widen ``(low, high)`` until every mark's own *ink* fits inside it.
+
+    ``clearance`` is a drawn radius as a fraction of the axis' own length, so the room a
+    mark needs is ``clearance * (high - low)`` -- a quantity that depends on the answer.
+    The circle closes in one step because the radius is fixed before the axis is (see
+    :data:`BUBBLE_REGION_INSET_PT`), leaving a linear equation per end.
+
+    Which ends are active is not known in advance: a chart whose lowest point sits well
+    above its axis' floor needs no room there at all.  So each of the four cases is solved
+    in closed form and the **narrowest** consistent one wins, which is the same answer a
+    fixed-point iteration converges to and does not need a convergence argument.
+    """
+    if clearance <= 0.0 or not math.isfinite(clearance):
+        return low, high
+    clearance = min(clearance, 0.45)
+    candidates = [(low, high)]
+    if clearance < 1.0:
+        candidates.append((low, (data_maximum - clearance * low) / (1.0 - clearance)))
+        candidates.append(((data_minimum - clearance * high) / (1.0 - clearance), high))
+    span = (data_maximum - data_minimum) / (1.0 - 2.0 * clearance)
+    candidates.append((data_minimum - clearance * span, data_maximum + clearance * span))
+
+    best: tuple[float, float] | None = None
+    for candidate_low, candidate_high in candidates:
+        bottom, top = min(candidate_low, low), max(candidate_high, high)
+        width = top - bottom
+        if not math.isfinite(width) or width <= 0:
+            continue
+        room = clearance * width
+        # A relative tolerance, because both sides of each comparison are products of the
+        # same solved width and land a few ulps either side of equality by construction.
+        slack = _EXTENT_SLACK * max(width, 1.0)
+        if data_minimum - room < bottom - slack or data_maximum + room > top + slack:
+            continue
+        if best is None or width < best[1] - best[0]:
+            best = (bottom, top)
+    return best if best is not None else (low, high)
+
+
 def nice_axis_scale(
     data_minimum: float,
     data_maximum: float,
@@ -938,6 +1018,7 @@ def nice_axis_scale(
     intervals: int = AXIS_MAX_INTERVALS,
     strict: bool = True,
     anchor_zero: bool = True,
+    clearance: float = 0.0,
 ) -> tuple[float, float, float]:
     """``(minimum, maximum, major_unit)`` for a value axis PowerPoint would draw itself.
 
@@ -983,6 +1064,13 @@ def nice_axis_scale(
     ``anchor_zero=False`` lets the domain leave zero out when the data sits far enough up
     its own range; see :data:`AXIS_ZERO_ANCHOR_RATIO`.  Only a **scatter** passes it, and
     only a scatter has been measured.
+
+    ``clearance`` is a **bubble**'s radius as a fraction of this axis' drawn length, and it
+    is the one thing here that pads for ink rather than for numbers: the domain is widened
+    until every mark's own circle fits inside it, and the 5% headroom becomes a floor
+    rather than the answer.  See :func:`_clearance_extent` and ROADMAP.md 3.2a; the two
+    never *add*, which ``bubble-axis``'s scale sweep settles outright -- at
+    ``bubbleScale=50`` the sum rounds a 0..10 axis to 0..12 and PowerPoint draws 0..10.
     """
     low, high = min(0.0, data_minimum), max(0.0, data_maximum)
     if not anchor_zero and _floats_away_from_zero(data_minimum, data_maximum):
@@ -1003,6 +1091,9 @@ def nice_axis_scale(
     headroom = AXIS_HEADROOM * span if strict else 0.0
     padded_low = low if anchored and low >= 0.0 else low - headroom
     padded_high = high if anchored and high <= 0.0 else high + headroom
+    padded_low, padded_high = _clearance_extent(
+        padded_low, padded_high, data_minimum, data_maximum, clearance
+    )
 
     unit = _nice_unit((padded_high - padded_low) / max(1, intervals))
     # A denormal span underflows the power of ten to zero; a span at the other end
@@ -1014,6 +1105,24 @@ def nice_axis_scale(
     minimum, maximum = _axis_extent(unit, padded_low, padded_high, low, high, strict)
     if not (math.isfinite(minimum) and math.isfinite(maximum) and maximum > minimum):
         return 0.0, 1.0, 1.0
+    if clearance > 0.0:
+        # Rounding outwards is not the end of it: the room a bubble needs is a fraction of
+        # the **drawn** span, which the rounding has just made larger, so a domain that
+        # cleared the ink before it was rounded can fail after.  Measured: ``bubble-axis``
+        # at ``bubbleScale=150`` solves to 0..10.885, rounds to 0..12, and at 0..12 the
+        # bubble sitting on the data's own minimum of 2 hangs 0.08 units below the floor --
+        # PowerPoint draws -2..12.  One more unit each way settles every such slide; at 300
+        # it takes two.
+        for _ in range(AXIS_MAX_INTERVALS):
+            room = min(clearance, 0.45) * (maximum - minimum)
+            below = data_minimum - room < minimum - _EXTENT_SLACK * max(maximum - minimum, 1.0)
+            above = data_maximum + room > maximum + _EXTENT_SLACK * max(maximum - minimum, 1.0)
+            if not (below or above):
+                break
+            if below:
+                minimum -= unit
+            if above:
+                maximum += unit
     return minimum, maximum, unit
 
 
@@ -1912,10 +2021,18 @@ class ChartBuilder:
     def _of_pie_geometry(self, region: _Rect) -> tuple[float, float, float, float, bool]:
         """``(first radius, first centre x, second size fraction, second centre x, is bar)``.
 
-        The packing law, measured to the last decimal on eight probes -- see
-        :data:`DEFAULT_OF_PIE_GAP_WIDTH` and :data:`OF_PIE_BAR_GAP_DIVISOR`.  The clamp
-        against the region's *height* is **not** measured: no probe frame was short enough
-        to reach it, and without it a wide frame draws a pie taller than its own region.
+        The packing law, measured to the last decimal -- see
+        :data:`DEFAULT_OF_PIE_GAP_WIDTH` and :data:`OF_PIE_BAR_GAP_DIVISOR`.
+
+        **The run is centred in the region, not stretched across it.**  Those two are the
+        same thing while the *width* is what limits the radius, which is every probe the
+        law was fitted on: the drawn span came back as exactly the region's width, to
+        0.004 pt, on all 23 slides of ``ofpie-pack``.  Once the region is short enough that
+        the **height** caps the radius, they part company, and `ofpie-clamp` says which one
+        PowerPoint does: on nine slides across five frames and both forms the drawn span is
+        ``divisor * radius`` and its midpoint is the region's own, to 0.005 pt, where
+        pinning the two plots to the region's edges puts them up to 160.6 pt out.
+        ``chart-gallery`` slide 9 is on that side of the line and is what found this.
         """
         is_bar = (self.plot.of_pie_type or "pie").strip() == "bar"
         size = self.plot.second_pie_size
@@ -1931,16 +2048,30 @@ class ChartBuilder:
             divisor = 2.0 + fraction + gap / OF_PIE_BAR_GAP_DIVISOR
         else:
             divisor = 2.0 + 2.0 * fraction + gap
-        radius = region.width / max(divisor, MIN_BAR_SLOTS)
+        divisor = max(divisor, MIN_BAR_SLOTS)
+        radius = region.width / divisor
+        # The region's height caps the radius, and `ofpie-clamp` measures the cap at
+        # exactly half of it: five frames whose width law asks for more all drew
+        # ``region.height / 2`` to 0.005 pt, in both forms.
         radius = min(radius, region.height / 2)
         if is_bar and fraction > 0:
+            # A second *bar* is ``2 * fraction * radius`` tall, so a bar wider than the pie
+            # runs out of height first.  **One reading only, and it disagrees**: the one
+            # probe short enough to reach this -- `ofpie-clamp`'s 520 x 220 frame at
+            # ``gapWidth=300``, ``secondPieSize=125`` -- drew a pie of 49.496 where this
+            # asks for 79.2, and a bar 99.0 wide where ``fraction * radius`` is 61.9, so
+            # the bar and the pie stop agreeing on a radius at all.  The cap is kept
+            # because without it such a chart draws a bar taller than its own region; what
+            # PowerPoint replaces it with is unmeasured.  See ROADMAP.md 3.2a.
             radius = min(radius, region.height / (2.0 * fraction))
+        # What the run does with the width it did not use: it **centres**, see the
+        # docstring.  While the width is the binding constraint this is the identity.
+        left = region.left + (region.width - divisor * radius) / 2
+        right = left + divisor * radius
         second_x = (
-            region.right - fraction * radius / 2
-            if is_bar
-            else region.right - fraction * radius
+            right - fraction * radius / 2 if is_bar else right - fraction * radius
         )
-        return radius, region.left + radius, fraction, second_x, is_bar
+        return radius, left + radius, fraction, second_x, is_bar
 
     def _draw_of_pie(
         self, region: _Rect, series: list[_Series], categories: list[str]
@@ -2826,33 +2957,81 @@ class ChartBuilder:
         x_values = [self._x_values(index, item) for index, item in enumerate(series)]
         xs = [value for column in x_values for value in column if value is not None]
         ys = [value for item in series for value in item.values if value is not None]
-        # **Neither axis is anchored at zero**, which every other type here is.  A bar has
-        # to start at its axis; a scatter of years against a measurement would be destroyed
-        # by it, and PowerPoint agrees -- see :data:`AXIS_ZERO_ANCHOR_RATIO`.
-        x_base = nice_axis_scale(*_span(xs), anchor_zero=False)
-        x_scale = _apply_axis_limits(
-            nice_axis_scale(
-                *_span(xs),
-                intervals=self._value_axis_intervals(x_axis, True, x_base),
-                anchor_zero=False,
-            ),
-            x_axis,
-        )
-        y_scale = _apply_axis_limits(
-            nice_axis_scale(
-                *_span(ys),
-                intervals=self._value_axis_intervals(y_axis, False),
-                anchor_zero=False,
-            ),
-            y_axis,
-        )
-
         x_font = self._label_font(x_axis)
         y_font = self._label_font(y_axis)
+
+        def scales(clearance: float) -> tuple[tuple, tuple]:
+            # **Neither axis is anchored at zero**, which every other type here is.  A bar
+            # has to start at its axis; a scatter of years against a measurement would be
+            # destroyed by it, and PowerPoint agrees -- see
+            # :data:`AXIS_ZERO_ANCHOR_RATIO`.  ``clearance`` is zero for everything but a
+            # bubble, where it is the largest drawn radius over the plot's height.
+            x_base = nice_axis_scale(*_span(xs), anchor_zero=False)
+            return (
+                _apply_axis_limits(
+                    nice_axis_scale(
+                        *_span(xs),
+                        intervals=self._value_axis_intervals(x_axis, True, x_base),
+                        anchor_zero=False,
+                        clearance=clearance,
+                    ),
+                    x_axis,
+                ),
+                _apply_axis_limits(
+                    nice_axis_scale(
+                        *_span(ys),
+                        intervals=self._value_axis_intervals(y_axis, False),
+                        anchor_zero=False,
+                        clearance=clearance,
+                    ),
+                    y_axis,
+                ),
+            )
+
+        def plot_for(x_scale, y_scale) -> _Rect:
+            return self._scatter_plot_rect(
+                self._tick_texts(x_scale, x_axis),
+                self._tick_texts(y_scale, y_axis),
+                x_font,
+                y_font,
+                x_scale,
+                y_scale,
+            )
+
+        x_scale, y_scale = scales(0.0)
+        rect = plot_for(x_scale, y_scale)
+        if self._is_bubble:
+            # **A bubble chart's value axis clears the bubbles, not their centres.**  The
+            # radius is a length in points and the domain is in data units, so the axis has
+            # to be told the radius as a *fraction* of a length -- and that fraction is the
+            # plot's **height on both axes**, which is the one genuinely surprising thing
+            # here and is measured rather than reasoned: reading the x axis against the
+            # plot's own width agrees with 25 of ``bubble-axis``' 40 slides and against its
+            # height with 38, and the fifteen it settles are not marginal -- at
+            # ``bubbleScale=150`` the width reading leaves x at 0..12 where PowerPoint draws
+            # -2..14.  A square plot cannot tell the two apart; these are 437 x 224.
+            #
+            # The radius is the **largest in the whole chart**, wherever it sits, which is
+            # the same reference the diameter takes: ``d-inner`` puts the biggest bubble in
+            # the middle of both ranges and its axis is the one ``d-outer`` draws with that
+            # bubble on the maximum.
+            #
+            # The circularity closes after exactly one step, because the radius comes from
+            # the frame-derived region and not from the plot
+            # (:data:`BUBBLE_REGION_INSET_PT`): the unpadded plot is enough to compute it,
+            # and the padded domain's labels are then what the final rectangle is measured
+            # from.  Iterating further would **oscillate** rather than converge -- a domain
+            # that goes negative moves its own value labels inside the plot, which grows the
+            # plot, which shrinks the clearance, which no longer needs the negative -- and
+            # the single pass is what PowerPoint's own answers match.
+            #
+            # See :func:`_clearance_extent` and ROADMAP.md 3.2a.
+            radius = self._largest_bubble() / 2.0
+            x_scale, y_scale = scales(radius / max(rect.height, 1.0))
+            rect = plot_for(x_scale, y_scale)
+
         x_ticks = self._tick_texts(x_scale, x_axis)
         y_ticks = self._tick_texts(y_scale, y_axis)
-
-        rect = self._scatter_plot_rect(x_ticks, y_ticks, x_font, y_font, x_scale, y_scale)
         # Where each axis is drawn: at the *other* axis' zero, clamped into the plot.
         # Measured on the negative-x probe, whose value axis is drawn at 111.088 pt -- the
         # x = 0 tick -- and not at the plot's left edge 95.7 pt away.
@@ -3743,11 +3922,53 @@ class ChartBuilder:
 
     @property
     def _is_line_keyed(self) -> bool:
-        """Whether *this* group's series take a line key rather than a swatch."""
+        """Whether *this* group's series take a line key rather than a swatch.
+
+        A group whose shape asks for a rule but which has **no rule to draw** does not
+        count: see :meth:`_draws_a_rule`.
+        """
         return bool(
-            self._is_line
-            or (self._is_scatter and not self._is_bubble)
-            or (self._is_radar and self._radar_style != "filled")
+            (
+                self._is_line
+                or (self._is_scatter and not self._is_bubble)
+                or (self._is_radar and self._radar_style != "filled")
+            )
+            and self._draws_a_rule()
+        )
+
+    def _draws_a_rule(self) -> bool:
+        """Whether any series in this group has a stroke the legend could show.
+
+        ``<a:ln><a:noFill/></a:ln>`` is an explicit *no line* -- a stock chart states it on
+        every series -- and a group where every series says so legends with the **swatch
+        cell**, not the 24.0 pt line cell.  Measured on ``legend-nokey``, sixteen slides:
+
+        * three bare line series draw **no key path at all** and lay out on a 1.0984 em
+          cell, the swatch cell to 0.0001 em, at three frame widths and at two, three,
+          four and five entries;
+        * the same three with a marker draw the **marker alone**, centred in that same
+          cell to 0.07 pt -- so what is lost is the rule, not the key;
+        * **one** series keeping its rule puts the whole chart back on the 24.002 pt cell
+          and the bare entries beside it simply draw nothing, which is what says the width
+          is a decision for the chart and the ink one for the series;
+        * a real ``c:stockChart`` reads the same as the line chart, both ways round.
+
+        The cell is solved twice per slide -- from the pitch between labels and from the
+        run's centring -- and the two agree: every slide's first label lands 0.366 pt left
+        of the predicted advance origin, the same side bearing 3.5 already carries, where
+        reading the line cell here is 8.5 pt out and reading no cell at all 7.5 pt the
+        other way.
+
+        ``_resolve_outline`` collapses "no line" and "no ``c:spPr``" to the same ``None``,
+        so the source element is what gets asked -- the same trap :meth:`_axis_outline`
+        and :meth:`_read_line_style` exist for.
+        """
+        return any(
+            not (
+                isinstance(source.outline, s.SourceOutline)
+                and isinstance(source.outline.fill, s.SourceNoFill)
+            )
+            for source in self.plot.series
         )
 
     def _axis_reach(self, series: list[_Series]) -> list[float]:
@@ -5866,12 +6087,14 @@ class ChartBuilder:
         return LEGEND_SWATCH_EM * font.size, LEGEND_SWATCH_GAP_EM * font.size
 
     def _line_legend_key(self) -> bool:
-        """Whether this chart's legend keys are rules rather than swatches."""
-        return self.line_legend_keys or (
-            self._is_line
-            or (self._is_scatter and not self._is_bubble)
-            or (self._is_radar and self._radar_style != "filled")
-        )
+        """Whether this chart's legend keys are rules rather than swatches.
+
+        ``line_legend_keys`` is the combo's answer, set on every group by
+        :meth:`_line_legend_keys`; a chart that never went through that path asks its own
+        group.  Both are :attr:`_is_line_keyed`, which refuses a group with no rule to
+        draw -- a stock chart's -- so such a chart lays its legend out on the swatch cell.
+        """
+        return self.line_legend_keys or self._is_line_keyed
 
     def _legend_key_cell(self, font: ChartFont) -> float:
         """The width a horizontal legend entry's key **advances**, key plus its padding.
@@ -5911,21 +6134,32 @@ class ChartBuilder:
             self._line(x, centre, x + swatch, centre, item.line)
             if item.marker_symbol:
                 self._marker((x + swatch / 2, centre), item)
+        elif item.line_keyed:
+            # **A series that legends with a rule and has no rule draws no rule**, and
+            # nothing takes its place: `legend-nokey`'s three bare line series came back
+            # with no key path on the page at all.  What it does keep is its marker, drawn
+            # alone and centred in the key's own width -- measured 0.07 pt off that centre
+            # on `o-mark` -- so the key loses its stroke and not its slot.
+            #
+            # The slot is narrower than a line key's whenever the *chart* has no rule
+            # anywhere, because :meth:`_line_legend_key` then reads the swatch; a bare
+            # series beside one that keeps its rule stays on the wide cell and simply
+            # leaves it empty, which is the `o-mix` reading.  See ROADMAP.md 3.2a.
+            if item.marker_symbol:
+                self._marker((x + swatch / 2, centre), item)
         else:
             # **A swatch in a combo is as wide as the chart's key and as tall as a
             # swatch.**  Measured on ``combo-legend``: the bar keys of a bar-plus-line
             # chart came back 19.200 pt wide -- the line key's width, not the 5.49 pt
             # swatch -- and 5.49 pt tall.  On a chart with no line group the two numbers
             # are the same and this is the square every bar and pie legend measured.
-            #
-            # A series whose *own* group legends with a rule but which has no line to draw
-            # -- a stock chart's, whose `<a:ln><a:noFill/></a:ln>` is exactly that -- is a
-            # case PowerPoint answers by drawing **nothing at all**, and neither shape is
-            # right for it.  It keeps the square it has always had rather than being
-            # quietly changed by a measurement that is not about it; see ROADMAP.md 3.2a.
-            height = swatch if item.line_keyed else LEGEND_SWATCH_EM * font.size
             self._rect(
-                _Rect(x, centre - height / 2, x + swatch, centre + height / 2),
+                _Rect(
+                    x,
+                    centre - LEGEND_SWATCH_EM * font.size / 2,
+                    x + swatch,
+                    centre + LEGEND_SWATCH_EM * font.size / 2,
+                ),
                 fill=item.fill,
                 outline=None,
             )

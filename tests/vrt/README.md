@@ -36,7 +36,7 @@ rather than assumed:
 | The rotated-label reserve has no cap, where PowerPoint's does — slide 3 reserves too little under its plot | `real-financial-report/slide-03.svg` |
 | PowerPoint ellipsis-truncates a category label that will not fit; we draw it in full | `slide-03.svg` draws `プラットフォーム` where PowerPoint's export drew `プラット…`; `slide-04.svg` draws `海外売上比率` and `従業員満足度` where it drew `海外売上…` and `従業員満…` |
 
-`chart-gallery.pptx` adds seven more, all of them deliberate — it is a fixture built to
+`chart-gallery.pptx` adds four more, all of them deliberate — it is a fixture built to
 pin what charts do now, including where that is wrong. Named here so nobody reads one of
 its snapshots as an assertion that we are right:
 
@@ -45,9 +45,10 @@ its snapshots as an assertion that we are right:
 | `surfaceChart` is measured and deliberately deferred: an empty frame and a `chart-unsupported-type` warning where PowerPoint draws a 3-D surface | `chart-gallery/slide-12.svg` |
 | A combo chart draws only its first group — no line series and no secondary value axis | `slide-17.svg` |
 | The four 3-D spellings are drawn flat; PowerPoint draws a real perspective scene, and on `area3DChart` it also picks a different axis unit | `slide-13.svg` … `slide-16.svg` |
-| A bubble chart's value axis clears the bubble *centres*; PowerPoint's clears the bubbles | `slide-06.svg` |
-| A legend key ignores `<a:ln><a:noFill/></a:ln>` on its series, so a stock chart gets three filled swatches where PowerPoint draws none | `slide-11.svg` |
-| `ofPieChart`'s bar form packs both plots smaller than PowerPoint's | `slide-09.svg` |
+| A `stockChart`'s gridlines and axis sit about a pixel off PowerPoint's, which is the plot-rectangle defect slide 1 carries and not a legend one | `slide-11.svg` |
+
+The three defects this list used to name on slides 6, 9 and 11 are **fixed** — see
+ROADMAP.md 3.2b — and those bytes are an assertion that we are right about them now.
 
 The rest of that list — the manually laid out legend, and body copy landing 1–2 px off —
 was measured on `real-college-template.pptx`, which is not committed and not snapshotted.

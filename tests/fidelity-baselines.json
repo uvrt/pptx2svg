@@ -87,13 +87,13 @@
         "ssim": 0.7759
       },
       {
-        "coverage": 0.1265,
-        "histogram": 0.995,
-        "mean_abs": 12.654,
-        "over10": 10.728,
-        "over64": 9.693,
+        "coverage": 0.0899,
+        "histogram": 0.9942,
+        "mean_abs": 4.097,
+        "over10": 3.777,
+        "over64": 2.863,
         "sparse": false,
-        "ssim": 0.4149
+        "ssim": 0.5512
       },
       {
         "coverage": 0.2399,
@@ -114,13 +114,13 @@
         "ssim": 0.9717
       },
       {
-        "coverage": 0.3214,
-        "histogram": 0.9991,
-        "mean_abs": 16.46,
-        "over10": 14.947,
-        "over64": 14.338,
+        "coverage": 0.2715,
+        "histogram": 0.999,
+        "mean_abs": 2.01,
+        "over10": 2.219,
+        "over64": 1.59,
         "sparse": false,
-        "ssim": 0.8056
+        "ssim": 0.8979
       },
       {
         "coverage": 0.0361,
@@ -132,13 +132,13 @@
         "ssim": 0.7106
       },
       {
-        "coverage": 0.0486,
-        "histogram": 0.9593,
-        "mean_abs": 5.532,
-        "over10": 4.806,
-        "over64": 3.588,
+        "coverage": 0.0446,
+        "histogram": 0.9608,
+        "mean_abs": 5.02,
+        "over10": 4.395,
+        "over64": 3.173,
         "sparse": false,
-        "ssim": 0.0499
+        "ssim": 0.0384
       },
       {
         "coverage": 0.1327,
@@ -195,7 +195,7 @@
         "ssim": 0.7433
       }
     ],
-    "ssim": 0.6619
+    "ssim": 0.6747
   },
   "real-basic-theme": {
     "fonts": {
