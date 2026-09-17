@@ -2548,6 +2548,31 @@ already performs. Separately, resvg honours `feDiffuseLighting` with `feDistantL
 available too — though the twelve `ST_BevelPresetType` cross-sections cannot be expressed
 as a blur radius, which buys *a* bevel rather than *the* bevel.
 
+**Lighting and material are available too, and the split is the same one.** Measured in
+resvg, our own rasteriser: `feDiffuseLighting` runs with all three light types
+(`feDistantLight`, `fePointLight`, `feSpotLight`), and `feSpecularLighting` runs as well —
+with the specular exponent controlling highlight tightness, which is the matte / plastic /
+metal axis `a:sp3d/@prstMaterial` encodes (exponent 1 gave 73 distinct levels, exponent 20
+gave 111, against 16 for an unlit fill). **The naive test reports a false negative**: a
+specular pass clipped into `SourceAlpha` with `operator="in"` throws the highlight away and
+looks like the filter never ran. It has to be composited *additively* over the source.
+
+Where the normal comes from is what decides whether that is worth anything:
+
+* **In a chart it is exact.** Each face's normal comes from its own polygon, so shading is
+  arithmetic baked into `fill` — no filter, no height field, no approximation, and material
+  is just the curve mapping the Lambert term to a colour plus an optional specular term.
+* **On a shape it is not.** SVG's lighting primitives derive their height field from
+  *blurred alpha*, which is not the bevel's profile. `a:bevelT` has twelve
+  `ST_BevelPresetType` cross-sections — `circle`, `hardEdge`, `coolSlant`, `divot`,
+  `riblet`, `artDeco` — and a blur radius cannot encode which one, so there is no parameter
+  to fit per preset. That is *a* bevel, not *the* bevel, and it is why 5.3's "approximate,
+  do last" rating still stands for shapes while it no longer does for charts.
+
+`a:lightRig`'s direction maps to azimuth and elevation, and `lighting-color` carries a
+tinted rig; the multi-light presets such as `threePt` would need several lighting passes
+merged, which is composable in principle and untested here.
+
 The prototype also showed the failure mode: a wrong pinhole divisor renders confidently
 inverted geometry rather than a slightly-off picture. That is the argument against shipping
 a half-fitted camera, and it is a different argument from the one against drawing flat.
