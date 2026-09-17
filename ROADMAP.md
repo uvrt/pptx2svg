@@ -2317,31 +2317,31 @@ needs its own assertion; a parsed field with no reader needs one too.
 
 `tests/fixtures/chart-gallery.pptx` (written by `tools/make_chart_gallery.py`, one chart
 type per slide, 17 slides) is the first chart-heavy deck the oracle can score. Its mean is
-**SSIM 0.6543 / hist 0.8172** (0.6413 / 0.8170 when this table was first written; slides 1
-and 17 moved in 3.3), and reading that as "charts are 65% right" would be wrong
+**SSIM 0.6601 / hist 0.8153** (0.6413 / 0.8170 when this table was first written; slides 1
+and 17 moved in 3.3, and every slide with a horizontal legend moved in 3.5), and reading that as "charts are 65% right" would be wrong
 twice over — three of the seventeen slides are types we deliberately do not draw, and the
 rest are thin ink on white, where SSIM punishes a one-pixel shift like a missing element.
 The per-slide numbers are the measurement; the mean is not.
 
 | slide | type | SSIM | hist | cov | reading |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `barChart` col, rotated labels | 0.6556 | 0.9960 | 0.083 | was 0.5611 before `c:overlap` entered the bar-width divisor (3.3); the plot rectangle is still a few pt wider than PowerPoint's |
+| 1 | `barChart` col, rotated labels | 0.6671 | 0.9960 | 0.083 | was 0.5611 before `c:overlap` entered the bar-width divisor (3.3) and 0.6556 before the legend gap (3.5); the plot rectangle is still a few pt wider than PowerPoint's |
 | 2 | `barChart` bar, bottom value axis, data labels | 0.9310 | 0.9989 | 0.138 | — |
-| 3 | `lineChart` | 0.6683 | 0.6117 | 0.040 | visually the same chart; 4% coverage of 1 pt strokes is what the number is |
+| 3 | `lineChart` | 0.6906 | 0.5920 | 0.040 | visually the same chart; 4% coverage of 1 pt strokes is what the number is. The legend gap (3.5) took the SSIM up and the histogram down, both for that reason |
 | 4 | `areaChart` stacked | 0.8814 | 0.9998 | 0.394 | — |
 | 5 | `scatterChart` | 0.7759 | 0.6225 | 0.031 | sparse, as slide 3 |
-| 6 | `bubbleChart` | 0.4068 | 0.9951 | 0.127 | **axis defect**: PowerPoint runs the y axis 0–12 by 2, we run 0–10 by 1 — it pads for the bubble *radii*, we pad for the centres |
+| 6 | `bubbleChart` | 0.4149 | 0.9950 | 0.127 | **axis defect**: PowerPoint runs the y axis 0–12 by 2, we run 0–10 by 1 — it pads for the bubble *radii*, we pad for the centres |
 | 7 | `pieChart` | 0.8968 | 0.9993 | 0.240 | — |
 | 8 | `doughnutChart` | 0.9717 | 0.9999 | 0.188 | the best slide in the deck |
-| 9 | `ofPieChart` bar form | 0.7924 | 0.9991 | 0.323 | **packing defect**: our pie and bar are both visibly smaller than PowerPoint's. `OF_PIE_BAR_GAP_DIVISOR` was fitted to one observation and this is the second |
-| 10 | `radarChart` | 0.6826 | 0.7434 | 0.036 | rings and spokes agree exactly, including the ring count; sparse |
-| 11 | `stockChart` | **0.0503** | 0.9597 | 0.049 | **legend defect**: the series state `<a:ln><a:noFill/></a:ln>`, PowerPoint's legend keys are therefore invisible, ours are three filled accent swatches. On a slide that is 5% ink, three swatches are most of the ink |
+| 9 | `ofPieChart` bar form | 0.8056 | 0.9991 | 0.323 | **packing defect**: our pie and bar are both visibly smaller than PowerPoint's. `OF_PIE_BAR_GAP_DIVISOR` was fitted to one observation and this is the second |
+| 10 | `radarChart` | 0.7106 | 0.7318 | 0.036 | rings and spokes agree exactly, including the ring count; sparse |
+| 11 | `stockChart` | **0.0499** | 0.9593 | 0.049 | **legend defect**: the series state `<a:ln><a:noFill/></a:ln>`, PowerPoint's legend keys are therefore invisible, ours are three filled accent swatches. On a slide that is 5% ink, three swatches are most of the ink |
 | 12 | `surfaceChart` | 0.5313 | −0.0470 | 0.133 | deferred by design: our empty frame against a full 3-D surface and its banded legend. The negative histogram is two unrelated images, which is the honest number |
-| 13 | `bar3DChart` | 0.5805 | 0.9760 | 0.242 | see 3.4 |
-| 14 | `line3DChart` | 0.0689 | 0.9116 | 0.063 | see 3.4 |
+| 13 | `bar3DChart` | 0.5844 | 0.9760 | 0.242 | see 3.4 |
+| 14 | `line3DChart` | 0.0723 | 0.9108 | 0.063 | see 3.4 |
 | 15 | `pie3DChart` | 0.7612 | 0.1336 | 0.241 | see 3.4 |
-| 16 | `area3DChart` | 0.7307 | 0.9931 | 0.286 | see 3.4 |
-| 17 | combo | **0.7384** | 0.9994 | 0.232 | was 0.6120: both groups, the right-hand axis and the two-entry legend are drawn now. See 3.3 |
+| 16 | `area3DChart` | 0.7340 | 0.9931 | 0.286 | see 3.4 |
+| 17 | combo | **0.7433** | 0.9994 | 0.232 | was 0.6120: both groups, the right-hand axis and the two-entry legend are drawn now. See 3.3 and 3.5 |
 
 Three defects are new and none of them were visible in the corpus before this deck:
 
@@ -2365,6 +2365,7 @@ before chasing those.
 Several `c:*Chart` groups over one plot area, with a secondary value axis. `barChart`,
 `lineChart` and `areaChart` in any combination are now drawn together; `chart-gallery`
 slide 17 went from SSIM **0.6120 to 0.7384** and its histogram from 0.9993 to 0.9994.
+(3.5 has since taken the same slide to 0.7433.)
 
 **Six probe decks, 76 slides**, written by `tools/make_combo_probe.py` and read back by
 `tools/read_combo_probe.py`. `--check` renders the same deck through this library and
@@ -2482,16 +2483,13 @@ picture than PowerPoint's but not a wrong one.
   — the legend band plus what the label column takes beyond the plain inset — predicts
   15.41. A sweep of the secondary label width with a right legend would settle the third of
   a point.
-* **`LEGEND_ENTRY_GAP_EM = 0.5` is refuted and nothing replaces it yet.** The gap between
+* **`LEGEND_ENTRY_GAP_EM = 0.5` was refuted here and is now replaced.** The gap between
   entries in a horizontal legend is solvable from the pitch between consecutive keys, and
-  four charts give four answers: **0.77 em** (`chart-gallery` slide 1, two bar entries on a
+  four charts gave four answers: **0.77 em** (`chart-gallery` slide 1, two bar entries on a
   288 pt frame), **1.03 em** (slide 3, three line entries on 648 pt), **1.12 em** (slide 17,
   a combo on 648 pt) and **1.15 em** (`combo-legend`'s `l-bottom`, a combo on 480 pt). The
-  pitch difference *within* a chart is exactly the text-width difference, so the gap is
-  constant per chart and our advance widths are right to 0.3%; what it is a function of is
-  not. It is worth a sweep of its own — entry counts, name widths, key types and frame
-  widths — because it moves every chart with a legend below or above it, not only combos,
-  and it is the largest remaining error on gallery slide 17.
+  sweep that settled it is **3.5**; one rule gives all four, because the gap is a function
+  of the entries and not of the chart.
 
 ### 3.4 3-D chart fallbacks (S)
 
@@ -2507,15 +2505,146 @@ to make room for it.
 
 | slide | group | SSIM | hist | what PowerPoint drew instead |
 | --- | --- | --- | --- | --- |
-| 13 | `bar3DChart` | 0.5805 | 0.9760 | extruded boxes on a floor, the plot pushed right and up by the depth |
-| 14 | `line3DChart` | **0.0689** | 0.9116 | ribbons in depth — the least recognisable of the four |
+| 13 | `bar3DChart` | 0.5844 | 0.9760 | extruded boxes on a floor, the plot pushed right and up by the depth |
+| 14 | `line3DChart` | **0.0723** | 0.9108 | ribbons in depth — the least recognisable of the four |
 | 15 | `pie3DChart` | 0.7612 | **0.1336** | an ellipse half the height of our circle, with a shaded extruded side; the shading is what takes the histogram to 0.13 |
-| 16 | `area3DChart` | 0.7307 | 0.9931 | a 3-D box, and a value axis of 0–50 by 5 where ours is 0–60 by 10 |
+| 16 | `area3DChart` | 0.7340 | 0.9931 | a 3-D box, and a value axis of 0–50 by 5 where ours is 0–60 by 10 |
 
 The axis disagreement on slide 16 is the useful part: the depth reservation changes the
 plot's height, the height decides the interval count (Phase 0's N-meter), and so a 3-D
 chart drawn flat gets a *different axis*, not merely different geometry. Any fix has to
 start there rather than with the ribbons.
+
+### 3.5 The horizontal legend's inter-entry gap — **done**
+
+`LEGEND_ENTRY_GAP_EM = 0.5` claimed the gap between entries in a `b` or `t` legend was a
+constant. 3.3 refuted it on four charts that solved for four gaps and left it there. **Four
+probe decks, 94 slides**, written by `tools/make_legend_probe.py` and read back by
+`tools/read_legend_probe.py`, settle it.
+
+The rule is:
+
+    W(i) = key cell + advance(name i)        cell = 1.0985 em (swatch) or 24.0 pt (line)
+    gap  = min(0.2 * ΣW, 0.9 * frame - ΣW) / (n + 1)
+    run  = ΣW + gap * (n - 1)                centred on the frame, plus 0.75 pt
+
+Read plainly: **the run is padded by a fifth of its own natural width, and that slack is
+cut into `n + 1` equal pieces** — one before the first entry, one after the last, and one
+between each pair. The gap is therefore a property of the entries, not of the chart.
+
+Worst residual **0.009 pt** on the gap and **0.035 pt** on the first key's x, over 88 probe
+slides and the nine charts of `chart-gallery.pptx` that were *not* fitted — which includes
+all four of 3.3's disagreeing observations. `read_legend_probe.py --check` renders each
+deck through this library and prints the residual against the export: worst **0.05 pt**.
+
+#### The distributed reading is refuted, and the frame sweep is what does it
+
+3.3's open question offered a second reading: that PowerPoint distributes entries across an
+available width, so what we solve for as a gap is a residue `(available − ΣW) / (n − 1)`
+that would naturally differ per chart. **It does not survive contact with two measurements,
+and they point in opposite directions:**
+
+* **Frame width moves nothing.** The same three entries on frames of 240, 300, 360, 420,
+  480, 600 and 720 pt draw at the same pitch to 0.001 pt, and the run simply re-centres.
+  A residue would move with every one of them.
+* **The gap grows with the content, where a residue would shrink.** Two entries give
+  3.79 pt and seven give 5.16 pt on one frame; three short names give 7.39 pt and the same
+  three names lengthened give 19.42 pt. The discriminating experiment 3.3 asked for —
+  lengthen one entry and watch the *others* — came out packed in sign and neither reading
+  in magnitude: the pitch between two untouched entries **grew**, by a fortieth of the
+  change, which is `0.2/(n+1)` at `n = 4`.
+
+`aiden0z/pptx-renderer` was checked as a prior and packs with a fixed 12 px gap in a
+centred flexbox — the same shape as the constant being replaced, and wrong the same way.
+It was read for the shape of the question only; no number came from it.
+
+#### What the sweep varied, and what each thing settled
+
+| family | swept | result |
+| --- | --- | --- |
+| `x` | one name's length, others held | packed in sign, `0.2/(n+1)` in size — the discriminating experiment |
+| `n` | entry count 2–7 | the `n + 1` divisor; six counts, two parameters, residual 0.001 pt |
+| `w` | name widths, including one long among short | depends on the **multiset**, not the order: `w-ssl` and `w-sls` agree to 0.002 pt |
+| `k` | bar, area, pie, line, line without marker, scatter, scatter-marker, combo | **two key cells, not seven.** Bar, area and pie take 1.0985 em; every line-keyed form takes 24.0 pt, combos included |
+| `f` | frame width 200–720 pt at fixed entries | the gap does not move at all |
+| `z` | font size 8, 10, 12, 14, 18 pt | `K/size` constant to four digits, so the whole layout is in ems — except the 0.75 pt centring offset, which is not |
+| `p` | `legendPos` `b`, `t`, `tr` | `b` and `t` are identical to 0.001 pt. **`tr` is not a horizontal legend at all** — see below |
+| `c` | content across the 0.9 threshold, at three frames and three counts | the cap, to 0.007 pt |
+
+#### The key cell is not the drawn key
+
+The layout advances by a cell that is **wider than the key it shows**, and the key is
+*centred* in it. A swatch is 0.549 em drawn inside a 1.0985 em cell — exactly twice — and a
+line rule 19.2 pt inside 24.0 pt. Taking the cell to be the drawn key plus its text gap
+(0.786 em) is what made the old constant look like it varied: the missing 0.31 em per entry
+is what `n` was multiplying. Both cells are over-determined — the pitch fixes them, and so
+does the centring, independently, to 0.005 em.
+
+#### The cap, and what is past it
+
+The 0.2 slack is capped so the run plus its `n + 1` gaps never passes **0.9 of the frame**.
+Nine slides cross that threshold at frames of 300, 480 and 720 pt and at two, three and six
+entries, and all nine land within 0.007 pt of the leftover `(0.9 · frame − ΣW)/(n + 1)`.
+This is the one place the layout does distribute, and it is a *cap*, not the rule.
+
+**Past it PowerPoint wraps the legend onto more rows** — at the 18.0 pt pitch
+`LEGEND_ROW_PITCH_EM` already carries — and that is not drawn here: once the entries alone
+exceed 0.9 of the frame the gap floors at zero and the row stays single. Measured on six
+slides (3 entries wrapping 2+1, 6 entries wrapping 3+3) and left alone, because the band
+height that a second row needs is a second unmeasured question.
+
+#### `legendPos="tr"` is a stacked legend
+
+Measured twice, with a swatch key and a line key: `tr` puts its entries in **one column at
+the top right**, at the 18.0 pt row pitch a right-hand legend uses, and takes its band off
+the plot's **width** — the plot ended at 429.51 pt where the same chart with a bottom
+legend ran to 487.0. It is a side legend that happens to be top-aligned rather than
+centred, and it is not what `resolve/chart.py` does with it: `tr` is still handled in the
+horizontal branch.
+
+**Left unchanged on purpose.** Two probe slides say what `tr` does; nothing says what its
+band width rule is, where the top alignment starts, or what the plot gives up as a
+function of the widest entry — and a right-hand legend's own composition already has an
+unresolved 0.31 pt in 3.3. No fixture in the corpus uses `tr`, so the wrong branch costs
+nothing today. A sweep of `tr` against the side-legend rules would settle it.
+
+#### What moved
+
+`chart-gallery` **0.6543 → 0.6601** SSIM. Ten of its seventeen slides carry a horizontal
+legend and nine of the ten improved; the tenth, slide 11, moved by −0.0004 on a slide whose
+score is 0.05 for an unrelated reason (its legend keys should be invisible). The other
+three scored decks are unchanged to four decimals. The deck histogram fell 0.8172 → 0.8153,
+entirely on slides 3 and 10, whose histograms are 0.61 and 0.74 for reasons that have
+nothing to do with the legend: they are 4% ink, so moving three 19.2 pt rules a few points
+is a visible fraction of their coloured pixels.
+
+| slide | SSIM before | after |
+| --- | --- | --- |
+| 1 `barChart` col | 0.6556 | **0.6671** |
+| 3 `lineChart` | 0.6683 | **0.6906** |
+| 6 `bubbleChart` | 0.4068 | 0.4149 |
+| 9 `ofPieChart` | 0.7924 | **0.8056** |
+| 10 `radarChart` | 0.6826 | **0.7106** |
+| 11 `stockChart` | 0.0503 | 0.0499 |
+| 13 `bar3DChart` | 0.5805 | 0.5844 |
+| 14 `line3DChart` | 0.0689 | 0.0723 |
+| 16 `area3DChart` | 0.7307 | 0.7340 |
+| 17 combo | 0.7384 | 0.7433 |
+
+#### Two residuals worth naming
+
+* **The 0.75 pt centring offset has no explanation.** The run's centre lands that far right
+  of the frame's centre, on every slide of every deck: frame-independent (200–720 pt),
+  size-independent (8–18 pt), key-independent, count-independent, and the same on
+  `chart-gallery`, whose frames sit at a different slide offset. It is not the plot's
+  centre — a pie, which has no axes at all, gives the identical number to a bar chart on
+  the same frame. It is carried as the measurement it is.
+* **Our legend text sits about 0.38 pt left of PowerPoint's advance origin**, unchanged by
+  this work. `LEGEND_SWATCH_GAP_EM = 0.237` reproduces the export's *ink* to 0.02 pt, and
+  the layout's own gap after the swatch is half a swatch, 0.2746 em. The two differ by a
+  left side bearing, and which of them PowerPoint is actually positioning on cannot be told
+  from a swatch legend alone. It was left alone because that constant also feeds side
+  legends, which were measured separately.
 
 ---
 

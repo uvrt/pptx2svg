@@ -121,16 +121,58 @@ LEGEND_SWATCH_GAP_EM = 0.237
 #: The same deck's bar chart, whose natural band is 29% of its frame, is untouched by it.
 LEGEND_SIDE_MAX_FRACTION = 0.40
 
-#: Padding either side of a side legend, and between entries in a horizontal one.
+#: Padding either side of a side legend.
 LEGEND_SIDE_LEAD_EM = 1.60
 LEGEND_SIDE_TRAIL_EM = 1.01
-LEGEND_ENTRY_GAP_EM = 0.5
 
-#: A horizontal legend's run of entries is centred on the frame with this much lead-in
-#: counted as part of it, which shifts the visible entries half of it to the right.
-#: Measured at 1.93 pt of shift for a 10 pt legend, identically on the legend-b and
-#: legend-t probes.
-LEGEND_HORIZONTAL_LEAD_EM = 0.386
+#: The **cell** a horizontal legend entry puts its key in, before the name.  It is not the
+#: drawn key: the key is *centred* in it, so the cell is what the layout advances by and
+#: the swatch is what the eye sees.  Twice the swatch for a swatch key, and 1.25x the rule
+#: for a line key -- 10.985 pt and 24.000 pt at 10 pt.  Both fall out of the same fit as
+#: :data:`LEGEND_ENTRY_SLACK` below and neither is adjustable without it.
+LEGEND_ENTRY_KEY_EM = 2 * LEGEND_SWATCH_EM
+LINE_LEGEND_ENTRY_KEY_PT = 24.000
+
+#: **The gap between entries in a horizontal legend, and it is not a constant.**  The run
+#: is padded by a fifth of its own natural width and that slack is split into ``n + 1``
+#: equal parts -- one before the first entry, one after the last, and one between each
+#: pair -- so the gap grows with the names rather than shrinking, and a wider frame does
+#: not touch it.
+#:
+#:     width(i) = key cell + advance(name i)
+#:     gap      = 0.2 * sum(width) / (n + 1)
+#:
+#: Superseding ``LEGEND_ENTRY_GAP_EM = 0.5``, which ROADMAP.md 3.3 refuted on four charts
+#: that solved for four different gaps.  Those four are what this reproduces: gallery
+#: slide 1 asked for 0.77 em, slide 3 for 1.03, slide 17 for 1.12 and ``combo-legend``'s
+#: ``l-bottom`` for 1.15, and one rule gives all four because the gap is a function of the
+#: entries and not of the chart.
+#:
+#: **Measured on 88 probe slides across four decks** (``tools/make_legend_probe.py``)
+#: sweeping entry count 2-7, name width, key type, frame width 200-720 pt, font size
+#: 8-18 pt and ``legendPos`` ``b``/``t``, plus nine charts of ``chart-gallery.pptx`` that
+#: were not fitted.  Worst residual **0.009 pt** on the gap and **0.035 pt** on the first
+#: key's x.  The frame sweep is the load-bearing one: a 240 pt frame and a 720 pt frame
+#: draw the same entries at the same pitch to 0.001 pt, which is what rules out the legend
+#: being *distributed* across an available width.
+LEGEND_ENTRY_SLACK = 0.2
+
+#: The cap on that slack.  The run plus its ``n + 1`` gaps never exceeds this much of the
+#: frame; past it the gap is whatever is left over, which is the one place the layout does
+#: distribute.  Measured at exactly 0.9 on nine slides that cross the threshold at three
+#: frame widths (300, 480 and 720 pt) and three entry counts.
+#:
+#: Once the entries alone pass 0.9 of the frame PowerPoint **wraps the legend onto more
+#: rows**, at the same 1.8 em pitch a side legend uses.  That is not drawn here -- the gap
+#: floors at zero and the row stays single -- and is the one regime this rule does not
+#: cover.  See ROADMAP.md 3.5.
+LEGEND_BAND_MAX_FRACTION = 0.9
+
+#: How far right of the frame's centre the run's own centre lands.  Frame-independent and
+#: size-independent: the same 0.75 pt at 200 pt and 720 pt of frame, and at 8 pt and 18 pt
+#: of type.  Replaces ``LEGEND_HORIZONTAL_LEAD_EM = 0.386``, whose 1.93 pt of shift was
+#: this constant plus the error in the gap it was fitted beside.
+LEGEND_HORIZONTAL_OFFSET_PT = 0.75
 
 #: The title band, and its baseline inside it, as multiples of the line height and the
 #: ascent.  Only one title was measurable (18 pt Arial, in two probes and the fixture, all
@@ -5710,12 +5752,18 @@ class ChartBuilder:
         swatch, gap = self._legend_key_size(font)
 
         if position in ("b", "t", "tr"):
-            widths = [swatch + gap + font.width(item.name or "") for _, item in entries]
-            total = (
-                sum(widths)
-                + LEGEND_ENTRY_GAP_EM * box.size * (len(entries) - 1)
-                + LEGEND_HORIZONTAL_LEAD_EM * box.size
+            # The layout advances by a **key cell** and the name; the drawn key is centred
+            # in the cell, so the swatch is inset by half the difference.  See
+            # :data:`LEGEND_ENTRY_SLACK` for where the gap comes from and what measured it.
+            cell = self._legend_key_cell(font)
+            widths = [cell + font.width(item.name or "") for _, item in entries]
+            total = sum(widths)
+            slack = min(
+                LEGEND_ENTRY_SLACK * total,
+                LEGEND_BAND_MAX_FRACTION * self.frame.width - total,
             )
+            entry_gap = max(slack, 0.0) / (len(entries) + 1)
+            run = total + entry_gap * (len(entries) - 1)
             baseline = (
                 self.frame.bottom - LEGEND_BOTTOM_BASELINE_EM * box.size
                 if position == "b"
@@ -5723,12 +5771,14 @@ class ChartBuilder:
             )
             x = (
                 self.frame.left
-                + (self.frame.width - total) / 2
-                + LEGEND_HORIZONTAL_LEAD_EM * box.size
+                + (self.frame.width - run) / 2
+                + LEGEND_HORIZONTAL_OFFSET_PT
             )
             for (_, item), width in zip(entries, widths):
-                self._legend_entry(item, x, baseline, swatch, gap, font)
-                x += width + LEGEND_ENTRY_GAP_EM * box.size
+                self._legend_entry(
+                    item, x + (cell - swatch) / 2, baseline, swatch, gap, font
+                )
+                x += width + entry_gap
             return
 
         # A side legend sits one lead gap outside the plot area.  Measured 15.996 pt at
@@ -5778,13 +5828,28 @@ class ChartBuilder:
         drawn bubble 3.1 pt small, because the legend reserve also feeds the region the
         largest bubble is sized against.
         """
-        if self.line_legend_keys or (
+        if self._line_legend_key():
+            return LINE_LEGEND_KEY_PT, LINE_LEGEND_KEY_GAP_PT
+        return LEGEND_SWATCH_EM * font.size, LEGEND_SWATCH_GAP_EM * font.size
+
+    def _line_legend_key(self) -> bool:
+        """Whether this chart's legend keys are rules rather than swatches."""
+        return self.line_legend_keys or (
             self._is_line
             or (self._is_scatter and not self._is_bubble)
             or (self._is_radar and self._radar_style != "filled")
-        ):
-            return LINE_LEGEND_KEY_PT, LINE_LEGEND_KEY_GAP_PT
-        return LEGEND_SWATCH_EM * font.size, LEGEND_SWATCH_GAP_EM * font.size
+        )
+
+    def _legend_key_cell(self, font: ChartFont) -> float:
+        """The width a horizontal legend entry's key **advances**, key plus its padding.
+
+        Wider than the drawn key, which is centred in it -- see
+        :data:`LEGEND_ENTRY_KEY_EM`.  Like the key itself, the line form is absolute points
+        and the swatch form scales with the type.
+        """
+        if self._line_legend_key():
+            return LINE_LEGEND_ENTRY_KEY_PT
+        return LEGEND_ENTRY_KEY_EM * font.size
 
     def _legend_entry_lines(self, name: str, font: ChartFont, x: float) -> int:
         """How many lines this entry needs once the band has capped its width."""
