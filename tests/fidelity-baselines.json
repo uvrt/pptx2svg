@@ -18,7 +18,7 @@
         "coverage": 0.221,
         "histogram": 0.9984,
         "mean_abs": 1.48,
-        "over10": 2.654,
+        "over10": 2.655,
         "over64": 0.827,
         "sparse": false,
         "ssim": 0.9327
@@ -39,16 +39,16 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8172,
+    "histogram": 0.8153,
     "slides": [
       {
-        "coverage": 0.0786,
+        "coverage": 0.0784,
         "histogram": 0.996,
-        "mean_abs": 3.081,
-        "over10": 3.0,
-        "over64": 1.817,
+        "mean_abs": 2.996,
+        "over10": 2.968,
+        "over64": 1.769,
         "sparse": false,
-        "ssim": 0.6556
+        "ssim": 0.6671
       },
       {
         "coverage": 0.1377,
@@ -60,13 +60,13 @@
         "ssim": 0.931
       },
       {
-        "coverage": 0.0403,
-        "histogram": 0.6117,
-        "mean_abs": 2.359,
-        "over10": 3.261,
-        "over64": 1.648,
+        "coverage": 0.0399,
+        "histogram": 0.592,
+        "mean_abs": 2.256,
+        "over10": 3.216,
+        "over64": 1.585,
         "sparse": false,
-        "ssim": 0.6683
+        "ssim": 0.6906
       },
       {
         "coverage": 0.3941,
@@ -87,13 +87,13 @@
         "ssim": 0.7759
       },
       {
-        "coverage": 0.1269,
-        "histogram": 0.9951,
-        "mean_abs": 12.766,
-        "over10": 10.774,
-        "over64": 9.754,
+        "coverage": 0.1265,
+        "histogram": 0.995,
+        "mean_abs": 12.654,
+        "over10": 10.728,
+        "over64": 9.693,
         "sparse": false,
-        "ssim": 0.4068
+        "ssim": 0.4149
       },
       {
         "coverage": 0.2399,
@@ -114,31 +114,31 @@
         "ssim": 0.9717
       },
       {
-        "coverage": 0.3229,
+        "coverage": 0.3214,
         "histogram": 0.9991,
-        "mean_abs": 16.925,
-        "over10": 15.165,
-        "over64": 14.611,
+        "mean_abs": 16.46,
+        "over10": 14.947,
+        "over64": 14.338,
         "sparse": false,
-        "ssim": 0.7924
+        "ssim": 0.8056
       },
       {
-        "coverage": 0.0365,
-        "histogram": 0.7434,
-        "mean_abs": 2.153,
-        "over10": 2.98,
-        "over64": 1.415,
+        "coverage": 0.0361,
+        "histogram": 0.7318,
+        "mean_abs": 2.048,
+        "over10": 2.934,
+        "over64": 1.357,
         "sparse": false,
-        "ssim": 0.6826
+        "ssim": 0.7106
       },
       {
-        "coverage": 0.0487,
-        "histogram": 0.9597,
-        "mean_abs": 5.523,
-        "over10": 4.809,
-        "over64": 3.584,
+        "coverage": 0.0486,
+        "histogram": 0.9593,
+        "mean_abs": 5.532,
+        "over10": 4.806,
+        "over64": 3.588,
         "sparse": false,
-        "ssim": 0.0503
+        "ssim": 0.0499
       },
       {
         "coverage": 0.1327,
@@ -150,22 +150,22 @@
         "ssim": 0.5313
       },
       {
-        "coverage": 0.2423,
+        "coverage": 0.2421,
         "histogram": 0.976,
-        "mean_abs": 16.923,
-        "over10": 15.13,
-        "over64": 13.599,
+        "mean_abs": 16.836,
+        "over10": 15.098,
+        "over64": 13.552,
         "sparse": false,
-        "ssim": 0.5805
+        "ssim": 0.5844
       },
       {
-        "coverage": 0.0629,
-        "histogram": 0.9116,
-        "mean_abs": 8.45,
-        "over10": 6.281,
-        "over64": 5.443,
+        "coverage": 0.0628,
+        "histogram": 0.9108,
+        "mean_abs": 8.433,
+        "over10": 6.273,
+        "over64": 5.435,
         "sparse": false,
-        "ssim": 0.0689
+        "ssim": 0.0723
       },
       {
         "coverage": 0.2409,
@@ -177,25 +177,25 @@
         "ssim": 0.7612
       },
       {
-        "coverage": 0.2865,
+        "coverage": 0.2863,
         "histogram": 0.9931,
-        "mean_abs": 14.748,
-        "over10": 12.442,
-        "over64": 11.722,
+        "mean_abs": 14.658,
+        "over10": 12.41,
+        "over64": 11.673,
         "sparse": false,
-        "ssim": 0.7307
+        "ssim": 0.734
       },
       {
-        "coverage": 0.2136,
+        "coverage": 0.2132,
         "histogram": 0.9994,
-        "mean_abs": 5.944,
-        "over10": 5.532,
-        "over64": 3.831,
+        "mean_abs": 5.836,
+        "over10": 5.485,
+        "over64": 3.77,
         "sparse": false,
-        "ssim": 0.7384
+        "ssim": 0.7433
       }
     ],
-    "ssim": 0.6543
+    "ssim": 0.6601
   },
   "real-basic-theme": {
     "fonts": {
@@ -267,9 +267,9 @@
       {
         "coverage": 0.182,
         "histogram": 0.9884,
-        "mean_abs": 12.422,
+        "mean_abs": 12.42,
         "over10": 10.076,
-        "over64": 6.971,
+        "over64": 6.97,
         "sparse": false,
         "ssim": 0.3719
       },
