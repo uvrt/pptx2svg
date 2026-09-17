@@ -43,6 +43,23 @@ then showed the frame does not enter at all.
 | ``z`` | frame, count, names | font size, 8 through 18 pt -- the answer is stated in ems |
 | ``p`` | everything | ``legendPos``: ``b``, ``t``, ``tr`` |
 
+Four later decks answer the question the first five left open -- **what happens when a
+legend wraps** -- and correct the row constant underneath it.  See ROADMAP.md 3.5, *The
+legend row, and what wraps inside it*:
+
+| deck | subject | read with |
+| --- | --- | --- |
+| ``legend-side`` | a side legend whose entries wrap: block, pitch, wrap depth | ``--side`` |
+| ``legend-row`` | a horizontal legend past the 0.9 cap: the grid it becomes | ``--rows`` |
+| ``legend-band`` | what a row costs the plot, against a **no-legend control** | ``--rows`` |
+| ``legend-face`` | whether the row is a constant or the face's line box | ``--rows`` |
+
+The last two are the load-bearing ones.  A chart's plot bottom is its category axis line,
+so differencing a 1-, 2- and 3-row legend against a control with no ``c:legend`` at all
+gives the row with no other reserve in it, to 0.005 pt -- and naming a face is what
+separates ``1.2083 * size`` from ``0.99 * lineBox``, because Aptos and Calibri are
+metric-compatible and every earlier deck used one of the two.
+
 Usage -- the deck's file name picks its probe table::
 
     python3 tools/make_legend_probe.py ~/pptx2svg-oracle/legend-pack.pptx
@@ -51,7 +68,7 @@ Usage -- the deck's file name picks its probe table::
     python3 tools/read_legend_probe.py ~/pptx2svg-oracle/legend-pack.pdf
 
 The decks and their exports are throwaway and are **not** committed; ``~/pptx2svg-oracle``
-is the directory PowerPoint is allowed to write to and it is left holding its eighteen
+is the directory PowerPoint is allowed to write to and it is left holding its twenty
 corpus files.  See ROADMAP.md section 0.1 before blaming a failed export on the path.
 """
 
@@ -285,6 +302,25 @@ def val_axis(
     )
 
 
+def _face(probe: dict) -> str:
+    """The chart's ``a:latin`` and ``a:ea``, for the decks that vary the face.
+
+    The legend's row pitch comes out the same for Aptos and for Calibri, which says
+    nothing at all: the two are metric-compatible to the unit.  Naming a face is what
+    separates a pitch that is a constant times the size from one that is the face's own
+    line box, and ``a:ea`` is what asks whether a Japanese legend follows the Latin face
+    it never draws with.
+    """
+    latin = probe.get("face")
+    east = probe.get("face_ea")
+    out = ""
+    if latin:
+        out += f"<a:latin typeface='{latin}'/>"
+    if east:
+        out += f"<a:ea typeface='{east}'/>"
+    return out
+
+
 def chart_xml(probe: dict) -> bytes:
     groups = probe["groups"]
     cats = probe.get("cats", CATEGORIES)
@@ -317,11 +353,16 @@ def chart_xml(probe: dict) -> bytes:
         + groups_xml
         + axes
         + "</c:plotArea>"
-        + f"<c:legend><c:legendPos val='{probe.get('legend', 'b')}'/>"
-        "<c:overlay val='0'/></c:legend>"
-        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+        + (
+            ""
+            if probe.get("legend", "b") is None
+            else f"<c:legend><c:legendPos val='{probe.get('legend', 'b')}'/>"
+            "<c:overlay val='0'/></c:legend>"
+        )
+        + "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
         "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>"
-        f"<a:defRPr sz='{size}'/></a:pPr><a:endParaRPr lang='en-US'/></a:p></c:txPr>"
+        f"<a:defRPr sz='{size}'>{_face(probe)}</a:defRPr>"
+        "</a:pPr><a:endParaRPr lang='en-US'/></a:p></c:txPr>"
         "</c:chartSpace>"
     ).encode()
 
@@ -527,12 +568,230 @@ NOKEY_PROBES: list[dict] = [
     probe("o-side", [line(NOKEY_THREE, no_line=True, marker=False)], legend="r"),
 ]
 
+def tokens(count: int) -> str:
+    """A name of ``count`` equal words, separated by spaces so it wraps predictably.
+
+    A side legend's band is capped at a fraction of the frame and a name wider than it
+    wraps; an unbroken ``Wmmmm...`` would make the break point PowerPoint's own hyphenation
+    decision, where a phrase breaks at a space and each line comes back as its own text
+    object in the export.  Every word is the same so a line's width says how many words
+    are on it.
+    """
+    return " ".join(["Wmmm"] * count)
+
+
+#: **Where a side legend's wrapped rows sit.**  ROADMAP.md 3.5 records the band cap and the
+#: opened row pitch and says the *block's* vertical placement was never measured: ours
+#: centres the rows and lands about 6 pt low on `real-financial-report.pptx`'s doughnut,
+#: whose five baselines are 26.46, 43.50, 56.70, 86.94 and 116.94 pt from the frame top.
+#: One chart cannot separate the three unknowns that produces -- where the block starts,
+#: where a row's first baseline sits inside it, and how far the second line drops -- so
+#: this family varies each one against the others:
+#:
+#: * ``sv-`` single-line controls at four counts, four frame heights and four sizes.  The
+#:   unwrapped rule is already shipped and matches to 0.06 pt, so these are what say
+#:   whether a changed wrapped rule still reduces to it.
+#: * ``sw-t`` walks one name from one line to four at a fixed count, which is the only
+#:   family that sees the pitch **opening** per extra line -- 1.22 em is one measurement
+#:   on one chart and three lines has only ever been extrapolated.
+#: * ``sw-h`` and ``sw-n`` move the frame height and the entry count under a fixed wrapped
+#:   entry.  A centred block moves by half of either; a top-anchored one does not move at
+#:   all with the height.
+#: * ``sw-z`` is the em check: the whole side layout is quoted in ems and the opening, the
+#:   first baseline's offset and the wrapped line's drop each have to scale or be points.
+#: * ``sw-mid``/``sw-two``/``sw-all`` ask whether the opened pitch is a decision for the
+#:   **legend** (every row takes the deepest entry's pitch, which is what the doughnut
+#:   showed) or for each row on its own.
+SIDE_TALL = _frame(300.0, 260.0)
+
+
+def side(key: str, groups: list[dict], **extra) -> dict:
+    return {"key": key, "frame": SIDE_TALL, "legend": "r", "groups": groups, **extra}
+
+
+SIDE_PROBES: list[dict] = [
+    # **Single line.**  The shipped rule -- rows of 1.8 em centred on the frame, each
+    # entry centred in its row -- has to come back out of these unchanged.
+    *[side(f"sv-n{n}", [col([tokens(1)] * n)]) for n in (2, 3, 4, 5)],
+    *[
+        side(f"sv-h{height:.0f}", [col([tokens(1)] * 3)], frame=_frame(300.0, height))
+        for height in (160.0, 200.0, 260.0, 340.0)
+    ],
+    *[
+        side(f"sv-z{size // 100}", [col([tokens(1)] * 3)], size=size)
+        for size in (800, 1200, 1400, 1800)
+    ],
+    # **One name from one line to four**, at a fixed three entries.
+    *[side(f"sw-t{k}", [col([tokens(k), tokens(1), tokens(1)])]) for k in (2, 3, 4, 5, 6, 8)],
+    # **Frame height** and **entry count** under a fixed two-line entry.
+    *[
+        side(f"sw-h{height:.0f}", [col([tokens(3), tokens(1), tokens(1), tokens(1)])],
+             frame=_frame(300.0, height))
+        for height in (160.0, 200.0, 260.0, 340.0)
+    ],
+    *[
+        side(f"sw-n{n}", [col([tokens(3)] + [tokens(1)] * (n - 1))])
+        for n in (2, 3, 5)
+    ],
+    # **Font size**, the em check.
+    *[
+        side(f"sw-z{size // 100}", [col([tokens(3), tokens(1), tokens(1)])], size=size)
+        for size in (800, 1400, 1800)
+    ],
+    # **Which rows open.**  The wrapped entry first, in the middle, last, everywhere, and
+    # two entries wrapped to different depths.
+    side("sw-mid", [col([tokens(1), tokens(3), tokens(1)])]),
+    side("sw-last", [col([tokens(1), tokens(1), tokens(3)])]),
+    side("sw-all", [col([tokens(3)] * 3)]),
+    side("sw-two", [col([tokens(3), tokens(1), tokens(5)])]),
+    # **The key**, which changes the width left for the name and the drawn key's height.
+    side("sw-line", [line([tokens(3), tokens(1), tokens(1)])]),
+    side("sw-pie", [{"kind": "pie", "names": [tokens(3), tokens(1), tokens(1)]}],
+         cats=[tokens(3), tokens(1), tokens(1)]),
+    # **Frame width**, which moves the band cap and so the wrap itself.
+    *[
+        side(f"sw-f{width:.0f}", [col([tokens(4), tokens(1), tokens(1)])],
+             frame=_frame(width, 260.0))
+        for width in (240.0, 360.0, 480.0)
+    ],
+    # A **left** legend, whose band is measured from the frame edge rather than the plot.
+    side("sw-left", [col([tokens(3), tokens(1), tokens(1)])], legend="l"),
+]
+
+
+#: **A horizontal legend that needs a second row.**  Past 0.9 of the frame the entries no
+#: longer fit on one line and PowerPoint wraps them; we floor the gap at zero and stay on
+#: one row.  ROADMAP.md 3.5 left it there because the *band* a second row takes is a
+#: second unmeasured question, and a legend that wraps to the wrong band height is worse
+#: than one that does not wrap.  Both questions are read off this deck:
+#:
+#: * every slide's **plot bottom** is a stroked axis line, so the band is the frame's
+#:   bottom edge less that line, and each wrapping slide is paired with a ``c`` control
+#:   whose entries are the same shape and fit on one row.  The difference is what a row
+#:   costs;
+#: * the **row assignment** -- which entries land on which row -- comes off the key x and
+#:   y of every entry, and the ``m`` family makes the entries unequal so a greedy fill and
+#:   a balanced split disagree.
+ROW_WIDE = _frame(480.0, 260.0)
+
+
+def row(key: str, groups: list[dict], **extra) -> dict:
+    return {"key": key, "frame": ROW_WIDE, "groups": groups, **extra}
+
+
+ROW_PROBES: list[dict] = [
+    # **Three entries** walked from just inside the cap to three rows' worth.  ``c`` is the
+    # control that still fits: the band it reserves is what a wrapped band is measured
+    # against.
+    *[row(f"rw3-{k:02d}", [col([wide(k)] * 3)]) for k in (11, 14, 16, 20, 26, 34)],
+    # **Other counts**, where the same total width splits differently.
+    *[row(f"rw2-{k:02d}", [col([wide(k)] * 2)]) for k in (20, 26, 34)],
+    *[row(f"rw4-{k:02d}", [col([wide(k)] * 4)]) for k in (8, 12, 18, 24)],
+    *[row(f"rw6-{k:02d}", [col([wide(k)] * 6)]) for k in (5, 8, 12, 18)],
+    *[row(f"rw7-{k:02d}", [col([wide(k)] * 7)]) for k in (4, 8, 14)],
+    # **Frame width** at a fixed wrapping content.  The cap is a fraction of the frame, so
+    # the same entries wrap onto a different number of rows as the frame moves.
+    *[
+        row(f"rwf-{width:.0f}", [col([wide(14)] * 4)], frame=_frame(width, 260.0))
+        for width in (300.0, 360.0, 480.0, 600.0, 720.0)
+    ],
+    # **Font size.**  The row pitch is quoted as 1.8 em and has only been measured at 10.
+    *[
+        row(f"rwz-{size // 100}", [col([wide(14)] * 4)], size=size)
+        for size in (800, 1400, 1800)
+    ],
+    # **The key**, whose 24.0 pt cell is nearly half an entry's width on a line chart.
+    *[row(f"rwl-{k:02d}", [line([wide(k)] * 3)]) for k in (8, 14, 22)],
+    # **Unequal entries.**  A greedy fill puts three on the first row here and a balanced
+    # split puts two; the pie is the same question with the per-point legend.
+    row("rwm-a", [col([wide(2), wide(2), wide(2), wide(24)])]),
+    row("rwm-b", [col([wide(24), wide(2), wide(2), wide(2)])]),
+    row("rwm-c", [col([wide(14), wide(4), wide(14), wide(4)])]),
+    row("rwm-pie", [{"kind": "pie", "names": [wide(12)] * 4}], cats=[wide(12)] * 4),
+    # **Position.**  A top legend wraps into the band at the other edge.
+    row("rwt-16", [col([wide(16)] * 3)], legend="t"),
+    row("rwt-c11", [col([wide(11)] * 3)], legend="t"),
+    # **Validation**, on combinations nothing is fitted to.
+    row("rv-5", [col([wide(k) for k in (6, 14, 3, 18, 9)])], frame=_frame(420.0, 260.0)),
+    row("rv-line", [line([wide(k) for k in (10, 4, 16, 6)])], frame=_frame(540.0, 260.0)),
+    row("rv-size", [col([wide(k) for k in (12, 5, 16, 8)])], size=1400),
+]
+
+#: **What a second row costs the plot.**  The ``legend-row`` deck says how the entries are
+#: arranged once they wrap; this one says how much of the frame the arrangement takes, which
+#: is the half of the question that kept wrapping unshipped.  The plot's bottom edge is the
+#: category axis line, and the band under it holds the category labels *and* the legend, so
+#: every size gets a **no-legend control** -- ``legend=None`` writes no ``c:legend`` at all
+#: -- and the legend's own band is the difference.  Row counts 1, 2 and 3 at five sizes then
+#: say whether the band is a multiple of the row pitch, of the font's line box, or neither.
+#:
+#: Each entry is wide enough that two of them pass the 0.9 cap, so the grid is one column
+#: and the row count is the entry count.  The name widths are chosen per size for that,
+#: because an entry's width scales with the type while the cap scales with the frame.
+BAND_NAME = {800: 34, 1000: 26, 1200: 22, 1400: 18, 1800: 14}
+
+BAND_PROBES: list[dict] = [
+    *[
+        probe(f"bn-{size // 100}", [col([wide(k)])], size=size, legend=None)
+        for size, k in BAND_NAME.items()
+    ],
+    *[
+        probe(f"b{rows_}-{size // 100}", [col([wide(k)] * rows_)], size=size)
+        for size, k in BAND_NAME.items()
+        for rows_ in (1, 2, 3)
+    ],
+    # The **top** legend, whose band comes off the plot's top edge instead.
+    *[probe(f"t{rows_}-10", [col([wide(26)] * rows_)], legend="t") for rows_ in (1, 2, 3)],
+    probe("tn-10", [col([wide(26)])], legend=None),
+]
+
+#: **Is the row pitch a constant or the face's line box?**  The ``legend-band`` deck fits
+#: ``1.2083 * size + 6.0`` to five sizes to 0.005 pt -- and ``0.99 * lineBox + 6.0`` fits
+#: them exactly as well, because the only faces in it are Aptos and Calibri and those two
+#: are metric-compatible to the unit (12.207 pt of line box at 10 pt apiece).  **Arial
+#: separates them**: its box is 11.172 and its pitch 11.499, so a face-driven band is a
+#: point smaller than a constant one, and ROTATED_LABEL_HEADROOM_PT's docstring already
+#: suspects as much from three rotated-label readings it could not otherwise explain.
+#:
+#: The Japanese rows ask the second half of it: ``real-financial-report.pptx``'s legends
+#: are drawn in a Japanese face with a 1.448 em box and measure the same 18.08 pt pitch as
+#: Aptos, which is only evidence of anything if the *Latin* face named beside it is not
+#: Calibri.  Here it is Arial.
+FACE_NAME = {"Arial": 30, "Times New Roman": 34, "Courier New": 22}
+JAPANESE = ["売上高構成比率推移", "営業利益率推移比率", "純利益率推移比率"]
+
+FACE_PROBES: list[dict] = [
+    *[
+        probe(f"{tag}{rows_}-{size // 100}", [col([wide(k)] * max(rows_, 1))],
+              size=size, face=face, legend=None if rows_ == 0 else "b")
+        for face, k, tag in (
+            ("Arial", FACE_NAME["Arial"], "a"),
+            ("Times New Roman", FACE_NAME["Times New Roman"], "m"),
+            ("Courier New", FACE_NAME["Courier New"], "c"),
+        )
+        for size in (1000, 1400)
+        for rows_ in (0, 1, 2)
+    ],
+    # The same question with **Japanese** entries: the face that draws them is the ``a:ea``
+    # one and the face named beside it is Arial, whose box is a point off Calibri's.
+    *[
+        probe(f"j{rows_}-10", [col(JAPANESE[:max(rows_, 1)])], face="Arial",
+              face_ea="Yu Gothic", legend=None if rows_ == 0 else "b",
+              frame=_frame(200.0, 260.0))
+        for rows_ in (0, 1, 2, 3)
+    ],
+]
+
 DECKS = {
     "legend-pack": PACK_PROBES,
     "legend-key": KEY_PROBES,
     "legend-frame": FRAME_PROBES,
     "legend-fit": FIT_PROBES,
     "legend-nokey": NOKEY_PROBES,
+    "legend-side": SIDE_PROBES,
+    "legend-row": ROW_PROBES,
+    "legend-band": BAND_PROBES,
+    "legend-face": FACE_PROBES,
 }
 
 

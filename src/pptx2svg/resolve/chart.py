@@ -88,37 +88,76 @@ CATEGORY_LABEL_GAP_EM = 0.615
 #: floor is what binds.
 TOP_INSET_BASE_PT = 5.0
 
-#: A legend row's height, as a multiple of the line height.  Measured 24.083 pt for a
-#: 10 pt Aptos legend against a 12.207 pt line height (1.973x); 2.0 is within 0.33 pt and
-#: the same band was measured for ``legendPos`` ``t`` and ``b``.
-LEGEND_BAND_LINES = 2.0
+#: **One legend row**, which is one number for every legend there is: the baseline-to-
+#: baseline step down a side legend, the step down a wrapped horizontal one, and the height
+#: a row takes out of the frame.  It is ``0.99 * lineBox + 6.0`` points -- a shade under the
+#: face's line box, plus a pad in points that does not scale with anything.
+#:
+#: **Measured on 67 probe slides** (``tools/make_legend_probe.py``, the ``legend-side``,
+#: ``legend-band`` and ``legend-face`` decks).  The precise reading is the *band*: a chart's
+#: plot bottom is its category axis line, so differencing a 1-, 2- and 3-row legend against
+#: a **no-legend control** of the same size and face gives the row with no other reserve in
+#: it.  Four faces and five sizes come back at the same ratio to 0.0002 em:
+#:
+#: | face | size | row less the 6.0 pt | our line box | ratio |
+#: | --- | --- | --- | --- | --- |
+#: | Aptos | 8 | 9.667 | 9.766 | 0.9899 |
+#: | Aptos | 10 | 12.083 | 12.207 | 0.9898 |
+#: | Aptos | 18 | 21.750 | 21.973 | 0.9899 |
+#: | Arial | 10 | 11.063 | 11.172 | 0.9902 |
+#: | Arial | 14 | 15.484 | 15.641 | 0.9900 |
+#: | Times New Roman | 10 | 10.964 | 11.074 | 0.9900 |
+#: | Courier New | 10 | 11.217 | 11.328 | 0.9902 |
+#:
+#: **The box, not the pitch**: Arial is the face that separates them and its 0.327 pt line
+#: gap is not in the row.  The 1% is carried as a ratio rather than chased: it is the same
+#: 1% for every face and size here, so it is a difference between our ``hhea`` box and
+#: whatever PowerPoint measures, not a per-face correction.
+#:
+#: **It is the Latin face's box even when no Latin is drawn.**  A legend of Japanese names
+#: with ``a:latin="Arial"`` and ``a:ea="Yu Gothic"`` takes Arial's 17.06 pt row, not the
+#: 20.3 pt Yu Gothic's 1.448 em box would give -- which is why
+#: ``real-financial-report.pptx``'s Japanese legends measure 18.08 pt: their Latin face is
+#: Calibri, and Calibri's box is Aptos' to the unit.
+#:
+#: Superseding ``LEGEND_ROW_PITCH_EM = 1.8`` and ``LEGEND_BAND_LINES = 2.0``, which were
+#: each fitted at 10 pt in one face and are out by 4.7 and 10.2 pt at 18 pt.
+LEGEND_ROW_PITCH_RATIO = 0.99
+LEGEND_ROW_PITCH_PT = 6.0
 
-#: The vertical pitch between stacked legend entries, in ems.  Measured 18.0 pt for a
-#: 10 pt legend on all three right-hand legends in real-financial-report.pptx -- which is
-#: *not* the same as the horizontal band's height above, so the two are separate numbers.
-LEGEND_ROW_PITCH_EM = 1.8
-
-#: How much the pitch opens for each extra line once an entry wraps.  Measured once: the
-#: same deck's doughnut, whose one two-line entry takes every row from 1.8 em to 3.02 em.
-#: Three or more lines is **extrapolated, not measured**.
-LEGEND_WRAPPED_PITCH_EM = 1.22
-
-#: Where a horizontal legend's baseline sits, in ems from the frame edge it hugs.  Taken
-#: straight off the probes rather than derived from the band: 12.913 pt above the frame
-#: bottom for ``legendPos="b"`` and 17.133 pt below the frame top for ``"t"``, both at
-#: 10 pt.  The two are not symmetric and no rule was found that makes them so.
-LEGEND_BOTTOM_BASELINE_EM = 1.291
-LEGEND_TOP_BASELINE_EM = 1.713
+#: The padding a **horizontal** legend's band carries on top of its rows, and the amount
+#: that padding gives back once the legend wraps.  ``band = rows * pitch + 6.0``, less
+#: 1.5 pt from the second row on -- so a wrapped legend's last row overhangs the band it
+#: was given by a point and a half.  Measured at five sizes and three row counts on the
+#: ``legend-band`` deck, where the 1.5 comes back identical at every one of them (14.167 vs
+#: 15.668 at 8 pt, 16.583 vs 18.083 at 10, 19.003 vs 20.503 at 12, 21.419 vs 22.920 at 14,
+#: 26.250 vs 27.750 at 18) and is therefore points rather than ems.  The same band was
+#: measured for ``legendPos`` ``t`` and ``b``.
+LEGEND_BAND_PAD_PT = 6.0
+LEGEND_WRAP_BAND_TRIM_PT = 1.5
 
 #: Legend swatch side and the gap after it, in ems.  Measured 5.4923 pt and 2.3711 pt at
 #: 10 pt.
 LEGEND_SWATCH_EM = 0.549
 LEGEND_SWATCH_GAP_EM = 0.237
-#: The most of the frame's width a side legend may take before its entries wrap.
-#: **One measurement**: `real-financial-report.pptx`'s doughnut legends an 11-character
-#: Japanese category whose natural band would be 143.96 pt, and PowerPoint reserved
-#: 113.98 pt -- 40.0% of the 285 pt frame -- wrapping the entry onto two lines instead.
-#: The same deck's bar chart, whose natural band is 29% of its frame, is untouched by it.
+#: The most of the frame's width a side legend may take before its entries wrap.  Two
+#: things come off it: **whether** an entry wraps, and the column it wraps inside once it
+#: does -- see :meth:`ChartBuilder._legend_side_metrics`, where the band then shrinks back
+#: to the widest line the wrap produced.
+#:
+#: **One measurement fixes it and one probe disagrees with it.**
+#: `real-financial-report.pptx`'s doughnut legends an 11-character Japanese category whose
+#: natural band would be 143.96 pt; PowerPoint reserved 113.98 pt and broke the name after
+#: its eighth character, which is this fraction of the 285 pt frame less the key and the
+#: pads to 0.02 pt.  The ``legend-side`` deck's frame sweep then walks the same four-word
+#: Latin name across 240, 300, 360 and 480 pt frames and three of the four agree -- but at
+#: 360 pt PowerPoint broke 2 + 2 where a 110.04 pt column holds three words at 107.60, so
+#: that slide wants the column under 0.3933 of the frame where the doughnut wants 0.3999
+#: or more.  **No single fraction fits both** and no pad or trailing-space reading closes
+#: the 2.4 pt; a column of about 0.29 * frame fits all five but then has to be a second
+#: constant, because at 480 pt the *unwrapped* name is 0.30 of the frame and stays on one
+#: line.  The doughnut is the reading a corpus deck is scored on, so the fraction stays
+#: where it measured; the Latin slide is the residual.
 LEGEND_SIDE_MAX_FRACTION = 0.40
 
 #: Padding either side of a side legend.
@@ -163,9 +202,9 @@ LEGEND_ENTRY_SLACK = 0.2
 #: frame widths (300, 480 and 720 pt) and three entry counts.
 #:
 #: Once the entries alone pass 0.9 of the frame PowerPoint **wraps the legend onto more
-#: rows**, at the same 1.8 em pitch a side legend uses.  That is not drawn here -- the gap
-#: floors at zero and the row stays single -- and is the one regime this rule does not
-#: cover.  See ROADMAP.md 3.5.
+#: rows**, at the same pitch a side legend uses, in a grid of equal columns as wide as the
+#: widest entry.  The number of columns is what this cap fixes -- see
+#: :meth:`ChartBuilder._legend_grid`, which is measured on the ``legend-row`` deck.
 LEGEND_BAND_MAX_FRACTION = 0.9
 
 #: How far right of the frame's centre the run's own centre lands.  Frame-independent and
@@ -173,6 +212,25 @@ LEGEND_BAND_MAX_FRACTION = 0.9
 #: of type.  Replaces ``LEGEND_HORIZONTAL_LEAD_EM = 0.386``, whose 1.93 pt of shift was
 #: this constant plus the error in the gap it was fitted beside.
 LEGEND_HORIZONTAL_OFFSET_PT = 0.75
+
+
+def legend_row_pitch(box: "FontBox", lines: int = 1) -> float:
+    """The height of one legend row whose deepest entry takes ``lines`` lines.
+
+    ``box`` is the **Latin** face's, which is the one PowerPoint measures with; see
+    :data:`LEGEND_ROW_PITCH_RATIO` for the 67 slides behind the two constants and for the
+    Japanese legend that says so.
+
+    The ``lines`` term is the same quantity again: a row that has to hold a second line is
+    exactly one more ``0.99 * lineBox`` tall, measured at 10 pt for one, two, three and
+    four lines (18.083, 30.12, 42.24 and 54.36 pt) and at 14 and 18 pt for three.  It is
+    **not** the line the entry is drawn with: the drawn drop is the box of the face that
+    draws it, which for a Japanese entry in the same 10 pt legend is 17.04 pt against this
+    12.08.  So a wrapped entry's second line does not sit where its row's arithmetic puts
+    it -- 0.2 pt apart for Latin, 5 pt for Japanese -- and the row is sized for the first
+    of those.
+    """
+    return LEGEND_ROW_PITCH_RATIO * box.line_height * max(lines, 1) + LEGEND_ROW_PITCH_PT
 
 #: The title band, and its baseline inside it, as multiples of the line height and the
 #: ascent.  Only one title was measurable (18 pt Arial, in two probes and the fixture, all
@@ -357,11 +415,14 @@ ROTATED_LABEL_DEGREES = -45.0
 #:
 #: The height it halves is the frame's less the furniture: a **bottom legend** and a
 #: **title** each moved the cap by their own band, over three frame heights each, while a
-#: *side* legend did not move it at all.  The legend probes land 0.19 pt out for a reason
-#: of their own: PowerPoint's legend band is 2 *pitches* (23.02, 23.02 and 23.07 pt read
-#: off three frames) where :data:`LEGEND_BAND_LINES` takes 2 line boxes, 22.34 -- the same
-#: lineGap that ``_bottom_label_band``'s wrapped ladder turned up, unfixed here because the
-#: legend band is measured elsewhere and moving it is not this change's business.
+#: *side* legend did not move it at all.  The legend probes landed 0.19 pt out for a reason
+#: of their own, and **that reason is now measured**: the Arial 10 pt band those three
+#: frames read as 23.02, 23.02 and 23.07 pt is 23.063 pt, one row of
+#: :func:`legend_row_pitch` plus :data:`LEGEND_BAND_PAD_PT`.  The old ``LEGEND_BAND_LINES``
+#: took 2 line boxes there, 22.34, which is where the 0.19 came from; the guess this
+#: docstring used to make -- that the band was 2 *pitches*, 23.00 -- lands within 0.06 pt
+#: of the truth for the wrong reason, since the row is the line **box** and Arial's line
+#: gap is not in it.
 ROTATED_LABEL_HEADROOM_PT = 6.25
 
 #: What PowerPoint puts at the cut, as its own text object whose pen starts exactly where
@@ -1521,9 +1582,13 @@ class FontBox:
           reproduces that title identically, so the two are indistinguishable here and
           differ only for faces nobody measured.  Changing it would move every non-Arial
           title on no evidence at all.
-        * :data:`LEGEND_BAND_LINES` and the multi-line blocks in ``_place_label``,
-          ``_centred_label`` and ``_draw_radar_category_labels``.  Every one of those was
-          measured in Aptos alone, which cannot tell the two apart.
+        * The multi-line blocks in ``_place_label``, ``_centred_label`` and
+          ``_draw_radar_category_labels``.  Every one of those was measured in Aptos alone,
+          which cannot tell the two apart.  The legend's row is no longer among them:
+          :data:`LEGEND_ROW_PITCH_RATIO` is measured in Arial as well, and it is the
+          **box** -- Arial's 0.327 pt gap at 10 pt is not in the row, which is the same
+          separation this docstring asks for and the answer went the other way from the
+          value axis' rung.
 
         The general shape of it: a reserve *around* one line is the box, a step *between*
         two lines is the pitch, and everything still on the box is there because its
@@ -1609,6 +1674,67 @@ def wrap_label(text: str, font: ChartFont, band: float) -> list[str]:
             current = token
     lines.append(current)
     return lines[:WRAPPED_LABEL_MAX_LINES]
+
+
+def _legend_tokens(text: str) -> list[str]:
+    """``text`` split at every place a legend entry may break.
+
+    A space is a break opportunity and so is the gap between two CJK characters; a Latin
+    word is one token and is never split.  The CJK half is measured rather than assumed:
+    ``real-financial-report.pptx``'s doughnut legends デジタルソリューション on two lines,
+    broken after the eighth character, which is exactly where its band runs out.
+    """
+    tokens: list[str] = []
+    word = ""
+    for char in text:
+        if char == " " or is_cjk(ord(char)):
+            if word:
+                tokens.append(word)
+                word = ""
+            tokens.append(char)
+        else:
+            word += char
+    if word:
+        tokens.append(word)
+    return tokens
+
+
+def _legend_wrap(text: str, font: ChartFont, column: float) -> list[str]:
+    """One legend entry, broken greedily to fit ``column``.
+
+    Used for the line *count*, which is what opens a side legend's row pitch, and for the
+    band the entry is drawn in; the drawing itself is the renderer's own wrap inside that
+    width.
+
+    **One probe slide says the column is about 2.4 pt narrower than this gets.**  A
+    four-word name on a 360 pt frame has a 110.04 pt column here and three of its words are
+    107.60 pt, so this keeps them together where PowerPoint broke 2 + 2.  Counting the
+    space that follows the line does not explain it (109.63 still fits) and no single
+    fraction of the frame does either: the Japanese doughnut's break needs a column of
+    80.02 pt on a 285 pt frame, which is 0.3999 of it, where this slide needs under 0.3933.
+    See :data:`LEGEND_SIDE_MAX_FRACTION`; the fraction is left where the one corpus chart
+    that wraps measured it.
+    """
+    if not text:
+        return [""]
+    if column <= 0 or font.width(text) <= column:
+        return [text]
+    lines: list[str] = []
+    current = ""
+    for token in _legend_tokens(text):
+        if token == " ":
+            if current:
+                current += " "
+            continue
+        candidate = current + token
+        if current.strip() and font.width(candidate) > column:
+            lines.append(current.rstrip())
+            current = token
+        else:
+            current = candidate
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines or [text]
 
 
 def rotated_label_anchor(box: "FontBox") -> float:
@@ -3232,7 +3358,7 @@ class ChartBuilder:
         legend = self._legend_position()
         if legend is not None and not self._legend_overlays():
             legend_font = self._legend_font()
-            band = LEGEND_BAND_LINES * legend_font.box.line_height
+            band = self._legend_band_height(legend_font)
             if legend == "b":
                 legend_bottom = band
             elif legend in ("t", "tr"):
@@ -3335,7 +3461,7 @@ class ChartBuilder:
         legend = self._legend_position()
         if legend is not None and not self._legend_overlays():
             font = self._legend_font()
-            band = LEGEND_BAND_LINES * font.box.line_height
+            band = self._legend_band_height(font)
             if legend == "b":
                 bottom -= band
             elif legend in ("t", "tr"):
@@ -4112,7 +4238,7 @@ class ChartBuilder:
             height -= TITLE_BAND_LINES * title.line_height
         legend = self._legend_position()
         if legend in ("b", "t", "tr") and not self._legend_overlays():
-            height -= LEGEND_BAND_LINES * self._legend_font().box.line_height
+            height -= self._legend_band_height(self._legend_font())
         return height
 
     def _axis_band_width(self) -> float:
@@ -4265,7 +4391,7 @@ class ChartBuilder:
         # measured against PowerPoint sets it.
         if legend is not None and not self._legend_overlays():
             legend_font = self._legend_font()
-            band = LEGEND_BAND_LINES * legend_font.box.line_height
+            band = self._legend_band_height(legend_font)
             if legend in ("b",):
                 legend_bottom = band
             elif legend in ("t", "tr"):
@@ -4375,7 +4501,7 @@ class ChartBuilder:
             height -= TITLE_BAND_LINES * title.line_height
         legend = self._legend_position()
         if legend in ("b", "t", "tr") and not self._legend_overlays():
-            height -= LEGEND_BAND_LINES * self._legend_font().box.line_height
+            height -= self._legend_band_height(self._legend_font())
         return height
 
     def _rotated_allowance(self, box: FontBox) -> float:
@@ -4526,7 +4652,7 @@ class ChartBuilder:
         legend = self._legend_position()
         if legend is not None and not self._legend_overlays():
             font = self._legend_font()
-            band = LEGEND_BAND_LINES * font.box.line_height
+            band = self._legend_band_height(font, per_point=per_point)
             if legend == "b":
                 bottom -= band
             elif legend in ("t", "tr"):
@@ -4749,20 +4875,109 @@ class ChartBuilder:
         """
         return max(EDGE_INSET_PT, TOP_INSET_BASE_PT + label.line_height / 2)
 
-    def _legend_side_width(self, font: ChartFont, *, per_point: bool = False) -> float:
-        # Only the entries actually drawn: a series struck out by `c:legendEntry` would
-        # otherwise reserve width for a label nobody sees, shifting the plot rectangle.
-        # A pie legends its *categories*, not its series.
-        names = self._legend_names(per_point=per_point)
-        widest = max((font.width(name) for name in names), default=0.0)
+    def _legend_grid(self, widths: list[float]) -> tuple[int, int]:
+        """A horizontal legend's ``(rows, columns)``.
+
+        Past :data:`LEGEND_BAND_MAX_FRACTION` of the frame the entries no longer fit on one
+        line and PowerPoint lays them out as a **grid of equal columns**, each as wide as
+        the widest entry and packed with no gap at all.  The arithmetic is measured on the
+        ``legend-row`` deck's 40 slides and is not the greedy fill it looks like:
+
+            columns that fit = floor(0.9 * frame / widest entry)
+            rows             = ceil(entries / columns that fit)
+            columns drawn    = ceil(entries / rows)
+
+        The second step is what a greedy fill gets wrong.  Six equal entries with four to a
+        row came back **3 + 3**, not 4 + 2; seven entries with three to a row came back
+        3 + 3 + 1, which is the same rule and not a balanced split either.  Both fall out
+        of taking the row count first and then dividing the entries over it.
+
+        A chart whose entries fit on one row returns ``(1, n)`` and is laid out by the gap
+        rule in :data:`LEGEND_ENTRY_SLACK` instead, which this leaves untouched.
+        """
+        if not widths:
+            return (1, 0)
+        cap = LEGEND_BAND_MAX_FRACTION * self.frame.width
+        if sum(widths) <= cap:
+            return (1, len(widths))
+        column = max(widths)
+        fits = max(1, int(cap // column)) if column > 0 else 1
+        rows = math.ceil(len(widths) / fits)
+        return (rows, math.ceil(len(widths) / rows))
+
+    def _legend_entry_widths(
+        self, font: ChartFont, *, per_point: bool = False
+    ) -> list[float]:
+        """Each horizontal legend entry's width: its key cell plus its name."""
+        cell = self._legend_key_cell(font)
+        return [
+            cell + font.width(name)
+            for name in self._legend_names(per_point=per_point)
+            if name
+        ]
+
+    def _legend_band_height(self, font: ChartFont, *, per_point: bool = False) -> float:
+        """What a legend along the top or the bottom takes out of the frame.
+
+        One row of :func:`legend_row_pitch` plus :data:`LEGEND_BAND_PAD_PT`, and one more
+        pitch for every extra row less the 1.5 pt a wrapped band gives back.  Measured at
+        five sizes against a no-legend control; see :data:`LEGEND_BAND_PAD_PT`.
+        """
+        rows, _ = self._legend_grid(self._legend_entry_widths(font, per_point=per_point))
+        pad = LEGEND_BAND_PAD_PT - (LEGEND_WRAP_BAND_TRIM_PT if rows > 1 else 0.0)
+        return rows * legend_row_pitch(font.box) + pad
+
+    def _legend_side_metrics(
+        self, font: ChartFont, *, per_point: bool = False
+    ) -> tuple[float, float]:
+        """A side legend's ``(band width, text column)``.
+
+        The band is the widest **drawn line** plus the key and the two pads.  For a legend
+        whose entries fit that is the widest name, which is the rule
+        :data:`LEGEND_SIDE_MAX_FRACTION` was measured against; for one that does not, the
+        cap fixes the column the names wrap inside and **the band then shrinks back to
+        whatever the wrapped lines actually need**.  Measured on the ``legend-side`` deck:
+        a three-word name on a 300 pt frame wraps to two words and one, and its band comes
+        back 105.0 pt where the cap alone would reserve 120.  ``real-financial-report``'s
+        doughnut cannot tell the two apart -- its wrapped Japanese line is 80.0 pt against
+        a column of 80.04, so the shrunken band and the cap agree there to 0.04 pt, which
+        is why this looked like a plain cap when it was first measured.
+
+        Only the entries actually drawn count: a series struck out by ``c:legendEntry``
+        would otherwise reserve width for a label nobody sees, shifting the plot
+        rectangle.  A pie legends its *categories*, not its series.
+        """
+        names = [name for name in self._legend_names(per_point=per_point) if name]
         key, key_gap = self._legend_key_size(font)
-        natural = (
-            widest
-            + key
-            + key_gap
-            + (LEGEND_SIDE_LEAD_EM + LEGEND_SIDE_TRAIL_EM) * font.size
+        pads = key + key_gap + (LEGEND_SIDE_LEAD_EM + LEGEND_SIDE_TRAIL_EM) * font.size
+        widest = max((font.width(name) for name in names), default=0.0)
+        cap = self.frame.width * LEGEND_SIDE_MAX_FRACTION
+        if widest + pads <= cap:
+            return widest + pads, widest
+        column = max(cap - pads, font.size)
+        drawn = max(
+            (
+                font.width(line)
+                for name in names
+                for line in _legend_wrap(name, font, column)
+            ),
+            default=column,
         )
-        return min(natural, self.frame.width * LEGEND_SIDE_MAX_FRACTION)
+        return min(drawn + pads, cap), column
+
+    def _legend_text_column(self, font: ChartFont, *, per_point: bool = False) -> float:
+        """The width a **side** legend leaves for an entry's name.
+
+        What an entry wraps inside once :data:`LEGEND_SIDE_MAX_FRACTION` has capped the
+        band.  Measured on the ``legend-side`` deck's frame sweep: the same four-word name
+        takes four lines on a 240 pt frame, two on a 360 pt one and one on a 480 pt one,
+        which is this column filled greedily and is not what a share of the *frame*
+        predicts.
+        """
+        return self._legend_side_metrics(font, per_point=per_point)[1]
+
+    def _legend_side_width(self, font: ChartFont, *, per_point: bool = False) -> float:
+        return self._legend_side_metrics(font, per_point=per_point)[0]
 
     def _legend_overlays(self) -> bool:
         return self.chart.legend is not None and self.chart.legend.overlay
@@ -6012,17 +6227,52 @@ class ChartBuilder:
             cell = self._legend_key_cell(font)
             widths = [cell + font.width(item.name or "") for _, item in entries]
             total = sum(widths)
+            rows, columns = self._legend_grid(widths)
+            pitch = legend_row_pitch(box)
+            # Every row's first baseline sits the same distance below its row's top as a
+            # side legend's does -- the row's own line, optically centred.  What differs is
+            # which edge the block is anchored to, and the two are not symmetric: a bottom
+            # legend hangs its **last** row off the frame's bottom and a top legend pins
+            # its **first** row below the frame's top.  Both are measured at five sizes on
+            # the ``legend-band`` deck and at 8 to 18 pt on ``legend-row``.
+            inside = pitch / 2 + box.ink_centre
+            if position == "b":
+                pad = LEGEND_BAND_PAD_PT - (
+                    LEGEND_WRAP_BAND_TRIM_PT if rows > 1 else 0.0
+                )
+                first = (
+                    self.frame.bottom - pad - pitch + inside - (rows - 1) * pitch
+                )
+            else:
+                first = self.frame.top + LEGEND_BAND_PAD_PT + inside
+            if rows > 1:
+                # **Past the cap the run becomes a grid**: equal columns as wide as the
+                # widest entry, packed with no gap, the block centred on the frame.  See
+                # :meth:`_legend_grid` for the row and column counts and what refuted the
+                # greedy fill.
+                column = max(widths)
+                start = (
+                    self.frame.left
+                    + (self.frame.width - columns * column) / 2
+                    + LEGEND_HORIZONTAL_OFFSET_PT
+                )
+                for index, (_, item) in enumerate(entries):
+                    row, slot = divmod(index, columns)
+                    self._legend_entry(
+                        item,
+                        start + slot * column + (cell - swatch) / 2,
+                        first + row * pitch,
+                        swatch,
+                        gap,
+                        font,
+                    )
+                return
             slack = min(
                 LEGEND_ENTRY_SLACK * total,
                 LEGEND_BAND_MAX_FRACTION * self.frame.width - total,
             )
             entry_gap = max(slack, 0.0) / (len(entries) + 1)
             run = total + entry_gap * (len(entries) - 1)
-            baseline = (
-                self.frame.bottom - LEGEND_BOTTOM_BASELINE_EM * box.size
-                if position == "b"
-                else self.frame.top + LEGEND_TOP_BASELINE_EM * box.size
-            )
             x = (
                 self.frame.left
                 + (self.frame.width - run) / 2
@@ -6030,7 +6280,7 @@ class ChartBuilder:
             )
             for (_, item), width in zip(entries, widths):
                 self._legend_entry(
-                    item, x + (cell - swatch) / 2, baseline, swatch, gap, font
+                    item, x + (cell - swatch) / 2, first, swatch, gap, font
                 )
                 x += width + entry_gap
             return
@@ -6048,18 +6298,25 @@ class ChartBuilder:
         # Measured against both bar charts in real-financial-report.pptx: baselines land
         # within 0.18 pt, where treating the row like the horizontal band's off-centre
         # line was 5.7 pt out.
-        # A wrapped entry takes every row with it: PowerPoint opens the pitch rather than
-        # letting two lines collide with the entry below.
+        #
+        # **A wrapped entry takes every row with it, and the extra height hangs below the
+        # line rather than round it.**  The block is still the rows centred on the frame,
+        # but an entry's first baseline stays where a one-line row would have put it --
+        # ``legend_row_pitch(box) / 2`` below its row's top, not half of the *opened*
+        # pitch.  Measured on 20 slides of the ``legend-side`` deck at four wrap depths,
+        # four frame heights, four entry counts and four sizes, and on
+        # ``real-financial-report.pptx``'s doughnut, whose five baselines this puts within
+        # 0.2 pt where centring the opened row was 5.9 pt low.
+        column = self._legend_text_column(font, per_point=per_point)
         lines = max(
-            (self._legend_entry_lines(item.name or "", font, x) for _, item in entries),
+            (len(_legend_wrap(item.name or "", font, column)) for _, item in entries),
             default=1,
         )
-        pitch = (
-            LEGEND_ROW_PITCH_EM + LEGEND_WRAPPED_PITCH_EM * (lines - 1)
-        ) * box.size
+        pitch = legend_row_pitch(box, lines)
+        inside = legend_row_pitch(box) / 2 + box.ink_centre
         y = self.frame.top + (self.frame.height - pitch * len(entries)) / 2
         for _, item in entries:
-            self._legend_entry(item, x, y + pitch / 2 + box.ink_centre, swatch, gap, font)
+            self._legend_entry(item, x, y + inside, swatch, gap, font, column=column)
             y += pitch
 
     def _legend_key_size(self, font: ChartFont) -> tuple[float, float]:
@@ -6107,15 +6364,6 @@ class ChartBuilder:
             return LINE_LEGEND_ENTRY_KEY_PT
         return LEGEND_ENTRY_KEY_EM * font.size
 
-    def _legend_entry_lines(self, name: str, font: ChartFont, x: float) -> int:
-        """How many lines this entry needs once the band has capped its width."""
-        swatch, gap = self._legend_key_size(font)
-        available = self.frame.right - FRAME_PADDING_PT - (x + swatch + gap)
-        natural = font.width(name)
-        if available <= font.size or natural <= available:
-            return 1
-        return max(1, math.ceil(natural / max(available - font.size, 1.0)))
-
     def _legend_entry(
         self,
         item: _Series,
@@ -6124,6 +6372,8 @@ class ChartBuilder:
         swatch: float,
         gap: float,
         font: ChartFont,
+        *,
+        column: float | None = None,
     ) -> None:
         box = font.box
         centre = baseline - box.ink_centre
@@ -6164,23 +6414,33 @@ class ChartBuilder:
                 outline=None,
             )
         # An entry wider than the band it sits in wraps rather than running out of the
-        # frame.  PowerPoint wraps too -- `real-financial-report.pptx`'s doughnut legends
-        # an 11-character category on two lines -- but it also opens the row pitch from
-        # 1.8 em to 3.02 em to make room, which this does not; a wrapped entry therefore
-        # overlaps the one below it.  Measured numbers are in ROADMAP.md.
+        # frame.  ``column`` is the width a **side** legend leaves for the name -- see
+        # :meth:`_legend_text_column` -- and the row pitch above has already been opened
+        # for the lines it produces, so the entry below is clear of them.  A horizontal
+        # legend passes no column: its entries are what the band's width was fitted to and
+        # none of them wraps, so the fallback is the old overflow guard against the frame.
         left = x + swatch + gap
-        natural = font.width(item.name or "") + box.size
-        available = self.frame.right - FRAME_PADDING_PT - left
-        body = self._label_body(item.name or "", font, align="l")
-        if natural > available > box.size:
+        name = item.name or ""
+        natural = font.width(name) + box.size
+        edge = self.frame.right - FRAME_PADDING_PT - left
+        body = self._label_body(name, font, align="l")
+        if column is None:
+            # A horizontal legend: the band's width was fitted to these entries and none
+            # of them wraps, so this is only the guard against one running off the frame.
+            width = min(natural, max(edge, box.size))
+            if natural > edge > box.size:
+                body = replace(body, body_properties=CHART_WRAPPED_TEXT_BODY)
+        elif font.width(name) > column:
+            # A side legend's entry that does not fit its column.  The row pitch above has
+            # already been opened for the lines this produces.
+            width = column
             body = replace(body, body_properties=CHART_WRAPPED_TEXT_BODY)
-        self._text(
-            body,
-            left=left,
-            width=min(natural, max(available, box.size)),
-            baseline=baseline,
-            box=box,
-        )
+        else:
+            # One that does fit: the box is the name's own advance and a little slack, so
+            # a hundredth of a point between our measurement and the renderer's cannot
+            # push it onto a second line.
+            width = min(natural, max(edge, box.size))
+        self._text(body, left=left, width=width, baseline=baseline, box=box)
 
     # -- primitives ---------------------------------------------------------------------
 

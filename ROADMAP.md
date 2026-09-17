@@ -2380,10 +2380,15 @@ Each of these is known-missing rather than merely absent:
   10 pt one. `real-financial-report.pptx`'s line chart is the deck that wanted it, and it
   is skipped by the scorer on this machine for want of Noto Sans JP, so the improvement is
   not in a scored number.
-* **Where a wrapped legend's rows sit.** The band cap and the opened row pitch are
-  measured; how PowerPoint places the block vertically is not. Ours centres the rows and
-  comes out about 5 pt high on chart4, whose measured baselines are 26.46, 43.50, 56.70,
-  86.94 and 116.94 pt from the frame top.
+* ~~**Where a wrapped legend's rows sit.**~~ — done and measured; see *The legend row, and
+  what wraps inside it* below. The block is still the rows centred on the frame; what was
+  wrong is that each entry's baseline was centred in its *opened* row. It sits half of an
+  **unopened** row below the row's top, so the extra lines hang below, and chart4's five
+  baselines now come out within 0.2 pt of 26.46, 43.50, 56.70, 86.94 and 116.94 where
+  centring the opened row was 5.9 pt low. Two things about that chart are still not drawn
+  right: the **drop to a wrapped entry's second line** is the drawing face's line box --
+  17.04 pt for its Japanese face, where our text renderer drops a flat 1.2 em -- and the
+  band that holds it is the **Latin** face's box, which is a separate number.
 * **`bestFit` is a fixed fraction of the radius.** PowerPoint's moves a label out of the
   way when it does not fit; the probe pie's labels all fit, so that behaviour was never
   exercised.
@@ -3076,11 +3081,147 @@ Nine slides cross that threshold at frames of 300, 480 and 720 pt and at two, th
 entries, and all nine land within 0.007 pt of the leftover `(0.9 · frame − ΣW)/(n + 1)`.
 This is the one place the layout does distribute, and it is a *cap*, not the rule.
 
-**Past it PowerPoint wraps the legend onto more rows** — at the 18.0 pt pitch
-`LEGEND_ROW_PITCH_EM` already carries — and that is not drawn here: once the entries alone
-exceed 0.9 of the frame the gap floors at zero and the row stays single. Measured on six
-slides (3 entries wrapping 2+1, 6 entries wrapping 3+3) and left alone, because the band
-height that a second row needs is a second unmeasured question.
+**Past it PowerPoint wraps the legend onto more rows**, and that is now drawn: see *The
+legend row, and what wraps inside it* below for the grid, the band and the 127 probe
+slides behind them.
+
+#### The legend row, and what wraps inside it
+
+Four new probe decks — `legend-side` (38 slides), `legend-row` (40), `legend-band` (24) and
+`legend-face` (22) — settle both halves of the wrapping question and correct the constant
+underneath them. Everything below is read off PowerPoint's own export: baselines from each
+text object's matrix, and the band from the **plot's bottom edge**, which is the category
+axis line, differenced against a slide of the same deck that has no legend at all.
+
+**The row is one number, and it is the Latin face's line box.** `row = 0.99 · lineBox +
+6.0` points — the same quantity for a side legend's baseline pitch, for a wrapped
+horizontal legend's, and for the height a row takes out of the frame. Four faces and five
+sizes give the ratio to 0.0002 em:
+
+| face | size | row less 6.0 pt | our line box | ratio |
+| --- | --- | --- | --- | --- |
+| Aptos | 8 | 9.667 | 9.766 | 0.9899 |
+| Aptos | 10 | 12.083 | 12.207 | 0.9898 |
+| Aptos | 12 | 14.504 | 14.648 | 0.9902 |
+| Aptos | 14 | 16.918 | 17.090 | 0.9899 |
+| Aptos | 18 | 21.750 | 21.973 | 0.9899 |
+| Arial | 10 | 11.063 | 11.172 | 0.9902 |
+| Arial | 14 | 15.484 | 15.641 | 0.9900 |
+| Times New Roman | 10 | 10.964 | 11.074 | 0.9900 |
+| Times New Roman | 14 | 15.350 | 15.504 | 0.9900 |
+| Courier New | 10 | 11.217 | 11.328 | 0.9902 |
+| Courier New | 14 | 15.701 | 15.859 | 0.9900 |
+
+Three things that table refutes. It is **not a multiple of the size**: `1.2083 · size +
+6.0` fits Aptos and Calibri perfectly and misses Arial by a point, which only shows up
+once a deck names a face — Aptos and Calibri are metric-compatible to the unit, so five
+sizes of the first deck could not tell the two readings apart. It is the line **box** and
+not the pitch: Arial's 0.327 pt line gap is not in the row, which is the separation
+`FontBox.pitch`'s docstring asks for and it comes out the other way from the value axis'
+rung. And it is the **Latin** face's box even when no Latin is drawn: a legend of Japanese
+names with `a:latin="Arial"` takes Arial's 17.06 pt row, not the 20.3 pt Yu Gothic's
+1.448 em box would give. That last one is why `real-financial-report.pptx`'s Japanese
+legends measure the Aptos number — their Latin face is Calibri.
+
+The 1% is carried as a ratio rather than chased. It is the same 1% for every face and
+size here, so it is a difference between our `hhea` box and whatever PowerPoint measures,
+not a per-face correction.
+
+**The band a horizontal legend takes** is `rows · row + 6.0`, less **1.5 pt from the second
+row on**. Fifteen slides at five sizes and three row counts, each differenced against a
+no-legend control: the third row and every row after it costs exactly one row, and the
+second costs 1.5 pt less at every size, so the 1.5 is points and not ems. A wrapped
+legend's last row therefore overhangs the band it was given. `legendPos="t"` takes the
+same band off the top and pins its **first** baseline where a single row would sit;
+`"b"` hangs its **last** row off the frame's bottom. That asymmetry is the one 3.3 already
+recorded between `LEGEND_BOTTOM_BASELINE_EM` and `LEGEND_TOP_BASELINE_EM`, and both
+constants are now gone: they were 10 pt fits and are out by 8.8 pt at 18 pt.
+
+**Past the 0.9 cap the run becomes a grid** of equal columns, each as wide as the widest
+entry, packed with no gap, and the block centred on the frame with the same 0.75 pt offset
+a single row gets. The counts are not a greedy fill:
+
+    columns that fit = floor(0.9 · frame / widest entry)
+    rows             = ceil(entries / columns that fit)
+    columns drawn    = ceil(entries / rows)
+
+Six equal entries with four to a row come back **3 + 3**, not 4 + 2; seven with three to a
+row come back 3 + 3 + 1, which is not a balanced split either. Forty slides — entry counts
+2 to 7, frames 300 to 720, sizes 8 to 18, swatch and line keys, unequal entries, a pie and
+a top legend — reproduce to **0.59 pt**, of which 0.02 is the x and the rest is
+`ink_centre`.
+
+**A side legend's wrapped rows.** The block is the rows centred on the frame, as it was;
+what was wrong is where the baseline sits inside a row that has opened. It sits
+`row(1)/2 + ink_centre` below the row's top — half of an **unopened** row — so the extra
+lines hang below rather than the single line being re-centred. Thirty-eight slides at four
+wrap depths, four frame heights, four entry counts, four sizes, three key types and both
+side positions come back within **0.63 pt**, and `real-financial-report.pptx`'s doughnut
+within 0.2 pt of its five measured baselines where the old rule was 5.9 pt low.
+
+Two corrections came with it. A **left** legend wraps exactly like a right one, which ours
+never did: it measured the available width against the frame's far edge and so never
+wrapped at all. And the band **shrinks back to the widest line the wrap produced** rather
+than keeping the cap: a three-word name on a 300 pt frame wraps to two words and one, and
+its band comes back 105.0 pt where the cap alone reserves 120. The doughnut cannot tell
+those apart — its wrapped Japanese line is 80.0 pt against a column of 80.04 — which is why
+this looked like a plain cap when `LEGEND_SIDE_MAX_FRACTION` was first measured.
+
+##### What moved
+
+Three scored decks up, one down, and the down is `ink_centre` above.
+
+| deck | SSIM before | after |
+| --- | --- | --- |
+| `chart-gallery` | 0.6747 | **0.6925** |
+| `real-financial-report` | 0.9114 | **0.9147** |
+| `real-college-template` | 0.8003 | **0.8018** |
+| `authoring-integration` | 0.9327 | 0.9290 |
+
+`real-financial-report`'s slide 3 carries the doughnut and goes 0.8662 → 0.8796; its slide
+4 does not move, because a radar with a two-entry legend takes the same rows either way.
+`real-college-template`'s slide 4 goes 0.3719 → 0.3852 and is the only chart in the corpus
+whose legend is **Arial at 12 pt**, so it is the one deck the face-driven row changes on its
+own. `chart-gallery`'s ten legend slides: 1, 3, 6, 10, 11 and 17 up (slide 3 by 0.118,
+slide 11 by 0.081, slide 10 by 0.069), and 9, 13, 14 and 16 down by 0.001 to 0.011. Its
+deck histogram falls 0.8147 → 0.8046 entirely on slides 3, 10 and 11 — the three that gained
+most on SSIM and the three with the least ink (3.5 to 4.2% coverage), which is the mask
+effect `tools/fidelity.py` documents; the rendered pair for slide 3 is the same picture.
+`authoring-integration` is one slide with one bottom legend: 0.33 pt of its loss is the
+band, now measured to 0.005 pt, and the rest is the legend baseline sitting 0.46 pt low
+because it inherits the shared `ink_centre` where the constant it replaces was fitted at
+exactly 10 pt. Putting that 0.46 back by hand recovers 0.0012 of the 0.0037 — which is the
+size of the thing, and not a reason to keep a rule that is 8.8 pt wrong at 18 pt.
+
+##### What this did not settle
+
+* **The wrap column is about 2.4 pt too generous at one frame.** The `legend-side` frame
+  sweep walks a four-word name across 240, 300, 360 and 480 pt frames; three agree and at
+  360 PowerPoint broke 2 + 2 where a 110.04 pt column holds three words at 107.60. No
+  single fraction fits that slide and the doughnut, whose break needs 0.3999 of its frame
+  where this one needs under 0.3933; counting the space that follows the line does not
+  close it either (109.63 still fits), and a column of about 0.29 · frame fits all five but
+  then has to be a second constant, because at 480 the *unwrapped* name is 0.30 of the
+  frame and stays on one line. Left at 0.40, where the one corpus chart that wraps
+  measured it. A CJK sweep would also say whether PowerPoint's kinsoku pushes a small kana
+  back or lets it hang, which changes what the doughnut's own break brackets.
+* **A wrapped entry's second line still drops by our text renderer's flat 1.2 em.**
+  PowerPoint drops by the box of the face that *draws* the line: 12.24 pt for Aptos at
+  10 pt, 17.04 pt for the same 10 pt legend in Japanese. The row is sized for the first of
+  those either way — the row arithmetic is the Latin box and does not move — so the second
+  line of `real-financial-report.pptx`'s doughnut entry sits 5 pt high. Fixing it is a
+  line-height question for the text engine, not for the legend.
+* **`ink_centre` is what is left in the residual.** Every legend baseline here is
+  `row/2 + ink_centre` below its row's top, and the legend's own readings put that offset
+  at 0.223 em at 10 pt, 0.305 at 8, 0.253 at 12, 0.268 at 14 and 0.295 at 18 — the same
+  U-shaped spread the constant's docstring already records, and consistent with no obvious
+  rule. It is also face-dependent: the same offset is 0.293 em for Arial and 0.157 for
+  Courier New at 10 pt. The shared 0.27 em costs 0.46 pt at 10 pt, which is the whole of
+  `authoring-integration`'s regression below.
+* **A side legend's band is 2 to 5 pt narrow at 18 pt.** Unchanged behaviour, visible in
+  the new deck: `LEGEND_SIDE_LEAD_EM` and `LEGEND_SIDE_TRAIL_EM` were measured at 10 pt and
+  assumed to scale, and the 8-to-18 pt sweep puts our band 2.0 pt narrow at 8 pt and 4.8 pt
+  wide at 18. Nothing in the corpus has a side legend at another size.
 
 #### `legendPos="tr"` is a stacked legend
 
