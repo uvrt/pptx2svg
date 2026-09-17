@@ -6720,3 +6720,198 @@ def test_a_line_chart_on_its_own_still_legends_with_a_square_swatch_when_it_has_
     assert len(keys) == 1
     assert keys[0].transform.extent_width == keys[0].transform.extent_height
     assert keys[0].transform.extent_width / 12700 == pytest.approx(LINE_LEGEND_KEY_PT)
+
+
+# -- 3-D charts, drawn flat --------------------------------------------------------------
+#
+# `tools/make_view3d_probe.py` writes two decks -- 59 and 54 slides -- and
+# `tools/read_view3d_probe.py` reads the axis and the plot rectangle back out of
+# PowerPoint's export of them.  PowerPoint rasterises the 3-D scene but leaves every
+# string vector, so the axis is exactly measurable although the picture is not.  What
+# those 113 probes settled, and what they left open, is ROADMAP.md 3.4.
+
+VIEW_3D = (
+    "<c:view3D><c:rotX val='15'/><c:rotY val='20'/><c:depthPercent val='100'/>"
+    "<c:rAngAx val='1'/></c:view3D>"
+)
+
+
+def three_d_chart_xml(
+    kind: str = "bar3DChart",
+    *,
+    high: float = 50.0,
+    view: str = VIEW_3D,
+) -> str:
+    """One 3-D group of *kind* whose largest value is *high*, with a value axis.
+
+    The maximum is what the padding question turns on: 0..50 padded by 5% at each end
+    comes to 52.5, which at ten intervals asks for a unit of 10 and an axis running to 60.
+    Unpadded it asks for 5 and stops at 50, and 50 is what PowerPoint draws.
+    """
+    values = (high * 0.3, high, high * 0.55, high * 0.8)
+    points = "".join(f"<c:pt idx='{i}'><c:v>{v!r}</c:v></c:pt>" for i, v in enumerate(values))
+    cats = "".join(f"<c:pt idx='{i}'><c:v>Q{i + 1}</c:v></c:pt>" for i in range(len(values)))
+    series = (
+        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+        "<c:cat><c:strRef><c:strCache>"
+        f"<c:ptCount val='{len(values)}'/>{cats}</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+        f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+    )
+    dimension = "<c:barDir val='col'/>" if kind.startswith("bar") else ""
+    depth = "<c:axId val='100004'/>" if kind.endswith("3DChart") else ""
+    serial_axis = (
+        "<c:serAx><c:axId val='100004'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='1'/><c:axPos val='b'/><c:crossAx val='100003'/></c:serAx>"
+        if depth
+        else ""
+    )
+    return (
+        f"<c:chart>{view}<c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        f"<c:{kind}>{dimension}<c:grouping val='clustered'/><c:varyColors val='0'/>"
+        f"{series}<c:axId val='100002'/><c:axId val='100003'/>{depth}</c:{kind}>"
+        "<c:catAx><c:axId val='100002'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='b'/><c:tickLblPos val='nextTo'/>"
+        "<c:crossAx val='100003'/><c:crosses val='autoZero'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        f"{serial_axis}</c:plotArea>"
+        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+    )
+
+
+def test_view_3d_is_read_element_by_element():
+    parsed = chart(
+        three_d_chart_xml(
+            view=(
+                "<c:view3D><c:rotX val='20'/><c:hPercent val='75'/><c:rotY val='340'/>"
+                "<c:depthPercent val='250'/><c:rAngAx val='0'/>"
+                "<c:perspective val='45'/></c:view3D>"
+            )
+        )
+    )
+    view = parsed.view_3d
+    assert (view.rot_x, view.rot_y) == (20.0, 340.0)
+    assert (view.depth_percent, view.h_percent) == (250.0, 75.0)
+    assert view.right_angle_axes is False
+    assert view.perspective == 45.0
+
+
+def test_an_empty_view_3d_is_not_an_absent_one():
+    """Measured: the two are different pictures, so they must be different records.
+
+    ``view3d-view``'s ``absent`` and ``empty`` probes are the same chart on the same
+    195 pt frame; PowerPoint drew a 94.08 pt value axis for the first and a 155.04 pt one
+    for the second.  A reader that defaulted the missing element could not tell them
+    apart.
+    """
+    assert chart(three_d_chart_xml(view="")).view_3d is None
+    empty = chart(three_d_chart_xml(view="<c:view3D/>")).view_3d
+    assert empty is not None
+    assert empty.rot_x is None and empty.depth_percent is None
+    assert empty.right_angle_axes is None
+
+
+def test_the_three_d_spelling_survives_the_flattening():
+    from pptx2svg.parse.chart import THREE_D_CHART_KINDS, is_three_d_kind
+
+    assert THREE_D_CHART_KINDS == {
+        "bar3DChart",
+        "line3DChart",
+        "area3DChart",
+        "pie3DChart",
+        "surface3DChart",
+    }
+    assert is_three_d_kind("bar3DChart") and not is_three_d_kind("barChart")
+
+    _, data = _build(three_d_chart_xml(), width=684.0, height=195.0)
+    assert data.kind == "barChart"
+    assert data.three_d is True
+    assert data.view_3d.rot_x == 15.0
+    assert data.view_3d.depth_percent == 100.0
+
+    _, flat = _build(three_d_chart_xml("barChart", view=""), width=684.0, height=195.0)
+    assert flat.three_d is False
+    assert flat.view_3d is None
+
+
+@pytest.mark.parametrize("kind", ["bar3DChart", "line3DChart", "area3DChart"])
+def test_a_three_d_value_axis_is_not_padded(kind):
+    """The measured half of the 3-D axis: the extent stops at the data.
+
+    ``view3d-meter`` draws 0..50 and 0..96 on seven frames and three group elements.
+    PowerPoint drew 0..50 and 0..100 every time -- never the 0..55/0..60 and 0..120 a 5%
+    headroom produces -- and fed back through `nice_axis_scale` the padded rule has **no
+    solution at any interval count** on 34 of the two decks' 52 3-D cells, where the bare
+    rule solves all 52.  The two flat controls on the same deck are the other way round.
+    """
+    _, data = _build(three_d_chart_xml(kind, high=50.0), width=684.0, height=195.0)
+    assert data.value_axis == m.ChartAxisScale(minimum=0.0, maximum=50.0, major_unit=5.0)
+
+    _, wider = _build(three_d_chart_xml(kind, high=96.0), width=684.0, height=195.0)
+    assert wider.value_axis == m.ChartAxisScale(
+        minimum=0.0, maximum=100.0, major_unit=10.0
+    )
+
+
+def test_the_same_data_on_a_flat_chart_keeps_its_headroom():
+    """The control, and the reason this is gated on the spelling rather than applied.
+
+    The 2-D rule is 611 readings of the axis sweep and is not in question; what the 3-D
+    probes refute is only its application to a 3-D chart.
+    """
+    _, data = _build(three_d_chart_xml("barChart", view=""), width=684.0, height=195.0)
+    assert data.value_axis == m.ChartAxisScale(minimum=0.0, maximum=60.0, major_unit=10.0)
+
+
+def test_the_gallerys_three_d_axes_are_powerpoints_own(chart_gallery):
+    """Slides 13, 14 and 16, against the numbers read out of `chart-gallery.pdf`.
+
+    Slide 16 is the defect ROADMAP.md 3.4 recorded: PowerPoint draws 0..50 by 5 where the
+    flat fallback drew 0..60 by 10.  Its cause is **not** the depth reservation the
+    roadmap named -- that chart's 336 pt frame is at the interval cap either way -- but
+    the headroom, which a 3-D axis does not have.  Slides 13 and 14 agreed before and
+    still do, which is what says the change is gated where it should be.
+    """
+    model = convert_pptx_to_model(chart_gallery)
+    axes = {
+        number: model.slides[number - 1].elements[-1].chart.value_axis
+        for number in (13, 14, 16)
+    }
+    assert axes[13] == m.ChartAxisScale(minimum=0.0, maximum=60.0, major_unit=10.0)
+    assert axes[14] == m.ChartAxisScale(minimum=0.0, maximum=30.0, major_unit=5.0)
+    assert axes[16] == m.ChartAxisScale(minimum=0.0, maximum=50.0, major_unit=5.0)
+
+
+def test_a_three_d_chart_says_it_is_drawn_flat(chart_gallery):
+    """`chart-3d-flattened`: drawn, and simplified.  Not `chart-unsupported-type`.
+
+    The two codes mean different things -- one is "here is a picture that leaves the
+    scene out", the other "there is no picture" -- and a build that fails on the second
+    should not be made to fail on the first.
+    """
+    options = ConvertOptions()
+    model = convert_pptx_to_model(chart_gallery, options)
+
+    flattened = [w for w in options.warnings if w.code == "chart-3d-flattened"]
+    assert len(flattened) == 4
+    assert {
+        kind
+        for warning in flattened
+        for kind in ("bar3DChart", "line3DChart", "pie3DChart", "area3DChart")
+        if kind in warning.message
+    } == {"bar3DChart", "line3DChart", "pie3DChart", "area3DChart"}
+    assert all("drawn flat" in warning.message for warning in flattened)
+
+    # Drawn, not refused: each of the four is a real chart element with children in it.
+    for number in (13, 14, 15, 16):
+        element = model.slides[number - 1].elements[-1]
+        assert isinstance(element, m.ChartElement)
+        assert element.children
+        assert element.chart.three_d is True

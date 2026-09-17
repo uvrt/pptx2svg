@@ -36,7 +36,7 @@ from ..metafile import extract_metafile_preview
 from ..metafile.pdf import PdfRasterizerNotAvailable, rasterise_pdf
 from ..opc import OpcPackage
 from ..parse import source as s
-from ..parse.chart import flat_chart_kind, parse_chart_space
+from ..parse.chart import flat_chart_kind, is_three_d_kind, parse_chart_space
 from ..parse.drawing import parse_group_transforms
 from ..parse.shapes import parse_shape_tree
 from ..parse.table_styles_builtin import builtin_table_style
@@ -925,6 +925,19 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
             f"holds {kinds}, which is not rendered yet; drawing an empty frame",
         )
     plot = plots[0]
+
+    three_d = sorted({p.kind for p in plots if is_three_d_kind(p.kind)})
+    if three_d:
+        # Not `chart-unsupported-type`: that code means "nothing was drawn".  This one is
+        # the other thing a renderer can be, and the deck should not have to guess which
+        # it got -- every category, value, label and axis in the picture is right, and the
+        # scene it stands for is missing.
+        context.warn(
+            "chart-3d-flattened",
+            f"{label} holds {', '.join(three_d)} and is drawn flat: no floor, back wall, "
+            "depth or extrusion, and the c:view3D camera is not applied. Its data, "
+            "categories, axis and legend are drawn in full",
+        )
 
     transform = _resolve_transform(context, node.transform)
     if transform.extent_width <= 0 or transform.extent_height <= 0:

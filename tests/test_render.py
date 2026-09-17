@@ -475,7 +475,14 @@ UNRENDERED_FIELDS = {
     # nothing in render/ reads them and nothing should.
     **{f"ChartData.{name}": "chart data, not drawing" for name in (
         "kind", "series", "categories", "title", "grouping", "bar_direction",
-        "value_axis", "legend_position",
+        "value_axis", "legend_position", "three_d",
+    )},
+    # `c:view3D`.  The scene is drawn flat and the chart warns `chart-3d-flattened` when
+    # it is, so nothing in render/ has a camera to apply; the view is carried for callers
+    # and for whoever builds one.  See ROADMAP.md 3.4.
+    "ChartData.view_3d": "the camera is parsed, not applied",
+    **{f"Chart3DView.{name}": "the camera is parsed, not applied" for name in (
+        "rot_x", "rot_y", "depth_percent", "h_percent", "right_angle_axes", "perspective",
     )},
     **{f"ChartSeries.{name}": "chart data, not drawing" for name in (
         "name", "values", "categories", "color", "format_code",

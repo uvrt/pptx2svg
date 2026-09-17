@@ -60,10 +60,12 @@ Give only `width` or only `height` and the other follows the slide's aspect rati
 neither and the slide's own size is used.
 
 `options.warnings` is the channel for everything the renderer could not do faithfully.
-The codes are stable strings — `chart-unsupported-type`, `diagram-no-cached-drawing`,
-`metafile-image`, `metafile-rasterizer-missing`, `table-style-unknown`, `font-substituted`,
-`font-bundle-missing` and a handful more — so a build can fail on the ones it cares about
-and ignore the rest.
+The codes are stable strings — `chart-unsupported-type`, `chart-3d-flattened`,
+`diagram-no-cached-drawing`, `metafile-image`, `metafile-rasterizer-missing`,
+`table-style-unknown`, `font-substituted`, `font-bundle-missing` and a handful more — so a
+build can fail on the ones it cares about and ignore the rest. "Nothing was drawn" and
+"something simplified was drawn" are deliberately different codes: `chart-unsupported-type`
+is the first and `chart-3d-flattened` the second.
 
 ### Command line
 
@@ -146,8 +148,16 @@ that names one therefore renders banded and headed rather than as a bare grid.
 **Charts** — `barChart`, `lineChart`, `areaChart`, `scatterChart`, `bubbleChart`,
 `pieChart`, `doughnutChart`, `ofPieChart`, `radarChart` and `stockChart` — are read and
 drawn with their axis range, tick interval, gridlines, legend and data labels, laid out
-from constants measured out of PowerPoint's PDF export. The 3-D spellings (`bar3DChart`
-and friends) draw flat. No deck in the test corpus warns `chart-unsupported-type`.
+from constants measured out of PowerPoint's PDF export. No deck in the test corpus warns
+`chart-unsupported-type`.
+
+The 3-D spellings (`bar3DChart` and friends) **draw flat and say so** — one
+`chart-3d-flattened` warning each. There is no floor, back wall, depth or extrusion, and
+`c:view3D`'s camera is parsed but not applied; the data, categories, axis and legend are
+drawn in full. A 3-D value axis is **not** padded the way a flat one is — measured, and
+it is the difference between the 0–50 by 5 PowerPoint draws and the 0–60 by 10 the flat
+rule asks for — so the numbers on the axis are PowerPoint's own even where the picture
+is not.
 
 **SmartArt** renders from the DrawingML drawing PowerPoint caches beside the diagram —
 shapes, text, fills and geometry, each label placed by its own `dsp:txXfrm`. Where that

@@ -1030,7 +1030,14 @@ def probes_for(target: Path) -> list[dict]:
     raise SystemExit(f"name the deck after one of {sorted(DECKS)}, not {target.stem!r}")
 
 
-def write_deck(target: Path, probes: list[dict]) -> None:
+def write_deck(target: Path, probes: list[dict], part_for=None) -> None:
+    """One slide per probe, each holding one chart, written to *target*.
+
+    ``part_for`` builds the chart part for a probe row and defaults to this deck's own
+    :func:`chart_part`; ``tools/make_view3d_probe.py`` passes its own so the slide,
+    relationship and content-type scaffolding is written in one place only.
+    """
+    part_for = part_for or chart_part
     source = zipfile.ZipFile(SOURCE)
     presentation = source.read("ppt/presentation.xml").decode()
     pres_rels = source.read("ppt/_rels/presentation.xml.rels").decode()
@@ -1086,23 +1093,26 @@ def write_deck(target: Path, probes: list[dict]) -> None:
         for index, probe in enumerate(probes):
             out.writestr(f"ppt/slides/slide{index + 1}.xml", slide_xml(index, probe))
             out.writestr(f"ppt/slides/_rels/slide{index + 1}.xml.rels", slide_rels(index))
-            if probe.get("read") == "x":
-                part = scatter_xy_xml(probe["low"], probe["high"], probe.get("size"))
-            elif probe.get("kind"):
-                part = category_chart_xml(
-                    probe["kind"],
-                    probe["high"],
-                    probe.get("size"),
-                    probe.get("labels"),
-                    probe.get("legend"),
-                    probe.get("title"),
-                    probe.get("face"),
-                )
-            elif probe.get("bar"):
-                part = bar_chart_xml(probe["high"], probe.get("size"))
-            else:
-                part = chart_xml(probe["low"], probe["high"], probe.get("size"))
-            out.writestr(f"ppt/charts/probe{index}.xml", part)
+            out.writestr(f"ppt/charts/probe{index}.xml", part_for(probe))
+
+
+def chart_part(probe: dict) -> bytes:
+    """The chart part one probe row asks for."""
+    if probe.get("read") == "x":
+        return scatter_xy_xml(probe["low"], probe["high"], probe.get("size"))
+    if probe.get("kind"):
+        return category_chart_xml(
+            probe["kind"],
+            probe["high"],
+            probe.get("size"),
+            probe.get("labels"),
+            probe.get("legend"),
+            probe.get("title"),
+            probe.get("face"),
+        )
+    if probe.get("bar"):
+        return bar_chart_xml(probe["high"], probe.get("size"))
+    return chart_xml(probe["low"], probe["high"], probe.get("size"))
 
 
 def main() -> int:
