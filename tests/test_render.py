@@ -918,3 +918,64 @@ def test_italic_is_left_to_the_font_when_the_font_has_one():
     svg = text_svg(one_run("Slanted", font_size=18, italic=True, font_family="Calibri"))
     assert 'font-style="italic"' in svg
     assert "skewX" not in svg
+
+
+def _line_dys(svg: str) -> list[float]:
+    """Every ``dy`` in the main ``<text>``, in document order."""
+    body = re.search(r"<text [^>]*>(.*?)</text>", svg, re.S).group(1)
+    return [float(value) for value in re.findall(r'dy="([-\d.]+)"', body)]
+
+
+def test_a_wrap_that_lands_on_a_sheared_run_still_advances_the_line():
+    """The continuation line's `dy` may not be lost with the run that carried it.
+
+    A sheared italic leaves the parent `<text>` flow for a `<text>` sibling of its own,
+    and when it is the first thing on a line it used to take the line's `dy` with it.
+    Nothing left in the flow then recorded the advance, so the rest of that line drew on
+    the line above -- two lines on one baseline -- and every line below it came up one
+    advance too high as well, because `dy` is relative.
+    """
+    properties = dict(font_size=42.667, font_family="Calibri", font_family_ea="Noto Sans JP")
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun("通常テキスト、", m.RunProperties(**properties)),
+                    m.TextRun("斜体テキスト", m.RunProperties(italic=True, **properties)),
+                    m.TextRun("、後続", m.RunProperties(**properties)),
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body, width=4000000, height=2000000)
+    # Three lines: 通常テキスト、 / 斜体テキスト、 / 後続.  The sheared run opens the
+    # second, so the `、` that follows it is the first flowing tspan on that line and
+    # has to carry the advance.
+    assert _line_dys(svg) == [0.0, 68.27, 68.27], svg
+    # The advance rides on the piece that follows the shear, which keeps its own x.
+    second = re.findall(r'<tspan x="([-\d.]+)" dy="68.27"', svg)
+    assert second and float(second[0]) > 300, svg
+
+
+def test_a_line_that_is_entirely_sheared_carries_its_advance_on_a_spacer():
+    """Every run on the line detached, so a space-only tspan records the advance.
+
+    Without it the line after this one is drawn one advance too high: the sheared
+    `<text>` siblings are positioned absolutely and contribute nothing to the flow.
+    """
+    properties = dict(font_size=42.667, font_family="Calibri", font_family_ea="Noto Sans JP")
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun("斜体テキストの", m.RunProperties(italic=True, **properties)),
+                    m.TextRun("後続テキスト", m.RunProperties(**properties)),
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body, width=4000000, height=2000000)
+    # Line 1 is nothing but the sheared run, so its advance sits on a spacer; line 2
+    # then steps a full line below it rather than onto it.
+    assert _line_dys(svg) == [0.0, 68.27], svg
+    assert '<tspan x="9.6" dy="0" text-anchor="start"> </tspan>' in svg, svg

@@ -648,14 +648,15 @@ def _render_line(
         for entry in planned:
             if entry is None:
                 continue
-            out.append(
-                _render_segment(
-                    entry[0], font_scale,
-                    _leading(x_pos, dy, anchor) if first else "",
-                    context, default_font_size,
-                )
+            rendered = _render_segment(
+                entry[0], font_scale,
+                _leading(x_pos, dy, anchor) if first else "",
+                context, default_font_size,
             )
-            first = False
+            out.append(rendered)
+            # A segment that emitted nothing never used the prefix, so the line's own
+            # ``dy`` is still owed: see ``advance`` below for what losing it costs.
+            first = first and not rendered
         return out
 
     if honour_tabs:
@@ -695,12 +696,29 @@ def _render_line(
     # of one -- to the left of where it belongs, which is only visible when a font change
     # splits the line at all.  ``honour_tabs`` only ever runs on a ``start`` line, so this
     # is the same string it used to produce there.
-    pending: str | None = _leading(left, dy, "start")
+    #
+    # The *position* is held here; the line's ``dy`` is held separately in ``advance``,
+    # and the two have to be able to come apart.  A ``dy`` is the only record of where
+    # this line sits -- the ``<text>`` element's ``y`` is the first baseline and every
+    # line after it is a relative step -- so a line that emits no ``dy`` is drawn on the
+    # previous line's baseline *and takes every line below it up with it*.  The position
+    # can be handed to an oblique run, which leaves the flow entirely, or replaced
+    # wholesale by a tab stop; either used to drop the advance with it.  So the advance
+    # is consumed by whichever tspan this line emits first, wherever that turns out to
+    # be, and a line whose every run was sheared away carries it on a spacer.
+    pending: tuple[float, str] | None = (left, "start")
+    advance = dy
+
+    def take_advance() -> str:
+        nonlocal advance
+        taken, advance = advance, ""
+        return taken
+
     for entry in planned:
         if entry is None:
             cursor = _chunk_end(chunk_start, chunk_width, chunk_anchor)
             stop, chunk_anchor = _next_tab_stop(cursor, origin, stops, default_tab_size)
-            pending = f'x="{num(stop)}" text-anchor="{chunk_anchor}" '
+            pending = (stop, chunk_anchor)
             cursor = chunk_start = stop
             chunk_width = 0.0
             previous_family = _NO_FAMILY
@@ -726,7 +744,8 @@ def _render_line(
                 continue
 
             if pending is not None:
-                prefix, pending = pending, None
+                prefix = _leading(pending[0], take_advance(), pending[1])
+                pending = None
                 previous_family = family
             elif family != previous_family:
                 previous_family = family
@@ -734,11 +753,11 @@ def _render_line(
                 # width, so a sub-chunk inside it has no absolute x to give.  Leave that
                 # one flowing and accept resvg's fallback rather than move the text.
                 prefix = (
-                    f'x="{num(cursor)}" text-anchor="start" '
-                    if chunk_anchor == "start" else ""
+                    _leading(cursor, take_advance(), "start")
+                    if chunk_anchor == "start" else _advance_only(take_advance())
                 )
             else:
-                prefix = ""
+                prefix = _advance_only(take_advance())
             rendered.append(f"<tspan {prefix}{styles}>{escape_xml_text(text)}</tspan>")
             cursor += width
             chunk_width += width
@@ -750,7 +769,19 @@ def _render_line(
             )
         if content:
             out.append(content)
+
+    if advance:
+        # Nothing was left in the flow to carry the line's advance -- every run on it was
+        # detached for shearing.  A space-only tspan carries it instead: it inks nothing,
+        # and the next line opens with its own absolute ``x``, so the space's width goes
+        # nowhere.  Without it the *following* line is drawn one advance too high.
+        out.insert(0, f'<tspan {_leading(left, advance, "start").rstrip()}> </tspan>')
     return out
+
+
+def _advance_only(dy: str) -> str:
+    """A ``dy`` with no position: shifts a flowing tspan down without re-anchoring it."""
+    return f'dy="{dy}" ' if dy else ""
 
 
 #: Sentinel for "no chunk open yet", distinct from a real ``font-family`` of ``None``.
