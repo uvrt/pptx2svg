@@ -25,6 +25,23 @@ that is mostly white background otherwise scores near-perfect no matter what hap
 the content.  When foreground coverage is under 1.5% the slide is too sparse to say
 anything useful and the score is defined as 1.0 rather than left to noise.
 
+**A correction that deletes wrong ink can lower SSIM while improving the picture**, and
+the mask is why.  The score is a mean over the pixels that are ink in *either* image, so
+removing something we drew and PowerPoint did not shrinks the denominator as well as the
+error.  If the region removed was scoring *better* than the slide's average -- which wrong
+ink in roughly the right place usually is -- the mean falls even though the total loss
+drops.  Measured on ``chart-gallery`` slide 11: deleting three legend swatches PowerPoint
+does not draw took SSIM 0.0499 to 0.0384 while the unnormalised structural loss fell 42577
+to 39502, the legend row's own share of it fell 3334 to 259, and every other column
+improved (histogram 0.9593 to 0.9608, mean absolute error 5.53 to 5.02, pixels over 10%
+4.81 to 4.40).  The renders are visually indistinguishable.
+
+So when SSIM falls alone while the other columns rise, look at the pictures before
+believing the number -- and prefer the unnormalised loss for that comparison.  This is the
+same class of problem as the pixel-difference metric described above, which is why it is
+recorded here rather than fixed: no single scalar survives a change in what counts as
+foreground.
+
 Foreground IoU was considered and deliberately left out: the upstream project dropped it
 because thin-stroke shapes lose about half their IoU to one pixel of anti-aliasing even
 when the geometry is exactly right, and table gridlines -- the thing that started this --
