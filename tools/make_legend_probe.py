@@ -144,15 +144,30 @@ def _name(text: str) -> str:
     )
 
 
-def _series(index: int, name: str, values, cats, *, kind: str, marker: bool) -> str:
+def _series(
+    index: int,
+    name: str,
+    values,
+    cats,
+    *,
+    kind: str,
+    marker: bool,
+    no_line: bool = False,
+) -> str:
     """One ``c:ser``.  ``c:idx`` must be unique across every group (ROADMAP.md 0.1).
 
     The child order is the schema's and is not negotiable: ``idx``, ``order``, ``tx``,
     ``spPr``, ``marker``, ``cat``, ``val``, ``smooth``.  Out-of-order children cost an
     earlier probe a -9074.
+
+    ``no_line`` writes the ``<a:ln><a:noFill/></a:ln>`` a stock chart's series carry, which
+    is the ``o`` family's whole subject: a series that legends with a **rule** and has no
+    rule to draw.
     """
     head = f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>" + _name(name)
-    if kind in ("line", "scatter"):
+    if no_line:
+        head += "<c:spPr><a:ln w='19050'><a:noFill/></a:ln></c:spPr>"
+    if kind in ("line", "scatter", "stock"):
         head += (
             "<c:marker><c:symbol val='circle'/><c:size val='5'/></c:marker>"
             if marker
@@ -166,16 +181,29 @@ def _series(index: int, name: str, values, cats, *, kind: str, marker: bool) -> 
     return head + body + tail + "</c:ser>"
 
 
+def _no_line_flags(group: dict, count: int) -> list[bool]:
+    """Which of this group's series state ``<a:ln><a:noFill/></a:ln>``."""
+    flag = group.get("no_line", False)
+    if flag is True:
+        return [True] * count
+    if flag is False:
+        return [False] * count
+    return [index in set(flag) for index in range(count)]
+
+
 def group_xml(group: dict, first_index: int, cats) -> tuple[str, int]:
     """One ``c:*Chart`` element, and the next free series index."""
     kind = group["kind"]
     names = group["names"]
     highs = group.get("highs") or [9.0] * len(names)
     marker = group.get("marker", True)
+    markers = group.get("markers")
+    no_line = _no_line_flags(group, len(names))
     body = "".join(
         _series(first_index + i, names[i], values_for(highs[i]), cats,
                 kind="scatter" if kind == "scatter" else ("line" if kind == "line" else kind),
-                marker=marker)
+                marker=markers[i] if markers is not None else marker,
+                no_line=no_line[i])
         for i in range(len(names))
     )
     cat_id = SECOND_CAT if group.get("secondary") else PRIMARY_CAT
@@ -191,6 +219,13 @@ def group_xml(group: dict, first_index: int, cats) -> tuple[str, int]:
             "<c:lineChart><c:grouping val='standard'/>"
             f"<c:varyColors val='0'/>{body}<c:marker val='{1 if marker else 0}'/>"
             f"{ids}</c:lineChart>"
+        )
+    elif kind == "stock":
+        # A `c:stockChart` takes exactly three or four series and no `c:grouping`.  Its
+        # `c:hiLowLines` is what a real stock chart draws instead of the series lines.
+        xml = (
+            "<c:stockChart>"
+            f"{body}<c:hiLowLines/>{ids}</c:stockChart>"
         )
     elif kind == "area":
         xml = (
@@ -437,11 +472,67 @@ FIT_PROBES: list[dict] = [
           frame=_frame(540.0)),
 ]
 
+#: **The key that has nothing to draw.**  ``chart-gallery`` slide 11's stock chart states
+#: ``<a:ln><a:noFill/></a:ln>`` on every series, so each entry legends with a *rule* and
+#: has no rule to draw, and PowerPoint's export shows no key path at all.  Three layouts
+#: are consistent with "no key drawn" and they put the labels in three different places:
+#:
+#: * the entry keeps the 24.0 pt line cell and only the ink is missing;
+#: * the entry keeps *a* cell but a narrower one -- the 1.0985 em swatch cell;
+#: * the entry loses its cell entirely and the run is that much narrower.
+#:
+#: Every slide here names its entries ``W``, ``Wm``, ``Wmm``... so each label's ink begins
+#: at the same left side bearing and the pitch between two labels is the pitch between two
+#: **cells** with no font residue in it.  ``read_legend_probe.py`` then solves each slide
+#: for the one unknown, the cell, from the pitches and from the run's centring
+#: independently.
+NOKEY_THREE = [wide(1), wide(3), wide(5)]
+
+NOKEY_PROBES: list[dict] = [
+    # The two controls, whose cells are already measured: 24.0 pt and 1.0985 em.
+    probe("o-line", [line(NOKEY_THREE)]),
+    probe("o-bar", [col(NOKEY_THREE)]),
+    # **The case.**  A line group whose every series has no rule, with and without the
+    # marker that is the only thing left to draw.
+    probe("o-none", [line(NOKEY_THREE, no_line=True, marker=False)]),
+    probe("o-mark", [line(NOKEY_THREE, no_line=True, marker=True)]),
+    # **Per chart or per entry?**  One group, one series without its rule.  If the cell is
+    # a decision for the chart, all three entries move together; if it is a decision for
+    # the series, only the bare one does.
+    probe("o-mix0", [line(NOKEY_THREE, no_line=(0,), marker=False)]),
+    probe("o-mix2", [line(NOKEY_THREE, no_line=(2,), marker=False)]),
+    probe("o-mix02", [line(NOKEY_THREE, no_line=(0, 2), marker=False)]),
+    # The gallery's own configuration: a real `c:stockChart`, no rules, a marker on the
+    # last series only -- and the same chart with its rules left in, which says whether a
+    # stock legend is a line legend at all.
+    probe("o-stock", [{"kind": "stock", "names": NOKEY_THREE, "no_line": True,
+                       "markers": [False, False, True]}]),
+    probe("o-stockline", [{"kind": "stock", "names": NOKEY_THREE, "markers": [False, False, True]}]),
+    # **Entry count and frame**, at the bare configuration.  The cell enters the gap
+    # through `n * cell` inside the slack, so a count sweep separates it from the gap far
+    # better than one slide can.
+    *[
+        probe(f"o-n{n}", [line([wide(k) for k in range(1, n + 1)], no_line=True, marker=False)])
+        for n in (2, 4, 5)
+    ],
+    *[
+        probe(f"o-f{width:.0f}", [line(NOKEY_THREE, no_line=True, marker=False)],
+              frame=_frame(width))
+        for width in (300.0, 720.0)
+    ],
+    # A width sweep, which moves the gap without moving the cell.
+    probe("o-w", [line([wide(1), wide(8), wide(3)], no_line=True, marker=False)]),
+    # A **side** legend of the same chart: the stacked branch draws the same key and no
+    # probe has asked what it does when there is nothing to draw.
+    probe("o-side", [line(NOKEY_THREE, no_line=True, marker=False)], legend="r"),
+]
+
 DECKS = {
     "legend-pack": PACK_PROBES,
     "legend-key": KEY_PROBES,
     "legend-frame": FRAME_PROBES,
     "legend-fit": FIT_PROBES,
+    "legend-nokey": NOKEY_PROBES,
 }
 
 
