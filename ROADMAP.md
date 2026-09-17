@@ -2503,6 +2503,28 @@ picture than PowerPoint's but not a wrong one.
 a back wall, gridlines that run into the depth, and a plot rectangle displaced and shrunk
 to make room for it.
 
+**PowerPoint rasterises the 3-D geometry, and that decides how measurable this is.** A
+census of `chart-gallery.pdf`'s page objects settles the question the feasibility review
+could not: slides 13–16 and the surface on slide 12 each carry **one image object** where
+the 2-D control on slide 1 carries none — a **300 dpi raster** covering the plot (bar3D
+466.3 × 250.1 pt as 1943 × 1042 px; pie3D 309.4 × 288.0; surface 434.9 × 232.8). The
+scene is a picture, not paths.
+
+The consequence is a clean split, and it is what any 3-D plan has to be built around:
+
+* **The text stays vector** — 20 text objects on slide 13, 28 on slide 12 — so the axis,
+  its tick labels, the legend and therefore **the plot rectangle and its depth
+  reservation are exactly measurable**, to the same standard as everything else here.
+  That is the whole of the axis defect below, and it is reachable with the drawing still
+  flat.
+* **The camera is not.** Recovering a projection means corner-detecting a raster, which is
+  the method `@silurus/ooxml` used at 200 dpi and which left it about 1.8% out on edge
+  ratios at its own fitted optimum. At 300 dpi one pixel is 0.24 pt. This project holds
+  chart lines to 0.07 pt and solved the legend gap to 0.009 pt, so a camera fitted this
+  way would be the first geometry in the renderer resting on evidence an order of
+  magnitude softer than its neighbours — worth knowing *before* committing to an L, not
+  after.
+
 | slide | group | SSIM | hist | what PowerPoint drew instead |
 | --- | --- | --- | --- | --- |
 | 13 | `bar3DChart` | 0.5844 | 0.9760 | extruded boxes on a floor, the plot pushed right and up by the depth |
