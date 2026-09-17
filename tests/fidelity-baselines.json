@@ -326,39 +326,75 @@
       "available": [
         "Arial",
         "Calibri",
-        "Calibri Light"
+        "Calibri Light",
+        "Noto Sans JP"
       ],
       "conditional": [
         "\u6e38\u30b4\u30b7\u30c3\u30af Light"
       ],
-      "hash": "b58c2bc56ca2",
+      "hash": "f5b1647e867f",
       "instead": [],
-      "missing": [
-        "Noto Sans JP"
-      ],
+      "missing": [],
       "substituted": [],
       "uncovered": ""
     },
-    "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
-    "slides": []
+    "histogram": 0.9988,
+    "slides": [
+      {
+        "coverage": 0.9898,
+        "histogram": 1.0,
+        "mean_abs": 0.942,
+        "over10": 2.086,
+        "over64": 0.479,
+        "sparse": false,
+        "ssim": 0.9849
+      },
+      {
+        "coverage": 0.1756,
+        "histogram": 0.9988,
+        "mean_abs": 1.667,
+        "over10": 3.547,
+        "over64": 0.903,
+        "sparse": false,
+        "ssim": 0.9338
+      },
+      {
+        "coverage": 0.1705,
+        "histogram": 0.9972,
+        "mean_abs": 2.221,
+        "over10": 3.78,
+        "over64": 1.422,
+        "sparse": false,
+        "ssim": 0.8662
+      },
+      {
+        "coverage": 0.1748,
+        "histogram": 0.9991,
+        "mean_abs": 2.201,
+        "over10": 3.85,
+        "over64": 1.315,
+        "sparse": false,
+        "ssim": 0.8597
+      }
+    ],
+    "ssim": 0.9112
   },
   "real-product-page": {
     "fonts": {
       "available": [
         "Arial",
         "Calibri",
-        "Calibri Light"
-      ],
-      "conditional": [],
-      "hash": "b58c2bc56ca2",
-      "instead": [],
-      "missing": [
+        "Calibri Light",
         "Noto Sans JP"
       ],
+      "conditional": [],
+      "hash": "f5b1647e867f",
+      "instead": [],
+      "missing": [],
       "substituted": [],
-      "uncovered": ""
+      "uncovered": "\u26a1\ud83d\udcf1\ud83d\udd12"
     },
-    "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
+    "skipped": "no named face can draw \u26a1\ud83d\udcf1\ud83d\udd12; both renderers invented a fallback",
     "slides": []
   },
   "sample": {
@@ -385,24 +421,110 @@
     "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
     "slides": []
   },
+  "sample-cjk": {
+    "fonts": {
+      "available": [
+        "Arial",
+        "Calibri",
+        "Courier New",
+        "Noto Sans JP"
+      ],
+      "conditional": [
+        "Noto Sans JP"
+      ],
+      "hash": "058bc5937650",
+      "instead": [],
+      "missing": [],
+      "substituted": [],
+      "uncovered": ""
+    },
+    "histogram": 0.9819,
+    "slides": [
+      {
+        "coverage": 0.0127,
+        "histogram": 1.0,
+        "mean_abs": 0.259,
+        "over10": 0.612,
+        "over64": 0.082,
+        "sparse": true,
+        "ssim": 1.0
+      },
+      {
+        "coverage": 0.0316,
+        "histogram": 0.9847,
+        "mean_abs": 2.678,
+        "over10": 2.26,
+        "over64": 1.415,
+        "sparse": false,
+        "ssim": 0.547
+      },
+      {
+        "coverage": 0.0328,
+        "histogram": 0.9914,
+        "mean_abs": 3.901,
+        "over10": 2.719,
+        "over64": 2.166,
+        "sparse": false,
+        "ssim": 0.2391
+      },
+      {
+        "coverage": 0.0273,
+        "histogram": 0.9703,
+        "mean_abs": 1.859,
+        "over10": 1.832,
+        "over64": 1.015,
+        "sparse": false,
+        "ssim": 0.6456
+      },
+      {
+        "coverage": 0.0168,
+        "histogram": 0.9669,
+        "mean_abs": 0.58,
+        "over10": 0.911,
+        "over64": 0.375,
+        "sparse": false,
+        "ssim": 0.9013
+      },
+      {
+        "coverage": 0.0188,
+        "histogram": 0.9779,
+        "mean_abs": 0.725,
+        "over10": 1.14,
+        "over64": 0.463,
+        "sparse": false,
+        "ssim": 0.74
+      }
+    ],
+    "ssim": 0.6788
+  },
   "sample-issue-387": {
     "fonts": {
       "available": [
         "Arial",
         "Calibri",
-        "Calibri Light"
-      ],
-      "conditional": [],
-      "hash": "b58c2bc56ca2",
-      "instead": [],
-      "missing": [
+        "Calibri Light",
         "Noto Sans JP"
       ],
+      "conditional": [],
+      "hash": "f5b1647e867f",
+      "instead": [],
+      "missing": [],
       "substituted": [],
       "uncovered": ""
     },
-    "skipped": "PowerPoint substituted too: no Noto Sans JP on this machine",
-    "slides": []
+    "histogram": 1.0,
+    "slides": [
+      {
+        "coverage": 1.0,
+        "histogram": 1.0,
+        "mean_abs": 1.009,
+        "over10": 1.248,
+        "over64": 0.561,
+        "sparse": false,
+        "ssim": 0.9897
+      }
+    ],
+    "ssim": 0.9897
   },
   "table-test": {
     "fonts": {

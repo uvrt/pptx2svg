@@ -12,18 +12,22 @@ it is *right*. Correctness comes from the other layer — `tools/fidelity.py` sc
 render against PowerPoint's own PDF export — and that layer needs PowerPoint, so it runs
 on one Mac while this one runs on all twelve CI legs.
 
-The distinction is not academic here, because **the oracle has never scored five of these
-eight decks**. `tests/fidelity-baselines.json` records why: `real-basic-theme` and
-`sample` are skipped because PowerPoint itself substituted ＭＳ Ｐゴシック, and
-`real-financial-report`, `real-product-page` and `sample-issue-387` because this machine
-has no Noto Sans JP, so both sides would be drawing the wrong face. Nothing has ever
-compared those five against PowerPoint. Their snapshots record what we do, and that is
-all they record.
+The distinction is not academic here, because **the oracle scored only three of these
+decks for most of this project's life**. `tests/fidelity-baselines.json` records where
+each one stands now. Installing the bundled Noto Sans JP into `~/Library/Fonts` and
+re-exporting (see FONTS.md ▸ *Making the oracle draw Japanese*) brought
+`real-financial-report` and `sample-issue-387` in; `sample-cjk` was derived to bring a
+Japanese deck in. Three are still skipped, each for a difference in the two renderers'
+*inputs* rather than their output: `real-basic-theme` and `sample` resolve their Japanese
+to ＭＳ Ｐゴシック, which this PowerPoint cannot use and which is not ours to install, and
+`real-product-page` carries emoji that no face either deck names can draw. Their
+snapshots record what we do, and that is all they record.
 
-The three that are scored do not score 1.0 either: `authoring-integration` is at SSIM
-0.9327, `table test` at 0.9895 and `chart-gallery` at 0.6407 — the last being a deck built
-to be scored, whose low mean is mostly the chart types we knowingly do not draw plus SSIM's
-severity on sparse line art. ROADMAP.md *3.2a* breaks it down per slide.
+Nothing scores 1.0: `authoring-integration` is at SSIM 0.9327, `table test` at 0.9895,
+`sample-issue-387` at 0.9897, `real-financial-report` at 0.9112, `sample-cjk` at 0.6788
+and `chart-gallery` at 0.6747 — the last being a deck built to be scored, whose low mean
+is mostly the chart types we knowingly do not draw plus SSIM's severity on sparse line
+art. ROADMAP.md *3.2a* breaks it down per slide.
 
 ## Defects that are baked into these files
 

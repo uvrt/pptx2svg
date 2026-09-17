@@ -113,20 +113,44 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | `authoring-integration.pptx` | 0.9327 | 0.9984 | SSIM |
 | `chart-gallery.pptx` | 0.6747 | 0.8147 | SSIM |
 | `real-college-template.pptx` (local only) | 0.8003 | 0.8753 | SSIM, hist |
-| `real-basic-theme.pptx` | skipped | — | PowerPoint drew MS Gothic where the deck names ＭＳ Ｐゴシック |
+| `sample-issue-387.pptx` | **0.9897** | 1.0000 | pass |
+| `real-financial-report.pptx` | 0.9112 | 0.9988 | SSIM |
+| `sample-cjk.pptx` (derived) | 0.6788 | 0.9819 | SSIM |
+| `real-basic-theme.pptx` | skipped | — | resolves Japanese to ＭＳ Ｐゴシック, which this PowerPoint cannot use |
 | `sample.pptx` | skipped | — | same |
-| `real-financial-report.pptx` | skipped | — | no Noto Sans JP on this machine, so PowerPoint substituted too |
-| `real-product-page.pptx` | skipped | — | same |
-| `sample-issue-387.pptx` | skipped | — | same |
+| `real-product-page.pptx` | skipped | — | ⚡📱🔒: no face either deck names can draw them |
 
-**Five of nine fixtures cannot be scored at all, and that is the single biggest hole in
-this project's feedback loop.** Not because the renderer is wrong on them — because the
-oracle and the renderer disagree about which *face* to draw, so any number would measure
-font resolution rather than layout. Two routes close it, neither taken here because both
-change the developer's machine rather than the repository: install Noto Sans JP where
-PowerPoint can see it (`~/Library/Fonts`) and re-export the three decks that name it, or
-rewrite the two Japanese decks' themes to name `MS Gothic` — the face PowerPoint actually
-resolves — instead of ＭＳ Ｐゴシック.
+**Five of nine fixtures could not be scored at all, and that was the single biggest hole
+in this project's feedback loop.** Not because the renderer is wrong on them — because
+the oracle and the renderer disagreed about which *face* to draw, so any number would
+measure font resolution rather than layout. Three of the five are now scored, and the
+two routes this section used to list turned out to be one good one and one that does not
+work:
+
+* **Install Noto Sans JP where PowerPoint can see it.** Taken. The bundled OFL file goes
+  into `~/Library/Fonts`, the three decks that name it are re-exported, and their PDFs
+  now carry `NotoSansJP-Thin_Regular`/`_Bold` — Core Text's spelling for the variable
+  font's 400 and 700 instances, matched against the file's own widths. FONTS.md ▸
+  *Making the oracle draw Japanese* has the command and how to undo it.
+  `real-financial-report` and `sample-issue-387` score from this alone.
+  `real-product-page` does not: removing the font difference exposed a second and
+  unrelated one — three emoji that no face the deck names can draw, which both renderers
+  therefore invent.
+* **Rewrite the two Japanese decks' themes to name `MS Gothic`.** Does not work, and the
+  seven exports that establish why are tabled in `tools/make_cjk_deck.py`. This
+  PowerPoint resolves neither ＭＳ Ｐゴシック nor `MS Gothic` by name; `real-basic-theme`
+  ignores its theme's East Asian slots altogether because its runs name a Latin face as
+  their own `<a:ea>`; and what *does* work for `sample` — filling the scheme's empty
+  `<a:ea>` — is a change to a fixture whose empty `<a:ea>` is the thing several
+  measurements are about.
+
+So the third route is the one taken for CJK: `tools/make_cjk_deck.py` **derives**
+`sample-cjk.pptx` from `sample.pptx` with that one theme slot filled with Noto Sans JP,
+leaving `sample.pptx` untouched. It is the first Japanese deck in this corpus where both
+sides ink the face the deck asks for. Its 0.6788 is a measurement of our Japanese
+*layout*, and slide 3 says what is wrong with it: a wrapped continuation line in a
+mixed-format CJK paragraph is drawn on top of the first line instead of below it, and on
+slide 2 our break point is one character later than PowerPoint's.
 
 `chart-gallery.pptx` is the fourth scorable deck and the only chart-heavy one; what its
 0.6747 is made of is in *3.2a* below, since almost all of it is a statement about chart

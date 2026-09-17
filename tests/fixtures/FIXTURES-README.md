@@ -30,8 +30,33 @@
 | `real-product-page.pptx`     | 手作成        | 1          | 角丸矩形・楕円・テキストボックス                           |
 | `real-financial-report.pptx` | 手作成        | 4          | チャート（棒グラフ・円グラフ等）・テキスト                 |
 | `sample.pptx`                | md-pptx 生成  | 6          | 日本語テキスト・箇条書き・テキスト装飾                     |
+| `sample-cjk.pptx`            | 本リポジトリの `tools/make_cjk_deck.py` が `sample.pptx` から**派生生成** | 6 | 同上（テーマの東アジア系フェイスのみ差し替え）             |
 | `sample-issue-387.pptx`      | 手作成        | 1          | インラインテキスト装飾（太字・斜体・太字斜体）             |
 | `authoring-integration.pptx` | document API  | 1          | from-scratch authoring API の package/render 統合 contract |
+
+## `sample-cjk.pptx`（`sample.pptx` からの派生。**取得したままのファイルではない**）
+
+`tools/make_cjk_deck.py` が `sample.pptx` から生成する。変更点は**テーマだけ**で、
+theme1 / theme2 の major・minor 両フォントコレクションについて
+
+- `<a:ea typeface=""/>` → `<a:ea typeface="Noto Sans JP"/>`
+- `<a:font script="Jpan" typeface="ＭＳ Ｐゴシック"/>` → 同じく `Noto Sans JP`
+
+の 8 箇所を書き換える。スライド・レイアウト・マスター・本文テキストは 1 文字も
+変更していない。したがって**本文の内容は md-pptx が生成したそのまま**だが、
+**フォント指定は原本のものではない**。
+
+存在理由は `tools/fidelity.py` で**採点できる日本語デッキが 1 つもなかった**こと。
+`sample.pptx` が指定する ＭＳ Ｐゴシック は、このマシンの PowerPoint では綴りを変えても
+解決できず（`tools/make_cjk_deck.py` の docstring に 7 回のエクスポート実測表がある）、
+Microsoft のフォントなのでこちらで導入する権利もない。つまり**原本のフェイスは
+どちらのレンダラも描かない**ので、比較しても測っているのはフォント解決であって
+レイアウトではない。Noto Sans JP は本リポジトリが同梱し、`~/Library/Fonts` に入れれば
+PowerPoint も描く唯一の日本語フェイスであり、そのとき初めて両者が同じ字形を描く。
+
+`sample.pptx` 自体は**一切変更していない**。空の `<a:ea>` は実在するケースであり
+（`src/pptx2svg/text/fontmap.py`）、既存の計測結果の入力でもあるため、
+書き換えるのではなく `tests/deckbuilder.py` と同じく**派生**させている。
 
 ## `real-college-template.pptx`（**リポジトリには含めない**）
 
