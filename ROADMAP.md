@@ -2517,13 +2517,34 @@ The consequence is a clean split, and it is what any 3-D plan has to be built ar
   reservation are exactly measurable**, to the same standard as everything else here.
   That is the whole of the axis defect below, and it is reachable with the drawing still
   flat.
-* **The camera is not.** Recovering a projection means corner-detecting a raster, which is
-  the method `@silurus/ooxml` used at 200 dpi and which left it about 1.8% out on edge
-  ratios at its own fitted optimum. At 300 dpi one pixel is 0.24 pt. This project holds
-  chart lines to 0.07 pt and solved the legend gap to 0.009 pt, so a camera fitted this
-  way would be the first geometry in the renderer resting on evidence an order of
-  magnitude softer than its neighbours — worth knowing *before* committing to an L, not
-  after.
+* **The camera is not solvable from vertices, but it is still measurable.** There are no
+  paths to read, so a projection has to be *fitted* against the raster rather than solved
+  from exact points — and this project distinguishes those (`BUBBLE_REGION_INSET_PT`'s 5 pt
+  is "solved rather than guessed"). A 3-D camera would be the first major geometry here in
+  the fitted category, which is worth knowing before committing to an L.
+
+  It is not, however, the weak position it first looks like, and two things say so. The
+  first is that **`tools/fidelity.py` is already a raster comparator** — it rasterises our
+  SVG and scores it against PowerPoint's page, which works the same whether that page holds
+  paths or an image, so verification needs no vertices at all and slides 13–16 are a
+  working objective function today. The second is **over-determination**: `@silurus/ooxml`'s
+  ~1.8% came from four corners of one card at 200 dpi, where bar prisms, floor and wall
+  quads and gridline intersections across a probe sweep give hundreds of constraints at
+  300 dpi against six parameters.
+
+**The SVG side is not in doubt, and was checked rather than assumed.** A throwaway
+prototype — one yaw/pitch/pinhole transform, Lambert shading against a fixed light, a
+painter's sort on face depth — draws a four-bar 3-D scene with a floor in **25 polygons
+and 2.4 kB of SVG, standard library only**, rendering correctly through resvg. SVG's paint
+model *is* the painter's algorithm, so the depth sort the scene needs is the one the format
+already performs. Separately, resvg honours `feDiffuseLighting` with `feDistantLight`
+(measured: 238 → 182 across a filtered rectangle), so shape bevels have a lighting model
+available too — though the twelve `ST_BevelPresetType` cross-sections cannot be expressed
+as a blur radius, which buys *a* bevel rather than *the* bevel.
+
+The prototype also showed the failure mode: a wrong pinhole divisor renders confidently
+inverted geometry rather than a slightly-off picture. That is the argument against shipping
+a half-fitted camera, and it is a different argument from the one against drawing flat.
 
 | slide | group | SSIM | hist | what PowerPoint drew instead |
 | --- | --- | --- | --- | --- |
