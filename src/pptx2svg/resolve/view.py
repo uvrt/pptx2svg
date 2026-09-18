@@ -939,7 +939,16 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         # that gets it has a different defect from one that does not: its axis, its
         # gridlines and its marks are where PowerPoint puts them and only the scene is
         # absent, where the other kind is drawn in a rectangle PowerPoint never used.
-        placed = any(three_d_camera(source.view_3d, p.kind) is not None for p in plots)
+        placed = any(
+            three_d_camera(
+                source.view_3d,
+                p.kind,
+                series=len(p.series) or 1,
+                grouping=p.grouping,
+            )
+            is not None
+            for p in plots
+        )
         context.warn(
             "chart-3d-flattened",
             f"{label} holds {', '.join(three_d)} and is drawn flat: no floor, back wall, "

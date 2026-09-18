@@ -30,6 +30,19 @@ divides is the whole frame and nothing else has to be subtracted from it.
     the element absent altogether.  The axis is held at the interval cap so that anything
     that moves is geometry rather than the count; a short-frame block at the end puts the
     count back in play at the extremes of the depth.
+``view3d-colour``
+    The **raster** rather than the text, which is the other half of what a 3-D slide holds.
+    A four-series ``bar3DChart`` with its fills stated, over twelve pitches, fifteen yaws
+    and eight diagonals, so that ``tools/read_view3d_probe.py --colours`` can read each
+    prism's three faces off each slide's own image object.  What it settles: the face
+    factors are **constants** and do not move with the camera at all.
+``view3d-shape`` / ``view3d-aspect``
+    The same instrument turned on the scene's *box*, which the image object's own bounds
+    give directly -- so a ``pie3DChart``, which draws no axis, is measurable too.
+    ``view3d-shape`` sweeps eleven cameras per group element and two more frames;
+    ``view3d-aspect`` gives every series count from one to four four cameras each, two of
+    them width-bound and two height-bound, which is what separates the scene's aspect from
+    its depth.  See ``three_d_scene_shape``.
 
 Usage -- the deck's file name picks its probe table::
 
@@ -248,11 +261,205 @@ SERIES_PROBES: list[dict] = [
     ],
 ]
 
+
+#: The colour deck's fills, stated rather than themed.  Four series whose channels are
+#: spread as widely as possible, because what separates "the face factor multiplies the
+#: sRGB triple" from "it scales the light and converts back" is an offset that only shows
+#: on a channel far from the others: scaling in linear light is ``k*c - 0.055*(1-k)`` in
+#: sRGB, an affine map whose offset is invisible on a bright channel and a tenth of a dark
+#: one.  ``FF3300`` carries a zero channel and a dark one, ``103070`` is dark throughout.
+PROBE_COLOURS = ("4472C4", "ED7D31", "FF3300", "103070")
+
+#: The pie deck's slice fills -- the same four plus a mid grey, which is the control that
+#: says whether a face factor reads the fill's hue at all.
+PIE_COLOURS = ("4472C4", "ED7D31", "FF3300", "103070", "808080")
+
+#: Three categories and four series on a 684 x 330 pt frame: twelve prisms about 41 pt
+#: wide, which is enough face for a colour census to find the top and the side even at the
+#: shallow pitches where they are a few pixels tall.
+COLOUR_FRAME = (FRAME_WIDTH, 330 * 12700)
+COLOUR_CATEGORIES = ("C1", "C2", "C3")
+#: Descending, and that is not decoration: the series of a clustered ``bar3DChart`` stand
+#: side by side and touching, so a bar taller than its right-hand neighbour is the only
+#: one whose own right face is not behind it.  Stepping the heights down keeps all four
+#: side faces in the picture.
+COLOUR_SCALES = (1.0, 0.85, 0.7, 0.55)
+
+
+def _colour_probe(name: str, view: dict | None, **extra) -> dict:
+    probe = {
+        "key": f"c-{name}",
+        "high": 9.0,
+        "frame": COLOUR_FRAME,
+        "kind": "bar3D",
+        "view": view,
+        "series": 4,
+        "colours": PROBE_COLOURS,
+        "categories": COLOUR_CATEGORIES,
+        "scales": COLOUR_SCALES,
+    }
+    probe.update(extra)
+    return probe
+
+
+#: **The colour sweep.**  ROADMAP.md 3.4 read a prism's three faces off one camera --
+#: the front face the series colour exactly, the top ``0.758x`` it and the right
+#: ``0.632x`` -- and nothing there says whether those are constants or a cosine evaluated
+#: at fifteen degrees.  This sweeps the pitch and the yaw one at a time and reads the
+#: faces off each slide's own raster, which is the measurement that tells the two apart.
+COLOUR_PROBES: list[dict] = [
+    *[_colour_probe(f"rx{value}", _view(rotX=value)) for value in
+      (0, 5, 10, 15, 20, 25, 30, 40, 50, 60, 75, 90)],
+    *[_colour_probe(f"ry{value}", _view(rotY=value)) for value in
+      (0, 5, 10, 20, 30, 45, 60, 75, 90, 120, 150, 180, 225, 270, 315)],
+    *[
+        _colour_probe(f"x{x}y{y}", _view(rotX=x, rotY=y))
+        for x, y in (
+            (0, 0), (30, 30), (45, 45), (60, 45),
+            (45, 60), (90, 90), (-15, 20), (-45, 20),
+        )
+    ],
+    *[_colour_probe(f"d{value}", _view(depthPercent=value)) for value in (20, 500)],
+    *[_colour_probe(f"h{value}", _view(hPercent=value)) for value in (50, 200)],
+    # Does the series count move the factors?  One and two series, same cameras.
+    _colour_probe("s1", DEFAULT_VIEW, series=1, colours=PROBE_COLOURS[:1], scales=(1.0,)),
+    _colour_probe(
+        "s2", DEFAULT_VIEW, series=2, colours=PROBE_COLOURS[:2], scales=(1.0, 0.7)
+    ),
+    _colour_probe(
+        "s1-rx45", _view(rotX=45), series=1, colours=PROBE_COLOURS[:1], scales=(1.0,)
+    ),
+]
+
+#: **Part C: the scene per group element.**  Only ``bar3DChart`` has a camera, because
+#: only its scene's shape is measured; ``line3DChart`` and ``area3DChart`` read 0.6 and
+#: 0.4 of the region's aspect at one series on one frame, which is two readings and not a
+#: law.  Every probe here carries stated fills, so the drawn scene's own ink is findable
+#: in the raster -- which is the only reading a ``pie3DChart`` has, having no axis.
+SHAPE_VIEWS: list[tuple[str, dict]] = [
+    ("base", DEFAULT_VIEW),
+    ("rx0", _view(rotX=0)),
+    ("rx30", _view(rotX=30)),
+    ("rx60", _view(rotX=60)),
+    ("ry0", _view(rotY=0)),
+    ("ry45", _view(rotY=45)),
+    ("ry90", _view(rotY=90)),
+    ("d20", _view(depthPercent=20)),
+    ("d500", _view(depthPercent=500)),
+    ("h50", _view(hPercent=50)),
+    ("h200", _view(hPercent=200)),
+]
+
+SHAPE_KINDS = ("bar3D", "line3D", "area3D", "pie3D")
+
+
+def _shape_probe(kind: str, name: str, view: dict, **extra) -> dict:
+    probe = {
+        "key": f"s-{kind}-{name}",
+        "high": 9.0,
+        "frame": VIEW_FRAME,
+        "kind": kind,
+        "view": view,
+        "series": 1,
+        "colours": PIE_COLOURS if kind == "pie3D" else PROBE_COLOURS,
+    }
+    probe.update(extra)
+    return probe
+
+
+SHAPE_PROBES: list[dict] = [
+    *[
+        _shape_probe(kind, name, view)
+        for kind in SHAPE_KINDS
+        for name, view in SHAPE_VIEWS
+    ],
+    # The second frame, which is what separates the scene's aspect from its depth.
+    *[
+        _shape_probe(
+            kind,
+            f"f{height}",
+            DEFAULT_VIEW,
+            frame=(FRAME_WIDTH, height * 12700),
+        )
+        for kind in SHAPE_KINDS
+        for height in (120, 330)
+    ],
+    # The series count, on both frames: a ``line3DChart``'s depth *grows* with it.
+    *[
+        _shape_probe(
+            kind,
+            f"n{count}-f{height}",
+            DEFAULT_VIEW,
+            series=count,
+            frame=(FRAME_WIDTH, height * 12700),
+        )
+        for kind in ("line3D", "area3D")
+        for count in (2, 3, 4)
+        for height in (195, 120)
+    ],
+    # A pie folds ``rotY`` into the camera or into its own seam, and those look different
+    # past a quarter turn.
+    *[
+        _shape_probe("pie3D", f"ry{value}", _view(rotY=value))
+        for value in (135, 180, 270)
+    ],
+]
+
+
+#: **The scene aspect against the series count.**  ``view3d-shape`` measured each group
+#: element's scene over eleven cameras at one series and found the aspect a clean multiple
+#: of the region's -- 1.0 for a ``bar3DChart``, 0.6 for a ``line3DChart``, 0.4 for an
+#: ``area3DChart`` -- but it swept the series count at one camera only, where the scene is
+#: bound by the region's height and a single reading cannot separate the aspect from the
+#: depth.  This gives every series count four cameras, which is what makes each of them
+#: solvable on its own: two of them pitch the scene into the width-bound branch.
+ASPECT_CAMERAS: list[tuple[str, dict]] = [
+    ("base", DEFAULT_VIEW),
+    ("rx0", _view(rotX=0)),
+    ("rx45", _view(rotX=45)),
+    ("ry90", _view(rotY=90)),
+]
+
+ASPECT_PROBES: list[dict] = [
+    *[
+        {
+            "key": f"a-{kind}-n{count}-{name}",
+            "high": 9.0,
+            "frame": VIEW_FRAME,
+            "kind": kind,
+            "view": view,
+            "series": count,
+            "colours": PROBE_COLOURS,
+            }
+        for kind in ("bar3D", "line3D", "area3D")
+        for count in (1, 2, 3, 4)
+        for name, view in ASPECT_CAMERAS
+    ],
+    # Gallery slide 16's own shape: stacked, two series.  A stacked group stands its series
+    # on top of each other rather than beside them, and whether that changes the scene is
+    # exactly the question the aspect law has to answer for that slide.
+    *[
+        {
+            "key": f"a-area3Dstack-{name}",
+            "high": 9.0,
+            "frame": VIEW_FRAME,
+            "kind": "area3Dstack",
+            "view": view,
+            "series": 2,
+            "colours": PROBE_COLOURS,
+        }
+        for name, view in ASPECT_CAMERAS
+    ],
+]
+
 DECKS = {
     "view3d-meter": METER_PROBES,
     "view3d-view": VIEW_PROBES,
     "view3d-type": TYPE_PROBES,
     "view3d-series": SERIES_PROBES,
+    "view3d-colour": COLOUR_PROBES,
+    "view3d-shape": SHAPE_PROBES,
+    "view3d-aspect": ASPECT_PROBES,
 }
 
 CATEGORIES = ("C1", "C2", "C3", "C4", "C5")
@@ -272,19 +479,38 @@ def view_xml(view: dict | None) -> str:
     return f"<c:view3D>{body}</c:view3D>"
 
 
-def series_xml(high: float, index: int = 0, scale: float = 1.0) -> str:
-    values = [high * factor * scale for factor in FACTORS]
+def series_xml(
+    high: float,
+    index: int = 0,
+    scale: float = 1.0,
+    colour: str | None = None,
+    categories: tuple[str, ...] = CATEGORIES,
+) -> str:
+    """One ``c:ser``.  *colour* states its fill as an explicit ``srgbClr``.
+
+    The colour deck needs the fill stated rather than inherited, because what it measures
+    is the ratio between a face's drawn colour and the fill it came from, and a theme
+    colour would leave the denominator to be looked up rather than known.
+    """
+    values = [high * factor * scale for factor in FACTORS[: len(categories)]]
     values[1] = high * scale
     points = "".join(f"<c:pt idx='{i}'><c:v>{v!r}</c:v></c:pt>" for i, v in enumerate(values))
     cats = "".join(
-        f"<c:pt idx='{i}'><c:v>{name}</c:v></c:pt>" for i, name in enumerate(CATEGORIES)
+        f"<c:pt idx='{i}'><c:v>{name}</c:v></c:pt>" for i, name in enumerate(categories)
+    )
+    fill = (
+        f"<c:spPr><a:solidFill><a:srgbClr val='{colour}'/></a:solidFill>"
+        "<a:ln><a:noFill/></a:ln></c:spPr>"
+        if colour
+        else ""
     )
     return (
         f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
         "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
         f"<c:pt idx='0'><c:v>S{index + 1}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
-        "<c:cat><c:strRef><c:strCache>"
-        f"<c:ptCount val='{len(CATEGORIES)}'/>{cats}</c:strCache></c:strRef></c:cat>"
+        + fill
+        + "<c:cat><c:strRef><c:strCache>"
+        f"<c:ptCount val='{len(categories)}'/>{cats}</c:strCache></c:strRef></c:cat>"
         "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
         f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef></c:val>"
         "</c:ser>"
@@ -332,7 +558,15 @@ def axes_xml(kind: str) -> str:
     )
 
 
-def group_xml(kind: str, high: float, series: int = 1, gap_depth: int = 150) -> str:
+def group_xml(
+    kind: str,
+    high: float,
+    series: int = 1,
+    gap_depth: int = 150,
+    colours: tuple[str, ...] | None = None,
+    categories: tuple[str, ...] = CATEGORIES,
+    scales: tuple[float, ...] | None = None,
+) -> str:
     """One ``c:*Chart`` group.  A 3-D group states three ``c:axId`` children, exactly.
 
     *series* is the number of ``c:ser`` children, which is what a 3-D chart lays out
@@ -340,7 +574,13 @@ def group_xml(kind: str, high: float, series: int = 1, gap_depth: int = 150) -> 
     "the scene's depth is ``depthPercent`` of its width" from "it is that per row".
     """
     body = "".join(
-        series_xml(high, index, 1.0 if series == 1 else 0.6 - 0.15 * index)
+        series_xml(
+            high,
+            index,
+            (scales[index] if scales else (1.0 if series == 1 else 0.6 - 0.15 * index)),
+            colours[index] if colours else None,
+            categories,
+        )
         for index in range(series)
     )
     depth_gap = f"<c:gapDepth val='{gap_depth}'/>"
@@ -372,13 +612,30 @@ def group_xml(kind: str, high: float, series: int = 1, gap_depth: int = 150) -> 
         )
     if kind == "area3Dstack":
         # Gallery slide 16 is stacked and two-series, which is the one shape the single
-        # series above cannot rule out on its own.
+        # series above cannot rule out on its own.  Two is what *stacked* means here, so
+        # the count is fixed rather than read from the probe -- but the fills and the gap
+        # are the probe's, so a colour reading of this kind has a denominator.
+        stacked = "".join(
+            series_xml(high, index, scale, colours[index] if colours else None, categories)
+            for index, scale in enumerate((0.6, 0.4))
+        )
         return (
             "<c:area3DChart><c:grouping val='stacked'/><c:varyColors val='0'/>"
-            + series_xml(high, 0, 0.6)
-            + series_xml(high, 1, 0.4)
-            + "<c:gapDepth val='150'/>" + ids3 + "</c:area3DChart>"
+            + stacked
+            + depth_gap + ids3 + "</c:area3DChart>"
         )
+    if kind == "pie3D":
+        # A pie has no axes and one series, so its slices carry the colours: ``c:dPt``
+        # per point, stated rather than inherited for the same reason the bars' are.
+        points = "".join(
+            f"<c:dPt><c:idx val='{i}'/><c:bubble3D val='0'/>"
+            f"<c:spPr><a:solidFill><a:srgbClr val='{(colours or PIE_COLOURS)[i]}'/>"
+            "</a:solidFill><a:ln><a:noFill/></a:ln></c:spPr></c:dPt>"
+            for i in range(len(categories))
+        )
+        ser = series_xml(high, 0, 1.0, None, categories)
+        ser = ser.replace("<c:cat>", points + "<c:cat>", 1)
+        return "<c:pie3DChart><c:varyColors val='1'/>" + ser + "</c:pie3DChart>"
     raise SystemExit(f"unknown probe kind {kind!r}")
 
 
@@ -394,7 +651,13 @@ def chart_part(probe: dict) -> bytes:
         + "<c:autoTitleDeleted val='1'/>"
         "<c:plotArea><c:layout/>"
         + group_xml(
-            kind, probe["high"], probe.get("series", 1), probe.get("gapDepth", 150)
+            kind,
+            probe["high"],
+            probe.get("series", 1),
+            probe.get("gapDepth", 150),
+            probe.get("colours"),
+            probe.get("categories", CATEGORIES),
+            probe.get("scales"),
         )
         + axes_xml(kind)
         + "</c:plotArea>"

@@ -39,7 +39,7 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8025,
+    "histogram": 0.8007,
     "slides": [
       {
         "coverage": 0.0778,
@@ -159,13 +159,13 @@
         "ssim": 0.5882
       },
       {
-        "coverage": 0.0646,
-        "histogram": 0.9292,
-        "mean_abs": 8.434,
-        "over10": 6.452,
-        "over64": 5.318,
+        "coverage": 0.0606,
+        "histogram": 0.8976,
+        "mean_abs": 7.774,
+        "over10": 6.045,
+        "over64": 4.925,
         "sparse": false,
-        "ssim": 0.0689
+        "ssim": 0.1207
       },
       {
         "coverage": 0.2408,
@@ -195,7 +195,7 @@
         "ssim": 0.762
       }
     ],
-    "ssim": 0.6928
+    "ssim": 0.6959
   },
   "real-basic-theme": {
     "fonts": {

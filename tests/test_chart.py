@@ -7362,23 +7362,29 @@ def test_the_three_d_spelling_survives_the_flattening():
 
 
 @pytest.mark.parametrize(
-    "kind,unit,wide_unit",
+    "kind,top,unit,wide_unit",
     [
         # A `bar3DChart`'s camera is applied, so its axis is divided by the count the
         # *drawn* plot leaves room for; ``view3d-meter``'s ``m195-F`` and ``m195-G`` are
         # these two charts and PowerPoint drew them 0..50 by 10 and 0..100 by 20.
-        ("bar3DChart", 10.0, 20.0),
-        # A `line3DChart` and an `area3DChart` keep the flat plot rectangle -- their
-        # scenes are measured and not modelled, see `three_d_camera` -- so they are
-        # divided by the count the frame leaves room for and come out finer than
-        # PowerPoint's own 0..50 by 10 and 0..60 by 20.  Recorded rather than asserted
-        # away: the extent is the thing this test is about and it is right on all three.
-        ("line3DChart", 5.0, 10.0),
-        ("area3DChart", 5.0, 10.0),
+        ("bar3DChart", 50.0, 10.0, 20.0),
+        # And so are a `line3DChart`'s and an `area3DChart`'s, now that their scenes are
+        # measured too (`three_d_scene_shape`).  Both used to be divided by the count the
+        # whole *frame* leaves room for and came out finer than PowerPoint on all four
+        # readings; ``view3d-meter``'s ``type-line3D-F/G`` and ``type-area3D-F/G`` are
+        # those readings and every one of them is now drawn exactly.
+        ("line3DChart", 50.0, 10.0, 20.0),
+        # An `area3DChart`'s scene is 0.4 of the region's aspect, so the same data on the
+        # same frame leaves room for three intervals where a `line3DChart` has room for
+        # five -- and **PowerPoint stops at 60 rather than 50**, because the bare rule
+        # rounds the extent outwards to whole units and at a unit of 20 that is 60.  That
+        # is the rule working, not a headroom: ``type-area3D-F`` is drawn 0..60 by 20 and
+        # its 59.04 pt plot is reproduced to 0.01 pt.
+        ("area3DChart", 60.0, 20.0, 50.0),
     ],
 )
-def test_a_three_d_value_axis_is_not_padded(kind, unit, wide_unit):
-    """The measured half of the 3-D axis: the extent stops at the data.
+def test_a_three_d_value_axis_is_not_padded(kind, top, unit, wide_unit):
+    """The measured half of the 3-D axis: the extent is not padded before it is rounded.
 
     ``view3d-meter`` draws 0..50 and 0..96 on seven frames and three group elements.
     PowerPoint drew 0..50 and 0..100 every time -- never the 0..55/0..60 and 0..120 a 5%
@@ -7387,11 +7393,14 @@ def test_a_three_d_value_axis_is_not_padded(kind, unit, wide_unit):
     rule solves all 52.  The two flat controls on the same deck are the other way round.
 
     The **unit** is the other half, and it is the depth reservation rather than the range:
-    see :func:`~pptx2svg.resolve.chart.three_d_plot_rect`.
+    see :func:`~pptx2svg.resolve.chart.three_d_plot_rect`.  The two interact, which is why
+    one row here stops at 60 rather than 50: the bare rule rounds the extent outwards to
+    whole units, so a coarse enough unit clears the data without any headroom being added.
+    PowerPoint does the same on the same chart.
     """
     _, data = _build(three_d_chart_xml(kind, high=50.0), width=684.0, height=195.0)
     assert data.value_axis == m.ChartAxisScale(
-        minimum=0.0, maximum=50.0, major_unit=unit
+        minimum=0.0, maximum=top, major_unit=unit
     )
 
     _, wider = _build(three_d_chart_xml(kind, high=96.0), width=684.0, height=195.0)
@@ -7572,8 +7581,21 @@ def test_the_camera_is_applied_only_where_it_is_measured():
     )
     assert three_d_camera(right_angled, "bar3DChart") is right_angled
     assert three_d_camera(SourceChartView3D(), "bar3DChart") is not None
-    assert three_d_camera(right_angled, "line3DChart") is None
-    assert three_d_camera(right_angled, "area3DChart") is None
+    # A `line3DChart` and an `area3DChart` pass now: their scenes are 0.6 and 0.4 of the
+    # region's aspect and one unit of depth per series, read off eleven cameras each.
+    assert three_d_camera(right_angled, "line3DChart") is right_angled
+    assert three_d_camera(right_angled, "area3DChart") is right_angled
+    # ... but only over the series counts the ladder in `three_d_scene_shape` was read at,
+    # and not stacked, whose four cameras do not fit one box.
+    assert three_d_camera(right_angled, "line3DChart", series=5) is None
+    assert three_d_camera(right_angled, "area3DChart", series=9) is None
+    assert (
+        three_d_camera(right_angled, "area3DChart", series=2, grouping="stacked") is None
+    )
+    assert three_d_camera(right_angled, "bar3DChart", series=9) is not None
+    # A pie's flat rectangle is already PowerPoint's: its scene raster is the plot region
+    # itself at every camera, and neither `rotY` nor `depthPercent` moves the ink in it.
+    assert three_d_camera(right_angled, "pie3DChart") is None
     assert three_d_camera(right_angled, "barChart") is None
     assert three_d_camera(None, "bar3DChart") is None
     assert (
@@ -7620,20 +7642,172 @@ def test_a_three_d_bar_chart_draws_in_the_faces_rectangle():
     assert left > flat_left and right < flat_right
 
 
+#: ``view3d-shape`` and ``view3d-aspect``, solved: per group element and series count, the
+#: scene's aspect as a multiple of the region's and its depth in units of
+#: ``depthPercent``.  Each row is four or eleven cameras fitted together -- two of them
+#: width-bound and two height-bound, which is what makes the aspect and the depth separable
+#: at all -- at 0.14 pt rms or better on a scene six hundred points wide.
+VIEW_3D_SHAPE_READINGS = [
+    ("bar3DChart", 1, 0.9908), ("bar3DChart", 2, 0.9952),
+    ("bar3DChart", 3, 0.9948), ("bar3DChart", 4, 0.9943),
+    ("line3DChart", 1, 0.5948), ("line3DChart", 2, 0.5939),
+    ("line3DChart", 3, 0.7891), ("line3DChart", 4, 0.7943),
+    ("area3DChart", 1, 0.4037), ("area3DChart", 2, 0.5962),
+    ("area3DChart", 3, 0.5910), ("area3DChart", 4, 0.7895),
+]
+
+
+def test_each_group_elements_scene_is_the_shape_its_raster_says():
+    """`three_d_scene_shape` against the boxes the probe decks' rasters occupy.
+
+    PowerPoint draws the scene as one image object and that object's box *is* the scene's
+    box, so a camera sweep solves the scene's proportions without a single vertex.  The
+    ``bar3DChart`` rows are the control: they come back at the region's own aspect, which
+    is what the tick labels independently say, and the other two are read against them.
+    """
+    from pptx2svg.resolve.chart import three_d_scene_shape
+
+    for kind, series, aspect in VIEW_3D_SHAPE_READINGS:
+        shape = three_d_scene_shape(kind, series)
+        assert shape is not None, (kind, series)
+        assert shape[0] == pytest.approx(aspect, abs=0.011), (kind, series)
+        # A `bar3DChart` divides one depth between its series; the other two stand one
+        # series per row, and four counts came back 1.03, 2.01, 3.01 and 4.00 units.
+        assert shape[1] == (None if kind == "bar3DChart" else float(series))
+
+
+def test_a_pie_needs_no_camera_because_its_rectangle_is_already_powerpoints():
+    """The other half of the per-type measurement, and it is a refusal.
+
+    A ``pie3DChart``'s scene raster is the plot region itself -- 662.40 x 173.28 pt on a
+    195 pt frame -- at **every** camera: six yaws from 0 to 270 degrees and depths of 20%
+    and 500% all drew the same 481.92 x 168.24 pt of ink inside it, to the hundredth of a
+    point.  So neither ``rotY`` nor ``depthPercent`` moves a pie at all, and there is no
+    displacement for a camera to apply.  That also refutes, for PowerPoint, the reference
+    renderer's pie: `@silurus/ooxml` folds ``rotY`` into the camera and rotates the whole
+    solid with it.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import three_d_camera, three_d_scene_shape
+
+    view = SourceChartView3D(rot_x=15, rot_y=20, depth_percent=100, right_angle_axes=True)
+    assert three_d_scene_shape("pie3DChart", 1) is None
+    assert three_d_camera(view, "pie3DChart") is None
+
+
+#: What ``view3d-colour``'s rasters draw, per stated fill and per face, at **every one of
+#: the forty-two cameras that shows that face**: twelve pitches from -45 to 90 degrees,
+#: fifteen yaws from 0 to 315, eight diagonals, two depths, two stated heights and three
+#: series counts.  Not one of them moves a byte -- which is the whole of Stage 2's colour
+#: question, and the answer is "constants".  The fills are chosen for channel spread,
+#: because what separates a multiply in sRGB from one in linear light is an offset that
+#: only shows on a dark channel.
+VIEW_3D_FACE_READINGS = {
+    "4472C4": {"top": "345695", "right": "2A487E", "left": "1A2C4E"},
+    "ED7D31": {"top": "B55E24", "right": "97501E", "left": "5E3212"},
+    "FF3300": {"top": "C12600", "right": "A32000", "left": "661400"},
+    "103070": {"top": "0C2456", "right": "0A1E48", "left": "06122C"},
+}
+
+
+def test_a_prisms_faces_are_constants_and_not_a_lighting_model():
+    """`VIEW_3D_FACE_SHADES` against the rasters it was read off.
+
+    Every value here is a multiple of the fill **per sRGB channel**, and it reproduces the
+    twelve channels of all four fills to within one level -- which is what the export's own
+    rounding moves a flat fill by, so it is the floor rather than a residual.
+
+    The negative result is the point.  `@silurus/ooxml`'s `meshMaterialFactor` evaluates a
+    clamped Lambert term on the **camera-space** normal, so its face factors move with
+    `rotX` and `rotY`; PowerPoint's do not move at all, at any of the cameras
+    ``view3d-colour`` sweeps.  The model is refuted for PowerPoint and the shape of the
+    rule -- one flat factor per face, multiplying the triple -- survives.
+    """
+    from pptx2svg.resolve.chart import VIEW_3D_FACE_SHADES
+
+    assert VIEW_3D_FACE_SHADES["left"] == VIEW_3D_FACE_SHADES["bottom"]
+    for fill, faces in VIEW_3D_FACE_READINGS.items():
+        base = [int(fill[i : i + 2], 16) for i in (0, 2, 4)]
+        assert [round(VIEW_3D_FACE_SHADES["front"] * c) for c in base] == base
+        for face, drawn in faces.items():
+            want = [int(drawn[i : i + 2], 16) for i in (0, 2, 4)]
+            got = [round(VIEW_3D_FACE_SHADES[face] * c) for c in base]
+            assert all(abs(a - b) <= 1 for a, b in zip(got, want)), (
+                f"{fill} {face}: {got} against the drawn {want}"
+            )
+
+
+def test_the_face_shades_are_a_multiply_in_srgb_and_not_in_linear_light():
+    """The colour *space*, which this project has the opposite answer for next door.
+
+    ROADMAP.md 3.2 measured PowerPoint's chart accent cycle modulating the linear-light
+    value of each channel.  A 3-D face does not: scaling the linear light and converting
+    back is an affine map in sRGB, ``k * c - 0.055 * (1 - k)``, whose offset is invisible
+    on a bright channel and a tenth of a dark one -- and the dark channels are where it
+    misses.  ``103070``'s top face is drawn ``#0C2456``; a linear scaling that gets its
+    blue right puts its red at 10 where PowerPoint drew 12, and one that gets the red right
+    puts the blue at 95 against 86.
+    """
+    from pptx2svg.resolve.chart import VIEW_3D_FACE_SHADES
+
+    def to_linear(c):
+        c /= 255.0
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    def to_srgb(v):
+        v = 12.92 * v if v <= 0.0031308 else 1.055 * v ** (1 / 2.4) - 0.055
+        return v * 255.0
+
+    worst_srgb = worst_linear = 0.0
+    for face in ("top", "right", "left"):
+        # The best linear-light scaling for this face, fitted the same way the sRGB one was
+        top = sum(
+            to_linear(int(VIEW_3D_FACE_READINGS[fill][face][i : i + 2], 16))
+            * to_linear(int(fill[i : i + 2], 16))
+            for fill in VIEW_3D_FACE_READINGS
+            for i in (0, 2, 4)
+        )
+        bottom = sum(
+            to_linear(int(fill[i : i + 2], 16)) ** 2
+            for fill in VIEW_3D_FACE_READINGS
+            for i in (0, 2, 4)
+        )
+        k = top / bottom
+        for fill, faces in VIEW_3D_FACE_READINGS.items():
+            for i in (0, 2, 4):
+                base = int(fill[i : i + 2], 16)
+                drawn = int(faces[face][i : i + 2], 16)
+                worst_srgb = max(worst_srgb, abs(drawn - VIEW_3D_FACE_SHADES[face] * base))
+                worst_linear = max(
+                    worst_linear, abs(drawn - to_srgb(min(1.0, k * to_linear(base))))
+                )
+    assert worst_srgb < 1.5
+    assert worst_linear > 4.0
+
+
 def test_the_three_d_warning_says_whether_the_camera_was_applied(chart_gallery):
     """The warning is a claim about what was drawn, so it has to track the gate.
 
     A chart whose plot rectangle is PowerPoint's and whose scene is missing has a
-    different defect from one drawn in a rectangle PowerPoint never used, and slide 13 and
-    slide 14 of the gallery are one of each.
+    different defect from one drawn in a rectangle PowerPoint never used, and the gallery's
+    four 3-D slides are two of each: 13's ``bar3DChart`` and 14's ``line3DChart`` get the
+    camera, 15's ``pie3DChart`` needs none -- its flat rectangle is already PowerPoint's --
+    and 16's **stacked** ``area3DChart`` is the one whose scene is not settled.
+
+    The gate reads the series count and the grouping, so this has to pass them: a plot's
+    kind alone would say "camera" for slide 16, which is the wrong claim about a chart
+    whose rectangle did not move.
     """
     options = ConvertOptions()
     convert_pptx_to_model(chart_gallery, options)
     flattened = [w for w in options.warnings if w.code == "chart-3d-flattened"]
     assert len(flattened) == 4
-    placed = [w for w in flattened if "camera places and sizes" in w.message]
-    assert len(placed) == 1
-    assert "bar3DChart" in placed[0].message
+    placed = {
+        w.slide_number
+        for w in flattened
+        if "camera places and sizes" in w.message
+    }
+    assert placed == {13, 14}
     assert all("is drawn flat" in w.message for w in flattened)
 
 
