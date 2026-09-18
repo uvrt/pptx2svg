@@ -71,6 +71,14 @@ ARROW_SIZES = {"sm", "med", "lg"}
 RECTANGLE_ALIGNMENTS = {"tl", "t", "tr", "l", "ctr", "r", "bl", "b", "br"}
 LINE_CAP_MAP = {"flat": "butt", "sq": "square", "rnd": "round"}
 
+#: ``a:ln@cmpd`` -- how many parallel strokes the one outline is drawn as.  ``sng`` is
+#: the default and the only one that is a single stroke; the rest lay two or three
+#: strokes across the stated width ``w``, which SVG's one centred stroke per path cannot
+#: express.  Kept because the *renderer* has to know it is simplifying: a ``dbl`` border
+#: drawn as one stroke is the right colour, the right width and the wrong picture, and
+#: silence about that is the defect this field exists to stop.
+COMPOUND_LINE_TYPES = {"sng", "dbl", "thickThin", "thinThick", "tri"}
+
 #: ``a:prstClr`` names we map; the full ECMA-376 list is ~140 entries and the rest fall
 #: back to black.
 PRESET_COLOR_HEX = {
@@ -278,10 +286,34 @@ def parse_blip_fill(blip_fill: Element) -> SourceFill | None:
         return None
     return SourceImageFill(
         blip_relationship_id=embed,
+        svg_relationship_id=parse_svg_blip_rel_id(blip),
         tile=parse_image_fill_tile(child(blip_fill, "tile")),
         src_rect=parse_relative_rect(child(blip_fill, "srcRect")),
         stretch=parse_relative_rect(child(child(blip_fill, "stretch"), "fillRect")),
     )
+
+
+def parse_svg_blip_rel_id(blip: Element | None) -> str | None:
+    """``a:blip/a:extLst/a:ext/asvg:svgBlip@r:embed`` -- the vector original of a picture.
+
+    PowerPoint stores an SVG picture *twice*: a rasterised PNG in ``a:blip@r:embed``, so
+    that every consumer draws something, and the SVG itself hung off the blip in an
+    extension.  Readers that do not know the extension get the raster and are none the
+    wiser, which is the point of the design -- and is also why missing it is invisible:
+    the picture is simply soft, at whatever size PowerPoint happened to rasterise it.
+
+    We embed SVG directly, so the vector is strictly the better of the two.  The
+    extension's ``uri`` is a fixed GUID, but it is matched on the element name instead:
+    the name is what identifies it in the schema, and one deck in the wild spelling the
+    GUID differently would cost a picture for nothing.
+    """
+    for ext in children(child(blip, "extLst"), "ext"):
+        svg_blip = child(ext, "svgBlip")
+        if svg_blip is not None:
+            embed = ns_attr(svg_blip, "embed")
+            if embed is not None:
+                return embed
+    return None
 
 
 def parse_image_fill_tile(tile: Element | None) -> SourceImageFillTile | None:
@@ -342,6 +374,7 @@ def parse_line(ln: Element | None) -> SourceOutline | None:
 
     dash = attr(child(ln, "prstDash"), "val")
     cap = attr(ln, "cap")
+    compound = attr(ln, "cmpd")
     return SourceOutline(
         width=num_attr(ln, "w"),
         fill=parse_fill(ln),
@@ -351,6 +384,7 @@ def parse_line(ln: Element | None) -> SourceOutline | None:
         line_join=parse_line_join(ln),
         head_end=parse_arrow_endpoint(child(ln, "headEnd")),
         tail_end=parse_arrow_endpoint(child(ln, "tailEnd")),
+        compound=compound if compound in COMPOUND_LINE_TYPES else None,  # type: ignore[arg-type]
     )
 
 
@@ -476,6 +510,13 @@ def _parse_glow(node: Element | None) -> SourceGlow | None:
     return SourceGlow(radius=num_attr(node, "rad") or 0, color=color)
 
 
+def _alpha_mod_fix(node: Element | None) -> float | None:
+    if node is None:
+        return None
+    amount = (num_attr(node, "amt") or 100000) / 100000
+    return amount if amount < 1 else None
+
+
 def parse_blip_effects(blip: Element | None) -> SourceBlipEffects | None:
     """Read the image adjustment children of ``a:blip`` (grayscale, duotone, ...)."""
     if blip is None:
@@ -486,6 +527,7 @@ def parse_blip_effects(blip: Element | None) -> SourceBlipEffects | None:
     lum = child(blip, "lum")
     duotone = child(blip, "duotone")
     clr_change = child(blip, "clrChange")
+    alpha_mod_fix = child(blip, "alphaModFix")
 
     duotone_colors = None
     if duotone is not None:
@@ -511,6 +553,12 @@ def parse_blip_effects(blip: Element | None) -> SourceBlipEffects | None:
         ),
         duotone=duotone_colors,
         clr_change=change,
+        # `a:alphaModFix@amt` is a 1/1000 percent and defaults to 100%, so a bare
+        # `<a:alphaModFix/>` -- which is what a Google Slides export writes on every
+        # picture -- asks for nothing.  Recording it as 1.0 would put a no-op
+        # `feFuncA slope="1"` into the filter chain of every such picture, so the no-op
+        # is dropped here and only a real reduction survives.
+        alpha=_alpha_mod_fix(alpha_mod_fix),
     )
     if (
         parsed.grayscale
@@ -519,6 +567,7 @@ def parse_blip_effects(blip: Element | None) -> SourceBlipEffects | None:
         or parsed.lum is not None
         or parsed.duotone is not None
         or parsed.clr_change is not None
+        or parsed.alpha is not None
     ):
         return parsed
     return None

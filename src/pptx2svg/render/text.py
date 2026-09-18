@@ -301,6 +301,7 @@ def _render_column(
     # which is why it is accumulated here rather than recovered afterwards.
     baseline = 0.0
     highlights: list[_Highlight] = []
+    bullet_images: list[_BulletImage] = []
     obliques: list[_Oblique] = []
 
     for paragraph in paragraphs:
@@ -314,6 +315,7 @@ def _render_column(
         effective_text_width = text_width - para_margin_left
 
         bullet_text = _bullet_text(properties, auto_num_counters)
+        bullet_blip = properties.bullet if isinstance(properties.bullet, m.BlipBullet) else None
         x_pos, anchor = _alignment(
             properties.alignment, text_start_x, effective_text_width, dims.width, dims.margin_right
         )
@@ -398,6 +400,19 @@ def _render_column(
                     line_dy = ""
                 else:
                     line_dy = dy
+                    if line_index == 0 and bullet_blip is not None:
+                        line_font_size = (
+                            _line_font_size(line.segments, default_font_size) * font_scale
+                        )
+                        bullet_images.append(
+                            _BulletImage(
+                                x=bullet_x,
+                                baseline=baseline + float(dy),
+                                size=_bullet_size_pt(properties, line_font_size) * PX_PER_PT,
+                                image_data=bullet_blip.image_data,
+                                mime_type=bullet_blip.mime_type,
+                            )
+                        )
                 tspans.extend(
                     _render_line(
                         line.segments, x_pos, anchor, line_dy, dims.margin_left,
@@ -443,6 +458,23 @@ def _render_column(
                     f'<tspan x="{num(bullet_x)}" dy="{dy}" text-anchor="start" '
                     f"{_bullet_style_attrs(properties, size, segment, context)}>"
                     f"{escape_xml_text(bullet_text)}</tspan>"
+                )
+
+            if bullet_blip is not None:
+                first_run = next((run for run in paragraph.runs if run.text), None)
+                size = (
+                    (first_run.properties.font_size if first_run and first_run.properties.font_size
+                     else default_font_size)
+                    * font_scale
+                )
+                bullet_images.append(
+                    _BulletImage(
+                        x=bullet_x,
+                        baseline=baseline + float(dy),
+                        size=_bullet_size_pt(properties, size) * PX_PER_PT,
+                        image_data=bullet_blip.image_data,
+                        mime_type=bullet_blip.mime_type,
+                    )
                 )
 
             line_dy = "" if bullet_text else dy
@@ -500,6 +532,10 @@ def _render_column(
         # Behind the text, and in one go: a highlight run is a background, so it must not
         # paint over a neighbouring run's glyphs.
         element = "".join(rect.svg(y_start) for rect in highlights) + element
+    if bullet_images:
+        # After the <text>, like the sheared runs: a picture bullet is a glyph standing
+        # in the hanging indent, not a background, and nothing is drawn under it.
+        element += "".join(bullet.svg(y_start) for bullet in bullet_images)
 
     if body.vert in _VERTICAL_TYPES:
         element = (
@@ -880,6 +916,34 @@ class _Highlight:
         )
 
 
+@dataclass
+class _BulletImage:
+    """One ``a:buBlip`` picture bullet, positioned like :class:`_Highlight`.
+
+    It cannot be a ``<tspan>`` the way every other bullet is: ``<image>`` is not a text
+    content element, so an SVG text run has nowhere to put one.  It is emitted as a
+    sibling of the ``<text>`` instead, which is also why it does not advance the line --
+    the text after it starts at its ordinary indent rather than after the bullet.
+    """
+
+    x: float
+    #: distance from the <text> element's y down to this bullet's own baseline
+    baseline: float
+    size: float
+    image_data: str
+    mime_type: str
+
+    def svg(self, y_start: float) -> str:
+        # Square, sitting on the baseline: the same box a glyph bullet of this size would
+        # occupy, so a deck that swaps a character bullet for a picture keeps its layout.
+        y = y_start + self.baseline - self.size
+        return (
+            f'<image x="{num(self.x)}" y="{num(y)}" width="{num(self.size)}" '
+            f'height="{num(self.size)}" preserveAspectRatio="xMidYMid meet" '
+            f'xlink:href="data:{self.mime_type};base64,{self.image_data}"/>'
+        )
+
+
 def _line_highlights(
     segments: list[LineSegment],
     x_pos: float,
@@ -1014,6 +1078,22 @@ def _to_alpha(number: int) -> str:
     return result
 
 
+def _bullet_size_pt(properties: m.ParagraphProperties, text_font_size_pt: float) -> float:
+    """The bullet's own point size.
+
+    DrawingML spells it two ways and they are mutually exclusive: ``a:buSzPct`` as a
+    fraction of the run it leads, ``a:buSzPts`` as an absolute size.  Only the first was
+    read here, which made every ``buSzPts`` bullet silently take the *run's* size -- the
+    theme in ``real-basic-theme.pptx`` alone sets it 184 times.  The absolute spelling
+    wins if a deck somehow carries both, because it needs no context to apply.
+    """
+    if properties.bullet_size_points is not None:
+        return properties.bullet_size_points
+    if properties.bullet_size_pct is not None:
+        return text_font_size_pt * (properties.bullet_size_pct / 100000)
+    return text_font_size_pt
+
+
 def _bullet_style_attrs(
     properties: m.ParagraphProperties,
     text_font_size_pt: float,
@@ -1022,11 +1102,9 @@ def _bullet_style_attrs(
 ) -> str:
     styles: list[str] = []
 
-    if properties.bullet_size_pct is not None:
-        size = text_font_size_pt * (properties.bullet_size_pct / 100000)
+    size = _bullet_size_pt(properties, text_font_size_pt)
+    if size:
         styles.append(f'font-size="{num(size * PX_PER_PT)}"')
-    elif text_font_size_pt:
-        styles.append(f'font-size="{num(text_font_size_pt * PX_PER_PT)}"')
 
     # A bullet with no `buFont` inherits the first run's typeface.
     chain = [

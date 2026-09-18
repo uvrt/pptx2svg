@@ -94,6 +94,10 @@ ArrowType = Literal["none", "triangle", "stealth", "diamond", "oval", "arrow"]
 ArrowSize = Literal["sm", "med", "lg"]
 LineCap = Literal["butt", "round", "square"]
 LineJoin = Literal["miter", "round", "bevel"]
+#: ``a:ln@cmpd``.  Every value but ``sng`` lays two or three parallel strokes across the
+#: stated width; SVG gives a path one centred stroke, so the others are drawn as a single
+#: stroke of the full width and declared through the ``line-compound-flattened`` warning.
+CompoundLineType = Literal["sng", "dbl", "thickThin", "thinThick", "tri"]
 DashStyle = Literal[
     "solid", "dash", "dot", "dashDot", "lgDash", "lgDashDot", "lgDashDotDot", "sysDash", "sysDot"
 ]
@@ -117,6 +121,9 @@ class Outline:
     line_join: LineJoin | None = None
     head_end: ArrowEndpoint | None = None
     tail_end: ArrowEndpoint | None = None
+    #: ``a:ln@cmpd``.  ``None`` and ``"sng"`` both mean one stroke; anything else is
+    #: drawn as one stroke of the full width, which the resolver warns about.
+    compound: CompoundLineType | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -202,6 +209,8 @@ class BlipEffects:
     lum: LumEffect | None = None
     duotone: DuotoneEffect | None = None
     clr_change: ClrChangeEffect | None = None
+    #: ``a:alphaModFix@amt`` -- 0..1 opacity over the whole picture.
+    alpha: float | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -252,7 +261,21 @@ class AutoNumBullet:
     type: Literal["autoNum"] = "autoNum"
 
 
-BulletType = Union[NoBullet, CharBullet, AutoNumBullet]
+@dataclass
+class BlipBullet:
+    """``a:buBlip`` -- a picture used as the bullet glyph.
+
+    Carries the image itself rather than a relationship id, for the same reason
+    :class:`ImageElement` does: by the time the renderer runs there is no package left
+    to look anything up in.
+    """
+
+    image_data: str
+    mime_type: str
+    type: Literal["blip"] = "blip"
+
+
+BulletType = Union[NoBullet, CharBullet, AutoNumBullet, BlipBullet]
 
 
 @dataclass
@@ -318,6 +341,10 @@ class ParagraphProperties:
     bullet_font: str | None = None
     bullet_color: ResolvedColor | None = None
     bullet_size_pct: float | None = None
+    #: ``a:buSzPts@val`` in points -- an *absolute* bullet size, where ``bullet_size_pct``
+    #: is relative to the run.  The two are mutually exclusive in the schema; this one
+    #: wins if a deck somehow carries both, because it needs no context to apply.
+    bullet_size_points: float | None = None
     margin_left: float | None = None
     indent: float | None = None
     tab_stops: list[TabStop] = field(default_factory=list)

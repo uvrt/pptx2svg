@@ -19,6 +19,7 @@ from typing import Literal, Union
 from ..model import (
     ArrowEndpoint,
     BulletType,
+    CompoundLineType,
     CustomGeometryPath,
     DashStyle,
     LineCap,
@@ -116,6 +117,8 @@ class SourceImageFillTile:
 @dataclass
 class SourceImageFill:
     blip_relationship_id: str
+    #: ``asvg:svgBlip@r:embed`` -- the vector original, when the blip carries one.
+    svg_relationship_id: str | None = None
     tile: SourceImageFillTile | None = None
     src_rect: tuple[float, float, float, float] | None = None
     stretch: tuple[float, float, float, float] | None = None
@@ -157,6 +160,8 @@ class SourceOutline:
     line_join: LineJoin | None = None
     head_end: ArrowEndpoint | None = None
     tail_end: ArrowEndpoint | None = None
+    #: ``a:ln@cmpd`` -- ``sng`` (the default) or one of the multi-stroke spellings.
+    compound: CompoundLineType | None = None
 
 
 @dataclass
@@ -225,6 +230,8 @@ class SourceBlipEffects:
     lum: tuple[float, float] | None = None
     duotone: tuple[SourceColor, SourceColor] | None = None
     clr_change: tuple[SourceColor, SourceColor] | None = None
+    #: ``a:alphaModFix@amt`` -- 0..1 opacity applied to the whole picture.
+    alpha: float | None = None
 
 
 # --------------------------------------------------------------------------------------
@@ -295,6 +302,23 @@ class SourceTextRun:
 
 
 @dataclass
+class SourceBlipBullet:
+    """``a:buBlip`` as parsed -- a relationship id, not yet an image.
+
+    The model's :class:`~pptx2svg.model.BlipBullet` carries the bytes; turning one into
+    the other needs the package, which is the resolver's to hold and not the reader's.
+    """
+
+    relationship_id: str
+    type: Literal["blip"] = "blip"
+
+
+#: A bullet as *parsed*.  Identical to the model's union except for the picture bullet,
+#: which is still a relationship id at this stage.
+SourceBulletType = Union[BulletType, SourceBlipBullet]
+
+
+@dataclass
 class SourceParagraphProperties:
     align: Literal["l", "ctr", "r", "just"] | None = None
     level: int | None = None
@@ -303,10 +327,12 @@ class SourceParagraphProperties:
     space_after: SpacingValue | None = None
     margin_left: float | None = None
     indent: float | None = None
-    bullet: BulletType | None = None
+    bullet: SourceBulletType | None = None
     bullet_font: str | None = None
     bullet_color: SourceColor | None = None
     bullet_size_pct: float | None = None
+    #: ``a:buSzPts@val`` in points -- the absolute spelling of a bullet's size.
+    bullet_size_points: float | None = None
     tab_stops: list[TabStop] | None = None
     default_run_properties: SourceRunProperties | None = None
 
@@ -404,6 +430,8 @@ class SourceConnector:
 @dataclass
 class SourceImage:
     blip_relationship_id: str | None = None
+    #: ``asvg:svgBlip@r:embed`` -- the vector original, when the blip carries one.
+    svg_relationship_id: str | None = None
     name: str | None = None
     shape_id: str | None = None
     alt_text: str | None = None

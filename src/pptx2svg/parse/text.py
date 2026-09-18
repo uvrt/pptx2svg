@@ -16,7 +16,6 @@ from xml.etree.ElementTree import Element
 
 from ..model import (
     AutoNumBullet,
-    BulletType,
     CharBullet,
     NoBullet,
     PercentSpacing,
@@ -37,6 +36,8 @@ from ..xmlutil import (
 )
 from .drawing import parse_color
 from .source import (
+    SourceBlipBullet,
+    SourceBulletType,
     SourceParagraph,
     SourceParagraphProperties,
     SourceRunProperties,
@@ -187,6 +188,11 @@ def parse_paragraph_properties(p_pr: Element | None) -> SourceParagraphPropertie
         bullet_font=attr(child(p_pr, "buFont"), "typeface"),
         bullet_color=parse_color(child(p_pr, "buClr")),
         bullet_size_pct=num_attr(child(p_pr, "buSzPct"), "val"),
+        # `a:buSzPts@val` is in 1/100 pt, the same unit as `a:rPr@sz`.
+        bullet_size_points=(
+            points / 100 if (points := num_attr(child(p_pr, "buSzPts"), "val")) is not None
+            else None
+        ),
         tab_stops=parse_tab_stops(p_pr),
         default_run_properties=parse_run_properties(child(p_pr, "defRPr")),
     )
@@ -214,11 +220,19 @@ def parse_spacing(node: Element | None) -> SpacingValue | None:
     return None
 
 
-def parse_bullet(p_pr: Element | None) -> BulletType | None:
+def parse_bullet(p_pr: Element | None) -> SourceBulletType | None:
     if p_pr is None:
         return None
     if child(p_pr, "buNone") is not None:
         return NoBullet()
+    # `a:buBlip` is checked before the glyph spellings because it is the one that cannot
+    # be approximated: a picture bullet whose blip is unreadable has to fall through to
+    # *no* bullet rather than to a character nobody asked for.
+    bu_blip = child(p_pr, "buBlip")
+    if bu_blip is not None:
+        embed = ns_attr(child(bu_blip, "blip"), "embed")
+        if embed is not None:
+            return SourceBlipBullet(relationship_id=embed)
     bu_char = child(p_pr, "buChar")
     if bu_char is not None:
         return CharBullet(char=decode_char_refs(attr(bu_char, "char") or "•"))

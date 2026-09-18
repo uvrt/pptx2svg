@@ -173,6 +173,9 @@ class ResolveContext:
     id_prefix: str = ""
     #: Optional external EMF/WMF converter; see :data:`MetafileConverter`.
     metafile_converter: MetafileConverter | None = None
+    #: ``a:ln@cmpd`` spellings already reported, so a themed table's hundreds of
+    #: identically-compound cell borders warn once rather than once each.
+    compound_lines_warned: set[str] = field(default_factory=set)
 
     def warn(self, code: str, message: str) -> None:
         self.warnings.append(
@@ -495,7 +498,7 @@ def _resolve_image(context: ResolveContext, image: s.SourceImage) -> m.SlideElem
         image.transform, _node_transform(layout_node), _node_transform(master_node)
     )
 
-    media = _load_media_bytes(context, image.blip_relationship_id)
+    media = _preferring_vector(context, image.svg_relationship_id, image.blip_relationship_id)
     if media is None:
         context.warn(
             "unresolved-image",
@@ -1499,7 +1502,7 @@ def _resolve_fill(context: ResolveContext, fill: s.SourceFill | None) -> m.Fill 
         )
 
     if isinstance(fill, s.SourceImageFill):
-        media = _load_media_bytes(context, fill.blip_relationship_id)
+        media = _preferring_vector(context, fill.svg_relationship_id, fill.blip_relationship_id)
         if media is None:
             return None
         payload, mime_type = media
@@ -1542,7 +1545,40 @@ def _resolve_outline(
         line_join=outline.line_join,
         head_end=outline.head_end,
         tail_end=outline.tail_end,
+        compound=_compound_line(context, outline.compound),
     )
+
+
+def _compound_line(
+    context: ResolveContext, compound: m.CompoundLineType | None
+) -> m.CompoundLineType | None:
+    """Pass ``a:ln@cmpd`` through, warning once per deck when it is one we flatten.
+
+    ``dbl``, ``thickThin``, ``thinThick`` and ``tri`` lay two or three parallel strokes
+    across the width the line declares.  SVG gives a path exactly one stroke, centred on
+    it, and there is no way to offset a stroke outwards from an arbitrary path -- so what
+    gets drawn is one stroke of the full width: the right colour, the right weight, the
+    right place, and a solid line where the deck asked for a split one.
+
+    That is the ``chart-3d-flattened`` shape of defect rather than the
+    ``chart-unsupported-type`` shape: something *is* drawn and it is simplified.  So it
+    warns rather than either failing or staying silent.
+
+    **Warned once, not once per line.**  A themed table puts ``cmpd`` on all four borders
+    of every cell; a per-line warning would run to hundreds of identical lines and bury
+    everything else the conversion had to say.
+    """
+    if compound is None or compound == "sng":
+        return compound
+    if compound not in context.compound_lines_warned:
+        context.compound_lines_warned.add(compound)
+        context.warn(
+            "line-compound-flattened",
+            f"a line is {compound!r} -- two or three parallel strokes across its stated "
+            "width -- and is drawn as one stroke of that full width instead: its colour, "
+            "weight and position are right and the split down it is missing",
+        )
+    return compound
 
 
 def _resolve_fill_reference(
@@ -1693,6 +1729,7 @@ def _resolve_blip_effects(
         else None,
         duotone=duotone,
         clr_change=change,
+        alpha=effects.alpha,
     )
 
 
@@ -1716,6 +1753,28 @@ def _load_media_bytes(context: ResolveContext, rel_id: str | None) -> tuple[byte
         extension = target.rsplit(".", 1)[-1].lower()
         mime_type = MIME_BY_EXTENSION.get(extension, "image/png")
     return payload, mime_type
+
+
+def _preferring_vector(
+    context: ResolveContext, svg_rel_id: str | None, raster_rel_id: str | None
+) -> tuple[bytes, str] | None:
+    """The vector original of a picture when there is one, else the raster it ships with.
+
+    ``asvg:svgBlip`` names the SVG a picture was rasterised *from*, and the raster in
+    ``a:blip@r:embed`` exists so that a consumer which cannot draw SVG still draws
+    something.  We can embed SVG directly, so the extension is strictly the better
+    source: it is the artwork itself rather than one fixed-resolution sample of it.
+
+    The vector is only taken when the part really does read back as SVG.  A relationship
+    that is missing, unreadable, or (a deck has to be odd for this, but the check is one
+    line) typed as something else falls back to the raster, which is what every consumer
+    before this change drew.
+    """
+    if svg_rel_id is not None:
+        vector = _load_media_bytes(context, svg_rel_id)
+        if vector is not None and vector[1] == "image/svg+xml":
+            return vector
+    return _load_media_bytes(context, raster_rel_id)
 
 
 def _load_media(context: ResolveContext, rel_id: str | None) -> tuple[str, str] | None:
