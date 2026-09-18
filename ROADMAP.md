@@ -3082,6 +3082,50 @@ solved still do.
   sits about three points below PowerPoint's on the probe decks even where its size is
   right. `_top_inset`'s `max(11.0, 5.0 + lineHeight/2)` is the suspect.
 
+#### The scene — measured on the gallery's own raster, and not built
+
+The camera puts the plot rectangle where PowerPoint puts it; the picture inside it is
+still flat. What that picture has to become was read off `chart-gallery.pdf`'s slide 13 at
+4 px/pt, because the scene is a raster and a raster is a measurement like any other.
+
+* **The camera's box is the raster's box.** The image object on slide 13 runs 70.56 to
+  536.88 pt across and 83.04 to 333.12 down; the camera's face plus its depth vector gives
+  72.3 to 535.1 and 81.9 to 331.4, which is the same rectangle to about two points of
+  antialiasing bleed. So the projection is not only right about the *axis*, it is right
+  about where the scene's own corners land.
+* **The scene is line art on white.** A colour census of the plot region finds white, the
+  two series colours, two shades of each, black, and nothing else but antialiasing greys.
+  There is no floor fill and no wall fill to resolve — the floor, the back wall and the
+  side wall are drawn as strokes.
+* **A prism is three flat fills and no outline.** The front face is the series colour
+  exactly; the top face is **0.758×** it and the right face **0.632×**, per channel, and
+  both multipliers are the same for both series — `#4472C5` gives `#345695` and `#2A487E`,
+  `#ED7E30` gives `#B55E24` and `#97501E`. The faces meet with no stroke between them.
+* **The bars stand at 0.3 to 0.7 of the depth.** Their bases are drawn 6.1 pt above the
+  front face's own bottom edge on a scene whose depth rises 20.1 pt, which is 0.30; the
+  visible right face is 10.5 pt wide against a 27.9 pt depth, which is 0.38 of it. One row
+  of depth 1 centred in a `gapDepth` of 150% occupies exactly 0.3 to 0.7, and that is the
+  obvious reading — but the chart it was read on is a *clustered* two-series bar, whose
+  series sit side by side across the width and share one depth row, and whose drawn depth
+  still shrank by the series count. Those two facts are not yet one story.
+* **A gridline is a polyline, not a line.** Each value tick draws front-left → back-left →
+  back-right: a diagonal up the side wall along the depth vector, then a horizontal across
+  the back wall. The category axis is the front bottom edge alone.
+
+**Two things stop this being built, and only one of them is work.** The first is that
+`line3DChart`, `area3DChart` and `pie3DChart` have no camera yet, so three of the four
+slides would still be flat and the fourth would be drawn — a split that is defensible but
+buys a quarter of the section. The second is the reason not to build even that quarter
+yet: **every colour above was read at one camera**, `rotX=15 rotY=20`. PowerPoint lights a
+3-D chart from a rig, and a rig's shading moves with the rotation; nothing here measures
+whether 0.758 and 0.632 are constants or the value of a cosine at fifteen degrees. The
+probe decks read text and cannot answer it — a colour probe would have to sample the
+raster at each view, which is a different reader from the one this section has.
+
+A wrong scene reads as a bug where an honest flat drawing with a warning does not, and a
+scene lit correctly at one angle and wrongly at every other is exactly that. So: the
+camera ships, the scene waits for a colour reader.
+
 #### What the four still get wrong
 
 The scene: floor, back wall, depth, extrusion and shading. Every 3-D chart still emits one

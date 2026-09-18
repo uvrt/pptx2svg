@@ -1916,11 +1916,11 @@ def three_d_camera(
     * The group element is not a ``bar3DChart``.  ``line3DChart`` and ``area3DChart`` do
       **not** share its scene: on one frame and one view a ``bar3DChart`` drew a 127.68 pt
       value axis where a ``line3DChart`` drew 88.56 and an ``area3DChart`` 59.04.  What
-      differs is measured -- their scenes are 0.6 and 0.4 as tall for the same width, and
-      a ``line3DChart``'s depth grows by one unit per series where a ``bar3DChart``'s does
-      not -- but the series-count law behind it is not pinned down, and a reservation
-      fitted to within a few per cent is a wrong interval count near every transition.
-      See ROADMAP.md 3.4.
+      differs is measured -- their scenes are 0.6 and 0.4 as tall for the same width at one
+      series, and a ``line3DChart``'s depth *grows* with the series count where a
+      ``bar3DChart``'s shrinks (:data:`VIEW_3D_DEPTH_ROW_GAP`) -- but neither law is
+      pinned down, and a reservation fitted to within a few per cent is a wrong interval
+      count near every transition.  See ROADMAP.md 3.4.
     * ``c:rAngAx="0"``, which draws a perspective scene this does not model.
     * ``c:view3D`` absent altogether, which **selects that same perspective scene**
       although ECMA-376 defaults the attribute to 1: the absent probe is identical to
