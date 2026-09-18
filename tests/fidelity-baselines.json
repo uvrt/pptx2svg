@@ -438,34 +438,34 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9805,
+    "histogram": 0.9802,
     "slides": [
       {
         "coverage": 0.0127,
         "histogram": 1.0,
-        "mean_abs": 0.259,
-        "over10": 0.612,
-        "over64": 0.082,
+        "mean_abs": 0.226,
+        "over10": 0.59,
+        "over64": 0.051,
         "sparse": true,
         "ssim": 1.0
       },
       {
-        "coverage": 0.0308,
-        "histogram": 0.9857,
-        "mean_abs": 2.361,
-        "over10": 2.14,
-        "over64": 1.277,
+        "coverage": 0.0291,
+        "histogram": 0.986,
+        "mean_abs": 1.457,
+        "over10": 1.738,
+        "over64": 0.78,
         "sparse": false,
-        "ssim": 0.5957
+        "ssim": 0.7825
       },
       {
-        "coverage": 0.028,
-        "histogram": 0.9822,
-        "mean_abs": 2.214,
-        "over10": 1.981,
-        "over64": 1.293,
+        "coverage": 0.0274,
+        "histogram": 0.9828,
+        "mean_abs": 2.054,
+        "over10": 1.923,
+        "over64": 1.227,
         "sparse": false,
-        "ssim": 0.5373
+        "ssim": 0.5877
       },
       {
         "coverage": 0.0273,
@@ -486,16 +486,16 @@
         "ssim": 0.9013
       },
       {
-        "coverage": 0.0188,
-        "histogram": 0.9779,
-        "mean_abs": 0.725,
-        "over10": 1.14,
-        "over64": 0.463,
+        "coverage": 0.0178,
+        "histogram": 0.9753,
+        "mean_abs": 0.369,
+        "over10": 0.856,
+        "over64": 0.161,
         "sparse": false,
-        "ssim": 0.74
+        "ssim": 0.9243
       }
     ],
-    "ssim": 0.7367
+    "ssim": 0.8069
   },
   "sample-issue-387": {
     "fonts": {
@@ -517,14 +517,14 @@
       {
         "coverage": 1.0,
         "histogram": 1.0,
-        "mean_abs": 1.009,
-        "over10": 1.248,
-        "over64": 0.561,
+        "mean_abs": 0.958,
+        "over10": 1.225,
+        "over64": 0.534,
         "sparse": false,
-        "ssim": 0.9897
+        "ssim": 0.9906
       }
     ],
-    "ssim": 0.9897
+    "ssim": 0.9906
   },
   "table-test": {
     "fonts": {

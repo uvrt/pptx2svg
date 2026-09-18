@@ -1005,17 +1005,19 @@ def test_a_cjk_line_fits_exactly_the_characters_the_box_is_wide():
             assert _cjk_line_counts(k * size, size)[0] == k, (k, size)
 
 
-def test_the_wrap_tolerance_is_too_small_to_admit_a_whole_glyph():
-    """The slack is an allowance for our own measurement error, not a model of anything.
+def test_the_wrap_tolerance_is_an_epsilon_and_not_an_allowance():
+    """The slack used to cover the ``kern`` we did not apply.  We apply it now.
 
-    It has to cover the OpenType ``kern`` PowerPoint applies to Japanese and we do not --
-    up to 0.684% of a line over `sample-cjk` -- without ever admitting a character
-    PowerPoint rejects, which on that deck overhangs by 0.813%.  At 2% it admitted one,
-    and `sample-cjk` slide 2 broke a character late because of it.
+    It was 0.02, then 0.005, and the window it had to sit in was measured from both
+    sides: `sample-cjk` slide 3 needed at least 0.231% to keep a character PowerPoint
+    keeps, slide 2's overhung by 0.813%, and a string of nothing but kerned pairs loses
+    1.5% -- outside any window at all.  `pptx2svg.text.kerning` removed the error the
+    window was drawn around, so what is left is the last bit of a floating-point sum: at
+    exactly zero the exact-fit case above fails on the mantissa.
     """
     from pptx2svg.text.wrap import WRAP_TOLERANCE_RATIO
 
-    assert 0.00231 < WRAP_TOLERANCE_RATIO < 0.00813
+    assert 0.0 < WRAP_TOLERANCE_RATIO < 1e-4
     # A box one glyph short of eleven still fits only ten, however the slack rounds.
     assert _cjk_line_counts(11 * 32.0 - 32.0)[0] == 10
 
@@ -1074,3 +1076,62 @@ def test_the_kinsoku_classes_hold_no_character_latin_wrapping_can_see():
 
     assert not NOT_LINE_START & NOT_LINE_END
     assert all(is_cjk(ord(char)) for char in NOT_LINE_START | NOT_LINE_END)
+
+
+def test_kerning_reaches_a_wrap_across_token_boundaries():
+    """A CJK paragraph gives every character its own token, so every pair straddles one.
+
+    Measuring tokens in isolation would charge no kerning at all, which is the trap this
+    guards.  The box is 11.85 ems wide and the twelve characters advance twelve ems; the
+    six キス pairs in them kern by -30/1000 each, which is what buys the twelfth
+    its place.  See ``_join_kern``.
+    """
+    assert _cjk_wrap("キス" * 6, 11.85 * 32.0) == ["キス" * 6]
+    # ...and a box that is short even of the kerned width still breaks.
+    assert _cjk_wrap("キス" * 6, 11.75 * 32.0)[0] == "キス" * 5 + "キ"
+
+
+def test_kerning_is_charged_only_within_one_run():
+    """The wrap and the render must agree about which joins exist.
+
+    ``_merge_segments`` re-joins tokens by the identity of their run properties, so the
+    width the renderer finally centres a line on is a sum over those merged segments.  A
+    join charged across a run boundary that the renderer will not merge would make the
+    line the layout fitted and the line it drew disagree, so ``_join_kern`` tests the
+    same identity.
+    """
+    from pptx2svg.text.wrap import _join_kern, _Token
+    from pptx2svg.text.measure import DefaultTextMeasurer
+
+    shared = m.RunProperties(font_size=32.0, font_family_ea="Noto Sans JP")
+    other = m.RunProperties(font_size=32.0, font_family_ea="Noto Sans JP")
+    measurer = DefaultTextMeasurer()
+    left = _Token(text="キ", properties=shared, width=0.0, breakable=False)
+    same = _Token(text="ス", properties=shared, width=0.0, breakable=False)
+    split = _Token(text="ス", properties=other, width=0.0, breakable=False)
+    assert _join_kern(left, same, 32.0, 1.0, measurer) < 0.0
+    assert _join_kern(left, split, 32.0, 1.0, measurer) == 0.0
+
+
+def test_a_measurer_without_kern_between_still_wraps():
+    """``TextMeasurer`` is a structural protocol and a public one.
+
+    A caller's own measurer, written before kerning was modelled, answers widths
+    perfectly well and must not raise in the middle of a wrap; it simply does not kern.
+    """
+    class Ancient:
+        def measure_text_width(self, text, font_size_pt, bold=False,
+                               font_family=None, font_family_ea=None):
+            return len(text) * font_size_pt * 0.5
+
+        def line_height_ratio(self, font_family=None, font_family_ea=None):
+            return 1.2
+
+        def ascender_ratio(self, font_family=None, font_family_ea=None):
+            return 1.0
+
+    paragraph = make_paragraph("one two three four", font_size=10.0)
+    lines = wrap_paragraph(paragraph, 60.0, 10.0, measurer=Ancient())
+    assert ["".join(s.text for s in line.segments) for line in lines] == [
+        "one two", "three four"
+    ]

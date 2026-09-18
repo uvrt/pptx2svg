@@ -2066,6 +2066,28 @@ def text_width(
     YuGothic-Regular, both inside one label.  Measuring the whole string through either
     face alone gets the other half wrong -- and for a proportional Japanese face the
     error is large, ``ＭＳ Ｐゴシック`` running from 0.648 em to 1.0 across its katakana.
+
+    **It is a sum of advances with no ``kern`` term, and that is measured rather than
+    left over.**  :mod:`pptx2svg.text.measure` applies the face's ``kern`` feature because
+    PowerPoint applies it to slide text; the chart engine does not apply it to the text it
+    *lays out*, although it does draw that text kerned.  The two are separable in
+    PowerPoint's own export and the answer is not close:
+
+    * ``chart-gallery``'s legends put twenty-odd entry names against their key positions,
+      and the horizontal legend's arithmetic (:data:`LEGEND_ENTRY_SLACK`) turns each name's
+      advance directly into the next key's x.  Measured against the export, the unkerned
+      advance lands every one of them within **0.033 pt**; charging the same names their
+      ``kern`` moves five entries on slide 9 out by 0.23 to 0.67 pt, ``Plan`` on slides 1
+      and 13 by 0.18, and ``Revenue`` on slide 17 by 0.15.  Every entry that moved is one
+      with a kern pair in it; the ones without (slide 8's five) do not move at all.
+    * The same export *draws* those names kerned.  ``Plan`` on slide 1 is shown as
+      ``[ (Pl) 83 (a) -46 (n) ]``, a net 0.37 pt of leftward adjustment against an
+      unkerned advance of 19.20 pt and our kerned measure of 18.92 -- so the glyphs are
+      kerned while the layout that placed them was not.
+
+    So the chart engine measures the way GDI's ``GetTextExtent`` does and hands the string
+    to a shaper afterwards.  Adding ``kern`` here is not a smaller error than leaving it
+    out: it is the wrong number for this caller.
     """
     metrics = metrics_for(family)
     ea_metrics = metrics_for(family_ea) if family_ea else None
