@@ -38,10 +38,11 @@ Two properties were designed in and are worth keeping:
   `tools/fidelity.py` compares two renders of the same outlines rather than measuring
   which fonts this machine happens to have. It is the first chart-heavy deck that has ever
   been scored; see ROADMAP.md *3.2a* for what the score is made of.
-* **It names its own defects.** Slide 12 (`surfaceChart`) is expected to draw an empty
-  frame and warn, and slide 17 (a combo chart) is expected to draw only its first group.
-  Both are pinned by `tests/test_chart.py` and by the snapshots, so a change either way
-  is visible.
+* **It names its own defects.** Slide 17 (a combo chart) is expected to draw only its
+  first group, and slides 15 and 16 to draw their 3-D scenes flat. All three are pinned by
+  `tests/test_chart.py` and by the snapshots, so a change either way is visible. Slide 12
+  (`surfaceChart`) used to be the fourth and is not: its mesh, its value bands and its band
+  legend are drawn, and the test there now asserts that **no** slide in the deck refuses.
 
 There is deliberately **no ChartEx (`cx:chartSpace`) slide**: four hand-written ones all
 hang PowerPoint on open, and a deck PowerPoint will not open is not a fixture. ROADMAP.md

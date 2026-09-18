@@ -39,7 +39,7 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.7891,
+    "histogram": 0.8443,
     "slides": [
       {
         "coverage": 0.0778,
@@ -69,13 +69,13 @@
         "ssim": 0.8251
       },
       {
-        "coverage": 0.3942,
+        "coverage": 0.3935,
         "histogram": 0.9998,
-        "mean_abs": 4.203,
-        "over10": 4.225,
-        "over64": 2.869,
+        "mean_abs": 4.065,
+        "over10": 4.152,
+        "over64": 2.803,
         "sparse": false,
-        "ssim": 0.8814
+        "ssim": 0.8833
       },
       {
         "coverage": 0.03,
@@ -96,13 +96,13 @@
         "ssim": 0.5751
       },
       {
-        "coverage": 0.2398,
+        "coverage": 0.2379,
         "histogram": 0.9993,
-        "mean_abs": 2.12,
-        "over10": 2.044,
-        "over64": 1.52,
+        "mean_abs": 1.638,
+        "over10": 1.792,
+        "over64": 1.245,
         "sparse": false,
-        "ssim": 0.8971
+        "ssim": 0.9132
       },
       {
         "coverage": 0.1877,
@@ -141,13 +141,13 @@
         "ssim": 0.09
       },
       {
-        "coverage": 0.1327,
-        "histogram": -0.047,
-        "mean_abs": 17.466,
-        "over10": 13.253,
-        "over64": 12.466,
+        "coverage": 0.1505,
+        "histogram": 0.9095,
+        "mean_abs": 6.614,
+        "over10": 5.911,
+        "over64": 4.12,
         "sparse": false,
-        "ssim": 0.5313
+        "ssim": 0.5694
       },
       {
         "coverage": 0.212,
@@ -168,13 +168,13 @@
         "ssim": 0.5812
       },
       {
-        "coverage": 0.2408,
-        "histogram": 0.1336,
-        "mean_abs": 22.025,
-        "over10": 24.06,
-        "over64": 20.751,
+        "coverage": 0.2389,
+        "histogram": 0.1159,
+        "mean_abs": 21.542,
+        "over10": 23.807,
+        "over64": 20.475,
         "sparse": false,
-        "ssim": 0.7614
+        "ssim": 0.7764
       },
       {
         "coverage": 0.2984,
@@ -195,7 +195,7 @@
         "ssim": 0.7562
       }
     ],
-    "ssim": 0.7303
+    "ssim": 0.7345
   },
   "real-basic-theme": {
     "fonts": {

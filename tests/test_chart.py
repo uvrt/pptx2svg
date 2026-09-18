@@ -661,15 +661,22 @@ def test_a_chart_part_that_is_missing_warns_and_draws_an_empty_frame(authoring):
 
 
 def test_a_chart_type_that_is_not_implemented_says_so(authoring):
-    """Types with no renderer must say so rather than draw a wrong picture."""
+    """A plot area with no group element we draw must say so rather than draw nothing.
+
+    **Every group element ECMA-376 defines is drawn now**, ``surfaceChart`` included, so
+    this can no longer be provoked with a real type: what is left is a plot area holding
+    something the reader does not recognise at all, which is what a future schema or a
+    hand-written file can produce.  The warning still has to fire and the frame still has
+    to be positioned and empty.
+    """
     from tests.deckbuilder import derive_deck
 
     chart_xml = (
         "<?xml version='1.0'?>"
-        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:surfaceChart>"
+        f"<c:chartSpace {C} {A} {R}><c:chart><c:plotArea><c:hypercubeChart>"
         "<c:ser><c:val><c:numRef><c:numCache><c:ptCount val='1'/>"
         "<c:pt idx='0'><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"
-        "</c:surfaceChart></c:plotArea></c:chart></c:chartSpace>"
+        "</c:hypercubeChart></c:plotArea></c:chart></c:chartSpace>"
     ).encode()
     frame = (
         "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='97' name='Stock'/>"
@@ -698,7 +705,7 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
     options = ConvertOptions()
     convert_pptx_to_model(deck_bytes, options)
     warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
-    assert "surfaceChart" in warning.message
+    assert "nothing" in warning.message
 
 
 # -- The probe sweep -------------------------------------------------------------------
@@ -6568,16 +6575,22 @@ def test_up_and_down_bar_fills_come_from_the_file_when_it_states_them():
     assert fills == {"#FF0000", "#0000FF"}
 
 
-def test_the_new_four_types_and_what_still_warns():
-    """The gate in `resolve/view.py`, which is what turns a warning into a picture."""
+def test_every_group_element_is_drawable_now():
+    """The gate in `resolve/view.py`, which is what turns a warning into a picture.
+
+    ``surfaceChart`` was the last one out and is in now: PowerPoint draws it as a lit 3-D
+    mesh coloured by value band -- both spellings of it -- and that is what is drawn here.
+    Both spellings land on this one entry, `flat_chart_kind` mapping the suffixed one to
+    the plain one.
+    """
+    from pptx2svg.parse.chart import CHART_GROUP_ELEMENTS
     from pptx2svg.resolve.view import DRAWABLE_CHART_KINDS
 
-    assert {"bubbleChart", "ofPieChart", "stockChart"} <= DRAWABLE_CHART_KINDS
-    # `surfaceChart` is deliberately still out: PowerPoint draws it as a lit 3-D mesh --
-    # both spellings, with and without `c:view3D` -- and none of that is built.  See the
-    # roadmap.
-    assert "surfaceChart" not in DRAWABLE_CHART_KINDS
+    assert {"bubbleChart", "ofPieChart", "stockChart", "surfaceChart"} <= (
+        DRAWABLE_CHART_KINDS
+    )
     assert flat_chart_kind("surface3DChart") == "surfaceChart"
+    assert {flat_chart_kind(kind) for kind in CHART_GROUP_ELEMENTS} == DRAWABLE_CHART_KINDS
 
 
 #: Numbers a file controls, at three frame sizes including a 1 x 1 pt one.  Every one of
@@ -6736,38 +6749,39 @@ def test_the_chart_gallery_holds_one_of_every_group_element(chart_gallery):
         assert groups[0] == expected, f"slide {number} leads with {groups[0]}"
 
     present = {group for part in parts for group in re.findall(r"<c:(\w+Chart)[ >]", part)}
-    # `surface3DChart` is the one group element with no slide of its own: `surfaceChart`
-    # already covers the deferral, and `flat_chart_kind` maps the two to one answer.
+    # `surface3DChart` is the one group element with no slide of its own: the two
+    # spellings draw the identical picture -- measured, see `SURFACE_CHART_KINDS` -- and
+    # `flat_chart_kind` maps them to one answer.
     assert set(CHART_GROUP_ELEMENTS) - present == {"surface3DChart"}
 
 
-def test_only_the_gallerys_surface_slide_refuses_to_draw(chart_gallery):
-    """Sixteen slides draw; the seventeenth says so and draws an empty frame.
+def test_every_gallery_slide_draws_a_chart(chart_gallery):
+    """All seventeen slides draw, and nothing warns that a type is unsupported.
 
-    `surfaceChart` is measured and deliberately deferred, and this is the committed
-    end-to-end evidence that the refusal is the *honest* one -- a warning naming the type,
-    plus a positioned but undrawn frame -- rather than a blank slide nobody notices.  It
-    is also the tripwire for the opposite mistake: if some future change starts drawing a
-    surface, this test and `tests/vrt/chart-gallery/slide-12.svg` both fail, which is the
-    right amount of noise for a chart type going from refused to drawn.
+    Slide 12's ``surfaceChart`` was the one refusal in the deck and is drawn now -- a lit
+    mesh over the value bands -- so ``chart-unsupported-type`` fires nowhere in the
+    gallery at all.  This is the tripwire in the other direction now: a type going back to
+    refused fails here.
     """
     options = ConvertOptions()
     model = convert_pptx_to_model(chart_gallery, options)
 
-    unsupported = [w for w in options.warnings if w.code == "chart-unsupported-type"]
-    assert len(unsupported) == 1
-    assert "surfaceChart" in unsupported[0].message
+    assert not [w for w in options.warnings if w.code == "chart-unsupported-type"]
     assert not any(w.code == "chart-unreadable" for w in options.warnings)
-
-    # An undrawn chart is a `ShapeElement` with neither fill nor outline, which is what
-    # `_empty_graphic_frame` produces; every other slide ends in a real chart.
-    frame = model.slides[11].elements[-1]
-    assert isinstance(frame, m.ShapeElement)
-    assert frame.fill is None and frame.outline is None
     for number, slide in enumerate(model.slides, start=1):
-        if number == 12:
-            continue
         assert isinstance(slide.elements[-1], m.ChartElement), f"slide {number}"
+
+    # The surface's own picture: a band legend rather than a series one, and a mesh whose
+    # facets are polygons.  Nine bands over a 0..45 axis, named for the two ticks each
+    # runs between, and PowerPoint's own export names the same nine.
+    surface = model.slides[11].elements[-1]
+    names = [
+        "".join(run.text for p in element.text_body.paragraphs for run in p.runs)
+        for element in surface.children
+        if isinstance(element, m.ShapeElement) and element.text_body is not None
+    ]
+    assert "40-45" in names and "0-5" in names
+    assert sum(1 for name in names if "-" in name and name[0].isdigit()) == 9
 
 
 # -- Combo charts ----------------------------------------------------------------------
@@ -7458,8 +7472,13 @@ def test_the_three_d_spelling_survives_the_flattening():
         "area3DChart",
         "pie3DChart",
         "surface3DChart",
+        # **The un-suffixed surface is a 3-D spelling too**, which is measured rather than
+        # inferred from its name: with no `c:view3D` at all the two spellings draw the
+        # identical projected surface.  See `SURFACE_CHART_KINDS`.
+        "surfaceChart",
     }
     assert is_three_d_kind("bar3DChart") and not is_three_d_kind("barChart")
+    assert is_three_d_kind("surfaceChart")
 
     _, data = _build(three_d_chart_xml(), width=684.0, height=195.0)
     assert data.kind == "barChart"
@@ -8151,6 +8170,371 @@ def _faces(children):
         ]
         out.append((fill.color.hex, points))
     return out
+
+
+# -- The surface -----------------------------------------------------------------------
+#
+# Every number here was read out of a PowerPoint export of one of the five surface probe
+# decks `tools/make_view3d_probe.py` writes -- `view3d-surfshape` (110 slides, the scene's
+# shape), `view3d-surfmesh` (28, where the lattice's rows stand), `view3d-surflight` (34)
+# and `view3d-surflit` (29, the light), and `view3d-surfband` (22, the bands and their
+# legend).  See ROADMAP.md 3.4.
+
+#: A legend on the right, which is where gallery slide 12 puts its bands.
+SURFACE_LEGEND = "<c:legend><c:legendPos val='r'/><c:overlay val='0'/></c:legend>"
+
+#: The six Office accents, which the band ramp cycles through and the three-accent style
+#: `_builder` carries cannot show.
+SURFACE_ACCENTS = ("#4472C4", "#ED7D31", "#A5A5A5", "#FFC000", "#5B9BD5", "#70AD47")
+
+
+def surface_chart_xml(
+    *,
+    kind: str = "surfaceChart",
+    rows: tuple[tuple[float, ...], ...] = ((10.0, 16.0), (18.0, 26.0)),
+    view: str = VIEW_3D,
+    cross_between: str | None = None,
+    wireframe: str = "",
+    band_fmts: str = "",
+    legend: str = "",
+) -> str:
+    """One surface group over *rows*, a row per series, with its three axes.
+
+    A surface states three ``c:axId`` children like every other 3-D group, and its value
+    axis' ``c:crossBetween`` is left out by default because that is what a real deck
+    writes -- and what PowerPoint reads as ``midCat``, measured.
+    """
+    categories = len(rows[0])
+    cats = "".join(
+        f"<c:pt idx='{i}'><c:v>C{i + 1}</c:v></c:pt>" for i in range(categories)
+    )
+    series = "".join(
+        f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
+        "<c:tx><c:strRef><c:strCache><c:ptCount val='1'/>"
+        f"<c:pt idx='0'><c:v>S{index + 1}</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+        "<c:cat><c:strRef><c:strCache>"
+        f"<c:ptCount val='{categories}'/>{cats}</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
+        f"<c:ptCount val='{categories}'/>"
+        + "".join(f"<c:pt idx='{i}'><c:v>{v!r}</c:v></c:pt>" for i, v in enumerate(row))
+        + "</c:numCache></c:numRef></c:val></c:ser>"
+        for index, row in enumerate(rows)
+    )
+    between = (
+        f"<c:crossBetween val='{cross_between}'/>" if cross_between else ""
+    )
+    return (
+        f"<c:chart>{view}<c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        f"<c:{kind}>{wireframe}{series}{band_fmts}"
+        "<c:axId val='100002'/><c:axId val='100003'/><c:axId val='100004'/>"
+        f"</c:{kind}>"
+        "<c:catAx><c:axId val='100002'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='b'/><c:tickLblPos val='nextTo'/>"
+        "<c:crossAx val='100003'/><c:crosses val='autoZero'/></c:catAx>"
+        "<c:valAx><c:axId val='100003'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
+        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        f"<c:crosses val='autoZero'/>{between}</c:valAx>"
+        "<c:serAx><c:axId val='100004'/>"
+        "<c:scaling><c:orientation val='minMax'/></c:scaling>"
+        "<c:delete val='1'/><c:axPos val='b'/><c:crossAx val='100003'/></c:serAx>"
+        f"</c:plotArea>{legend}"
+        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+    )
+
+
+def _surface(width: float = 684.0, height: float = 250.0, **kwargs):
+    """One surface chart, drawn, with the six-accent style the band ramp needs."""
+    return _surface_builder(width=width, height=height, **kwargs).build()
+
+
+def _surface_builder(width: float = 684.0, height: float = 250.0, **kwargs):
+    """The builder behind :func:`_surface`, for a test that needs its scene."""
+    from pptx2svg.resolve.chart import ChartBuilder, ChartStyle
+
+    source = chart(surface_chart_xml(**kwargs))
+    builder = ChartBuilder(
+        source,
+        source.plots[0],
+        width_pt=width,
+        height_pt=height,
+        style=ChartStyle(
+            font_family="Aptos",
+            font_size=10.0,
+            color=m.ResolvedColor(hex="#000000"),
+            accents=[m.ResolvedColor(hex=hex_) for hex_ in SURFACE_ACCENTS],
+        ),
+        resolve_fill=_fake_fill,
+        resolve_outline=_fake_outline,
+        resolve_text=lambda rich, text, size, align: m.TextBody(),
+    )
+    return builder
+
+
+def test_a_surface_scene_is_a_line3d_scene():
+    """The aspect and the depth, over the cells ``view3d-surfshape`` reads back.
+
+    The instrument is the face itself: a surface's categories sit **on** the ticks, so the
+    first and last category labels stand on the drawn face's left and right edges and the
+    extreme value labels on its top and bottom ones.  Every cell's free fit lands on the
+    integer below, and the depth on ``series / categories``.
+    """
+    from pptx2svg.resolve.chart import three_d_scene_shape
+
+    # (categories, series) -> the drawn aspect over the region's own, read off the deck.
+    measured = {
+        (2, 2): 0.1239, (2, 3): 0.2477, (2, 4): 0.2471, (2, 5): 0.3693, (2, 6): 0.3704,
+        (3, 2): 0.1651, (3, 3): 0.1657, (3, 4): 0.2474, (3, 5): 0.2466, (3, 6): 0.3301,
+        (4, 2): 0.1237, (4, 3): 0.1858,
+        (8, 2): 0.1237, (8, 3): 0.1550, (8, 4): 0.1547, (8, 5): 0.1854, (8, 6): 0.1858,
+    }
+    # The region's own aspect on that deck's 195 pt frame, which every cell shares.
+    region = 0.2476
+    for (categories, series), aspect in measured.items():
+        shape = three_d_scene_shape(
+            "surfaceChart", series, categories=categories, across=categories - 1
+        )
+        assert shape is not None
+        assert shape[0] * region == pytest.approx(aspect, abs=0.0025), (
+            f"{categories} categories, {series} series"
+        )
+        assert shape[1] == float(series)
+
+    # `across` follows `c:crossBetween`, which the eight-category pair separates: spelled
+    # `between` the face spans eight intervals and reads 5 where its `midCat` twin reads 4.
+    plain = three_d_scene_shape("surfaceChart", 2, categories=8, across=7)
+    between = three_d_scene_shape("surfaceChart", 2, categories=8, across=8)
+    assert plain[0] * 8 == pytest.approx(4.0)
+    assert between[0] * 8 == pytest.approx(5.0)
+    # Both spellings are one scene: the flattened kind is what the law is keyed on.
+    assert three_d_scene_shape("surface3DChart", 3, categories=5) == three_d_scene_shape(
+        "surfaceChart", 3, categories=5
+    )
+
+
+def test_the_surface_light_is_the_corner_one():
+    """A level sheet, and the sweeps either side of it, in 8-bit levels.
+
+    The prism's light puts a level facet at 0.7587; PowerPoint draws 0.8275, which is the
+    corner light exactly.  Each of these is a facet whose normal the drawn geometry gives
+    and whose tone was read off the raster.
+    """
+    from pptx2svg.resolve.chart import (
+        VIEW_3D_LIGHT,
+        VIEW_3D_SURFACE_LIGHT,
+        three_d_lambert,
+    )
+
+    level = (0.0, 1.0, 0.0)
+    assert three_d_lambert(level, VIEW_3D_SURFACE_LIGHT) == pytest.approx(
+        211 / 255, abs=0.004
+    )
+    assert three_d_lambert(level) == pytest.approx(0.7587, abs=0.001)
+
+    # (normal, the tone PowerPoint drew) -- two facets sloped in the front plane, two
+    # through the depth, and one steep enough to saturate.
+    for normal, tone in (
+        ((-0.3167, 0.9485, 0.0), 171),
+        ((0.3167, 0.9485, 0.0), 241),
+        ((0.0, 0.9938, 0.1108), 223),
+        ((0.0, 0.9938, -0.1108), 199),
+        ((0.0, 0.8312, 0.5559), 255),
+    ):
+        drawn = three_d_lambert(normal, VIEW_3D_SURFACE_LIGHT)
+        assert round(drawn * 255) == pytest.approx(tone, abs=2), normal
+
+    # A facet the light misses is the ambient, and the clamp is what puts it there.
+    assert three_d_lambert((0.0, -1.0, 0.0), VIEW_3D_SURFACE_LIGHT) == pytest.approx(
+        0.3947, abs=0.001
+    )
+    assert VIEW_3D_SURFACE_LIGHT != VIEW_3D_LIGHT
+
+
+def test_the_lattice_stands_row_by_row_across_the_whole_depth():
+    """Series one on the front plane, the last on the back wall, the rest evenly between.
+
+    ``view3d-surfmesh`` paints every band one red so the sheet is separable from the floor
+    by colour alone and stands each row flat at a value of its own; two, three, four and
+    five rows come back at ``0, 1``, ``0, 1/2, 1``, ``0, 1/3, 2/3, 1`` and
+    ``0, 1/4, 1/2, 3/4, 1`` of a depth that is itself ``series / categories`` of the
+    face's width.  A **level** sheet is the cleanest reading of that here: its drawn
+    quadrilateral is the face's own width displaced through the whole depth, so its four
+    extremes name the front row, the back row and the two ends at once.
+    """
+    builder = _surface_builder(
+        rows=((20.0, 20.0, 20.0), (20.0, 20.0, 20.0), (20.0, 20.0, 20.0))
+    )
+    children, _ = builder.build()
+    scene = builder.scene
+    faces = _faces(children)
+    assert faces, "the mesh is drawn"
+    xs = [x for _, points in faces for x, _ in points]
+    ys = [y for _, points in faces for _, y in points]
+    # The categories sit **on** the ticks, so the sheet starts at the face's left edge and
+    # ends at its right one -- and it is displaced by the whole depth, front row to back.
+    assert min(xs) == pytest.approx(scene.face.left, abs=0.01)
+    assert max(xs) == pytest.approx(scene.face.right + scene.depth[0], abs=0.01)
+    assert max(ys) - min(ys) == pytest.approx(abs(scene.depth[1]), abs=0.01)
+    # Every facet of a level sheet has the same normal, so they are all one tone -- the
+    # light's own level reading.
+    assert len({fill for fill, _ in faces}) == 1
+    # Two rows of cells across two category intervals, two triangles each.
+    assert len(faces) == 2 * 2 * 2
+
+    # Three rows and the middle one raised: its own corners sit at half the depth.
+    builder = _surface_builder(
+        rows=((20.0, 20.0), (20.0, 20.0), (20.0, 20.0)), width=684.0
+    )
+    children, _ = builder.build()
+    scene = builder.scene
+    xs = sorted({round(x, 3) for _, points in _faces(children) for x, _ in points})
+    middle = scene.face.left + scene.depth[0] / 2
+    assert any(x == pytest.approx(middle, abs=0.01) for x in xs)
+
+
+def test_a_surface_is_coloured_by_band_and_legends_them():
+    """The bands are the value axis' own intervals, named for the ticks they run between.
+
+    Measured on ``view3d-surfband``: eleven axes from ``-20..20 by 10`` to ``0..1,4 by
+    0,2`` and the band legend names every boundary, always the two ticks joined by a
+    hyphen.
+    """
+    children, data = _surface(
+        rows=((0.0, 2.0, 4.0), (6.0, 8.0, 10.0)), legend=SURFACE_LEGEND
+    )
+    names = [
+        "".join(run.text for p in element.text_body.paragraphs for run in p.runs)
+        for element in children
+        if isinstance(element, m.ShapeElement) and element.text_body is not None
+    ]
+    bands = [name for name in names if "-" in name]
+    # A 3-D axis is not padded, so 0..10 of data draws 0..10 -- five bands of two, the
+    # highest at the top of a legend at the side.
+    assert bands == ["8-10", "6-8", "4-6", "2-4", "0-2"]
+    assert (data.value_axis.minimum, data.value_axis.maximum) == (0.0, 10.0)
+    assert data.value_axis.major_unit == 2.0
+
+
+def test_the_band_ramp_turns_two_bands_early():
+    """Four bands draw the plain accents and five draw the darkened ones.
+
+    The band legend's swatches are vector and are the fills exactly, which is what made
+    this readable: 3 and 4 bands come back ``#4472C4 #ED7D31 #A5A5A5 #FFC000``, 5 and 6
+    come back darkened, and 9 bands add light accent1, accent2 and accent3 after the six.
+    See `BAND_COLOR_CYCLE_SLACK`.
+    """
+    from pptx2svg.resolve.chart import BAND_COLOR_CYCLE_SLACK
+
+    assert BAND_COLOR_CYCLE_SLACK == 2
+
+    def band_fills(rows):
+        children, _ = _surface(rows=rows, legend=SURFACE_LEGEND)
+        keys = [
+            element.fill.color.hex.upper()
+            for element in children
+            if isinstance(element, m.ShapeElement)
+            and isinstance(element.geometry, m.PresetGeometry)
+            and isinstance(element.fill, m.SolidFill)
+            and element.transform.extent_width == element.transform.extent_height
+        ]
+        return keys
+
+    # 0..20 by 5 -- four bands, and the plain accents.
+    four = band_fills(((0.0, 5.0), (10.0, 20.0)))
+    assert four[-4:] == ["#FFC000", "#A5A5A5", "#ED7D31", "#4472C4"]
+    # 0..10 by 2 -- five bands, and every one of them darkened.
+    five = band_fills(((0.0, 2.0), (6.0, 10.0)))
+    assert five[-1] == "#3B64AD" and five[-2] == "#D26E2A"
+
+
+def test_band_formats_override_the_ramp_and_the_legend_with_it():
+    """``c:bandFmts`` numbers the bands from the axis' minimum up.
+
+    Measured on a probe stating band 0 red and band 2 green: PowerPoint painted the lowest
+    band red and the third green, left the ramp on the rest, and put the two stated fills
+    in the legend as well.
+    """
+    band_fmts = (
+        "<c:bandFmts>"
+        "<c:bandFmt><c:idx val='0'/><c:spPr><a:solidFill><a:srgbClr val='FF0000'/>"
+        "</a:solidFill></c:spPr></c:bandFmt>"
+        "<c:bandFmt><c:idx val='2'/><c:spPr><a:solidFill><a:srgbClr val='00CC00'/>"
+        "</a:solidFill></c:spPr></c:bandFmt>"
+        "</c:bandFmts>"
+    )
+    children, _ = _surface(
+        rows=((0.0, 2.0), (6.0, 10.0)), band_fmts=band_fmts, legend=SURFACE_LEGEND
+    )
+    keys = [
+        element.fill.color.hex.upper()
+        for element in children
+        if isinstance(element, m.ShapeElement)
+        and isinstance(element.geometry, m.PresetGeometry)
+        and isinstance(element.fill, m.SolidFill)
+        and element.transform.extent_width == element.transform.extent_height
+    ]
+    assert keys[-1] == "#FF0000"
+    assert keys[-3] == "#00CC00"
+
+
+def test_a_wireframe_replaces_the_fill():
+    """``c:wireframe val="1"`` strokes the lattice and fills nothing.
+
+    Measured twice over: the drawn mesh comes back as strokes in the **accent** ramp even
+    on a probe whose `c:bandFmts` state a red fill for every band -- so the stroke follows
+    the band's line and not its fill -- and the legend keys are the same 5.49 pt squares
+    with a stroke and no fill at all.
+    """
+    filled, _ = _surface(rows=((0.0, 2.0), (6.0, 10.0)))
+    wire, _ = _surface(
+        rows=((0.0, 2.0), (6.0, 10.0)), wireframe="<c:wireframe val='1'/>"
+    )
+    assert _faces(filled), "the filled surface draws solid facets"
+    assert not _faces(wire), "the wireframe draws none"
+    strokes = [
+        element
+        for element in wire
+        if isinstance(element, m.ShapeElement)
+        and isinstance(element.geometry, m.CustomGeometry)
+        and element.outline is not None
+    ]
+    assert strokes
+
+
+def test_a_one_series_surface_draws_no_mesh():
+    """A lattice needs two rows to stretch a sheet between, and PowerPoint draws none.
+
+    Its one-series probes come back an empty scene -- floor, walls, gridlines, no sheet --
+    which is what this draws too.  What is *not* reproduced is the degenerate 0..1,5 axis
+    PowerPoint puts under it; see ROADMAP.md 3.4.
+    """
+    children, _ = _surface(rows=((10.0, 16.0, 22.0),))
+    assert not _faces(children)
+    # The scene itself is still drawn: the floor is a polygon with a stroke and no fill.
+    assert any(
+        isinstance(element, m.ShapeElement)
+        and isinstance(element.geometry, m.CustomGeometry)
+        for element in children
+    )
+
+
+def test_a_surface_with_no_camera_draws_no_mesh_and_says_so():
+    """``c:rAngAx="0"`` and an absent ``c:view3D`` both select a perspective scene.
+
+    Neither is modelled, and a surface has no flat mark to fall back on -- so the frame
+    keeps its axis and its legend and `chart-3d-flattened` declares the gap, which is the
+    same contract a `bar3DChart` under the same camera gets.
+    """
+    children, _ = _surface(rows=((0.0, 2.0), (6.0, 10.0)), view="")
+    assert not _faces(children)
+    builder_children, _ = _surface(
+        rows=((0.0, 2.0), (6.0, 10.0)),
+        view="<c:view3D><c:rotX val='15'/><c:rAngAx val='0'/></c:view3D>",
+    )
+    assert not _faces(builder_children)
 
 
 def _prism_scene(**kwargs):

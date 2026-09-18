@@ -733,7 +733,438 @@ BAND_PROBES: list[dict] = [
     ],
 ]
 
+#: **Surface, first light.**  Twelve slides that say what PowerPoint actually draws for a
+#: ``c:surfaceChart``, looked at rather than measured: the two spellings side by side, the
+#: wireframe, the contour camera, an explicit ``c:bandFmts``, a band legend, and three
+#: ramps whose values run linearly across the categories so that a band boundary is a
+#: stripe whose position names the value it stands at.
+SURF_FRAME = (FRAME_WIDTH, 250 * 12700)
+RAMP_CATS = 13
+
+
+def _ramp(count: int, low: float, high: float) -> tuple[float, ...]:
+    """Category factors running linearly from *low* to *high* as multiples of *high*."""
+    return tuple((low + (high - low) * i / (count - 1)) / high for i in range(count))
+
+
+def _surf_probe(name: str, **extra) -> dict:
+    probe = {
+        "key": f"r-{name}",
+        "high": 9.0,
+        "frame": SURF_FRAME,
+        "kind": "surface3D",
+        "view": DEFAULT_VIEW,
+        "series": 3,
+        "colours": None,
+        "categories": tuple(f"C{i + 1}" for i in range(5)),
+        "factors": CAT_SHAPES[5],
+        "scales": (1.0, 0.8, 0.62),
+    }
+    probe.update(extra)
+    return probe
+
+
+def _ramp_probe(name: str, high: float, low: float = 0.0, **extra) -> dict:
+    return _surf_probe(
+        name,
+        high=high,
+        series=2,
+        categories=tuple(f"C{i + 1}" for i in range(RAMP_CATS)),
+        factors=_ramp(RAMP_CATS, low, high),
+        scales=(1.0, 1.0),
+        **extra,
+    )
+
+
+#: Two bands stated outright.  ``c:bandFmts`` indexes the bands from the bottom up.
+BAND_FMTS = (
+    "<c:bandFmts>"
+    "<c:bandFmt><c:idx val='0'/><c:spPr><a:solidFill><a:srgbClr val='FF0000'/>"
+    "</a:solidFill></c:spPr></c:bandFmt>"
+    "<c:bandFmt><c:idx val='2'/><c:spPr><a:solidFill><a:srgbClr val='00CC00'/>"
+    "</a:solidFill></c:spPr></c:bandFmt>"
+    "</c:bandFmts>"
+)
+
+SURF_RECON_PROBES: list[dict] = [
+    _surf_probe("3d"),
+    # `c:crossBetween` left out altogether: what a real deck writes, and the only way to
+    # read PowerPoint's own default for a surface -- which decides where the lattice's
+    # points sit along the categories.
+    _surf_probe("auto", crossBetween="none"),
+    _surf_probe("auto-mid", crossBetween="midCat"),
+    _surf_probe("auto-btw", crossBetween="between"),
+    _surf_probe("bandfmt-legend", bandFmts=BAND_FMTS, legend="r"),
+    # **Where a side legend sits beside a scene.**  Our own rule -- the block of rows
+    # centred on the frame -- is measured on flat charts and puts gallery slide 12's
+    # seventeen points high, so the camera is swept here with the legend on and nothing
+    # else changed: a rule that reads the face, the scene's box or the region moves with
+    # it, and one that reads the frame does not.
+    *[
+        _surf_probe(f"lg-{name}", view=view, legend="r")
+        for name, view in (
+            ("base", DEFAULT_VIEW),
+            ("rx0", _view(rotX=0)),
+            ("rx45", _view(rotX=45)),
+            ("rx60", _view(rotX=60)),
+            ("h50", _view(hPercent=50)),
+            ("h200", _view(hPercent=200)),
+            ("d500", _view(depthPercent=500)),
+        )
+    ],
+    # The same sweep with no title in play is what the deck already draws (these probes
+    # state none), so a title cannot be what moves it.
+    _surf_probe("lg-flat", kind="surface", legend="r"),
+    # **With a title**, which gallery slide 12 has and the sweep above does not: the one
+    # thing left that could move a legend the camera does not.
+    *[
+        _surf_probe(f"lgt-{name}", view=view, legend="r", title="Surface")
+        for name, view in (
+            ("base", DEFAULT_VIEW),
+            ("rx45", _view(rotX=45)),
+        )
+    ],
+    _ramp_probe("lgt-ramp", 41.0, legend="r", title="Surface"),
+    _ramp_probe("lg-ramp", 41.0, legend="r"),
+    # The control: a **flat** chart, the same frame and the same legend, with and without
+    # a title.  If the title moves this one too then the rule is the legend's and not the
+    # scene's.
+    _surf_probe("lg-2d", kind="col", legend="r", colours=PROBE_COLOURS),
+    _surf_probe("lgt-2d", kind="col", legend="r", title="Flat", colours=PROBE_COLOURS),
+    # Is the band the title's own line height, or a share of the frame?  Two frames and
+    # two title sizes separate them.
+    *[
+        _surf_probe(
+            f"lgt-f{height}", legend="r", title="Surface",
+            frame=(FRAME_WIDTH, height * 12700),
+        )
+        for height in (120, 330)
+    ],
+    *[
+        _surf_probe(f"lgt-s{size}", legend="r", title="Surface", titleSize=size)
+        for size in (800, 2400)
+    ],
+    _surf_probe("wire-legend", wireframe=1, legend="r"),
+    _surf_probe("flat", kind="surface"),
+    _surf_probe("wire", wireframe=1),
+    _surf_probe("rx90", view=_view(rotX=90)),
+    _surf_probe("bandfmt", bandFmts=BAND_FMTS),
+    _surf_probe("legend", legend="r"),
+    _surf_probe("legend-flat", kind="surface", legend="r"),
+    _ramp_probe("ramp9", 9.0),
+    _ramp_probe("ramp50", 50.0),
+    _ramp_probe("rampneg", 6.0, low=-6.0),
+    _ramp_probe("ramp9-legend", 9.0, legend="r"),
+    _ramp_probe("ramp9-wire", 9.0, wireframe=1),
+]
+
+#: **The surface's scene, swept.**  The category count against the series count, two to
+#: eight against one to six, at two cameras each -- and read with an instrument neither
+#: the box nor the axis needs: a surface's categories sit **on** the ticks, so the first
+#: and last category labels stand on the drawn face's own left and right edges while the
+#: extreme value labels stand on its top and bottom ones.  That gives the face's width and
+#: its height directly, hence its aspect, with no region and no model in between; the
+#: raster's ink box on top of it gives the depth vector, the ink being the face swept
+#: through the depth.  See ``three_d_scene_shape``.
+SURF_CAMERAS: list[tuple[str, dict]] = [
+    ("base", DEFAULT_VIEW),
+    ("rx45", _view(rotX=45)),
+]
+
+
+def _surf_cell(kind: str, cats: int, count: int, name: str, view: dict, **extra) -> dict:
+    probe = {
+        "key": f"{kind}-c{cats}-n{count}-{name}",
+        "high": 9.0,
+        "frame": VIEW_FRAME,
+        "kind": kind,
+        "view": view,
+        "series": count,
+        "colours": None,
+        "categories": tuple(f"C{i + 1}" for i in range(cats)),
+        "factors": CAT_SHAPES[cats],
+        "scales": CAT_SCALES[:count],
+        "cats": cats,
+    }
+    probe.update(extra)
+    return probe
+
+
+SURF_SHAPE_PROBES: list[dict] = [
+    *[
+        _surf_cell("surface3D", cats, count, name, view)
+        for cats in (2, 3, 4, 5, 6, 7, 8)
+        for count in (1, 2, 3, 4, 5, 6)
+        for name, view in SURF_CAMERAS
+    ],
+    # The un-suffixed spelling, which ECMA calls a contour chart: the same cells, so that
+    # "identical" is a reading rather than an impression.
+    *[
+        _surf_cell("surface", cats, count, name, view)
+        for cats in (3, 5)
+        for count in (1, 2, 3)
+        for name, view in SURF_CAMERAS[:1]
+    ],
+    # `c:crossBetween`, which is what decides *across* for a line and an area.
+    *[
+        _surf_cell("surface3D", cats, count, f"btw-{name}", view, crossBetween="between")
+        for cats in (3, 5, 8)
+        for count in (1, 2)
+        for name, view in SURF_CAMERAS[:1]
+    ],
+    # The three multipliers, at two category counts: `depthPercent` and `hPercent` should
+    # scale the depth and the aspect, and `c:gapDepth` should move neither.
+    *[
+        _surf_cell("surface3D", cats, 2, f"{tag}-{name}", dict(view, **override))
+        for cats in (3, 8)
+        for tag, override in (
+            ("d500", {"depthPercent": 500}),
+            ("h50", {"hPercent": 50}),
+        )
+        for name, view in SURF_CAMERAS[:1]
+    ],
+    *[
+        _surf_cell("surface3D", 5, 2, f"gd{gap}-{name}", view, gapDepth=gap)
+        for gap in (0, 500)
+        for name, view in SURF_CAMERAS[:1]
+    ],
+    # Two more frames, which is what says the aspect is the region's own rather than a
+    # constant of the camera.
+    *[
+        _surf_cell(
+            "surface3D", cats, count, f"f{height}", DEFAULT_VIEW,
+            frame=(FRAME_WIDTH, height * 12700),
+        )
+        for cats in (3, 5)
+        for count in (1, 3)
+        for height in (120, 330)
+    ],
+]
+
+#: **The lattice inside the scene.**  Every band painted one and the same red, so the
+#: **sheet** is separable from the floor, the walls and the gridlines by colour alone --
+#: which is the only way to read where a row stands, the scene's own ink box being the
+#: floor's and not the mesh's.  Each series is flat across the categories and at a value
+#: of its own, so at that value's scanline the sheet's left edge *is* that row's own
+#: front-left corner and its offset from the face names the row's depth.  ``rotX=0``
+#: takes the vertical component of the depth out, so the offset is read in one axis.
+RED_BANDS = "<c:bandFmts>" + "".join(
+    f"<c:bandFmt><c:idx val='{i}'/><c:spPr><a:solidFill>"
+    "<a:srgbClr val='FF0000'/></a:solidFill></c:spPr></c:bandFmt>"
+    for i in range(16)
+) + "</c:bandFmts>"
+
+#: Flat rows at values of their own, well inside a band so that no row sits on a boundary.
+MESH_ROWS = {
+    2: (1.4, 8.6),
+    3: (1.4, 5.0, 8.6),
+    4: (1.4, 3.8, 6.2, 8.6),
+    5: (1.4, 3.2, 5.0, 6.8, 8.6),
+}
+
+
+def _surf_mesh_probe(cats: int, count: int, name: str, view: dict, **extra) -> dict:
+    values = extra.pop("values", MESH_ROWS[count])
+    probe = {
+        "key": f"sm-c{cats}-n{count}-{name}",
+        "high": 9.0,
+        "frame": VIEW_FRAME,
+        "kind": "surface3D",
+        "view": view,
+        "series": count,
+        "colours": None,
+        "categories": tuple(f"C{i + 1}" for i in range(cats)),
+        "factors": (1.0,) * cats,
+        "scales": tuple(v / 9.0 for v in values),
+        "bandFmts": RED_BANDS,
+    }
+    probe.update(extra)
+    return probe
+
+
+SURF_MESH_PROBES: list[dict] = [
+    *[
+        _surf_mesh_probe(cats, count, name, view)
+        for cats in (3, 5)
+        for count in (2, 3, 4, 5)
+        for name, view in (("rx0", _view(rotX=0)), ("base", DEFAULT_VIEW))
+    ],
+    # Descending rows: which end of the depth series one stands at, read off a picture
+    # where the rows are not interchangeable.
+    *[
+        _surf_mesh_probe(
+            5, count, f"down-{name}", view, values=tuple(reversed(MESH_ROWS[count]))
+        )
+        for count in (2, 4)
+        for name, view in (("rx0", _view(rotX=0)), ("base", DEFAULT_VIEW))
+    ],
+    # One flat sheet, every row at the same value: its top is a single horizontal face
+    # whose drawn colour is the lighting model at a known normal, and its underside is
+    # the same face reversed.
+    *[
+        _surf_mesh_probe(5, count, f"level-{name}", view, values=(5.0,) * count)
+        for count in (2, 4)
+        for name, view in (("base", DEFAULT_VIEW), ("rxneg", _view(rotX=-30)))
+    ],
+    # `c:gapDepth` and `c:depthPercent` against the rows, which the scene's box cannot
+    # see: the first divides a row for a ribbon and should do nothing at all here.
+    *[
+        _surf_mesh_probe(5, 3, f"gd{gap}-rx0", _view(rotX=0), gapDepth=gap)
+        for gap in (0, 500)
+    ],
+    _surf_mesh_probe(5, 3, "d500-rx0", _view(rotX=0, depthPercent=500)),
+    # The wireframe, whose stroke is what replaces the fill.
+    _surf_mesh_probe(5, 3, "wire-rx0", _view(rotX=0), wireframe=1),
+]
+
+#: **The light a surface is lit by**, which is not the prism's: a perfectly level sheet
+#: is drawn at 0.8275 of its band's fill where a ``bar3DChart``'s top face -- the same
+#: normal -- is drawn at 0.7587.  So the model is re-measured here rather than assumed,
+#: and the instrument is the one the ribbon gave: a facet whose normal is known from the
+#: drawn geometry, swept through a range of normals in **both** of the scene's planes.
+#: Every band is red, so a slide's every facet is one tone of one colour and the tone is
+#: the whole reading.  A ``9`` is held somewhere in every dataset so that the value axis
+#: does not rescale under the sweep and flatten the very slope being swept.
+def _surf_light_probe(name: str, values: tuple[tuple[float, ...], ...], view: dict) -> dict:
+    cats = len(values[0])
+    return {
+        "key": f"sl-{name}",
+        "high": 9.0,
+        "frame": VIEW_FRAME,
+        "kind": "surface3D",
+        "view": view,
+        "series": len(values),
+        "colours": None,
+        "categories": tuple(f"C{i + 1}" for i in range(cats)),
+        "factors": (1.0,) * cats,
+        "scales": (1.0,) * len(values),
+        "rows": values,
+        "bandFmts": RED_BANDS,
+    }
+
+
+SURF_LIGHT_PROBES: list[dict] = [
+    # Sloped along the categories: two identical rows, so the sheet tilts in the front
+    # plane only and every quad's normal lies in it.  `C3` to `C4` is level on every
+    # slide, which is the control the sweep is read against.
+    *[
+        _surf_light_probe(
+            f"x{value:g}-{name}", ((9.0, value, 9.0, 9.0), (9.0, value, 9.0, 9.0)), view
+        )
+        for value in (0.0, 1.0, 2.0, 3.0, 4.5, 6.0, 7.5, 8.5)
+        for name, view in (("base", DEFAULT_VIEW), ("rx45", _view(rotX=45)))
+    ],
+    # Sloped through the depth: two rows at values of their own and flat across the
+    # categories, so the sheet's normal has no `x` component at all.  Both directions,
+    # because a steep enough fall turns the sheet over and shows its underside.
+    *[
+        _surf_light_probe(
+            f"z{value:g}-{name}", ((9.0, 9.0), (value, value)), view
+        )
+        for value in (0.0, 1.5, 3.0, 4.5, 6.0, 7.5)
+        for name, view in (("base", DEFAULT_VIEW), ("rx45", _view(rotX=45)))
+    ],
+    *[
+        _surf_light_probe(
+            f"zup{value:g}-{name}", ((value, value), (9.0, 9.0)), view
+        )
+        for value in (0.0, 3.0, 6.0)
+        for name, view in (("base", DEFAULT_VIEW), ("rx45", _view(rotX=45)))
+    ],
+]
+
+#: **The same light, at normals steep enough to separate its terms.**  ``view3d-surflight``
+#: sweeps the slope with the scene's own proportions fixed, which holds the facet within
+#: a few degrees of level and leaves the ambient term and the light's own ``y`` perfectly
+#: confounded.  ``c:hPercent`` and ``c:depthPercent`` are the levers that break that: they
+#: stretch the scene in one axis without touching the data, so the same two datasets sweep
+#: a facet from level to nearly vertical in each of the scene's two planes.
+SURF_LIT_PROBES: list[dict] = [
+    # Steep in the front plane: a tall scene makes the same fall of nine a cliff.
+    *[
+        _surf_light_probe(
+            f"hx{h}", ((9.0, 0.0, 9.0, 9.0), (9.0, 0.0, 9.0, 9.0)), _view(hPercent=h)
+        )
+        for h in (20, 50, 100, 200, 300, 500)
+    ],
+    # Steep through the depth: a shallow scene does the same to the depth's own slope,
+    # and a deep one flattens it.  Both directions, so the sweep crosses level.
+    *[
+        _surf_light_probe(f"dz{d}", ((9.0, 9.0), (0.0, 0.0)), _view(depthPercent=d))
+        for d in (20, 35, 50, 75, 200, 500)
+    ],
+    *[
+        _surf_light_probe(f"dzup{d}", ((0.0, 0.0), (9.0, 9.0)), _view(depthPercent=d))
+        for d in (20, 35, 50, 75, 200, 500)
+    ],
+    # The same two sweeps with the height stretched as well, which tilts the facet in
+    # both planes at once -- the case a model fitted one plane at a time can still miss.
+    *[
+        _surf_light_probe(
+            f"hz{h}-d{d}", ((9.0, 9.0), (0.0, 0.0)), _view(hPercent=h, depthPercent=d)
+        )
+        for h, d in ((200, 50), (300, 200), (50, 35), (500, 500))
+    ],
+    *[
+        _surf_light_probe(
+            f"hzup{h}-d{d}", ((0.0, 0.0), (9.0, 9.0)), _view(hPercent=h, depthPercent=d)
+        )
+        for h, d in ((200, 50), (300, 200), (50, 35), (500, 500))
+    ],
+    # Tilted in both planes at once: a corner of the lattice pulled down on its own.
+    *[
+        _surf_light_probe(
+            f"corner-h{h}", ((9.0, 9.0, 9.0), (0.0, 9.0, 9.0)), _view(hPercent=h)
+        )
+        for h in (50, 100, 300)
+    ],
+]
+
+#: **The bands themselves**: how many there are, what each is painted, and what the legend
+#: of them says.  A band legend is a legend of value *ranges* rather than of series, so its
+#: entries are read here as strings -- and its swatches are vector, so each band's fill is
+#: exact rather than a tone of the lit raster.  The ramps run the value linearly across
+#: thirteen categories so that every band the axis holds appears in the picture.
+SURF_BAND_PROBES: list[dict] = [
+    # Nine bands, which is gallery slide 12's own count: past six, the accent cycle is
+    # whatever the per-point ramp does, and that is what this reads.
+    _ramp_probe("b9", 41.0, legend="r"),
+    _ramp_probe("bn2", 1.0, legend="r"),
+    *[
+        _ramp_probe(
+            f"tall{value:g}", value, legend="r", frame=(FRAME_WIDTH, 330 * 12700)
+        )
+        for value in (18.0, 9.5, 41.0, 4.5)
+    ],
+    _ramp_probe("bn3", 2.5, legend="r"),
+    _ramp_probe("bn8", 15.0, legend="r"),
+    _ramp_probe("bn10", 18.5, legend="r"),
+    _ramp_probe("bn11", 11.0, legend="r"),
+    _ramp_probe("b10", 19.0, legend="r"),
+    _ramp_probe("b9b", 82.0, legend="r"),
+    _ramp_probe("b3", 3.0, legend="r"),
+    _ramp_probe("bneg", 6.0, low=-6.0, legend="r"),
+    _ramp_probe("bneg2", 20.0, low=-20.0, legend="r"),
+    # A decimal axis and a stated number format, which is what says whether a band's label
+    # is the axis' own format or a plain number.
+    _ramp_probe("bdec", 1.4, legend="r"),
+    _ramp_probe("bfmt", 9.0, legend="r", numFmt="0.00"),
+    _ramp_probe("bpct", 9.0, legend="r", numFmt="0%"),
+    # Every legend position, because a band legend's order is its own: the right-hand one
+    # runs the highest band first, which is the reverse of a series legend's.
+    *[_ramp_probe(f"bleg-{where}", 9.0, legend=where) for where in ("b", "l", "t")],
+    # A surface with no legend at all, and one with `c:wireframe`, so the deck says what
+    # each of those does to the same picture.
+    _ramp_probe("bwire", 41.0, legend="r", wireframe=1),
+]
+
 DECKS = {
+    "view3d-surfrecon": SURF_RECON_PROBES,
+    "view3d-surfband": SURF_BAND_PROBES,
+    "view3d-surflit": SURF_LIT_PROBES,
+    "view3d-surflight": SURF_LIGHT_PROBES,
+    "view3d-surfmesh": SURF_MESH_PROBES,
+    "view3d-surfshape": SURF_SHAPE_PROBES,
     "view3d-mesh": MESH_PROBES,
     "view3d-cat": CAT_PROBES,
     "view3d-count": COUNT_PROBES,
@@ -805,7 +1236,9 @@ def series_xml(
     )
 
 
-def axes_xml(kind: str, cross_between: str | None = None) -> str:
+def axes_xml(
+    kind: str, cross_between: str | None = None, num_fmt: str | None = None
+) -> str:
     """The category, value and (for a 3-D group) series axes this chart needs.
 
     The value axis carries gridlines and ten-point labels exactly as every earlier axis
@@ -822,10 +1255,19 @@ def axes_xml(kind: str, cross_between: str | None = None) -> str:
         "<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"
         "<c:tickLblPos val='nextTo'/>"
         "<c:crossAx val='100003'/><c:crosses val='autoZero'/></c:serAx>"
-        if "3D" in kind
+        if "3D" in kind or kind.startswith("surface")
         else ""
     )
-    cross_between = cross_between or ("midCat" if kind.startswith("area") else "between")
+    if cross_between == "none":
+        # The attribute left out altogether, which is what a real deck usually writes and
+        # is therefore the only way to read PowerPoint's own default for this element.
+        between = ""
+    else:
+        cross_between = cross_between or (
+            "midCat" if kind.startswith(("area", "surface")) else "between"
+        )
+        between = f"<c:crossBetween val='{cross_between}'/>"
+
     return (
         "<c:catAx><c:axId val='100002'/>"
         "<c:scaling><c:orientation val='minMax'/></c:scaling>"
@@ -838,10 +1280,15 @@ def axes_xml(kind: str, cross_between: str | None = None) -> str:
         "<c:valAx><c:axId val='100003'/>"
         "<c:scaling><c:orientation val='minMax'/></c:scaling>"
         "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
-        "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        + (
+            f"<c:numFmt formatCode='{num_fmt}' sourceLinked='0'/>"
+            if num_fmt
+            else "<c:numFmt formatCode='General' sourceLinked='1'/>"
+        )
+        +
         "<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"
         "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
-        f"<c:crosses val='autoZero'/><c:crossBetween val='{cross_between}'/></c:valAx>"
+        "<c:crosses val='autoZero'/>" + between + "</c:valAx>"
         + depth
     )
 
@@ -858,6 +1305,9 @@ def group_xml(
     factors: tuple[float, ...] | None = None,
     bar_dir: str = "col",
     grouping: str = "clustered",
+    wireframe: int = 0,
+    band_fmts: str | None = None,
+    rows: tuple[tuple[float, ...], ...] | None = None,
 ) -> str:
     """One ``c:*Chart`` group.  A 3-D group states three ``c:axId`` children, exactly.
 
@@ -872,7 +1322,11 @@ def group_xml(
             (scales[index] if scales else (1.0 if series == 1 else 0.6 - 0.15 * index)),
             colours[index] if colours else None,
             categories,
-            factors,
+            (
+                tuple(value / high for value in rows[index])
+                if rows is not None
+                else factors
+            ),
         )
         for index in range(series)
     )
@@ -929,6 +1383,16 @@ def group_xml(
             + stacked
             + depth_gap + ids3 + "</c:area3DChart>"
         )
+    if kind in ("surface3D", "surface"):
+        # A surface is coloured by **value band** rather than by series, so its series
+        # carry no fill of their own: what a band is painted is `c:bandFmts`' business or
+        # the theme's.  `c:wireframe` and `c:bandFmts` are both written here because both
+        # are what this deck measures; the element order is the schema's.
+        element = "c:surface3DChart" if kind == "surface3D" else "c:surfaceChart"
+        wire = f"<c:wireframe val='{wireframe}'/>"
+        return (
+            f"<{element}>" + wire + body + (band_fmts or "") + ids3 + f"</{element}>"
+        )
     if kind == "pie3D":
         # A pie has no axes and one series, so its slices carry the colours: ``c:dPt``
         # per point, stated rather than inherited for the same reason the bars' are.
@@ -953,8 +1417,20 @@ def chart_part(probe: dict) -> bytes:
         "<c:date1904 val='0'/><c:lang val='en-US'/><c:roundedCorners val='0'/>"
         "<c:chart>"
         + view_xml(probe["view"])
-        + "<c:autoTitleDeleted val='1'/>"
-        "<c:plotArea><c:layout/>"
+        + (
+            (
+                "<c:title><c:tx><c:rich><a:bodyPr rot='0' spcFirstLastPara='1' "
+                "vertOverflow='ellipsis' vert='horz' wrap='square' anchor='ctr' "
+                "anchorCtr='1'/><a:lstStyle/><a:p>"
+                f"<a:pPr><a:defRPr sz='{probe.get('titleSize', 1400)}' b='0'/>"
+                f"</a:pPr><a:r><a:rPr lang='en-US' sz='{probe.get('titleSize', 1400)}' b='0'/>"
+                f"<a:t>{probe['title']}</a:t></a:r></a:p></c:rich></c:tx>"
+                "<c:overlay val='0'/></c:title><c:autoTitleDeleted val='0'/>"
+            )
+            if probe.get("title")
+            else "<c:autoTitleDeleted val='1'/>"
+        )
+        + "<c:plotArea><c:layout/>"
         + group_xml(
             kind,
             probe["high"],
@@ -967,10 +1443,19 @@ def chart_part(probe: dict) -> bytes:
             probe.get("factors"),
             probe.get("barDir", "col"),
             probe.get("grouping", "clustered"),
+            probe.get("wireframe", 0),
+            probe.get("bandFmts"),
+            probe.get("rows"),
         )
-        + axes_xml(kind, probe.get("crossBetween"))
+        + axes_xml(kind, probe.get("crossBetween"), probe.get("numFmt"))
         + "</c:plotArea>"
-        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+        + (
+            f"<c:legend><c:legendPos val='{probe['legend']}'/>"
+            "<c:overlay val='0'/></c:legend>"
+            if probe.get("legend")
+            else ""
+        )
+        + "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
         "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>"
         f"<a:defRPr sz='{size}'/></a:pPr><a:endParaRPr lang='en-US'/></a:p></c:txPr>"
         "</c:chartSpace>"

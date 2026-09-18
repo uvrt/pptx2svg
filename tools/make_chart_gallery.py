@@ -14,7 +14,7 @@ write.
 
 This deck is the missing input.  Every ``c:*Chart`` group element the reader recognises
 appears on a slide of its own -- the ten that draw, the four 3-D spellings that degrade to
-them, ``surfaceChart`` which is deliberately deferred -- plus a combo chart, and the whole
+them, ``surfaceChart`` and its band legend -- plus a combo chart, and the whole
 thing is generated from this file so that anyone can regenerate it and read what went in.
 
 Authored to be *scorable*
@@ -71,11 +71,12 @@ seconds.
 
 So a hand-authored ChartEx cannot be a fixture on this machine -- "the acceptance test is
 that PowerPoint opens it", and PowerPoint does not.  The warning path it would have
-pinned is covered twice over without it: slide 12's ``surfaceChart`` exercises the same
-``chart-unsupported-type`` empty-frame output through the ``c:`` reader, and
-``tests/test_chart.py::test_an_office_2016_chartex_frame_says_what_it_is`` covers the
-``cx:`` branch on a deck that never goes near PowerPoint.  Getting a real one into the
-corpus needs a deck Office wrote, not one we wrote.
+pinned is covered by ``tests/test_chart.py`` instead --
+``test_an_office_2016_chartex_frame_says_what_it_is`` for the ``cx:`` branch and
+``test_a_chart_type_that_is_not_implemented_says_so`` for the ``c:`` one, both on decks
+that never go near PowerPoint.  No slide here refuses any more: ``surfaceChart`` was the
+last group element out and is drawn now.  Getting a real ChartEx into the corpus needs a
+deck Office wrote, not one we wrote.
 
 Usage::
 
@@ -621,12 +622,13 @@ def stock() -> bytes:
 
 
 def surface() -> bytes:
-    """Slide 12 -- ``surfaceChart``, which is **measured and deliberately deferred**.
+    """Slide 12 -- ``surfaceChart``: a lit mesh coloured by **value band**.
 
-    This is the only slide in the deck whose expected output is an empty frame plus a
-    ``chart-unsupported-type`` warning.  It is here so that the honest-refusal path has a
-    committed fixture instead of only a unit test: if a future change ever starts drawing
-    something here, the snapshot says so.
+    The one chart type in the deck whose marks are not its series.  Three series over four
+    quarters make a lattice of twelve points, drawn as a sheet through the scene's depth
+    and cut into nine bands by the value axis' own intervals, each band a step of the
+    accent ramp; the legend is of those bands rather than of the series, which is a legend
+    model no other slide here has.  See ROADMAP.md 3.4.
 
     A surface group needs three ``c:axId`` children, so it carries a real ``c:serAx``.
     """
@@ -651,7 +653,7 @@ def surface() -> bytes:
         + ser_axis(119002, 119001)
     )
     return chart_space(
-        VIEW_3D + title("Surface (deferred)") + plot_area(groups, axes) + tail(legend("r"))
+        VIEW_3D + title("Surface by quarter") + plot_area(groups, axes) + tail(legend("r"))
     )
 
 
@@ -816,7 +818,7 @@ SLIDES: list[dict] = [
     {"key": "stockChart", "build": stock, "frame": WIDE,
      "caption": "11  stockChart - high/low/close with hiLowLines"},
     {"key": "surfaceChart", "build": surface, "frame": MEDIUM,
-     "caption": "12  surfaceChart - deferred: expect an empty frame and a warning"},
+     "caption": "12  surfaceChart - a lit mesh banded by value, with a legend of bands"},
     {"key": "bar3DChart", "build": bar_3d, "frame": MEDIUM,
      "caption": "13  bar3DChart - parses as barChart and draws flat"},
     {"key": "line3DChart", "build": line_3d, "frame": MEDIUM,

@@ -1319,8 +1319,9 @@ appears.
 
 ## Phase 3 — Charts
 
-**Effort: XL. 3.1 is done, 3.2 has ten of its types, and 3.3's combo charts and secondary
-axis landed with them; `surfaceChart` and the 3-D scene are what remain.**
+**Effort: XL. 3.1 is done, 3.2 has every type ECMA-376 defines, and 3.3's combo charts
+and secondary axis landed with them; what remains of the 3-D scene is the perspective
+camera and a `pie3DChart`'s solid.**
 
 No shortcut: unlike SmartArt, PowerPoint does *not* cache a rendered chart. The
 `c:chartSpace` part holds data plus styling, and the renderer must do axis scaling, tick
@@ -1368,7 +1369,7 @@ Three things the obvious reading gets wrong, each found in a fixture:
 mapping. Both **[pptx-renderer]** and this roadmap flagged it; it is invisible until a
 deck does both at once.
 
-### 3.2 Renderer — ten types **done**, one deferred with its reasons
+### 3.2 Renderer — **every type done**
 
 1. ✅ `barChart` — clustered, stacked, percentStacked, `barDir` col and bar
 2. ✅ `lineChart` — markers, smoothing, blanks, the real fixture on slide 2
@@ -1380,14 +1381,19 @@ deck does both at once.
    `c:showNegBubbles`
 8. ✅ `ofPieChart` — both `c:ofPieType` forms, all five splits, `c:serLines`
 9. ✅ `stockChart` — `c:hiLowLines`, `c:upDownBars`, three and four series
-10. ⛔ `surfaceChart` / `surface3DChart` — **measured and deferred**; see below
+10. ✅ `surfaceChart` / `surface3DChart` — a lit mesh banded by value, `c:bandFmts`,
+    `c:wireframe` and a legend of the bands; see *Surface — measured, and drawn* in 3.4
 
-**Still warning `chart-unsupported-type`:** `surfaceChart` / `surface3DChart`, and the
-whole ChartEx family. Their 3-D spellings degrade through `parse/chart.flat_chart_kind`
-and then warn too. **No chart in the corpus warns**, and none ever did once 3.1 landed.
+**Still warning `chart-unsupported-type`:** the whole ChartEx family, and a plot area
+holding a group element the reader does not recognise at all. Every `c:*Chart` group
+ECMA-376 defines is drawn, the 3-D spellings included — four of them draw their scene and
+the rest degrade through `parse/chart.flat_chart_kind` and declare it.
+**No chart in the corpus warns**, and none ever did once 3.1 landed.
 
-Data labels are drawn for all ten, at every `c:dLblPos` each type accepts — except
-the radar's, whose placement no export has ever shown; see below.
+Data labels are drawn for all ten of the types that have them, at every `c:dLblPos` each
+accepts — except the radar's, whose placement no export has ever shown; see below. A
+surface has none: it has no marks of its own to label, its facets being bands rather than
+points.
 
 #### Polar layout, measured
 
@@ -1957,42 +1963,136 @@ came back a line chart's in every one of them.
 * **The legend key is the line chart's rule with the marker on it**, 19.200 pt, confirmed
   on the bottom-legend probe.
 
-#### Surface — measured, and deferred
+#### Surface — measured, and **drawn**
 
-Six probe charts, exported and compared against our own render. **`surfaceChart` is not
-drawn and should not be**, and this is the reasoning rather than an absence of effort.
+`surfaceChart` was the last group element PowerPoint renders that this did not, and it is
+drawn now: a lit 3-D mesh coloured by value band, both spellings of it, with a legend of
+those bands. What this section used to say — six probe charts, a refusal, and a list of
+seven things none of which existed — is kept below as the reading that was right, with
+what each of them came to. Five probe decks settle it: `view3d-surfshape` (110 slides),
+`view3d-surfmesh` (28), `view3d-surflight` (34), `view3d-surflit` (29) and
+`view3d-surfband` (22), all in `tools/make_view3d_probe.py`.
 
-What PowerPoint drew, on every one of the six:
+**The reading that was already right, and still is.**
 
-* **A lit 3-D mesh, in perspective, including for the spelling without "3D" in it.**
-  ECMA-376 calls `c:surfaceChart` a contour chart and `c:surface3DChart` a surface, and
-  the obvious reading is that the first is a flat 2-D map. It is not: with no `c:view3D`
-  the two spellings drew the **identical** projected 3-D surface, complete with a floor, a
-  back wall, gridlines drawn in perspective and three axis label runs positioned inside
-  that projection. Adding `<c:view3D><c:rotX val="15"/><c:rotY val="20"/></c:view3D>`
-  turned the whole picture, so the *view*, not the element name, is what decides.
+* **A lit 3-D mesh, in perspective, for the spelling without "3D" in it too.** ECMA-376
+  calls `c:surfaceChart` a contour chart and the obvious reading is a flat 2-D map. It is
+  not: `view3d-surfshape` draws twelve cells both ways and they come back **equal to the
+  digit** — the same face, the same lattice, the same depth. So `surfaceChart` is in
+  `THREE_D_CHART_KINDS` although its name does not say so, which is what gives it the bare
+  (unpadded) value axis every other 3-D group gets.
 * **`c:wireframe val="1"` replaces the fill with a stroked mesh** and nothing else changes.
-* **The surface is coloured by value band, not by series** — accent1 for 0–5, accent2 for
-  5–10, accent3 for 10–15 — with each facet shaded by its orientation, so the same band
-  appears in two or three different tones depending on which way the quad faces.
-* **The legend is of those bands**, printed as `0-5`, `5-10`, `10-15`, which is a legend
-  model no other chart type here has.
+* **The surface is coloured by value band, not by series**, each facet shaded by its
+  orientation.
+* **The legend is of those bands**, printed as `0-5`, `5-10`, `10-15`.
 
-What that would take, none of which exists and none of which is shared with anything else:
-a projection from `c:view3D` (`rotX`, `rotY`, `perspective`, `rAngAx`, `depthPercent`,
-`heightPercent`), painter's-algorithm ordering of the quads, a lighting model to reproduce
-the per-facet shading, `c:bandFmts` for the value bands, a projected axis frame with walls
-and gridlines, axis labels placed in the projection, and a band legend. Each of those is
-itself a fitted, measured thing; a surface drawn without the lighting or without the
-hidden-surface ordering is not a rough version of the picture above, it is a different
-picture that reads as a bug.
+**The scene is a `line3DChart`'s exactly, and that is measured rather than borrowed.** A
+surface's categories sit **on** the ticks, so the first and last category labels stand on
+the drawn face's own left and right edges while the extreme value labels stand on its top
+and bottom ones — which gives the face's width and its height directly, with no region and
+no model in between, and the raster's ink box on top of that gives the depth vector. Over
+42 cells, two to eight categories against one to six series at two cameras each:
 
-**What would close it**: the projection first, measured against the `view3d` probe, which
-is the only one of the six whose camera differs and therefore the only one that constrains
-the matrix. Until the projection reproduces that probe's floor and wall vertices, none of
-the rest can be checked at all. The empty frame plus `chart-unsupported-type` stays, which
-is the principle this file already applies everywhere else: a wrong picture is worse than
-an honest gap.
+> aspect = `floor((across + series) / 2) / categories` of the region's own, and
+> depth = `series / categories` of the scene's width.
+
+Every cell's free fit lands within 0.01 of the integer, and the depth within 0.3%.
+`across` follows `c:crossBetween` here too, which the eight-category pair separates —
+spelled `between` it reads 5 where its `midCat` twin reads 4 — and **`midCat` is the
+default**, read off the probe that states the attribute nowhere and draws its `midCat`
+twin's picture to the digit. `c:depthPercent` scales the depth alone, a stated
+`c:hPercent` replaces the region's aspect, and `c:gapDepth` moves neither: 0 and 500% draw
+the identical picture.
+
+**The lattice spans the whole depth, front row to back.** `view3d-surfmesh` paints every
+band one and the same red through `c:bandFmts`, which is what makes the sheet separable
+from the floor by colour alone — the scene's own ink box is the floor's and says nothing
+about the mesh — and stands each row flat at a value of its own, so a row's own scanline
+gives its front-left corner. Two, three, four and five rows come back at `0, 1`,
+`0, ½, 1`, `0, ⅓, ⅔, 1` and `0, ¼, ½, ¾, 1`. **Series one is the front row** whatever its
+values, read off the probe whose rows descend. A **one-series** surface draws no sheet at
+all, which is PowerPoint's own picture.
+
+**Each cell is two triangles, split along its near-left to far-right diagonal.** Measured
+and not chosen: a cell with three corners level and the fourth pulled down draws **two**
+tones, one of them the level tone its neighbour draws — which that diagonal gives and the
+other cannot, since it would split the same cell into two sloped triangles and draw three.
+Predicted, the two tones land within one 8-bit level at three heights.
+
+**A surface is lit by a different light, and only the direction differs.** The prism and
+the ribbon are lit from 22° right of the viewer and 29° above; a surface's sheet is lit
+from the **corner** — `(1, 1, 1)/√3` — with the same ambient and the same diffuse. That is
+a free fit of `ambient + u·nx + w·ny + q·nz` to **96 facets**, which returns 0.3946,
+0.4345, 0.4339 and 0.4317: three light components inside 0.7% of each other and an ambient
+that agrees with `VIEW_3D_AMBIENT` to the fourth place. The instrument is the ribbon's,
+turned on a sheet — a facet whose normal the drawn geometry gives, with `c:hPercent` and
+`c:depthPercent` as the levers that tilt it from level to nearly vertical in each of the
+scene's two planes without touching the data. Read back with the **shared** constants,
+every one of the 104 facets is inside **two 8-bit levels**, mean 0.66. The prism's own
+light is refuted by a wide margin: it puts a level sheet at 0.7587 where PowerPoint draws
+0.8275.
+
+Two more things the same sweeps settle. It **clamps at both ends** — `ambient + diffuse`
+is 1.1412 and the brightest facet measured is 1.0000 exactly — and a facet the light
+misses is a flat **0.4000**, where `max(0, n·L)` puts it at the ambient 0.3947. That 1.4
+levels is the whole of the disagreement and is left where it is. The edge-on case is what
+confirms the projection under all of this: a sheet falling away at exactly the pitch shows
+its **underside**, and `sm-c5-n2-down` tilts its rows 15.0° at `rotX=15` and does.
+
+**The bands are the value axis' own major intervals.** No band count of its own and no
+rule of its own: coarsen the axis and the bands coarsen with it, which is why the same data
+draws five bands on a short frame and nine on a tall one. Eleven axes from `-20..20 by 10`
+to `0..1,4 by 0,2` say so, and the legend names every boundary — the two ticks' own text
+joined by a hyphen, in the axis' own number format (`0,00-2,00` under `0.00`, `0%-200%`
+under `0%`, and `-4--2` at the bottom of a signed axis, PowerPoint joining the strings and
+leaving the signs where they fall). `c:bandFmts` overrides a band's fill by an index that
+counts **from the axis' minimum up**, and the override reaches the legend key as well.
+
+**The band colours are the per-point accent cycle, turned two bands early.** The legend's
+swatches are vector and are the fills exactly, which is what made this readable: 3 and 4
+bands come back `#4472C4 #ED7D31 #A5A5A5 #FFC000`, 5 and 6 come back the same six
+*darkened*, 7 adds a light `#8FA2D4` after them, and 9 and 10 bands carry the darkened six
+followed by light accent1, accent2, accent3 and accent4. So it is `_cycle_accent` exactly
+and only its threshold moves — four bands draw the plain accents where four *points* also
+do, and five bands draw the darkened ones where five points do not. What the two extra
+colours are for is not identified; `BAND_COLOR_CYCLE_SLACK` is that two and says so.
+
+**A side legend stands beside the region and below the title**, and both halves of that
+came out of this slide. PowerPoint's nine band keys stand at 685.5 pt where the scene's
+own *face* plus the lead gap is 565.5: the legend's band comes off the frame before the
+camera is fitted into what is left, so the scene shrinking its front face does not pull the
+legend in after it. And the block is centred in the frame **less the title's band** — 9.38,
+13.04 and 19.15 pt below the frame's centre at 8, 14 and 24 pt of title, unmoved at every
+camera on the thirteen titleless probes beside them, and the same on a flat control. Twice
+those shifts is `line_height + 8.99` at all three sizes, and it is a constant of the title
+rather than a share of the frame: 120, 250 and 330 pt frames all read 13.04. That is **not**
+`TITLE_BAND_LINES` times the line, which is the band the axis' interval count is measured
+against and reads 14.42, 25.24 and 43.27 against this one's 18.76, 26.08 and 38.30 — the
+two agree at 14 pt and nowhere else, which is why one stood for the other until a size
+sweep was run. Gallery slides 4, 7 and 15 moved with slide 12 for that reason, all three
+upwards.
+
+**What it cost and what it bought.** Gallery slide 12 goes from **0.5313 / −0.0470** to
+**0.5694 / 0.9095**, with mean absolute error 17.47 → 6.61 and pixels over 10% 13.25 →
+5.91; the deck goes 0.7303 → **0.7345** and its histogram 0.7891 → **0.8443**, and slides
+4, 7 and 15 gain 0.0019, 0.0161 and 0.0150 from the legend's title band. Nothing else in
+the corpus moves to four decimals. Put the two renders side by side and the difference is
+edges: the mesh's own colours are exact, the nine band names are PowerPoint's string for
+string, and what the difference image shows is antialiasing along the contours, where
+PowerPoint rasterises the whole scene at once and we draw vector polygons.
+
+The one thing drawn here that PowerPoint does not draw is a **hairline in each facet's own
+colour**: two polygons sharing an edge antialias against the paper rather than against each
+other, so a mesh of them comes out with a pale seam along every edge. The stroke closes it
+and moves the silhouette by a fortieth of a point; it took slide 12 from 0.5154 to 0.5685
+on its own.
+
+**What is left, and it is small.** A **one-series** surface draws its scene and no sheet,
+which is PowerPoint's picture — but PowerPoint also draws a degenerate `0..1,5` value axis
+under it where we draw the data's own, and that axis is not modelled. A surface with
+**no camera** (`c:rAngAx="0"`, or no `c:view3D` at all) keeps its axis and its legend and
+declares `chart-3d-flattened`, exactly as a `bar3DChart` under the same camera does: what
+those select is the perspective scene, which nothing here draws for any group element.
 
 #### What the new types cost the corpus, and what they bought
 
@@ -2293,8 +2393,9 @@ says nothing; the flags have to be read, and then the per-point overrides on top
 
 Data-label rendering is therefore verified **entirely against probes**.
 
-`surfaceChart` and the ChartEx family warn `chart-unsupported-type` and draw an empty
-frame rather than a wrong picture. The shared infrastructure — value domain, tick
+The ChartEx family warns `chart-unsupported-type` and draws an empty frame rather than a
+wrong picture; nothing in the `c:` reader does any more, `surfaceChart` having been the
+last one out. The shared infrastructure — value domain, tick
 selection, number formatting, gridlines, legend layout for all four `legendPos` values,
 plot-area rectangle, the polar region, markers, data labels — is built, and the three types
 that landed this week were mostly a matter of reusing it: the bubble is the scatter's
@@ -2611,18 +2712,18 @@ The per-slide numbers are the measurement; the mean is not.
 | 1 | `barChart` col, rotated labels | 0.6671 | 0.9960 | 0.083 | was 0.5611 before `c:overlap` entered the bar-width divisor (3.3) and 0.6556 before the legend gap (3.5); the plot rectangle is still a few pt wider than PowerPoint's |
 | 2 | `barChart` bar, bottom value axis, data labels | 0.9310 | 0.9989 | 0.138 | — |
 | 3 | `lineChart` | 0.6906 | 0.5920 | 0.040 | visually the same chart; 4% coverage of 1 pt strokes is what the number is. The legend gap (3.5) took the SSIM up and the histogram down, both for that reason |
-| 4 | `areaChart` stacked | 0.8814 | 0.9998 | 0.394 | — |
+| 4 | `areaChart` stacked | 0.8814 → **0.8833** | 0.9998 | 0.394 | its side legend sits below the title band now; see 3.4 |
 | 5 | `scatterChart` | 0.7759 | 0.6225 | 0.031 | sparse, as slide 3 |
 | 6 | `bubbleChart` | **0.5512** | 0.9942 | 0.090 | was 0.4149. Both axes run 0–12 by 2 now rather than 0–10 by 1: the domain clears the bubbles' *ink*. Pixels differing by more than 10% went 10.7 to 3.8. See 3.2b |
-| 7 | `pieChart` | 0.8968 | 0.9993 | 0.240 | — |
+| 7 | `pieChart` | 0.8968 → **0.9132** | 0.9993 | 0.240 | the side legend's title band again; see 3.4 |
 | 8 | `doughnutChart` | 0.9717 | 0.9999 | 0.188 | the best slide in the deck |
 | 9 | `ofPieChart` bar form | **0.8979** | 0.9990 | 0.272 | was 0.8056, and **not** the divisor defect this table used to call it: the radius was right to 1%, the two plots were in the wrong place. Pixels over 10% went 14.9 to 2.2. See 3.2b |
 | 10 | `radarChart` | 0.7106 | 0.7318 | 0.036 | rings and spokes agree exactly, including the ring count; sparse |
 | 11 | `stockChart` | 0.0384 | 0.9608 | 0.045 | was 0.0499 and the picture is **right** now: the three wrong swatches are gone and the legend lays out on PowerPoint's own cell. Every other number improved — histogram 0.9593 to 0.9608, mean absolute error 5.53 to 5.02, pixels over 10% 4.81 to 4.40 — and the SSIM fell anyway. See below and 3.2b |
-| 12 | `surfaceChart` | 0.5313 | −0.0470 | 0.133 | deferred by design: our empty frame against a full 3-D surface and its banded legend. The negative histogram is two unrelated images, which is the honest number |
+| 12 | `surfaceChart` | 0.5313 → **0.5694** | −0.0470 → **0.9095** | 0.151 | its **mesh is drawn**: a lit lattice cut into nine value bands, with a legend of those bands whose nine names are PowerPoint's string for string. Mean absolute error 17.47 → 6.61 and pixels over 10% 13.25 → 5.91; the histogram was negative because the two pictures shared nothing. See 3.4 |
 | 13 | `bar3DChart` | 0.5882 → **0.7316** | 0.9404 → **0.9990** | 0.212 | its **scene is drawn**: prisms, floor, side and back walls. Mean absolute error 13.48 → 5.50 and pixels over 10% 10.26 → 4.83. See 3.4 |
 | 14 | `line3DChart` | 0.1223 → **0.5812** | 0.8871 → 0.6027 | 0.061 | its **scene is drawn** too: ribbons in depth, one row per series. Mean absolute error 7.78 → 3.07 and pixels over 10% 5.96 → 3.26; the histogram falls for the documented mask reason, and the ribbon faces are within two levels per channel of PowerPoint's. See 3.4 |
-| 15 | `pie3DChart` | 0.7614 | 0.1336 | 0.241 | see 3.4 |
+| 15 | `pie3DChart` | 0.7614 → **0.7764** | 0.1336 → 0.1159 | 0.241 | the side legend's title band; its scene is still flat. See 3.4 |
 | 16 | `area3DChart` | **0.7551** | 0.9801 | 0.286 | was 0.7340 / 0.9931: its axis is PowerPoint's 0–50 by 5 now rather than 0–60 by 10, which is more ink in the right places and slightly more black on a slide whose scene is a raster. Stacked, so its scene is measured and not drawn. See 3.4 |
 | 17 | combo | **0.7433** | 0.9994 | 0.232 | was 0.6120: both groups, the right-hand axis and the two-entry legend are drawn now. See 3.3 and 3.5 |
 
@@ -2932,7 +3033,7 @@ picture than PowerPoint's but not a wrong one.
   sweep that settled it is **3.5**; one rule gives all four, because the gap is a function
   of the entries and not of the chart.
 
-### 3.4 3-D chart fallbacks (M–L) — **three group elements draw their scene; a `pie3DChart` and a stacked `area3DChart` stay flat**
+### 3.4 3-D chart fallbacks (M–L) — **four group elements draw their scene; a `pie3DChart` and a stacked `area3DChart` stay flat**
 
 `bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents —
 `parse/chart.flat_chart_kind` does this and `bar3DChart` therefore already draws flat.
@@ -5300,12 +5401,11 @@ Revised quick wins, in order of payoff per day:
    like: it turned up two arc-conversion bugs that had been silently misdrawing
    custom geometry, and it replaced hand-transcription with a spec compiler.
 
-Phase 3 is well along: the reader and ten chart types -- `barChart`, `lineChart`,
-`areaChart`, `scatterChart`, `bubbleChart`, `pieChart`, `doughnutChart`, `ofPieChart`,
-`radarChart` and `stockChart` -- are done and measured, and no chart in the corpus warns
-`chart-unsupported-type` any more. `surfaceChart` is measured and deliberately deferred;
-see *Surface -- measured, and deferred* for what PowerPoint actually draws and what would
-close it. The shared infrastructure -- value domain, tick selection, number formatting,
+Phase 3 is well along: the reader and **every** chart type ECMA-376 defines --
+`barChart`, `lineChart`, `areaChart`, `scatterChart`, `bubbleChart`, `pieChart`,
+`doughnutChart`, `ofPieChart`, `radarChart`, `stockChart` and now `surfaceChart` -- are
+drawn and measured, and nothing in the corpus warns `chart-unsupported-type` any more.
+The surface was the last one out; see *Surface -- measured, and drawn*. The shared infrastructure -- value domain, tick selection, number formatting,
 gridlines, legend layout, plot-area rectangle, polar region -- is built, and the three
 types that landed this week reused nearly all of it. What is left, cheapest first:
 
@@ -5326,8 +5426,7 @@ types that landed this week reused nearly all of it. What is left, cheapest firs
    Category-label wrapping is done; the data-label kind is a separate path.
 4. ~~**Combo charts and the secondary axis.**~~ -- done and measured over 76 probe
    slides; see 3.3. `bubbleChart`, `ofPieChart` and `stockChart` had already landed, and
-   `surfaceChart` is measured and deliberately deferred under *Surface -- measured, and
-   deferred*. What 3.3 leaves open is named there: two value axes on one side, a
+   `surfaceChart` has since -- see *Surface -- measured, and drawn*. What 3.3 leaves open is named there: two value axes on one side, a
    horizontal combo, and a horizontal legend's inter-entry gap -- the last of which is not
    a combo problem at all and is now the largest chart item left.
 5. ~~**The value-axis tick density — and, it turns out, the unit rule under it.**~~ — done
