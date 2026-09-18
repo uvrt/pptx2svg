@@ -549,3 +549,118 @@ def test_a_bullet_sized_in_points_is_drawn_at_that_size(basic_theme):
     bullet = re.search(r'<tspan [^>]*font-size="([\d.]+)"[^>]*>●</tspan>', svg)
     assert bullet is not None, "no character bullet in the render"
     assert float(bullet.group(1)) == pytest.approx(13.33, abs=0.05)
+
+
+# --------------------------------------------------------------------------------------
+# The feature-sweep fixture itself
+# --------------------------------------------------------------------------------------
+
+#: Slide number -> the feature it demonstrates, in the order `tools/make_feature_sweep.py`
+#: puts them.  Written down here rather than read back out of the deck, so that a slide
+#: reordered in the generator fails this test instead of silently renumbering what the VRT
+#: snapshots and the fidelity baseline mean.
+SWEEP_SLIDES = (
+    ("clr-change", "fixed"),
+    ("svg-blip", "fixed"),
+    ("alternate-content", "fixed"),
+    ("bu-blip", "fixed"),
+    ("bu-sz-pts", "fixed"),
+    ("alpha-mod-fix", "fixed"),
+    ("compound-lines", "pinned"),
+    ("table-compound", "pinned"),
+    ("gradient-paths", "pinned"),
+    ("tile-fill", "pinned"),
+    ("anchor-ctr", "pinned"),
+    ("shadow-blur", "pinned"),
+    ("pattern-fills", "rendered"),
+)
+
+
+def _generator():
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+    import make_feature_sweep
+
+    return make_feature_sweep
+
+
+def test_the_fixture_is_exactly_what_its_generator_writes(tmp_path, feature_sweep):
+    """The deck's provenance claim, checked rather than asserted in prose.
+
+    ``tests/fixtures/FIXTURES-README.md`` says every slide and every image in this deck is
+    written by ``tools/make_feature_sweep.py``.  Edit the committed file by hand and that
+    stops being true silently -- and the generator's docstring, which is where the
+    authoring hazards and the scorability constraints are recorded, stops describing the
+    thing in the repository.
+    """
+    written = tmp_path / "feature-sweep.pptx"
+    _generator().write_deck(written)
+    assert written.read_bytes() == feature_sweep.read_bytes(), (
+        "tests/fixtures/feature-sweep.pptx is not what tools/make_feature_sweep.py "
+        "writes; regenerate it rather than editing the deck by hand"
+    )
+
+
+def test_the_generator_and_this_file_agree_on_the_slide_order():
+    assert tuple((s["key"], s["state"]) for s in _generator().SLIDES) == SWEEP_SLIDES
+
+
+def test_the_fixture_names_no_typeface_so_the_oracle_can_score_it():
+    """The property that makes this deck worth having.
+
+    ``tools/fidelity.py`` skips a deck whose faces PowerPoint substituted, because the
+    comparison then measures font availability rather than this library -- three of the
+    corpus decks are skipped exactly that way.  ``requested_faces`` counts ``a:latin``,
+    ``a:ea``, ``a:cs`` **and ``a:buFont``**, so a single bullet font on any slide would
+    cost the deck its score.
+    """
+    import zipfile
+
+    deck = Path(__file__).parent / "fixtures" / "feature-sweep.pptx"
+    named = set()
+    with zipfile.ZipFile(deck) as archive:
+        for name in archive.namelist():
+            if not name.startswith("ppt/slides/") or not name.endswith(".xml"):
+                continue
+            body = archive.read(name).decode("utf-8")
+            named.update(re.findall(r'<a:(?:latin|ea|cs|buFont)\s+typeface="([^"]*)"', body))
+    assert not named, f"a slide names a typeface, which can cost the deck its score: {named}"
+
+
+def test_no_slide_carries_a_character_the_oracle_cannot_draw():
+    """No CJK, and nothing outside Latin-1 -- see the generator's *Authored to be scorable*."""
+    import zipfile
+
+    deck = Path(__file__).parent / "fixtures" / "feature-sweep.pptx"
+    outside = set()
+    with zipfile.ZipFile(deck) as archive:
+        for name in archive.namelist():
+            if not name.startswith("ppt/slides/") or not name.endswith(".xml"):
+                continue
+            for text in re.findall(r"<a:t>(.*?)</a:t>", archive.read(name).decode("utf-8")):
+                outside.update(char for char in text if ord(char) > 0xFF)
+    assert not outside, f"non-Latin-1 characters on a slide: {sorted(outside)}"
+
+
+def test_the_compound_warning_fires_once_per_slide_on_the_fixture(feature_sweep):
+    """Slide 8 puts ``cmpd='dbl'`` on all four borders of all nine cells."""
+    options = ConvertOptions(slide_numbers=[8])
+    convert_pptx_to_model(str(feature_sweep), options)
+    assert [w.code for w in options.warnings].count("line-compound-flattened") == 1
+
+
+def test_a_tiled_image_fill_actually_tiles(feature_sweep):
+    """Found by building this fixture: it used to draw one flat block of colour.
+
+    ``patternUnits="objectBoundingBox"`` sizes the tile but says nothing about the units
+    its children are in, so the ``width="100%"`` on the tile's ``<image>`` resolved
+    against the viewport -- the whole 960 px slide -- and every tile showed one hugely
+    magnified corner of the picture.  A ``viewBox`` on the pattern is what maps one copy
+    of the image onto one tile.
+    """
+    svg = convert_pptx_to_svg(str(feature_sweep), ConvertOptions(width=960, slide_numbers=[10]))[0]
+    patterns = re.findall(r"<pattern[^>]*>", svg)
+    assert patterns, "no tiled fill on the tile slide"
+    for pattern in patterns:
+        assert 'viewBox="0 0 1 1"' in pattern, pattern
+    assert '<image href="data:image/png;base64,' in svg
+    assert 'width="1" height="1"' in svg

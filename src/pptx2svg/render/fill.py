@@ -94,12 +94,25 @@ def _image_fill_ref(fill: m.ImageFill, context: RenderContext) -> str:
 
     if fill.tile is not None:
         # A tiled fill repeats at sx/sy of the shape's bounding box.
+        #
+        # The tile needs a `viewBox`, and without one this drew a solid colour rather
+        # than tiling at all.  `patternUnits="objectBoundingBox"` sizes the *tile* as a
+        # fraction of the shape, but it says nothing about the units its children are in:
+        # those stay user space, so the `width="100%"` on the image below resolved
+        # against the **viewport** -- the whole 960 px slide -- and each tile showed one
+        # hugely magnified corner of the picture.  Every tiled image fill in the library
+        # came out as a flat block of whatever colour that corner happened to be.
+        #
+        # A `viewBox` fixes it by giving the tile its own coordinate system: `0 0 1 1`
+        # with the image at 1x1 maps exactly one copy of the picture onto exactly one
+        # tile, whatever the tile's size in user units turns out to be.
         width = num(fill.tile.sx * 100)
         height = num(fill.tile.sy * 100)
         context.add_def(
             f'<pattern id="{pattern_id}" patternUnits="objectBoundingBox" '
-            f'width="{width}%" height="{height}%">'
-            f'<image href="{href}" width="100%" height="100%" preserveAspectRatio="none"/>'
+            f'width="{width}%" height="{height}%" viewBox="0 0 1 1" '
+            f'preserveAspectRatio="none">'
+            f'<image href="{href}" width="1" height="1" preserveAspectRatio="none"/>'
             "</pattern>"
         )
     else:
