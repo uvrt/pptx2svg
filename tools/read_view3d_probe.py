@@ -26,6 +26,13 @@ reports the scene image's own box and the ink inside it, which is the only readi
 
     python3 tools/read_view3d_probe.py ~/pptx2svg-oracle/view3d-colour.pdf --colours
     python3 tools/read_view3d_probe.py ~/pptx2svg-oracle/view3d-shape.pdf --shapes
+
+``--mesh`` reads the **solid inside** the scene rather than the scene's own box: each
+prism's front face against the front plane its value axis defines, and its depth off its
+own right face.  That is what a renderer drawing the scene needs and what the box cannot
+say -- where in its row of depth a bar stands::
+
+    python3 tools/read_view3d_probe.py ~/pptx2svg-oracle/view3d-mesh.pdf --mesh
 """
 
 from __future__ import annotations
@@ -343,6 +350,156 @@ def ink_box(obj) -> tuple[float, float, float, float] | None:
     )
 
 
+def _runs(flags) -> list[tuple[int, int]]:
+    """Contiguous ``True`` spans of a boolean row, as inclusive index pairs."""
+    out: list[tuple[int, int]] = []
+    start = None
+    for index, value in enumerate(flags):
+        if value and start is None:
+            start = index
+        elif not value and start is not None:
+            out.append((start, index - 1))
+            start = None
+    if start is not None:
+        out.append((start, len(flags) - 1))
+    return out
+
+
+def solids(obj, fill: str, factor: float, minimum: int = 200):
+    """Every span of one shaded face of one fill, left to right, in page points.
+
+    A face is found by its **exact** drawn colour -- ``factor`` times the fill per sRGB
+    channel, which ``view3d-colour`` measured as a constant -- within the level the export
+    rounds by, and split into spans by the columns it occupies.  One span is one solid's
+    face: prisms stand apart across the width and a ribbon is one span per series.
+
+    Each span comes back as ``(left, right, top, bottom, rise)`` where the first four are
+    the span's own box and ``rise`` is how much higher the face's top edge is at its right
+    end than at its left -- which for a side face *is* the depth vector's slope, read
+    without reference to anything else on the slide.
+    """
+    import numpy as np
+
+    array = obj.get_bitmap().to_numpy()
+    height, width = array.shape[:2]
+    left, bottom, right, top = obj.get_bounds()
+    sx = (right - left) / width
+    sy = (top - bottom) / height
+    base = [int(fill[i : i + 2], 16) for i in (0, 2, 4)]
+    want = np.array([round(c * factor) for c in base])
+    rgb = array[:, :, [2, 1, 0]].astype(int)
+    mask = np.abs(rgb - want).max(axis=2) <= 2
+    out = []
+    for first, last in _runs(mask.any(axis=0)):
+        span = mask[:, first : last + 1]
+        if span.sum() < minimum:
+            continue
+        rows = span.any(axis=1).nonzero()[0]
+        tops = [span[:, i].nonzero()[0][0] for i in range(span.shape[1]) if span[:, i].any()]
+        out.append(
+            (
+                left + first * sx,
+                left + (last + 1) * sx,
+                top - rows[0] * sy,
+                top - (rows[-1] + 1) * sy,
+                (tops[0] - tops[-1]) * sy,
+            )
+        )
+    return out
+
+
+def mesh(path: Path, probes: list[dict], only: str | None) -> None:
+    """Per probe, where the **solid** stands inside the scene -- the mesh's own reading.
+
+    Everything else here reads the scene's box.  This reads what is drawn inside it: each
+    prism's, ribbon's or slab's front face against the front plane the value axis defines,
+    and its own depth off its right face.  Two numbers come out of every solid and neither
+    needs the scene's box:
+
+    * ``near`` -- how far the solid's front face is drawn *above* where the value it plots
+      would put it on the front plane.  A solid standing back in the depth is lifted by
+      exactly the depth it stands back, so this is that distance in drawn points.
+    * ``deep`` -- the width and the rise of its right face, which is the solid's own depth
+      vector.
+
+    ``near / deep`` is where in its row the solid stands and needs no camera at all;
+    ``deep`` against the camera is the projection the scene is *drawn* with, which is a
+    different number from the one the plot rectangle is *reserved* with.
+    """
+    doc = pdfium.PdfDocument(path)
+    print(
+        "# key\tkind\tseries\tgapD\tgapW\trotX\trotY\tdepth%\th%\tframe"
+        "\tplot_h\tplot_w\tunit_pt\tzero_y\tfill\tvalue\tfront_l\tfront_r\tfront_t"
+        "\tfront_b\tnear\tdeep_dx\tdeep_dy"
+    )
+    for index, probe in enumerate(probes):
+        if only and only not in probe["key"]:
+            continue
+        page = doc[index]
+        images = scene_images(page)
+        read = read_page(page.raw, probe)
+        values, positions = read["values"], None
+        text = labels(page.raw)
+        ticks = []
+        for label, _left, y, _height, _width, _x in text:
+            try:
+                ticks.append((_number(label), y))
+            except ValueError:
+                pass
+        ticks.sort()
+        if len(ticks) < 2 or not images:
+            print(f"{probe['key']}\t{probe['kind']}\t(nothing to read)")
+            continue
+        span = ticks[-1][0] - ticks[0][0]
+        unit = (ticks[-1][1] - ticks[0][1]) / span if span else 0.0
+        zero = ticks[0][1] - ticks[0][0] * unit
+        view = probe["view"] or {}
+        head = [
+            probe["key"],
+            probe["kind"],
+            str(probe.get("series", 1)),
+            str(probe.get("gapDepth", 150)),
+            str(probe.get("gapWidth", 150)),
+            str(view.get("rotX", 0)),
+            str(view.get("rotY", 0)),
+            str(view.get("depthPercent", 100)),
+            str(view.get("hPercent", "")),
+            f"{probe['frame'][1] / EMU:.0f}",
+            f"{read['height']:.3f}",
+            f"{read['right'] - read['left']:.3f}",
+            f"{unit:.5f}",
+            f"{zero:.3f}",
+        ]
+        high = probe["high"]
+        shape = probe.get("factors") or ()
+        scales = probe.get("scales") or (1.0,)
+        for order, fill in enumerate((probe.get("colours") or ())[: probe.get("series", 1)]):
+            fronts = solids(images[0], fill, 1.0)
+            sides = solids(images[0], fill, 0.6364)
+            scale = scales[order] if order < len(scales) else 1.0
+            for place, front in enumerate(fronts):
+                value = high * shape[place] * scale if place < len(shape) else float("nan")
+                side = next(
+                    (row for row in sides if row[0] >= front[1] - 0.5), None
+                )
+                print(
+                    "\t".join(
+                        head
+                        + [
+                            fill,
+                            f"{value:.4f}",
+                            f"{front[0]:.3f}",
+                            f"{front[1]:.3f}",
+                            f"{front[2]:.3f}",
+                            f"{front[3]:.3f}",
+                            f"{front[3] - zero:.3f}",
+                            f"{side[1] - side[0]:.3f}" if side else "-",
+                            f"{side[4]:.3f}" if side else "-",
+                        ]
+                    )
+                )
+
+
 def centroid(array, colour: tuple[int, int, int]) -> tuple[float, float]:
     """Where a colour's pixels sit in the raster, as a fraction of it: (down, across).
 
@@ -449,6 +606,9 @@ def main() -> int:
         return 0
     if "--shapes" in rest:
         shapes(path, probes, only)
+        return 0
+    if "--mesh" in rest:
+        mesh(path, probes, only)
         return 0
     doc = pdfium.PdfDocument(path)
     mine = ours(path.with_suffix(".pptx"), probes) if check else None

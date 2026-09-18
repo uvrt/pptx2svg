@@ -1765,6 +1765,11 @@ def test_a_stacked_series_sits_on_top_of_the_one_before_it(variant_deck):
 
 def _build(body: str, *, width: float = 200.0, height: float = 150.0):
     """Lay out a bare chart with no colour or text resolution, and return its children."""
+    return _builder(body, width=width, height=height).build()
+
+
+def _builder(body: str, *, width: float = 200.0, height: float = 150.0):
+    """The builder `_build` uses, for a test that needs to ask it something."""
     from pptx2svg.resolve.chart import ChartBuilder, ChartStyle
 
     source = chart(body)
@@ -1786,7 +1791,7 @@ def _build(body: str, *, width: float = 200.0, height: float = 150.0):
         resolve_fill=_fake_fill,
         resolve_outline=_fake_outline,
         resolve_text=lambda rich, text, size, align: m.TextBody(),
-    ).build()
+    )
 
 
 def _fake_fill(fill):
@@ -7267,8 +7272,13 @@ def three_d_chart_xml(
     The maximum is what the padding question turns on: 0..50 padded by 5% at each end
     comes to 52.5, which at ten intervals asks for a unit of 10 and an axis running to 60.
     Unpadded it asks for 5 and stops at 50, and 50 is what PowerPoint draws.
+
+    **Five categories, which is the probe decks' own count and is not decoration**: a 3-D
+    bar is as deep as it is wide and its width is a share of one band, so the category
+    count is an input to the scene's depth and therefore to the drawn axis.  See
+    :func:`~pptx2svg.resolve.chart.three_d_scene_depth`.
     """
-    values = (high * 0.3, high, high * 0.55, high * 0.8)
+    values = (high * 0.3, high, high * 0.55, high * 0.8, high * 0.45)
     points = "".join(f"<c:pt idx='{i}'><c:v>{v!r}</c:v></c:pt>" for i, v in enumerate(values))
     cats = "".join(f"<c:pt idx='{i}'><c:v>Q{i + 1}</c:v></c:pt>" for i in range(len(values)))
     series = (
@@ -7789,10 +7799,11 @@ def test_the_three_d_warning_says_whether_the_camera_was_applied(chart_gallery):
     """The warning is a claim about what was drawn, so it has to track the gate.
 
     A chart whose plot rectangle is PowerPoint's and whose scene is missing has a
-    different defect from one drawn in a rectangle PowerPoint never used, and the gallery's
-    four 3-D slides are two of each: 13's ``bar3DChart`` and 14's ``line3DChart`` get the
-    camera, 15's ``pie3DChart`` needs none -- its flat rectangle is already PowerPoint's --
-    and 16's **stacked** ``area3DChart`` is the one whose scene is not settled.
+    different defect from one drawn in a rectangle PowerPoint never used, and the two of
+    the gallery's 3-D slides that still warn are one of each: 14's ``line3DChart`` gets
+    the camera, 15's ``pie3DChart`` needs none -- its flat rectangle is already
+    PowerPoint's -- and 16's **stacked** ``area3DChart`` is the one whose scene is not
+    settled.  13's ``bar3DChart`` no longer warns at all, because its scene is drawn.
 
     The gate reads the series count and the grouping, so this has to pass them: a plot's
     kind alone would say "camera" for slide 16, which is the wrong claim about a chart
@@ -7801,13 +7812,13 @@ def test_the_three_d_warning_says_whether_the_camera_was_applied(chart_gallery):
     options = ConvertOptions()
     convert_pptx_to_model(chart_gallery, options)
     flattened = [w for w in options.warnings if w.code == "chart-3d-flattened"]
-    assert len(flattened) == 4
+    assert {w.slide_number for w in flattened} == {14, 15, 16}
     placed = {
         w.slide_number
         for w in flattened
         if "camera places and sizes" in w.message
     }
-    assert placed == {13, 14}
+    assert placed == {14}
     assert all("is drawn flat" in w.message for w in flattened)
 
 
@@ -7836,18 +7847,22 @@ def test_a_three_d_chart_says_it_is_drawn_flat(chart_gallery):
     The two codes mean different things -- one is "here is a picture that leaves the
     scene out", the other "there is no picture" -- and a build that fails on the second
     should not be made to fail on the first.
+
+    **The warning is a claim about what this library drew**, so it has to stop when the
+    drawing stops being flat: the gallery's ``bar3DChart`` draws its prisms, its floor
+    and its walls now, and leaving the warning on it would be as wrong as omitting it
+    from the three that are still flat.
     """
     options = ConvertOptions()
     model = convert_pptx_to_model(chart_gallery, options)
 
     flattened = [w for w in options.warnings if w.code == "chart-3d-flattened"]
-    assert len(flattened) == 4
     assert {
         kind
         for warning in flattened
         for kind in ("bar3DChart", "line3DChart", "pie3DChart", "area3DChart")
         if kind in warning.message
-    } == {"bar3DChart", "line3DChart", "pie3DChart", "area3DChart"}
+    } == {"line3DChart", "pie3DChart", "area3DChart"}
     assert all("drawn flat" in warning.message for warning in flattened)
 
     # Drawn, not refused: each of the four is a real chart element with children in it.
@@ -7856,3 +7871,168 @@ def test_a_three_d_chart_says_it_is_drawn_flat(chart_gallery):
         assert isinstance(element, m.ChartElement)
         assert element.children
         assert element.chart.three_d is True
+
+
+# -- The 3-D scene ---------------------------------------------------------------------
+#
+# Stage 2 of the 3-D work: the mesh, not the camera.  ``view3d-mesh`` (51 slides) reads
+# each prism's own three faces off PowerPoint's raster by their exact drawn colours, which
+# gives two things no reading of the scene's *box* can: where in its row of depth a solid
+# stands, and how deep the solid is against the bar it came from.  See ROADMAP.md 3.4.
+
+
+#: ``view3d-mesh``'s ``c:gapWidth`` sweep: the value axis PowerPoint drew, in points, for
+#: one series over three categories on a 684 by 250 pt frame.  **This is the reading that
+#: refutes the old depth law**, which has no ``gapWidth`` in it and so predicts 166.08
+#: four times.
+VIEW_3D_GAP_WIDTH_READINGS = [(0, 127.20), (50, 146.16), (150, 166.08), (300, 179.76)]
+
+
+@pytest.mark.parametrize(
+    "gap_width,drawn",
+    VIEW_3D_GAP_WIDTH_READINGS,
+    ids=[f"gapWidth{g}" for g, _ in VIEW_3D_GAP_WIDTH_READINGS],
+)
+def test_the_scenes_depth_is_one_bars_width(gap_width, drawn):
+    """A 3-D bar is as deep as it is wide, so anything that narrows it shallows the scene.
+
+    The region here is solved from the default probe of the same sweep rather than
+    measured, because the deck has no flat control on that frame; what the other three
+    then test is the *shape* of the law, which is the whole of what ``gapWidth`` says.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import _Rect, three_d_plot_rect
+
+    region = _Rect(0.0, 0.0, 653.22, 213.86)
+    view = SourceChartView3D(rot_x=15, rot_y=20, depth_percent=100, right_angle_axes=True)
+    face = three_d_plot_rect(
+        region, view, categories=3, gap_width=float(gap_width), kind="bar3DChart"
+    )
+    assert face.height == pytest.approx(drawn, abs=1.0)
+
+
+def test_the_category_count_is_an_input_to_the_depth():
+    """Five categories and three, same chart: the fewer the categories the deeper the box.
+
+    This is what ``VIEW_3D_DEPTH_PROJECTION``'s unidentified "fifth" turned out to be --
+    every deck it was fitted on drew five categories -- so it has to be a variable rather
+    than baked in.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import three_d_scene_depth
+
+    view = SourceChartView3D(rot_x=15, rot_y=20, depth_percent=100, right_angle_axes=True)
+    five = three_d_scene_depth("bar3DChart", view, categories=5)
+    three = three_d_scene_depth("bar3DChart", view, categories=3)
+    assert five == pytest.approx(1.0 / 5.0)
+    assert three == pytest.approx(five * 5 / 3)
+
+    # A stacked group stands its series on top of each other, so it takes one slot of the
+    # band and is as wide -- and as deep -- as a single series'.  Measured: `m-stack2` and
+    # `m-stack3` draw the same 23.04 by 17.28 pt depth vector as the one-series probe.
+    one = three_d_scene_depth("bar3DChart", view, categories=5, series=1)
+    for count in (2, 3, 4):
+        assert three_d_scene_depth(
+            "bar3DChart", view, categories=5, series=count, grouping="stacked"
+        ) == pytest.approx(one)
+        assert three_d_scene_depth("bar3DChart", view, categories=5, series=count) < one
+
+
+def _faces(children):
+    """Every drawn polygon, as ``(fill hex, points)`` in points, in paint order."""
+    out = []
+    for element in children:
+        geometry = getattr(element, "geometry", None)
+        if not isinstance(geometry, m.CustomGeometry) or not geometry.paths:
+            continue
+        fill = element.fill
+        if not isinstance(fill, m.SolidFill):
+            continue
+        commands = geometry.paths[0].commands
+        if not commands.endswith(" Z"):
+            continue
+        numbers = [
+            float(token)
+            for token in commands.replace("M", " ").replace("L", " ").replace("Z", " ").split()
+        ]
+        left = _pt(element.transform.offset_x)
+        top = _pt(element.transform.offset_y)
+        points = [
+            (left + numbers[i], top + numbers[i + 1]) for i in range(0, len(numbers), 2)
+        ]
+        out.append((fill.color.hex, points))
+    return out
+
+
+def _prism_scene(**kwargs):
+    """One single-series 3-D bar chart, drawn, with its faces read back."""
+    children, _ = _build(three_d_chart_xml(**kwargs), width=684.0, height=250.0)
+    return children, _faces(children)
+
+
+def test_a_bar_is_drawn_as_three_faces_shaded_by_the_measured_constants():
+    """The front face is the fill, the top 0.7587 of it and the right 0.6364 -- no more.
+
+    A box seen obliquely shows three of its six faces and PowerPoint draws exactly those
+    three, with no stroke between them: a colour census of gallery slide 13's scene finds
+    the two fills, two shades of each, and nothing else.
+    """
+    _, faces = _prism_scene()
+    # Five categories, three faces each.
+    assert len(faces) == 15
+    assert {hex_ for hex_, _ in faces} == {"#4472C4", "#345695", "#2B497D"}
+
+
+def test_a_bar_stands_in_the_middle_of_its_row_of_depth():
+    """0.3 to 0.7 of the scene's depth at the default ``c:gapDepth``, and 0 to 1 at zero.
+
+    ROADMAP.md 3.4 read the 0.3 off gallery slide 13 by hand and could not say whether it
+    was a number or a range.  It is ``gapDepth / 2 / (1 + gapDepth)``, measured over five
+    gaps on ``view3d-mesh``: the bar's share of its scene comes back 0.985, 0.689, 0.406,
+    0.252 and 0.166 at 0, 50, 150, 300 and 500% against the rule's 1.0, 0.667, 0.4, 0.25
+    and 0.167.
+    """
+    def span(gap: str) -> tuple[float, float]:
+        body = three_d_chart_xml().replace(
+            "<c:axId val='100002'/>", f"{gap}<c:axId val='100002'/>", 1
+        )
+        return _builder(body, width=684.0, height=250.0)._scene_depth_span()
+
+    assert span("") == pytest.approx((0.3, 0.7))
+    assert span("<c:gapDepth val='0'/>") == pytest.approx((0.0, 1.0))
+    assert span("<c:gapDepth val='500'/>") == pytest.approx((5 / 12, 5 / 12 + 1 / 6))
+
+
+def test_the_prisms_are_painted_left_to_right():
+    """The painter's sort, and why an average-depth sort is not it.
+
+    Every bar of a clustered ``bar3DChart`` stands in the **same** row of depth, so a sort
+    on depth alone leaves their order undefined -- and they do hide each other: a bar's
+    right face runs back along the depth vector and the bar to its right is drawn over it.
+    Measured on gallery slide 13, where the blue series' right face is visible in exactly
+    the two categories where blue outruns the orange beside it.
+    """
+    _, faces = _prism_scene()
+    fronts = [points for hex_, points in faces if hex_ == "#4472C4"]
+    lefts = [min(x for x, _ in points) for points in fronts]
+    assert lefts == sorted(lefts)
+    # And the front face is painted last of its own three, over the two that meet it.
+    assert [hex_ for hex_, _ in faces[:3]] == ["#2B497D", "#345695", "#4472C4"]
+
+
+def test_a_solid_that_is_not_a_box_keeps_the_flat_rectangle():
+    """``c:shape`` of a cylinder is a different solid, and a box is not an approximation.
+
+    A cone drawn as a box is a wrong picture rather than a simplified one, which is the
+    distinction ``chart-3d-flattened`` exists to make -- so the mesh refuses and the
+    warning stays.
+    """
+    _, boxes = _prism_scene()
+    assert boxes != []
+    body = three_d_chart_xml().replace(
+        "<c:axId val='100002'/>", "<c:shape val='cylinder'/><c:axId val='100002'/>", 1
+    )
+    children, _ = _build(body, width=684.0, height=250.0)
+    assert _faces(children) == []
+    # The flat rectangle it keeps is still the camera's front face, which is measured.
+    assert any(isinstance(child, m.ShapeElement) for child in children)

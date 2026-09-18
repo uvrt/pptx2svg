@@ -43,6 +43,14 @@ divides is the whole frame and nothing else has to be subtracted from it.
     ``view3d-aspect`` gives every series count from one to four four cameras each, two of
     them width-bound and two height-bound, which is what separates the scene's aspect from
     its depth.  See ``three_d_scene_shape``.
+``view3d-mesh``
+    The **solid inside** the scene rather than the scene's box: each prism's own three
+    faces, found in the raster by their exact drawn colours, against the front plane its
+    value axis defines.  That gives where in its row of depth a bar stands and how deep it
+    is, which is what a renderer drawing the scene needs and what no reading of the box
+    can say.  What it settles: a 3-D bar is as deep as it is **wide**, so the depth's
+    unidentified constant is the category count and its ``1.5`` is ``c:gapWidth``'s
+    default.  Read back with ``--mesh``.
 
 Usage -- the deck's file name picks its probe table::
 
@@ -452,7 +460,113 @@ ASPECT_PROBES: list[dict] = [
     ],
 ]
 
+#: **The mesh.**  Every deck above reads where the scene's *box* is; this one reads where
+#: the **solid inside it** stands, which is what a renderer that draws the scene has to
+#: know and what nothing here had measured.  One series with a stated fill, three
+#: categories whose values descend so that no prism's right face is hidden behind its
+#: neighbour, and a value axis whose ticks give the front plane's own ``value -> y`` on
+#: every slide.  ``tools/read_view3d_probe.py --mesh`` reads each prism's three faces off
+#: the raster by their exact colours and prints, in page points:
+#:
+#: * the **near offset** -- how far back from the front plane the solid begins, as the
+#:   drawn displacement between the value the bar plots and where its front face is
+#:   actually painted, and
+#: * the **solid's own depth**, as the width and slope of its right face.
+#:
+#: Those two, against the camera, are the whole of what the mesh needs: the depth vector
+#: the scene is drawn with (which is *not* the same number as the reservation's, and this
+#: is the deck that says so) and where in a row of it a bar stands.  ``c:gapDepth`` is
+#: swept because it is what should move the second, and ``c:gapWidth`` because the bar's
+#: *width* rule in 3-D was assumed to be the flat one and never checked.
+MESH_FRAME = (FRAME_WIDTH, 250 * 12700)
+MESH_CATEGORIES = ("C1", "C2", "C3")
+#: Descending: a prism's right face is hidden by the next prism along whenever that one
+#: is taller and the gap between them is small, and the ``gapWidth=0`` probe has no gap.
+MESH_FACTORS = (1.0, 0.72, 0.44)
+
+
+def _mesh_probe(name: str, view: dict | None = None, **extra) -> dict:
+    probe = {
+        "key": f"m-{name}",
+        "high": 9.0,
+        "frame": MESH_FRAME,
+        "kind": "bar3D",
+        "view": view or DEFAULT_VIEW,
+        "series": 1,
+        "colours": PROBE_COLOURS,
+        "categories": MESH_CATEGORIES,
+        "factors": MESH_FACTORS,
+        "scales": (1.0,),
+    }
+    probe.update(extra)
+    return probe
+
+
+MESH_PROBES: list[dict] = [
+    # The camera, one element at a time.  ``rotX`` and ``rotY`` each project the depth on
+    # their own axis, so a sweep of either separates the projection constant from the
+    # sine it multiplies.
+    *[_mesh_probe(f"rx{value}", _view(rotX=value)) for value in (5, 10, 15, 20, 30, 45, 60)],
+    *[_mesh_probe(f"ry{value}", _view(rotY=value)) for value in (5, 10, 20, 30, 45, 60, 90)],
+    *[_mesh_probe(f"d{value}", _view(depthPercent=value)) for value in (20, 50, 200, 500)],
+    *[_mesh_probe(f"h{value}", _view(hPercent=value)) for value in (50, 200)],
+    # The row.  ``gapDepth`` is the whole of where a bar stands in its own depth: at 0 it
+    # should fill the row and at 500 it should be a sixth of it.
+    *[_mesh_probe(f"gd{value}", gapDepth=value) for value in (0, 50, 300, 500)],
+    # The bar's width across the category, which is the flat rule or is not.
+    *[_mesh_probe(f"gw{value}", gapWidth=value) for value in (0, 50, 300)],
+    # Series stand side by side across the width and share one row of depth -- or they do
+    # not, and this is what says which.
+    # Descending, so that no series' right face is hidden behind the one beside it.
+    *[
+        _mesh_probe(f"s{count}", series=count, scales=(1.0, 0.78, 0.56, 0.34))
+        for count in (2, 3, 4)
+    ],
+    *[
+        _mesh_probe(f"f{height}", frame=(FRAME_WIDTH, height * 12700))
+        for height in (150, 330)
+    ],
+    # **Stacked**, which the clustered sweep can only infer: series that stand on top of
+    # each other take one slot of the band rather than one each, so the bar is as wide --
+    # and therefore as deep -- as a single-series chart's.
+    *[
+        _mesh_probe(
+            f"{name}{count}",
+            series=count,
+            grouping=grouping,
+            scales=(0.5, 0.3, 0.2, 0.15),
+        )
+        for name, grouping in (("stack", "stacked"), ("pct", "percentStacked"))
+        for count in (2, 3)
+    ],
+    # A horizontal 3-D bar, whose categories run *up* the scene: the same solids in the
+    # same scene, and a different order to paint them in.
+    _mesh_probe("bardir", barDir="bar"),
+    # The other two group elements that draw a scene.  A ``line3DChart`` stands a ribbon
+    # per series and an ``area3DChart`` a slab, both one row of depth per series, and
+    # where in its row each of those sits is the same question the bar's ``gapDepth``
+    # sweep asks.
+    *[
+        _mesh_probe(
+            f"{kind}-n{count}", kind=kind, series=count, scales=(0.45, 0.72, 1.0)
+        )
+        for kind in ("line3D", "area3D")
+        for count in (1, 2, 3)
+    ],
+    *[
+        _mesh_probe(f"{kind}-{name}", view, kind=kind)
+        for kind in ("line3D", "area3D")
+        for name, view in (("rx45", _view(rotX=45)), ("ry60", _view(rotY=60)))
+    ],
+    *[
+        _mesh_probe(f"{kind}-gd{value}", kind=kind, gapDepth=value)
+        for kind in ("line3D", "area3D")
+        for value in (0, 500)
+    ],
+]
+
 DECKS = {
+    "view3d-mesh": MESH_PROBES,
     "view3d-meter": METER_PROBES,
     "view3d-view": VIEW_PROBES,
     "view3d-type": TYPE_PROBES,
@@ -485,6 +599,7 @@ def series_xml(
     scale: float = 1.0,
     colour: str | None = None,
     categories: tuple[str, ...] = CATEGORIES,
+    factors: tuple[float, ...] | None = None,
 ) -> str:
     """One ``c:ser``.  *colour* states its fill as an explicit ``srgbClr``.
 
@@ -492,8 +607,10 @@ def series_xml(
     is the ratio between a face's drawn colour and the fill it came from, and a theme
     colour would leave the denominator to be looked up rather than known.
     """
-    values = [high * factor * scale for factor in FACTORS[: len(categories)]]
-    values[1] = high * scale
+    shape = factors or FACTORS
+    values = [high * factor * scale for factor in shape[: len(categories)]]
+    if factors is None:
+        values[1] = high * scale
     points = "".join(f"<c:pt idx='{i}'><c:v>{v!r}</c:v></c:pt>" for i, v in enumerate(values))
     cats = "".join(
         f"<c:pt idx='{i}'><c:v>{name}</c:v></c:pt>" for i, name in enumerate(categories)
@@ -566,6 +683,10 @@ def group_xml(
     colours: tuple[str, ...] | None = None,
     categories: tuple[str, ...] = CATEGORIES,
     scales: tuple[float, ...] | None = None,
+    gap_width: int = 150,
+    factors: tuple[float, ...] | None = None,
+    bar_dir: str = "col",
+    grouping: str = "clustered",
 ) -> str:
     """One ``c:*Chart`` group.  A 3-D group states three ``c:axId`` children, exactly.
 
@@ -580,6 +701,7 @@ def group_xml(
             (scales[index] if scales else (1.0 if series == 1 else 0.6 - 0.15 * index)),
             colours[index] if colours else None,
             categories,
+            factors,
         )
         for index in range(series)
     )
@@ -588,8 +710,9 @@ def group_xml(
     ids2 = "<c:axId val='100002'/><c:axId val='100003'/>"
     if kind == "bar3D":
         return (
-            "<c:bar3DChart><c:barDir val='col'/><c:grouping val='clustered'/>"
-            "<c:varyColors val='0'/>" + body + "<c:gapWidth val='150'/>"
+            f"<c:bar3DChart><c:barDir val='{bar_dir}'/>"
+            f"<c:grouping val='{grouping}'/>"
+            "<c:varyColors val='0'/>" + body + f"<c:gapWidth val='{gap_width}'/>"
             + depth_gap + "<c:shape val='box'/>" + ids3 + "</c:bar3DChart>"
         )
     if kind == "col":
@@ -658,6 +781,10 @@ def chart_part(probe: dict) -> bytes:
             probe.get("colours"),
             probe.get("categories", CATEGORIES),
             probe.get("scales"),
+            probe.get("gapWidth", 150),
+            probe.get("factors"),
+            probe.get("barDir", "col"),
+            probe.get("grouping", "clustered"),
         )
         + axes_xml(kind)
         + "</c:plotArea>"
