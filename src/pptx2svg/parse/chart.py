@@ -78,11 +78,21 @@ _THREE_D_EQUIVALENT = {
     "surface3DChart": "surfaceChart",
 }
 
+#: **``c:surfaceChart`` is a 3-D spelling although its name does not say so.**  ECMA-376
+#: calls it a contour chart and the obvious reading is a flat 2-D map; six probe charts
+#: refute it outright.  With no ``c:view3D`` at all the two spellings drew the *identical*
+#: projected surface -- the same floor, the same back wall, the same perspective
+#: gridlines, the same three axis label runs inside the projection -- and
+#: ``view3d-surfshape`` reads them back equal to the digit over twelve cells.  So it is
+#: the *view* and not the element name that decides, and every 3-D rule here (the bare
+#: axis, the camera, the scene) applies to both.
+SURFACE_CHART_KINDS = frozenset({"surfaceChart", "surface3DChart"})
+
 #: Every group element that is a 3-D spelling.  :func:`flat_chart_kind` erases this, and
 #: the difference is not cosmetic: a 3-D value axis is **not padded**, so a chart that
 #: forgets which spelling it came from draws the wrong numbers.  See
 #: :func:`~pptx2svg.resolve.chart.nice_axis_scale` and ROADMAP.md 3.4.
-THREE_D_CHART_KINDS = frozenset(_THREE_D_EQUIVALENT)
+THREE_D_CHART_KINDS = frozenset(_THREE_D_EQUIVALENT) | SURFACE_CHART_KINDS
 
 #: ``c:catAx`` / ``c:valAx`` / ``c:dateAx`` / ``c:serAx`` -- the four axis elements.
 AXIS_ELEMENTS = ("catAx", "valAx", "dateAx", "serAx")
@@ -96,8 +106,8 @@ def flat_chart_kind(kind: str) -> str:
 def is_three_d_kind(kind: str) -> bool:
     """Whether this group element was authored as a 3-D spelling.
 
-    Five of them, of which four draw: ``surface3DChart`` is deferred along with the 2-D
-    surface it maps to, and refuses rather than flattening.
+    Six of them, and all six draw.  ``surfaceChart`` is in the set although its name has
+    no ``3D`` in it: see :data:`SURFACE_CHART_KINDS`, which is where the measurement is.
     """
     return kind in THREE_D_CHART_KINDS
 
@@ -332,6 +342,14 @@ class SourceChartPlot:
     #: ``c:hiLowLines`` and ``c:upDownBars`` -- a stock chart's two decorations.
     hi_low_lines: SourceChartLines | None = None
     up_down_bars: SourceChartUpDownBars | None = None
+    #: ``c:wireframe`` -- a surface drawn as a stroked mesh instead of a filled one.
+    #: Measured: it **replaces** the fill rather than adding an outline to it.
+    wireframe: bool | None = None
+    #: ``c:bandFmts`` -- a fill per value band, keyed by ``c:idx``, which numbers the
+    #: bands **from the bottom of the value axis up**.  A surface is coloured by band
+    #: rather than by series, so this is the only per-mark formatting it has.
+    band_fills: dict[int, SourceFill] = field(default_factory=dict)
+    band_outlines: dict[int, SourceOutline] = field(default_factory=dict)
 
 
 @dataclass
@@ -505,7 +523,28 @@ def _plot(node: Element) -> SourceChartPlot:
         series_lines=_chart_lines(child(node, "serLines")),
         hi_low_lines=_chart_lines(child(node, "hiLowLines")),
         up_down_bars=_up_down_bars(child(node, "upDownBars")),
+        wireframe=_optional_flag(child(node, "wireframe")),
+        band_fills=_band_formats(child(node, "bandFmts"), parse_fill),
+        band_outlines=_band_formats(child(node, "bandFmts"), parse_outline),
     )
+
+
+def _band_formats(node: Element | None, read):
+    """``c:bandFmts`` read through *read*, keyed by each ``c:bandFmt``'s own ``c:idx``.
+
+    ECMA-376 numbers the bands from the axis' minimum up, and so does PowerPoint: a probe
+    stating ``idx=0`` red and ``idx=2`` green painted the lowest band red and the third
+    green, leaving the accent ramp on the rest.
+    """
+    if node is None:
+        return {}
+    out = {}
+    for band in children(node, "bandFmt"):
+        index = int_attr(child(band, "idx"), "val")
+        value = read(child(band, "spPr"))
+        if index is not None and index >= 0 and value is not None:
+            out[index] = value
+    return out
 
 
 def _chart_lines(node: Element | None) -> SourceChartLines | None:

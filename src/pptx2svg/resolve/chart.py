@@ -556,6 +556,26 @@ BUBBLE_CHART_KINDS = frozenset({"bubbleChart"})
 #: ``<a:ln><a:noFill/></a:ln>`` on each series; nothing in the renderer hides them.
 STOCK_CHART_KINDS = frozenset({"stockChart"})
 
+#: The surface, both spellings of which flatten to this one.  It is a 3-D scene whatever
+#: its name says; see :data:`~pptx2svg.parse.chart.SURFACE_CHART_KINDS`.
+SURFACE_CHART_KINDS = frozenset({"surfaceChart"})
+
+#: **How many colours a surface's band ramp behaves as if it needed**, beyond the bands
+#: it has.  The band colours are the per-point accent cycle
+#: (:meth:`ChartBuilder._cycle_accent`) exactly -- plain accents inside one cycle of six,
+#: the whole first cycle *darkened* once a second is needed -- but the cycle turns two
+#: bands early: four bands draw the plain accents and **five** draw the darkened ones,
+#: where four and five *points* both draw plain.
+#:
+#: Bracketed on the band legend's own vector swatches, which are the fills exactly: 3 and
+#: 4 bands come back ``#4472C4 #ED7D31 #A5A5A5 #FFC000``, 5 and 6 come back
+#: ``#3B64AD #D26E2A #929292 #E2AA00 #5089BC #62993E``, 7 adds a light ``#8FA2D4`` after
+#: those six, and 9 and 10 bands carry the same six darkened followed by light accent1,
+#: accent2, accent3 and accent4.  So the *cycle* is the point ramp's and only its
+#: threshold moves, which is what this constant is and all it is: what the two extra
+#: colours are for is not identified.
+BAND_COLOR_CYCLE_SLACK = 2
+
 #: The group elements a **combo** chart may be built out of, **in the order PowerPoint
 #: paints them**.  A chart whose groups are all in this tuple is drawn as one picture;
 #: anything else falls back to drawing the first group alone.
@@ -1068,6 +1088,59 @@ VIEW_3D_AMBIENT = 0.3947
 #: fixed by it: the light is a unit vector, so this is the length of the three solved
 #: components.
 VIEW_3D_DIFFUSE = 0.7465
+
+#: **A surface is lit by a different light, and only the direction differs.**
+#:
+#: The prism and the ribbon are lit from 22 degrees right of the viewer and 29 above
+#: (:data:`VIEW_3D_LIGHT`); a ``surfaceChart``'s sheet is lit from the **corner** --
+#: ``(1, 1, 1) / sqrt(3)``, 45 degrees right, 45 above and 45 in front -- with the same
+#: ambient and the same diffuse.  That is not a guess from a round number: it is what a
+#: free fit of ``ambient + u*nx + w*ny + q*nz`` to **96 facets** returns, at 0.3946,
+#: 0.4345, 0.4339 and 0.4317, whose three light components agree to 0.7 per cent of each
+#: other and whose ambient agrees with :data:`VIEW_3D_AMBIENT` to the fourth place.
+#:
+#: The instrument is the ribbon's, turned on a sheet: every band painted one and the same
+#: red so that the mesh is separable from the floor by colour alone, a facet whose normal
+#: is known from the drawn geometry, and ``c:hPercent`` and ``c:depthPercent`` as the two
+#: levers that tilt it from level to nearly vertical in each of the scene's planes
+#: without touching the data.  ``view3d-surflight`` (34 slides) and ``view3d-surflit``
+#: (29) are those sweeps.  Read back with the **shared** constants -- ambient 0.3947,
+#: diffuse 0.7465 -- every one of the 104 facets is inside **two 8-bit levels**, mean
+#: 0.66, and a level is what the export quantises to.  The prism's own light is refuted
+#: here by a wide margin: it puts a level sheet at 0.7587 where PowerPoint draws 0.8275.
+#:
+#: Two things the same sweeps settle:
+#:
+#: * **It clamps at both ends.**  ``ambient + diffuse`` is 1.1412, and the brightest facet
+#:   measured is 1.0000 exactly -- so the product is clamped, not the factor.
+#: * **A facet the light misses is a flat 0.4000**, measured on every back-facing sample
+#:   and independent of how far it faces away.  ``max(0, n . L)`` puts it at the ambient
+#:   0.3947, which is 1.4 levels darker; that is the whole of the disagreement and it is
+#:   left where it is rather than given a constant of its own.
+VIEW_3D_SURFACE_LIGHT = (3.0**-0.5, 3.0**-0.5, 3.0**-0.5)
+
+#: What a ``c:wireframe`` surface's lattice is stroked at, in EMU.  Read off the wireframe
+#: legend probe's own key, whose square carries a stroke of exactly this.
+SURFACE_WIREFRAME_WIDTH_EMU = 6350.0
+
+#: The hairline a filled facet is stroked with **in its own colour**, in EMU.
+#:
+#: Not a line PowerPoint draws: two polygons sharing an edge antialias against the paper
+#: rather than against each other, so a mesh of them comes out with a pale seam along
+#: every edge where PowerPoint -- which rasterises the whole scene at once -- has none.
+#: The stroke closes the seam and moves the silhouette by half of it, which is a fortieth
+#: of a point.
+SURFACE_SEAM_WIDTH_EMU = 3175.0
+
+#: What a title costs a **side** legend beyond its own line, in points.
+#:
+#: The legend block is centred in the frame less ``line_height + this``, measured on nine
+#: probes at three title sizes and three frame heights: the block's centre sits 9.38,
+#: 13.04 and 19.15 pt below the frame's at 8, 14 and 24 pt, which is a straight line in
+#: the size with a slope of 1.2213 -- the face's own line height per em -- and this
+#: intercept.  It is a constant and not a share of the frame: 120, 250 and 330 pt frames
+#: all read 13.04 at 14 pt.  What the 9 pt *is* is not identified.
+LEGEND_SIDE_TITLE_GAP_PT = 8.99
 
 #: How thick a ``line3DChart``'s ribbon is, as a fraction of the scene's own **width**.
 #:
@@ -2142,7 +2215,10 @@ class _Rect:
         return self.bottom - self.top
 
 
-def three_d_lambert(normal: tuple[float, float, float]) -> float:
+def three_d_lambert(
+    normal: tuple[float, float, float],
+    light: tuple[float, float, float] = VIEW_3D_LIGHT,
+) -> float:
     """What a face of *normal* is painted, as a multiple of the fill per sRGB channel.
 
     ``ambient + diffuse * max(0, n . light)`` against :data:`VIEW_3D_LIGHT`, in the
@@ -2150,9 +2226,15 @@ def three_d_lambert(normal: tuple[float, float, float]) -> float:
     :data:`VIEW_3D_FACE_SHADES` are this at the four axis-aligned normals, and a
     ``line3DChart``'s ribbon is what says it is a model and not a coincidence: see that
     constant, and :meth:`ChartBuilder._paint_slab`, which shades every sloped face with it.
+
+    *light* is the one thing a ``surfaceChart`` does differently
+    (:data:`VIEW_3D_SURFACE_LIGHT`); the ambient, the diffuse and the clamp are shared.
+    The product is clamped at 1 as well as at the ambient, which the surface sweep
+    measured and the prism's four faces could not have shown -- none of them is bright
+    enough to reach it.
     """
-    lit = sum(a * b for a, b in zip(normal, VIEW_3D_LIGHT))
-    return VIEW_3D_AMBIENT + VIEW_3D_DIFFUSE * max(0.0, lit)
+    lit = sum(a * b for a, b in zip(normal, light))
+    return min(1.0, VIEW_3D_AMBIENT + VIEW_3D_DIFFUSE * max(0.0, lit))
 
 
 def three_d_scene_shape(
@@ -2226,6 +2308,20 @@ def three_d_scene_shape(
       as any other cell.  What it is *for* is gallery slide 16, whose axis is already
       PowerPoint's without a camera; giving it one changes that axis, so this returns
       ``None`` and the chart keeps its flat rectangle.  See ROADMAP.md 3.4.
+    * **A ``surfaceChart`` is a ``line3DChart``'s scene exactly**, both spellings of it,
+      and that is measured on its own rather than borrowed: ``view3d-surfshape`` reads the
+      face directly off the text -- a surface's categories sit **on** the ticks, so the
+      first and last category labels stand on the drawn face's left and right edges while
+      the extreme value labels stand on its top and bottom ones -- over 42 cells, two to
+      eight categories against one to six series, at two cameras each.  Every cell's
+      ``aspect * categories / region`` lands within 0.01 of the integer
+      ``floor((across + series) / 2)``, and the depth, read as the raster's overhang past
+      that face, comes back ``series / categories`` to 0.3 per cent.  ``across`` follows
+      ``c:crossBetween`` here too, which the eight-category pair separates: spelled
+      ``between`` it reads 5 where its ``midCat`` twin reads 4.  ``c:depthPercent`` scales
+      the depth alone, a stated ``c:hPercent`` replaces the region's aspect, and
+      ``c:gapDepth`` moves neither -- 0 and 500% draw the same picture to the digit.
+
     * **A ``pie3DChart`` has no scene box to measure.**  Its raster is the plot region
       itself at every camera and every frame -- 662.40 x 173.28 pt on a 195 pt frame
       whether the yaw is 0 or 270 -- and only the ink inside it moves.  ``rotY`` and
@@ -2236,7 +2332,7 @@ def three_d_scene_shape(
     """
     if kind == "bar3DChart":
         return 1.0, None
-    if kind not in ("line3DChart", "area3DChart"):
+    if kind not in ("line3DChart", "area3DChart", "surfaceChart", "surface3DChart"):
         return None
     if (grouping or "") in ("stacked", "percentStacked"):
         return None
@@ -2437,6 +2533,91 @@ def three_d_plot_rect(
     return region if scene is None else scene.face
 
 
+def _surface_normal(
+    points: list[tuple[float, float, float]],
+    depth: float,
+    view: tuple[float, float, float],
+) -> "tuple[float, float, float] | None":
+    """One facet's unit normal in the scene's frame, turned towards the viewer.
+
+    *points* are ``(x, y, z)`` with ``x`` and ``y`` the front face's own screen
+    coordinates -- ``y`` down -- and ``z`` the fraction of the scene's depth the point
+    stands at.  The scene's frame is ``x`` right, ``y`` **up** and ``z`` towards the
+    viewer, so the third coordinate is ``-z * depth`` in it and the second is negated.
+    """
+    if depth <= 0 or len(points) < 3:
+        return None
+    a, b, c = (
+        (point[0], -point[1], -point[2] * depth) for point in points[:3]
+    )
+    u = tuple(second - first for first, second in zip(a, b))
+    v = tuple(third - first for first, third in zip(a, c))
+    normal = (
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    )
+    length = math.hypot(*normal)
+    if length <= 0:
+        return None
+    if sum(one * two for one, two in zip(normal, view)) < 0:
+        normal = tuple(-value for value in normal)
+    return tuple(value / length for value in normal)
+
+
+def _clip_to_band(
+    points: list[tuple[float, float, float]],
+    values: list[float],
+    low: float,
+    high: float,
+) -> list[tuple[float, float, float]]:
+    """The part of a planar facet whose value lies inside ``[low, high]``.
+
+    Sutherland-Hodgman against the two value planes, interpolating the point along with
+    the value it carries -- which is exact, the facet being planar and the value linear
+    across it.  That is what puts a band boundary straight across a cell rather than at
+    its edges, and it is what the picture shows.
+    """
+    polygon = list(zip(points, values))
+    for keep_above, limit in ((True, low), (False, high)):
+
+        def inside(value: float) -> bool:
+            return value >= limit if keep_above else value <= limit
+
+        clipped: list[tuple[tuple[float, float, float], float]] = []
+        for index, (point, value) in enumerate(polygon):
+            previous_point, previous_value = polygon[index - 1]
+            if inside(value):
+                if not inside(previous_value):
+                    clipped.append(
+                        _lerp(previous_point, previous_value, point, value, limit)
+                    )
+                clipped.append((point, value))
+            elif inside(previous_value):
+                clipped.append(_lerp(previous_point, previous_value, point, value, limit))
+        polygon = clipped
+        if not polygon:
+            return []
+    return [point for point, _value in polygon]
+
+
+def _lerp(
+    first: tuple[float, float, float],
+    first_value: float,
+    second: tuple[float, float, float],
+    second_value: float,
+    limit: float,
+) -> tuple[tuple[float, float, float], float]:
+    """Where the segment crosses *limit*, as a point and the value it carries."""
+    span = second_value - first_value
+    t = 0.0 if span == 0 else (limit - first_value) / span
+    t = min(max(t, 0.0), 1.0)
+    return (
+        tuple(a + (b - a) * t for a, b in zip(first, second)),
+        limit,
+    )
+
+
 @dataclass(frozen=True)
 class _Scene:
     """A 3-D chart's box: the front face it is laid out in, and where the back of it is.
@@ -2451,6 +2632,12 @@ class _Scene:
 
     face: _Rect
     depth: tuple[float, float]
+    #: How deep the scene is in the **scene's own units** -- the world the light lives in
+    #: -- as a multiple of the face's width.  The depth vector above is that same depth
+    #: *projected*, which is not the same number and cannot be un-projected: two of the
+    #: three components of a normal survive the projection and the third does not.  A
+    #: surface's facets are the first geometry here to need it.
+    span: float = 0.0
 
     def at(self, x: float, y: float, z: float) -> tuple[float, float]:
         """A point on the front face, moved *z* of the way back into the scene."""
@@ -2530,6 +2717,7 @@ def three_d_scene(
             -width * run if leads_left else width * run,
             -width * rise if leads_up else width * rise,
         ),
+        span=depth,
     )
 
 
@@ -2636,6 +2824,10 @@ class ChartBuilder:
         #: :meth:`_draws_a_scene`, which is the narrower question of whether the *mesh*
         #: is drawn as well as the plot rectangle placed.
         self.scene: "_Scene | None" = None
+        #: The value scale a ``surfaceChart``'s bands are cut from, stashed by
+        #: :meth:`_build_cartesian` so that everything asking about the bands asks about
+        #: the axis the chart drew.  See :meth:`_band_scale`.
+        self.bands_scale: "tuple[float, float, float] | None" = None
         #: The prisms of the group being drawn, held back so they can be painted in depth
         #: order rather than in the order the data happens to be in.  See
         #: :meth:`_paint_prisms`.
@@ -2674,6 +2866,10 @@ class ChartBuilder:
     @property
     def _is_stock(self) -> bool:
         return c.flat_chart_kind(self.plot.kind) in STOCK_CHART_KINDS
+
+    @property
+    def _is_surface(self) -> bool:
+        return c.flat_chart_kind(self.plot.kind) in SURFACE_CHART_KINDS
 
     @property
     def _is_three_d(self) -> bool:
@@ -3616,6 +3812,11 @@ class ChartBuilder:
 
         primary = attached(value_axis) or [drawn[0]]
         scale = self._axis_scale(primary, value_axis)
+        # The bands are cut from this axis and several things want them before the plot
+        # rectangle exists -- the legend's own band, for one.  See :meth:`_band_scale`.
+        self.bands_scale = scale
+        for group in groups:
+            group.bands_scale = scale
         # Each axis carries its own `c:txPr`, and they disagree in real files.
         value_font = self._label_font(value_axis)
         category_font = self._label_font(category_axis)
@@ -3701,7 +3902,22 @@ class ChartBuilder:
             )
         for group, items in drawn:
             group._draw_data_labels(plot_rect, items, categories, scale_for(group))
-        self._draw_legend(plot_rect, series, second_band=second_band)
+        # **A side legend stands beside the *region*, not beside the scene's face.**  The
+        # legend's band comes off the frame before the camera is fitted into what is left,
+        # so the scene shrinking its own front face does not pull the legend in after it.
+        # Measured on gallery slide 12, the one chart in the corpus with both a scene and
+        # a legend at the side: PowerPoint's nine band keys stand at 685.5 pt where the
+        # face's right edge plus the lead gap is 565.5.
+        legend_rect = plot_rect if self.scene is None else self._three_d_region(scale)
+        if self._is_surface:
+            # The bands run lowest first, and a side legend stacks them **upwards**: its
+            # top entry is the highest band, measured at all four legend positions.
+            bands = self._band_series(scale, value_axis)
+            if self._legend_position() in ("l", "r"):
+                bands.reverse()
+            self._draw_legend(legend_rect, bands, second_band=second_band)
+        else:
+            self._draw_legend(legend_rect, series, second_band=second_band)
 
         data = m.ChartData(
             kind=c.flat_chart_kind(self.plot.kind),
@@ -3762,7 +3978,12 @@ class ChartBuilder:
         instead of the flat mark -- no stroke and no marker for the line, which is
         PowerPoint's picture: a ribbon is the series and there is nothing drawn on it.
         """
-        if self._draws_a_scene and (self._is_area or self._is_line):
+        if self._is_surface:
+            # A surface has no flat mark at all: without a scene there is nothing to put
+            # in its place, so the frame stays empty and `chart-3d-flattened` says so.
+            if self._draws_a_scene:
+                self._draw_scene_surface(rect, series, categories, scale)
+        elif self._draws_a_scene and (self._is_area or self._is_line):
             self._draw_scene_ribbons(rect, series, categories, scale)
         elif self._is_area:
             self._draw_areas(rect, series, categories, scale)
@@ -5931,6 +6152,11 @@ class ChartBuilder:
         * **a ``pie3DChart``**, which is not a box at all -- and whose rim sweeps more than
           a hundred colours, so it is not the prism's faces with a different outline
           either.
+
+        A ``surfaceChart`` always draws its scene when it has a camera, and draws its
+        **lattice** into it only when it has two rows to stretch one between: a
+        one-series surface is a scene with nothing in it, which is what PowerPoint draws
+        as well -- see :meth:`_draw_scene_surface`.
         * **``c:grouping="standard"`` on a ``bar3DChart``**, which is the 3-D-only grouping
           that puts each series in its own row of depth rather than side by side across
           the width.  The flat fallback draws those side by side, so the mesh would stand
@@ -5947,6 +6173,8 @@ class ChartBuilder:
         if self.scene is None:
             return False
         if self.plot.kind in ("line3DChart", "area3DChart"):
+            return True
+        if self._is_surface:
             return True
         if self.plot.kind != "bar3DChart":
             return False
@@ -6069,6 +6297,264 @@ class ChartBuilder:
                     item.fill,
                     item.color,
                 )
+
+    def _value_bands(
+        self, scale: tuple[float, float, float], axis: "c.SourceChartAxis | None" = None
+    ) -> list[tuple[float, float, str]]:
+        """The value bands a surface is coloured by: one per **major interval**.
+
+        Measured on ``view3d-surfband``, whose ramps run the value linearly across
+        thirteen categories so that every band the axis holds is in the picture and whose
+        band legend names each one: the boundaries are the value axis' own major ticks,
+        every time, over eleven axes from ``-20..20 by 10`` to ``0..1,4 by 0,2``.  There
+        is no band count of its own and no rule of its own -- coarsen the axis and the
+        bands coarsen with it, which is why a short frame draws five bands where a tall
+        one draws nine on the same data.
+
+        The label is the two ticks' own text joined by a hyphen, which is
+        :meth:`_tick_texts` and therefore the axis' own number format: ``0,00-2,00`` under
+        ``0.00``, ``0%-200%`` under ``0%``, and ``-4--2`` at the bottom of a signed axis,
+        where PowerPoint joins the two strings and leaves the two signs where they fall.
+        """
+        texts = self._tick_texts(scale, axis)
+        return [
+            (first, second, f"{first_text}-{second_text}")
+            for (first, first_text), (second, second_text) in zip(texts, texts[1:])
+        ]
+
+    def _band_fill(self, index: int, count: int) -> m.Fill | None:
+        """What band *index* of *count* is painted, before the light reaches it.
+
+        ``c:bandFmts`` first -- it numbers the bands from the axis' minimum up, measured
+        on a probe stating band 0 red and band 2 green, which painted the lowest band and
+        the third and left the ramp on the rest -- and otherwise the per-point accent
+        cycle two colours early.  See :data:`BAND_COLOR_CYCLE_SLACK`.
+        """
+        stated = self.plot.band_fills.get(index)
+        if stated is not None:
+            fill = self._resolve_fill(stated)
+            if fill is not None:
+                return fill
+        if not self.style.accents:
+            return None
+        return m.SolidFill(color=self._cycle_accent(index, count + BAND_COLOR_CYCLE_SLACK))
+
+    def _band_color(self, index: int, count: int) -> m.ResolvedColor:
+        """The band's flat colour, for its legend key and as the shading's base."""
+        fill = self._band_fill(index, count)
+        if isinstance(fill, m.SolidFill):
+            return fill.color
+        return m.ResolvedColor(hex="#4472C4")
+
+    def _band_outline(self, index: int, count: int) -> m.Outline | None:
+        """What a ``c:wireframe`` surface strokes band *index* with.
+
+        The band's own ``a:ln`` if it states one, and otherwise the band's colour: the
+        mesh deck's wireframe probe states a red *fill* per band through ``c:bandFmts``
+        and draws its lattice in the **accent** ramp all the same, so the stroke follows
+        the line and not the fill.  The colour is the band's flat one rather than a lit
+        one -- a wireframe's strokes come back at the accent exactly, where every filled
+        facet beside them is shaded.
+        """
+        stated = self.plot.band_outlines.get(index)
+        if stated is not None:
+            outline = self._resolve_outline(stated)
+            if outline is not None:
+                return outline
+        return m.Outline(
+            fill=m.SolidFill(color=self._band_color(index, count)),
+            width=SURFACE_WIREFRAME_WIDTH_EMU,
+        )
+
+    def _band_series(
+        self, scale: tuple[float, float, float], axis: "c.SourceChartAxis | None"
+    ) -> list[_Series]:
+        """A surface's legend entries: one per band, lowest first.
+
+        **A band legend is a legend of value ranges and not of series**, which no other
+        chart type here has, and it is drawn through the ordinary legend all the same:
+        every entry is a name and a key, so a band is a ``_Series`` with the band's name
+        and the band's fill and nothing else in it.
+
+        The order is measured at all four positions: a legend at the **side** runs the
+        highest band at the **top**, and one along the bottom or the top runs the lowest
+        at the **left** -- which is one order, bands ascending, stacked upwards in the
+        first case and rightwards in the second.  The caller reverses for a side legend;
+        this returns them ascending.
+
+        A ``c:wireframe`` surface keys with an **unfilled square outlined in the band's
+        colour**, measured on the wireframe legend probe, where the five keys are the
+        same 5.49 pt squares with a stroke and no fill at all.
+        """
+        bands = self._value_bands(scale, axis)
+        wire = bool(self.plot.wireframe)
+        return [
+            _Series(
+                name=name,
+                values=[],
+                color=self._band_color(index, len(bands)),
+                fill=None if wire else self._band_fill(index, len(bands)),
+                outline=self._band_outline(index, len(bands)) if wire else None,
+                format_code=None,
+                invert_if_negative=False,
+            )
+            for index, (_low, _high, name) in enumerate(bands)
+        ]
+
+    def _surface_view(self) -> tuple[float, float, float]:
+        """The direction the scene is looked **from**, in the scene's own frame.
+
+        ``rAngAx="1"`` is an oblique projection, so one direction projects to nothing and
+        that direction is the view: solving ``x + dx*z`` and ``y + dy*z`` for the
+        displacement that moves neither gives ``(dx / D, -dy / D, 1)``, where ``(dx, dy)``
+        is the scene's drawn depth vector and ``D`` its depth in the scene's own units.
+        It decides which side of a facet is the one drawn and, with it, the painter's
+        order -- both of which a surface needs and a prism never did, its faces being
+        axis-aligned.
+
+        Read back on the probes, it is the camera: ``(sin rotY, sin rotX, 1)``.  The sheet
+        that falls away at exactly the pitch is the check -- ``sm-c5-n2-down`` tilts its
+        two rows 15.0 degrees at ``rotX=15`` and PowerPoint draws its **underside**, at
+        the ambient, which is the edge-on case this predicts to a hundredth.
+        """
+        scene = self.scene
+        if scene is None:
+            return (0.0, 0.0, 1.0)
+        depth = scene.span * scene.face.width
+        if depth <= 0:
+            return (0.0, 0.0, 1.0)
+        return (scene.depth[0] / depth, -scene.depth[1] / depth, 1.0)
+
+    def _draw_scene_surface(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """A ``surfaceChart``'s lattice: quads over (category, series, value), lit and
+        banded.
+
+        **The lattice.**  A point sits on the category tick (`c:crossBetween` is `midCat`
+        by default here, measured) and at ``row / (rows - 1)`` of the scene's depth --
+        series one at the front plane exactly, the last series on the back wall exactly,
+        the rest spread evenly between.  Measured on ``view3d-surfmesh``, whose every band
+        is painted one red so the sheet is separable from the floor by colour alone and
+        whose rows are flat at a value each, so a row's own scanline gives its front-left
+        corner: two, three, four and five rows come back at ``0, 1``, ``0, 1/2, 1``,
+        ``0, 1/3, 2/3, 1`` and ``0, 1/4, 1/2, 3/4, 1`` of a depth that is itself
+        ``series / categories`` of the face's width.  ``c:gapDepth`` does nothing at all
+        here -- 0 and 500% draw the identical picture -- where it divides a ribbon's row,
+        and ``c:depthPercent`` scales the whole depth with the rows still at its ends.
+        **Series one is the front row** whatever its values: the descending-rows probe
+        puts its highest row at the front and its lowest at the back.
+
+        **The facets.**  Each cell of the lattice is two triangles split along the
+        diagonal from its near-left corner to its far-right one, which is measured and not
+        chosen: a cell with three corners level and the fourth pulled down draws **two**
+        tones, one of them the level tone its neighbour draws, which is what that diagonal
+        gives and what the other one cannot -- it would split the same cell into two
+        sloped triangles and draw three tones.  Predicted, the two tones land within one
+        8-bit level at three heights.
+
+        **The bands.**  A facet is not one colour: the value varies across it and the band
+        boundary cuts through it, so each triangle is clipped by the two planes of every
+        band it reaches and each piece drawn in that band's own fill.  The cut is straight
+        because the triangle is planar, which is what the picture shows -- a contour line
+        running clean across a cell.
+
+        **The order** is the painter's, along the view direction
+        (:meth:`_surface_view`): a facet whose centroid sits further from the viewer is
+        painted first.  That is a true depth sort and not the two-key screen sort a prism
+        gets, because a surface folds -- a near row can stand behind a far one wherever
+        the sheet climbs.
+        """
+        scene = self.scene
+        if scene is None or len(series) < 2 or len(categories) < 2:
+            # One row stretches no sheet, and PowerPoint draws none: its one-series probes
+            # come back an empty scene with a degenerate axis.  The scene, its floor and
+            # its walls are still drawn here, which that degenerate axis is not.
+            return
+        xs = self._category_positions(rect, len(categories))
+        blanks = self.chart.display_blanks_as or "gap"
+        bands = self._value_bands(scale)
+        rows = len(series)
+        depth = scene.span * scene.face.width
+        view = self._surface_view()
+        wire = bool(self.plot.wireframe)
+
+        def value_at(row: int, col: int) -> float | None:
+            value = _at(series[row].values, col)
+            if value is None and blanks == "zero":
+                return 0.0
+            return value
+
+        # Each entry is one band's piece of one triangle: its screen polygon, which
+        # band it belongs to, the light on the whole triangle, and the depth key the
+        # painter's order runs on.
+        faces: list[tuple[list[tuple[float, float]], int, float, float]] = []
+        for row in range(rows - 1):
+            for col in range(len(categories) - 1):
+                corners = [
+                    (row, col), (row, col + 1), (row + 1, col + 1), (row + 1, col)
+                ]
+                values = [value_at(r, c) for r, c in corners]
+                if any(value is None for value in values):
+                    # A gap in the data takes the whole cell with it: a lattice cell needs
+                    # all four of its corners and there is nothing to interpolate from.
+                    continue
+                points = [
+                    (
+                        xs[c],
+                        self._value_to_y(rect, value, scale),
+                        z / (rows - 1),
+                    )
+                    for (r, c), value, z in zip(
+                        corners, values, (row, row, row + 1, row + 1)
+                    )
+                ]
+                # The diagonal runs corner 0 to corner 2 -- near-left to far-right.
+                for triangle in ((0, 1, 2), (0, 2, 3)):
+                    corner_points = [points[index] for index in triangle]
+                    corner_values = [values[index] for index in triangle]
+                    normal = _surface_normal(corner_points, depth, view)
+                    if normal is None:
+                        continue
+                    shade = three_d_lambert(normal, VIEW_3D_SURFACE_LIGHT)
+                    key = sum(
+                        point[0] * view[0]
+                        - point[1] * view[1]
+                        - point[2] * depth * view[2]
+                        for point in corner_points
+                    ) / 3.0
+                    for index, (low, high, _name) in enumerate(bands):
+                        piece = _clip_to_band(corner_points, corner_values, low, high)
+                        if len(piece) < 3:
+                            continue
+                        faces.append(
+                            ([scene.at(*point) for point in piece], index, shade, key)
+                        )
+        for points, index, shade, _key in sorted(faces, key=lambda row: row[3]):
+            if wire:
+                self._polygon(
+                    points, fill=None, outline=self._band_outline(index, len(bands))
+                )
+                continue
+            fill = self._shade_factor(
+                self._band_fill(index, len(bands)),
+                shade,
+                self._band_color(index, len(bands)),
+            )
+            self._polygon(
+                points,
+                fill=fill,
+                # The seam, not a line of PowerPoint's: see `SURFACE_SEAM_WIDTH_EMU`.
+                outline=(
+                    m.Outline(fill=fill, width=SURFACE_SEAM_WIDTH_EMU)
+                    if isinstance(fill, m.SolidFill)
+                    else None
+                ),
+            )
 
     def _paint_slab(
         self,
@@ -6739,7 +7225,15 @@ class ChartBuilder:
         stated = axis.cross_between if axis is not None else None
         if stated:
             return stated
-        return DEFAULT_AREA_CROSS_BETWEEN if self._is_area else "between"
+        # **A surface's default is `midCat` too**, and it is measured rather than taken
+        # from the area beside it: the probe with the attribute left out altogether draws
+        # the same face, the same lattice and the same depth as its `midCat` twin to the
+        # digit, where its `between` twin draws a face a category wider.
+        return (
+            DEFAULT_AREA_CROSS_BETWEEN
+            if (self._is_area or self._is_surface)
+            else "between"
+        )
 
     @property
     def _points_on_ticks(self) -> bool:
@@ -6753,7 +7247,9 @@ class ChartBuilder:
         PowerPoint does with a `midCat` bar chart is **not measured**; leaving the bars and
         their labels in the bands together is the reading that cannot be self-contradictory.
         """
-        return (self._is_area or self._is_line) and self._cross_between() == "midCat"
+        return (
+            self._is_area or self._is_line or self._is_surface
+        ) and self._cross_between() == "midCat"
 
     def _category_positions(self, rect: _Rect, count: int) -> list[float]:
         """Where each category sits along the plot's width, in frame points."""
@@ -7487,6 +7983,15 @@ class ChartBuilder:
         # in: measured on ``combo-legend``, where a line group written *first* still
         # legends after the bar group written second, in the same place and with the same
         # widths as the deck that writes them the other way round.
+        if self._is_surface:
+            # A surface legends its **value bands**.  The scale they come from is the one
+            # `_build_cartesian` solved, stashed there before anything reads this; the
+            # provisional axis stands in for the one call that comes *before* that -- the
+            # band a legend along the top or the bottom reserves, which is measured from
+            # the axis and so cannot wait for it.  The two differ only in how coarse the
+            # unit is, and what is being measured here is the width of `0-2` against
+            # `0-10`.
+            return [name for _low, _high, name in self._value_bands(self._band_scale())]
         sources = [source for plot in self._drawn_plots() for source in plot.series]
         if not per_point:
             return [
@@ -7502,6 +8007,23 @@ class ChartBuilder:
                     if name and index not in deleted
                 ]
         return []
+
+    def _band_scale(self) -> tuple[float, float, float]:
+        """The value scale this chart's bands are cut from.
+
+        Solved once by :meth:`_build_cartesian` and stashed, because the bands are the
+        value axis' own intervals and every reader of them wants the same axis the chart
+        drew.  Before that -- there is exactly one such caller, the band a top or bottom
+        legend reserves, which the axis' own interval count depends on in turn -- the
+        finest axis the data could take stands in for it, which is the same stand-in
+        :meth:`_value_axis_intervals` makes for the same circle.
+        """
+        if self.bands_scale is not None:
+            return self.bands_scale
+        numbers = self._axis_reach(self._series()) or [0.0]
+        return nice_axis_scale(
+            min(numbers), max(numbers), intervals=AXIS_MAX_INTERVALS, strict=False
+        )
 
     def _draw_legend(
         self,
@@ -7641,10 +8163,37 @@ class ChartBuilder:
         )
         pitch = legend_row_pitch(box, lines)
         inside = legend_row_pitch(box) / 2 + box.ink_centre
-        y = self.frame.top + (self.frame.height - pitch * len(entries)) / 2
+        # **A title moves it down by half its own band**, which is measured rather than
+        # inherited from the band the axis count already subtracts: nine probes on
+        # ``view3d-surfrecon`` -- 3-D and flat, three frame heights and three title sizes
+        # -- put the block's centre 9.38, 13.04 and 19.15 pt below the frame's at 8, 14
+        # and 24 pt of title, and unmoved at 137.00 on every one of the thirteen titleless
+        # probes beside them whatever the camera does to the scene.  Twice those shifts is
+        # ``line_height + 8.99`` exactly at all three sizes, and it is a *constant* of the
+        # title and not a share of the frame: 120, 250 and 330 pt frames all read 13.04.
+        band = self._legend_title_band()
+        y = (
+            self.frame.top
+            + band
+            + (self.frame.height - band - pitch * len(entries)) / 2
+        )
         for _, item in entries:
             self._legend_entry(item, x, y + inside, swatch, gap, font, column=column)
             y += pitch
+
+    def _legend_title_band(self) -> float:
+        """What the title takes off the height a **side** legend centres itself in.
+
+        Not :data:`TITLE_BAND_LINES` times the line, which is the band the *axis* interval
+        count is measured against: that reads 14.42, 25.24 and 43.27 pt at 8, 14 and 24 pt
+        of title where the legend's own band reads 18.76, 26.08 and 38.30.  The two agree
+        at 14 pt and nowhere else, which is why one of them could stand for the other
+        until a size sweep was run.  See :data:`LEGEND_SIDE_TITLE_GAP_PT`.
+        """
+        title = self._title_box()
+        if title is None:
+            return 0.0
+        return title.line_height + LEGEND_SIDE_TITLE_GAP_PT
 
     def _legend_key_size(self, font: ChartFont) -> tuple[float, float]:
         """The legend key's width and the gap after it.
@@ -7738,7 +8287,12 @@ class ChartBuilder:
                     centre + LEGEND_SWATCH_EM * font.size / 2,
                 ),
                 fill=item.fill,
-                outline=None,
+                # **A key with no fill keeps its stroke**, which is what a `c:wireframe`
+                # surface's band key is: the same square, outlined in the band's colour
+                # and empty.  Measured on the wireframe legend probe, whose five keys
+                # carry a stroke and no fill at all.  An entry that has a fill draws no
+                # outline, which is every other chart's key and is left alone.
+                outline=item.outline if item.fill is None else None,
             )
         # An entry wider than the band it sits in wraps rather than running out of the
         # frame.  ``column`` is the width a **side** legend leaves for the name -- see

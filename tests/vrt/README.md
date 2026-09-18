@@ -40,15 +40,14 @@ rather than assumed:
 | The rotated-label reserve has no cap, where PowerPoint's does — slide 3 reserves too little under its plot | `real-financial-report/slide-03.svg` |
 | PowerPoint ellipsis-truncates a category label that will not fit; we draw it in full | `slide-03.svg` draws `プラットフォーム` where PowerPoint's export drew `プラット…`; `slide-04.svg` draws `海外売上比率` and `従業員満足度` where it drew `海外売上…` and `従業員満…` |
 
-`chart-gallery.pptx` adds four more, all of them deliberate — it is a fixture built to
+`chart-gallery.pptx` adds three more, all of them deliberate — it is a fixture built to
 pin what charts do now, including where that is wrong. Named here so nobody reads one of
 its snapshots as an assertion that we are right:
 
 | Defect | Frozen into |
 | --- | --- |
-| `surfaceChart` is measured and deliberately deferred: an empty frame and a `chart-unsupported-type` warning where PowerPoint draws a 3-D surface | `chart-gallery/slide-12.svg` |
 | A combo chart draws only its first group — no line series and no secondary value axis | `slide-17.svg` |
-| The four 3-D spellings are drawn flat; PowerPoint draws a real perspective scene, and on `area3DChart` it also picks a different axis unit | `slide-13.svg` … `slide-16.svg` |
+| A `pie3DChart` and a stacked `area3DChart` are drawn flat; PowerPoint draws a real scene under both. The other three 3-D spellings draw theirs — `bar3DChart`, `line3DChart` and, since the surface landed, `surfaceChart` on slide 12 | `slide-15.svg`, `slide-16.svg` |
 | A `stockChart`'s gridlines and axis sit about a pixel off PowerPoint's, which is the plot-rectangle defect slide 1 carries and not a legend one | `slide-11.svg` |
 
 The three defects this list used to name on slides 6, 9 and 11 are **fixed** — see

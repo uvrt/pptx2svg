@@ -109,6 +109,9 @@ DRAWABLE_CHART_KINDS = frozenset(
         "ofPieChart",
         "radarChart",
         "stockChart",
+        # Both spellings of the surface land here: `flat_chart_kind` maps
+        # `surface3DChart` to this one, and the two draw the identical picture.
+        "surfaceChart",
     }
 )
 
