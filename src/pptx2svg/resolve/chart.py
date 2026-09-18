@@ -936,15 +936,15 @@ AXIS_EDGE_RESERVE_PT = 2 * EDGE_INSET_PT
 #: 0.2083 -- a vertical and a horizontal reading of the same foreshortening -- and holding
 #: them equal costs nothing.
 #:
-#: **What the number is, is the category count**, and a ``bar3DChart`` no longer uses it:
-#: see :func:`three_d_scene_depth`.  Every deck it was fitted on draws five categories,
+#: **What the number is, is the category count**, and nothing uses it any more: see
+#: :func:`three_d_scene_depth`.  Every deck it was fitted on draws five categories,
 #: ``1 / 5`` is 0.2, and the drawn depth is a bar's own width -- so the "drawn at a fifth
 #: of its nominal length" this recorded as unidentified was one fifth of the plot per
-#: category, and the foreshortening is not a constant at all but ``sin`` exactly.  It
-#: survives here for a ``line3DChart`` and an ``area3DChart``, whose depth is a row per
-#: series: ``view3d-mesh`` reads an ``area3DChart``'s row as the category band, which is
-#: the same ``1 / categories`` the bar's turned out to be, but their *aspect* was fitted
-#: against this form and only the two together reproduce their axis.
+#: category, and the foreshortening is not a constant at all but ``sin`` exactly.  A
+#: ``line3DChart`` and an ``area3DChart`` kept it while their *aspect* was still the
+#: ladder fitted against it; both are now re-derived on ``1 / categories`` over seven
+#: category counts (``view3d-cat``, ``view3d-count``, ``view3d-band``), so the last
+#: caller is gone and this is the name of a quantity rather than a divisor.
 #:
 #: Measured on 131 readings of the four ``view3d-*`` probe decks: seven frames, seven
 #: depths from 20% to 2000%, nine pitches from -45 to 90 degrees, seven yaws, five stated
@@ -1029,10 +1029,19 @@ DEFAULT_GAP_DEPTH = 150.0
 #: Read as lighting, the four values are ``ambient + diffuse * max(0, n . light)`` with an
 #: ambient of 0.395, a diffuse of 0.747 and a light at **22 degrees right of the viewer and
 #: 29 degrees above** -- the left and bottom faces being the ones the light misses, which
-#: is why they share the ambient exactly.  That reading is *consistent* rather than
-#: *confirmed*: three parameters against four faces, with ``left == bottom`` its only
-#: check.  A curved extrusion -- a ``pie3DChart``'s rim, or ``c:shape`` of ``cylinder`` --
-#: would sweep the whole cosine and is the experiment that would settle it.
+#: is why they share the ambient exactly.  That reading used to be *consistent* rather than
+#: *confirmed*, three parameters against four faces with ``left == bottom`` its only check,
+#: and it asked for "a curved extrusion, which would sweep the whole cosine".
+#:
+#: **A ``line3DChart``'s ribbon is that experiment, and it confirms the model.**  A ribbon
+#: is faceted per segment, and each segment's top face is a different normal in the same
+#: scene: the five-category probe's four segments come back ``0.6201, 0.7113, 0.8018,
+#: 0.8088`` where :func:`three_d_lambert` on each segment's own slope says ``0.6231,
+#: 0.7144, 0.8040, 0.8126`` -- four normals spanning a quarter of the whole range, every
+#: one inside 0.5%, with a two-category probe's single facet at 0.7277 against 0.7267 and
+#: the same probe pitched to 45 degrees at 0.6867 and 0.7908 against 0.691 and 0.7874.
+#: So the four constants below are four samples of :data:`VIEW_3D_LIGHT`, and the light
+#: is what a sloped face is shaded with.  See ROADMAP.md 3.4.
 VIEW_3D_FACE_SHADES = {
     "front": 1.0,
     "top": 0.7587,
@@ -1040,6 +1049,41 @@ VIEW_3D_FACE_SHADES = {
     "left": 0.3947,
     "bottom": 0.3947,
 }
+
+#: The light :data:`VIEW_3D_FACE_SHADES` is four samples of, as a unit vector in the
+#: scene's own frame -- ``x`` right, ``y`` up, ``z`` towards the viewer.
+#:
+#: Solved from the three faces the light reaches: ``front`` fixes ``z``, ``top`` fixes
+#: ``y`` and ``right`` fixes ``x``, each as ``(shade - ambient) / diffuse``, and the
+#: diffuse below is what makes the three a unit vector.  That is 22 degrees right of the
+#: viewer and 29 above, which is the reading recorded beside the constants; what makes it
+#: a *model* rather than a restatement is the ribbon sweep above.
+VIEW_3D_LIGHT = (0.3238, 0.4876, 0.8108)
+
+#: The ambient term: what a face the light misses is painted, and the floor of
+#: :func:`three_d_lambert`.  It is the ``left`` and ``bottom`` faces' own measurement.
+VIEW_3D_AMBIENT = 0.3947
+
+#: The diffuse term, which is ``1 - ambient`` to four places for the front face and is
+#: fixed by it: the light is a unit vector, so this is the length of the three solved
+#: components.
+VIEW_3D_DIFFUSE = 0.7465
+
+#: How thick a ``line3DChart``'s ribbon is, as a fraction of the scene's own **width**.
+#:
+#: A ribbon is a thin solid rather than a sheet: its front face is the fill exactly, and
+#: it hangs *below* the value it plots -- the front face's top edge is the value, read on
+#: a three-category probe where the first category's front face is painted at 5.641 value
+#: units against the 4.05 it plots plus the 1.586 its row's near offset lifts it.
+#:
+#: Measured over **72 readings** -- eight cells, three cameras, one to three series --
+#: as the front face's own pixel area over the columns it spans, which is a subpixel
+#: reading of a strip the export quantises to 0.24 pt: 0.00255 of the scene's width, sd
+#: 0.00015, min 0.00205 and max 0.00279.  It tracks the scene and not the frame, the
+#: category band or the row: the same cell pitched to 45 degrees draws a scene 0.67 of the
+#: width and a ribbon 0.67 as thick.  ``1 / 400`` is inside the spread and is what is
+#: shipped; what the quantity *is* is not identified.
+VIEW_3D_RIBBON_THICKNESS = 0.0025
 
 #: What the **front** face is lifted by, in 8-bit levels added to every channel alike.
 #:
@@ -2076,18 +2120,26 @@ class _Rect:
         return self.bottom - self.top
 
 
-#: How many series a ``line3DChart``'s or ``area3DChart``'s scene shape is measured for.
-#:
-#: The aspect below climbs a ladder in the series count and the ladder's *law* is not
-#: identified, so beyond the counts it was read at the shape would be an extrapolation of
-#: a staircase -- and past six series a linear reading of it makes a ``line3DChart``'s
-#: scene taller than its region, which is certainly wrong.  Outside this range the chart
-#: keeps its flat rectangle, exactly as it did before the shape was measured at all.
-VIEW_3D_SHAPE_MAX_SERIES = 4
+def three_d_lambert(normal: tuple[float, float, float]) -> float:
+    """What a face of *normal* is painted, as a multiple of the fill per sRGB channel.
+
+    ``ambient + diffuse * max(0, n . light)`` against :data:`VIEW_3D_LIGHT`, in the
+    scene's own frame -- ``x`` right, ``y`` up, ``z`` towards the viewer.  The four
+    :data:`VIEW_3D_FACE_SHADES` are this at the four axis-aligned normals, and a
+    ``line3DChart``'s ribbon is what says it is a model and not a coincidence: see that
+    constant, and :meth:`ChartBuilder._paint_slab`, which shades every sloped face with it.
+    """
+    lit = sum(a * b for a, b in zip(normal, VIEW_3D_LIGHT))
+    return VIEW_3D_AMBIENT + VIEW_3D_DIFFUSE * max(0.0, lit)
 
 
 def three_d_scene_shape(
-    kind: str, series: int = 1, grouping: str | None = None
+    kind: str,
+    series: int = 1,
+    grouping: str | None = None,
+    *,
+    categories: int = 5,
+    across: int | None = None,
 ) -> "tuple[float, float | None] | None":
     """How tall and how deep this group element's scene is, or ``None`` if unmeasured.
 
@@ -2096,36 +2148,62 @@ def three_d_scene_shape(
     where ``None`` means the bar's own law -- as deep as one bar is wide, see
     :func:`three_d_scene_depth`.
 
-    **Measured on ``view3d-shape`` and ``view3d-aspect``**, which read the scene off the
-    raster instead of the axis: PowerPoint draws a 3-D chart's scene as one image object
-    and that object's box *is* the scene's box, to two points on the gallery.  So every
-    probe gives the box's width and height directly, and a camera sweep over one group
-    element solves the same projection the tick labels do -- a ``bar3DChart``'s eleven
-    cameras come back at 0.99 of the region's aspect and one unit of depth, which is the
-    control that says the instrument reads what the axis reads.
+    *across* is how many category **intervals** the front face spans, which is the
+    category count for an axis crossing ``between`` and one less for ``midCat``; it
+    defaults to *categories*.
 
-    Against that control:
+    **The law is one line and it is measured over seven category counts**::
 
-    * **A ``line3DChart``'s scene is 0.6 of the region's aspect and an ``area3DChart``'s
-      0.4**, at one series -- confirming the two readings 3.4 recorded, now over eleven
-      cameras each and to 0.1 pt rms rather than one reading each.  The factor multiplies
-      a *stated* ``c:hPercent`` too: ``hPercent=200`` on a ``line3DChart`` drew a scene of
-      aspect 1.198 where the bar's is 2.0.
-    * **The depth is one unit per series**, where a ``bar3DChart``'s is
-      ``(1 + gapDepth) / (series + 1.5)`` of one: one to four series came back 1.03, 2.01,
-      3.01 and 4.00 units on the same frame.  That is 3.4's "the line's depth grows by one
-      per series" read exactly.
-    * **The aspect climbs a ladder in the series count** -- 0.6, 0.6, 0.8, 0.8 for a
-      ``line3DChart`` and 0.4, 0.6, 0.6, 0.8 for an ``area3DChart``, which is one ladder
-      ``0.4 + 0.2 * ceil(m / 2)`` read at ``m = series`` for the line and ``series - 1``
-      for the area.  Every one of those eight is a fifth exactly, fitted at 0.1 pt rms
-      over four cameras; **what the ladder is** is not identified, which is why
-      :data:`VIEW_3D_SHAPE_MAX_SERIES` stops it where it was read.
-    * **Stacked is not settled.**  A stacked two-series ``area3DChart`` -- gallery slide
-      16's own shape -- reads 0.8 rather than the 0.6 its standard twin reads, and one
-      unit of depth rather than two, which says a stacked group shares a row.  Its four
-      cameras do not fit one box to better than 1.6 pt where every other group fits to
-      0.14, so the shape is *different* and not yet *known*; it keeps the flat rectangle.
+        aspect = floor((across + series) / 2) / categories
+        rows   = series                    one row of depth per series
+
+    A ``line3DChart`` and an ``area3DChart`` differ in nothing but *across*: a line's
+    points sit in their bands and an area's on the ticks, so the same data gives the line
+    one interval more.  ``view3d-band``'s ``crossBetween="between"`` area probes are what
+    say that is the axis and not the group element -- a three-category area reads 2 where
+    its ``midCat`` twin reads 1, and a five-category one 3 against 2.
+
+    **This replaces the ladder ``0.4 + 0.2 * ceil(m / 2)``, which was that law seen at one
+    category count.**  Every deck the ladder was fitted on drew five categories, where the
+    depth's old form (:data:`VIEW_3D_DEPTH_PROJECTION` standing in for ``1 / categories``)
+    and its corrected one agree exactly; at five the formula above *is* the ladder, which
+    is why it reproduced all eight of its readings.  On three categories it does not, and
+    that is where the ladder was contradicted: a three-category ``area3DChart`` reads
+    0.333, 0.667 and 0.667 at one, two and three series where the ladder says 0.4, 0.6 and
+    0.6, and the formula says 1/3, 2/3 and 2/3.
+
+    Measured on ``view3d-cat`` (112 probes), ``view3d-count`` (72) and ``view3d-band``
+    (80), with the **category count and the series count varied independently** -- 2, 3,
+    4, 5, 6, 7 and 8 categories against one to six series -- and read off the value axis'
+    own tick labels rather than the raster, which is the instrument the depth reservation
+    was measured with.  Every one of the 42 cells' free fits lands within 0.03 of an
+    integer ``k``; fed back as this law the drawn face height comes back within **1.21 pt
+    at worst and 0.3 pt typically** over 168 probes at four cameras each.  Two of those
+    four are width-bound and two height-bound, which is what separates the aspect from the
+    depth.
+
+    What the law *is* is not identified: ``k`` is half the sum of the face's intervals and
+    the scene's rows, which is a plausible thing for a layout to want and is not stated
+    anywhere.  It is monotone and bounded by its own inputs, though, where the ladder was
+    a staircase read at four points -- so there is no longer a count to stop at, and the
+    ``VIEW_3D_SHAPE_MAX_SERIES`` of 4 that capped it is gone with the ladder that needed
+    it.  Five and six series were read directly, at two category counts each.
+
+    The rest of the group elements:
+
+    * **The depth is one row per series**, where a ``bar3DChart``'s is
+      ``(1 + gapDepth) / (series + 1.5)`` of one, and a row is the category band:
+      ``series / categories`` of the scene's width reproduces all 42 cells, at one to six
+      series and two to eight categories, with ``depthPercent`` scaling it (500% reads
+      five times the depth and the same aspect) and ``c:gapDepth`` **not** -- 0 and 500%
+      divide the row without moving the scene at all.
+    * **Stacked is measured now and still not drawn.**  A stacked ``area3DChart`` reads
+      ``across / categories`` of the region's aspect -- 2/3 at three categories, 4/5 at
+      five, 1/2 at two, 7/8 at eight, and 3/3 and 5/5 for the ``between`` pair -- on one
+      shared row of depth whatever the series count, which fits its four cameras as well
+      as any other cell.  What it is *for* is gallery slide 16, whose axis is already
+      PowerPoint's without a camera; giving it one changes that axis, so this returns
+      ``None`` and the chart keeps its flat rectangle.  See ROADMAP.md 3.4.
     * **A ``pie3DChart`` has no scene box to measure.**  Its raster is the plot region
       itself at every camera and every frame -- 662.40 x 173.28 pt on a 195 pt frame
       whether the yaw is 0 or 270 -- and only the ink inside it moves.  ``rotY`` and
@@ -2140,10 +2218,10 @@ def three_d_scene_shape(
         return None
     if (grouping or "") in ("stacked", "percentStacked"):
         return None
-    if not 1 <= series <= VIEW_3D_SHAPE_MAX_SERIES:
-        return None
-    steps = series if kind == "line3DChart" else series - 1
-    return 0.4 + 0.2 * math.ceil(steps / 2), float(series)
+    count = max(categories, 1)
+    span = count if across is None else max(across, 1)
+    rows = max(series, 1)
+    return math.floor((span + rows) / 2) / count, float(rows)
 
 
 def three_d_camera(
@@ -2157,10 +2235,10 @@ def three_d_camera(
 
     ``None`` means "keep the flat rectangle", and there are three ways to get it.
 
-    * :func:`three_d_scene_shape` has nothing measured for this group element, this
-      grouping or this many series -- a ``pie3DChart``, whose plot rectangle is already
-      PowerPoint's; a stacked ``area3DChart``; more series than the shape was read at; or
-      a 2-D group element, which has no scene at all.
+    * :func:`three_d_scene_shape` has nothing measured for this group element or this
+      grouping -- a ``pie3DChart``, whose plot rectangle is already PowerPoint's; a
+      stacked ``area3DChart``, whose shape is measured and whose *axis* is already right
+      without one; or a 2-D group element, which has no scene at all.
     * ``c:rAngAx="0"``, which draws a perspective scene this does not model.
     * ``c:view3D`` absent altogether, which **selects that same perspective scene**
       although ECMA-376 defaults the attribute to 1: the absent probe is identical to
@@ -2169,9 +2247,9 @@ def three_d_camera(
     A ``line3DChart`` and an ``area3DChart`` pass this gate now and did not before: their
     scenes are not a ``bar3DChart``'s -- on one frame and one view a ``bar3DChart`` drew a
     127.68 pt value axis where a ``line3DChart`` drew 88.56 and an ``area3DChart`` 59.04
-    -- but the difference is now measured rather than named.  Read back as the axis, the
-    two raster decks' 119 probes go from **56 drawn exactly as PowerPoint drew them to
-    113**, and no probe that matched before stops matching.
+    -- but the difference is now measured rather than named.  The **series count** is no
+    longer one of the ways to get ``None``: the aspect is a law rather than a ladder now
+    (:func:`three_d_scene_shape`), so there is nothing to run off the end of.
     """
     if view is None or view.right_angle_axes is False:
         return None
@@ -2243,18 +2321,24 @@ def three_d_scene_depth(
       ``m-bardir`` draws a depth vector of 8.64 by 6.48 pt where the same chart drawn
       upright draws 23.04 by 17.28 -- about a third, which is the region's own aspect.
 
-    A ``line3DChart`` and an ``area3DChart`` keep the fitted constant.  Their depth is a
-    row per series rather than a bar's own width, and ``view3d-mesh`` reads an
-    ``area3DChart``'s row as the **category band** -- which is ``1 / categories`` again,
-    and would say the same thing -- but their *aspect* was fitted against the old form on
-    five-category decks and reading one without the other is what would break them.  See
-    :func:`three_d_scene_shape`.
+    **A ``line3DChart``'s and an ``area3DChart``'s row is the category band too**, and
+    that is now their law rather than the fitted constant it used to be: one row per
+    series, ``series / categories`` of the scene's width, with ``depthPercent`` scaling it
+    and ``c:gapDepth`` dividing the row inside it rather than adding to it.  Measured over
+    42 cells of ``view3d-cat``, ``view3d-count`` and ``view3d-band`` -- two to eight
+    categories against one to six series -- where the free fit's ``depth * categories /
+    series`` comes back 1.00 to 1.03 everywhere.  See :func:`three_d_scene_shape`, which
+    the aspect had to be re-derived with at the same time: on five categories the old form
+    and this one are the same number, which is why neither could be read without the
+    other.
     """
     depth = (view.depth_percent if view.depth_percent is not None else 100.0) / 100.0
     gap = max((gap_depth if gap_depth is not None else DEFAULT_GAP_DEPTH) / 100.0, 0.0)
-    rows = (three_d_scene_shape(kind, series, grouping) or (1.0, None))[1]
+    rows = (
+        three_d_scene_shape(kind, series, grouping, categories=categories) or (1.0, None)
+    )[1]
     if rows is not None:
-        return depth * rows * VIEW_3D_DEPTH_PROJECTION
+        return depth * rows / max(categories, 1)
     width = max(gap_width if gap_width is not None else DEFAULT_GAP_WIDTH, 0.0) / 100.0
     slots = three_d_bar_slots(series, grouping)
     divisor = max(categories, 1) * max(slots + width, MIN_BAR_SLOTS)
@@ -2273,6 +2357,7 @@ def three_d_plot_rect(
     categories: int = 5,
     gap_width: float | None = None,
     bar_direction: str | None = None,
+    across: int | None = None,
 ) -> _Rect:
     """Where a 3-D chart's **front face** lands inside the flat plot rectangle.
 
@@ -2325,6 +2410,7 @@ def three_d_plot_rect(
         categories=categories,
         gap_width=gap_width,
         bar_direction=bar_direction,
+        across=across,
     )
     return region if scene is None else scene.face
 
@@ -2360,15 +2446,22 @@ def three_d_scene(
     categories: int = 5,
     gap_width: float | None = None,
     bar_direction: str | None = None,
+    across: int | None = None,
 ) -> "_Scene | None":
     """The scene's front face and its depth vector, or ``None`` if it does not fit.
 
     The box is scaled isotropically to fit *region* and centred in it; see
-    :func:`three_d_plot_rect`, which is this and its face.
+    :func:`three_d_plot_rect`, which is this and its face.  *across* is how many category
+    intervals the face spans, which :func:`three_d_scene_shape` reads.
     """
     rot_x = math.radians(view.rot_x or 0.0)
     rot_y = math.radians(view.rot_y or 0.0)
-    scale = (three_d_scene_shape(kind, series, grouping) or (1.0, None))[0]
+    scale = (
+        three_d_scene_shape(
+            kind, series, grouping, categories=categories, across=across
+        )
+        or (1.0, None)
+    )[0]
     if region.width <= 0 or region.height <= 0:
         return None
     aspect = scale * (
@@ -3641,8 +3734,15 @@ class ChartBuilder:
         categories: list[str],
         scale: tuple[float, float, float],
     ) -> None:
-        """This group's own marks: its areas, its lines or its bars."""
-        if self._is_area:
+        """This group's own marks: its areas, its lines or its bars.
+
+        A ``line3DChart`` and an ``area3DChart`` whose scene is drawn take the solid
+        instead of the flat mark -- no stroke and no marker for the line, which is
+        PowerPoint's picture: a ribbon is the series and there is nothing drawn on it.
+        """
+        if self._draws_a_scene and (self._is_area or self._is_line):
+            self._draw_scene_ribbons(rect, series, categories, scale)
+        elif self._is_area:
             self._draw_areas(rect, series, categories, scale)
         elif self._is_line:
             self._draw_lines(rect, series, categories, scale)
@@ -4319,7 +4419,13 @@ class ChartBuilder:
                 self._read_line_style(item, source, source.index)
                 # The key shape follows the series, not the chart: a combo's bar series
                 # keeps its swatch while the line beside it takes a rule.
-                item.line_keyed = True
+                #
+                # **A ``line3DChart`` keys with a swatch**, because its mark is a solid and
+                # not a stroke: PowerPoint draws gallery slide 14's legend as two filled
+                # squares where a flat line chart of the same data gets the rule and its
+                # marker.  Gated on the spelling rather than on whether the scene is drawn,
+                # because it is PowerPoint that draws the ribbon either way.
+                item.line_keyed = self.plot.kind != "line3DChart"
                 if self._is_radar and (source.marker is None or not source.marker.size):
                     # Measured on the probe: a radar series stating no `c:size` draws a
                     # 6 pt marker, not ECMA-376's 7.
@@ -4895,7 +5001,11 @@ class ChartBuilder:
         The category count is an input to the depth and not only to the layout: a 3-D bar
         is as deep as it is wide and its width is a share of one category band, so the
         same chart drawn over three categories stands in a deeper scene than over five.
+        How many *intervals* those categories span -- one less when the marks sit on the
+        ticks rather than in the bands -- is an input to a ``line3DChart``'s and an
+        ``area3DChart``'s **aspect** in the same way; see :func:`three_d_scene_shape`.
         """
+        count = len(self._categories(self._series())) or 1
         return three_d_scene(
             region,
             view,
@@ -4903,9 +5013,10 @@ class ChartBuilder:
             gap_depth=self.plot.gap_depth,
             kind=self.plot.kind,
             grouping=self.plot.grouping,
-            categories=len(self._categories(self._series())) or 1,
+            categories=count,
             gap_width=self.plot.gap_width,
             bar_direction=self.plot.bar_direction,
+            across=max(count - 1, 1) if self._points_on_ticks else count,
         )
 
     def _axis_band_height(self, scale: "tuple[float, float, float] | None" = None) -> float:
@@ -5791,23 +5902,31 @@ class ChartBuilder:
         """Whether this group's solid is **drawn** rather than left as a flat rectangle.
 
         A narrower question than :meth:`_three_d_view`, which only asks whether the plot
-        rectangle is the scene's front face.  Three things keep a chart whose camera is
-        applied from having its mesh drawn as well, and each is a thing that would be a
-        *wrong* picture rather than a simplified one:
+        rectangle is the scene's front face.  What keeps a chart whose camera is applied
+        from having its mesh drawn as well is a thing that would be a *wrong* picture
+        rather than a simplified one:
 
-        * **it is not a ``bar3DChart``.**  A ``line3DChart``'s ribbons and an
-          ``area3DChart``'s slabs stand one row of depth per series, and where in its row
-          each of those sits is measured (``view3d-mesh``) while the *aspect* their scene
-          is fitted with is not -- reading one without the other draws a solid in a box
-          the wrong shape.  A ``pie3DChart`` is not a box at all.
-        * **``c:grouping="standard"``**, which is the 3-D-only grouping that puts each
-          series in its own row of depth rather than side by side across the width.  The
-          flat fallback draws those side by side, so the mesh would stand them in the
-          wrong place; nothing here has measured the row layout.
-        * **``c:shape`` is not a box.**  A cylinder, a cone or a pyramid is a different
-          solid and drawing a box in its place is a different chart.
+        * **a ``pie3DChart``**, which is not a box at all -- and whose rim sweeps more than
+          a hundred colours, so it is not the prism's faces with a different outline
+          either.
+        * **``c:grouping="standard"`` on a ``bar3DChart``**, which is the 3-D-only grouping
+          that puts each series in its own row of depth rather than side by side across
+          the width.  The flat fallback draws those side by side, so the mesh would stand
+          them in the wrong place; nothing here has measured the bar's row layout.  It is
+          the *default* for a ``line3DChart`` and an ``area3DChart``, whose rows are
+          measured, and means nothing else there.
+        * **``c:shape`` is not a box**, which only a ``bar3DChart`` states.  A cylinder, a
+          cone or a pyramid is a different solid and drawing a box in its place is a
+          different chart.
+
+        A stacked ``area3DChart`` never gets here, because :func:`three_d_camera` gives it
+        no scene to draw into.
         """
-        if self.plot.kind != "bar3DChart" or self.scene is None:
+        if self.scene is None:
+            return False
+        if self.plot.kind in ("line3DChart", "area3DChart"):
+            return True
+        if self.plot.kind != "bar3DChart":
             return False
         if (self.plot.grouping or "clustered") == "standard":
             return False
@@ -5836,6 +5955,182 @@ class ChartBuilder:
         )
         near = gap / 2.0 / (1.0 + gap)
         return near, near + 1.0 / (1.0 + gap)
+
+    def _scene_rows(self, count: int) -> list[tuple[float, float]]:
+        """Where each series' solid stands in the depth, as fractions of the whole scene.
+
+        A ``line3DChart``'s ribbons and an ``area3DChart``'s slabs take **one row of depth
+        per series** where a clustered ``bar3DChart``'s share one, and inside its row each
+        solid fills ``1 / (1 + gapDepth)`` centred -- the same gap rule as
+        :meth:`_scene_depth_span`, applied to a row rather than to the whole scene.
+
+        Measured on ``view3d-mesh``: the second and third rows' own near offsets come back
+        48.65 and 86.33 pt against this rule's 48.98 and 86.66, and a ``c:gapDepth`` sweep
+        of 0 and 500% divides the row without moving the scene at all.  The near offset is
+        a reading of the rule on its own -- a three-category one-series probe paints its
+        first category's front face at 5.641 value units where the value is 4.05 and the
+        row's near offset lifts it by 1.586.
+
+        **Series one stands nearest the viewer**, which is read off the raster rather than
+        assumed: on the two-series slab probe the first series' fill is the one drawn over
+        the second, and its front face is the lower of the two.
+        """
+        gap = max(
+            (
+                self.plot.gap_depth
+                if self.plot.gap_depth is not None
+                else DEFAULT_GAP_DEPTH
+            )
+            / 100.0,
+            0.0,
+        )
+        rows = max(count, 1)
+        span = 1.0 / rows
+        near = span * gap / 2.0 / (1.0 + gap)
+        deep = span / (1.0 + gap)
+        return [
+            (index * span + near, index * span + near + deep) for index in range(rows)
+        ]
+
+    def _draw_scene_ribbons(
+        self,
+        rect: _Rect,
+        series: list[_Series],
+        categories: list[str],
+        scale: tuple[float, float, float],
+    ) -> None:
+        """A ``line3DChart``'s ribbons and an ``area3DChart``'s slabs, back row first.
+
+        Both are the same solid: a strip swept along the data in the front plane and
+        extruded through its own row of depth.  What differs is where its underside is --
+        the zero line for a slab, the value less :data:`VIEW_3D_RIBBON_THICKNESS` for a
+        ribbon -- so both go through :meth:`_paint_slab`.
+
+        The runs, the blanks and the polygon a slab closes to are the flat drawing's, which
+        is deliberate: a 3-D area chart that breaks its run somewhere else than the flat
+        one would be two bugs rather than one.  A run of a single point draws nothing, as
+        flat.
+        """
+        scene = self.scene
+        if scene is None or not series or not categories:
+            return
+        xs = self._category_positions(rect, len(categories))
+        blanks = self.chart.display_blanks_as or "gap"
+        zero = self._value_to_y(rect, 0.0, scale)
+        rows = self._scene_rows(len(series))
+        thickness = scene.face.width * VIEW_3D_RIBBON_THICKNESS
+        ribbon = self._is_line
+        # Back to front: the first series stands nearest the viewer, so it is painted
+        # last and hides what stands behind it -- which is PowerPoint's picture.
+        for order in reversed(range(len(series))):
+            item = series[order]
+            run: list[tuple[float, float, float] | None] = []
+            for index in range(len(categories)):
+                value = _at(item.values, index)
+                if value is None:
+                    if blanks == "zero":
+                        value = 0.0
+                    elif blanks == "span":
+                        continue
+                    else:
+                        run.append(None)
+                        continue
+                y = self._value_to_y(rect, value, scale)
+                run.append((xs[index], y, y + thickness if ribbon else zero))
+            for stretch in _split_runs(run):
+                if len(stretch) < 2:
+                    continue
+                self._paint_slab(
+                    [(x, top) for x, top, _ in stretch],
+                    [(x, bottom) for x, _, bottom in stretch],
+                    rows[order],
+                    item.fill,
+                    item.color,
+                )
+
+    def _paint_slab(
+        self,
+        top: list[tuple[float, float]],
+        bottom: list[tuple[float, float]],
+        span: tuple[float, float],
+        fill: m.Fill | None,
+        base: m.ResolvedColor,
+    ) -> None:
+        """One ribbon or slab: its two ends, its skin per segment, and its front face.
+
+        Every face but the front one is **lit rather than looked up**: a segment's top
+        surface is tilted by its own slope, so the four :data:`VIEW_3D_FACE_SHADES` are
+        not enough and :func:`three_d_lambert` is what paints it.  That is the model the
+        prism's four constants are four samples of, and the ribbon is what confirms it --
+        see :data:`VIEW_3D_FACE_SHADES`.
+
+        **Which faces are drawn is the camera's arithmetic and not a case to enumerate.**
+        A face is visible when its outward normal points towards the viewer, and for an
+        oblique projection that test is ``n . (-depth_x, depth_y, -depth) < 0`` -- so a
+        segment rising more steeply than the depth leads shows its underside instead of
+        its top, which is what PowerPoint draws: at ``rotX=0`` a rising segment's belly
+        comes back at the ambient 0.3939 where its falling neighbour's top is 0.7908.
+
+        The front face is at the near edge and is painted last, over everything the solid
+        has behind it; between segments the paint runs the way the depth points, which is
+        the rule :meth:`_paint_prisms` measured.
+        """
+        scene = self.scene
+        if scene is None or len(top) < 2:
+            return
+        near, far = span
+        faces: list[tuple[float, list[tuple[float, float]], tuple[float, float, float]]] = []
+
+        def visible(normal: tuple[float, float, float]) -> bool:
+            return -normal[0] * scene.depth[0] + normal[1] * scene.depth[1] < 0
+
+        def quad(a, b, normal) -> None:
+            if not visible(normal):
+                return
+            faces.append(
+                (
+                    (a[0] + b[0]) / 2.0 * math.copysign(1.0, scene.depth[0]),
+                    [
+                        scene.at(*a, near),
+                        scene.at(*b, near),
+                        scene.at(*b, far),
+                        scene.at(*a, far),
+                    ],
+                    normal,
+                )
+            )
+
+        # The two ends, whose normals are the scene's own x axis -- and which therefore
+        # come out at the prism's `left` and `right` constants exactly.
+        quad(top[0], bottom[0], (-1.0, 0.0, 0.0))
+        quad(top[-1], bottom[-1], (1.0, 0.0, 0.0))
+        for index in range(len(top) - 1):
+            for edge in (top, bottom):
+                first, second = edge[index], edge[index + 1]
+                run = second[0] - first[0]
+                rise = second[1] - first[1]
+                length = math.hypot(run, rise)
+                if length <= 0:
+                    continue
+                # Screen y runs down, so the surface's upward normal is (dy, dx) in it.
+                normal = (rise / length, run / length, 0.0)
+                quad(first, second, normal if edge is top else tuple(-v for v in normal))
+        for _, points, normal in sorted(faces, key=lambda row: row[0]):
+            self._polygon(
+                points, fill=self._shade_normal(fill, normal, base), outline=None
+            )
+        self._polygon(
+            [scene.at(*point, near) for point in top]
+            + [scene.at(*point, near) for point in reversed(bottom)],
+            fill=fill,
+            outline=None,
+        )
+
+    def _shade_normal(
+        self, fill: m.Fill | None, normal: tuple[float, float, float], base: m.ResolvedColor
+    ) -> m.Fill | None:
+        """:meth:`_shade`, given a normal rather than one of the four named faces."""
+        return self._shade_factor(fill, three_d_lambert(normal), base)
 
     def _draw_scene_gridlines(
         self, rect: _Rect, scale: tuple[float, float, float], axis: c.SourceChartAxis | None
@@ -5928,7 +6223,12 @@ class ChartBuilder:
         front face keeps it and the shaded ones fall back to the series' resolved colour,
         which is the same colour its legend swatch draws.
         """
-        factor = VIEW_3D_FACE_SHADES.get(face, 1.0)
+        return self._shade_factor(fill, VIEW_3D_FACE_SHADES.get(face, 1.0), base)
+
+    def _shade_factor(
+        self, fill: m.Fill | None, factor: float, base: m.ResolvedColor
+    ) -> m.Fill | None:
+        """*fill* multiplied by *factor* per sRGB channel, which is where the shade lands."""
         if factor >= 1.0:
             return fill
         color = fill.color if isinstance(fill, m.SolidFill) else base

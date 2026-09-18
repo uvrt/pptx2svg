@@ -7353,6 +7353,9 @@ def three_d_chart_xml(
     *,
     high: float = 50.0,
     view: str = VIEW_3D,
+    cross_between: str = "between",
+    series_count: int = 1,
+    categories: int = 5,
 ) -> str:
     """One 3-D group of *kind* whose largest value is *high*, with a value axis.
 
@@ -7364,16 +7367,27 @@ def three_d_chart_xml(
     bar is as deep as it is wide and its width is a share of one band, so the category
     count is an input to the scene's depth and therefore to the drawn axis.  See
     :func:`~pptx2svg.resolve.chart.three_d_scene_depth`.
+
+    *cross_between* is the value axis' own, and it is an input to a ``line3DChart``'s and
+    an ``area3DChart``'s **aspect**: the scene is as tall as half the sum of the face's
+    category intervals and its rows, and ``midCat`` spans one interval fewer.  The probe
+    decks write it the way PowerPoint does -- ``midCat`` for an area and ``between`` for
+    everything else -- so a case that names a probe has to state it too.
     """
-    values = (high * 0.3, high, high * 0.55, high * 0.8, high * 0.45)
-    points = "".join(f"<c:pt idx='{i}'><c:v>{v!r}</c:v></c:pt>" for i, v in enumerate(values))
-    cats = "".join(f"<c:pt idx='{i}'><c:v>Q{i + 1}</c:v></c:pt>" for i in range(len(values)))
-    series = (
-        "<c:ser><c:idx val='0'/><c:order val='0'/>"
+    shape = (0.3, 1.0, 0.55, 0.8, 0.45, 0.9, 0.6, 0.35)[:categories]
+    points_for = lambda scale: "".join(  # noqa: E731
+        f"<c:pt idx='{i}'><c:v>{high * factor * scale!r}</c:v></c:pt>"
+        for i, factor in enumerate(shape)
+    )
+    cats = "".join(f"<c:pt idx='{i}'><c:v>Q{i + 1}</c:v></c:pt>" for i in range(categories))
+    series = "".join(
+        f"<c:ser><c:idx val='{index}'/><c:order val='{index}'/>"
         "<c:cat><c:strRef><c:strCache>"
-        f"<c:ptCount val='{len(values)}'/>{cats}</c:strCache></c:strRef></c:cat>"
+        f"<c:ptCount val='{categories}'/>{cats}</c:strCache></c:strRef></c:cat>"
         "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode>"
-        f"<c:ptCount val='{len(values)}'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+        f"<c:ptCount val='{categories}'/>{points_for(1.0 - 0.2 * index)}"
+        "</c:numCache></c:numRef></c:val></c:ser>"
+        for index in range(series_count)
     )
     dimension = "<c:barDir val='col'/>" if kind.startswith("bar") else ""
     depth = "<c:axId val='100004'/>" if kind.endswith("3DChart") else ""
@@ -7397,7 +7411,7 @@ def three_d_chart_xml(
         "<c:delete val='0'/><c:axPos val='l'/><c:majorGridlines/>"
         "<c:numFmt formatCode='General' sourceLinked='1'/>"
         "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
-        "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        f"<c:crosses val='autoZero'/><c:crossBetween val='{cross_between}'/></c:valAx>"
         f"{serial_axis}</c:plotArea>"
         "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
     )
@@ -7459,28 +7473,35 @@ def test_the_three_d_spelling_survives_the_flattening():
 
 
 @pytest.mark.parametrize(
-    "kind,top,unit,wide_unit",
+    "kind,cross,top,unit,wide_unit",
     [
         # A `bar3DChart`'s camera is applied, so its axis is divided by the count the
         # *drawn* plot leaves room for; ``view3d-meter``'s ``m195-F`` and ``m195-G`` are
         # these two charts and PowerPoint drew them 0..50 by 10 and 0..100 by 20.
-        ("bar3DChart", 50.0, 10.0, 20.0),
+        ("bar3DChart", "between", 50.0, 10.0, 20.0),
         # And so are a `line3DChart`'s and an `area3DChart`'s, now that their scenes are
         # measured too (`three_d_scene_shape`).  Both used to be divided by the count the
         # whole *frame* leaves room for and came out finer than PowerPoint on all four
         # readings; ``view3d-meter``'s ``type-line3D-F/G`` and ``type-area3D-F/G`` are
-        # those readings and every one of them is now drawn exactly.
-        ("line3DChart", 50.0, 10.0, 20.0),
-        # An `area3DChart`'s scene is 0.4 of the region's aspect, so the same data on the
-        # same frame leaves room for three intervals where a `line3DChart` has room for
-        # five -- and **PowerPoint stops at 60 rather than 50**, because the bare rule
-        # rounds the extent outwards to whole units and at a unit of 20 that is 60.  That
-        # is the rule working, not a headroom: ``type-area3D-F`` is drawn 0..60 by 20 and
-        # its 59.04 pt plot is reproduced to 0.01 pt.
-        ("area3DChart", 60.0, 20.0, 50.0),
+        # those readings and every one of them is drawn exactly.
+        ("line3DChart", "between", 50.0, 10.0, 20.0),
+        # ``type-area3D-F/G``, which is an area chart and therefore ``midCat``: its face
+        # spans four category intervals where the line's spans five, so its scene is
+        # ``floor((4 + 1) / 2) / 5`` of the region's aspect where the line's is
+        # ``floor((5 + 1) / 2) / 5``.  That leaves room for three intervals where the line
+        # has room for five -- and **PowerPoint stops at 60 rather than 50**, because the
+        # bare rule rounds the extent outwards to whole units and at a unit of 20 that is
+        # 60.  That is the rule working, not a headroom: ``type-area3D-F`` is drawn 0..60
+        # by 20 and its 59.04 pt plot is reproduced to 0.03 pt.
+        ("area3DChart", "midCat", 60.0, 20.0, 50.0),
+        # The same area chart spelled ``between``, which is legal and which gallery slide
+        # 16 is: one more interval across, so the scene is the line's and so is the axis.
+        # Measured on ``view3d-band``, whose ``between`` area probes read one step up the
+        # ladder from their ``midCat`` twins at every category count that separates them.
+        ("area3DChart", "between", 50.0, 10.0, 20.0),
     ],
 )
-def test_a_three_d_value_axis_is_not_padded(kind, top, unit, wide_unit):
+def test_a_three_d_value_axis_is_not_padded(kind, cross, top, unit, wide_unit):
     """The measured half of the 3-D axis: the extent is not padded before it is rounded.
 
     ``view3d-meter`` draws 0..50 and 0..96 on seven frames and three group elements.
@@ -7495,12 +7516,20 @@ def test_a_three_d_value_axis_is_not_padded(kind, top, unit, wide_unit):
     whole units, so a coarse enough unit clears the data without any headroom being added.
     PowerPoint does the same on the same chart.
     """
-    _, data = _build(three_d_chart_xml(kind, high=50.0), width=684.0, height=195.0)
+    _, data = _build(
+        three_d_chart_xml(kind, high=50.0, cross_between=cross),
+        width=684.0,
+        height=195.0,
+    )
     assert data.value_axis == m.ChartAxisScale(
         minimum=0.0, maximum=top, major_unit=unit
     )
 
-    _, wider = _build(three_d_chart_xml(kind, high=96.0), width=684.0, height=195.0)
+    _, wider = _build(
+        three_d_chart_xml(kind, high=96.0, cross_between=cross),
+        width=684.0,
+        height=195.0,
+    )
     assert wider.value_axis == m.ChartAxisScale(
         minimum=0.0, maximum=100.0, major_unit=wide_unit
     )
@@ -7678,14 +7707,16 @@ def test_the_camera_is_applied_only_where_it_is_measured():
     )
     assert three_d_camera(right_angled, "bar3DChart") is right_angled
     assert three_d_camera(SourceChartView3D(), "bar3DChart") is not None
-    # A `line3DChart` and an `area3DChart` pass now: their scenes are 0.6 and 0.4 of the
-    # region's aspect and one unit of depth per series, read off eleven cameras each.
+    # A `line3DChart` and an `area3DChart` pass now: their scene is a law in the category
+    # count, the axis' own crossing and the series count, read over seven category counts.
     assert three_d_camera(right_angled, "line3DChart") is right_angled
     assert three_d_camera(right_angled, "area3DChart") is right_angled
-    # ... but only over the series counts the ladder in `three_d_scene_shape` was read at,
-    # and not stacked, whose four cameras do not fit one box.
-    assert three_d_camera(right_angled, "line3DChart", series=5) is None
-    assert three_d_camera(right_angled, "area3DChart", series=9) is None
+    # **At any series count**, which the ladder this replaced could not do: five and six
+    # series were read directly and the law has no staircase to run off the end of.
+    assert three_d_camera(right_angled, "line3DChart", series=5) is right_angled
+    assert three_d_camera(right_angled, "area3DChart", series=9) is right_angled
+    # Stacked is the one that still keeps its flat rectangle, and not for want of a
+    # measurement any more: see `three_d_scene_shape`.
     assert (
         three_d_camera(right_angled, "area3DChart", series=2, grouping="stacked") is None
     )
@@ -7739,38 +7770,107 @@ def test_a_three_d_bar_chart_draws_in_the_faces_rectangle():
     assert left > flat_left and right < flat_right
 
 
-#: ``view3d-shape`` and ``view3d-aspect``, solved: per group element and series count, the
-#: scene's aspect as a multiple of the region's and its depth in units of
-#: ``depthPercent``.  Each row is four or eleven cameras fitted together -- two of them
-#: width-bound and two height-bound, which is what makes the aspect and the depth separable
-#: at all -- at 0.14 pt rms or better on a scene six hundred points wide.
+#: ``view3d-cat`` (112 probes), ``view3d-count`` (72) and ``view3d-band`` (80), solved:
+#: per group element, **category count**, category intervals across the face and series
+#: count, the scene's aspect as a multiple of the region's **times the category count** --
+#: which the law says is the integer ``floor((across + series) / 2)``.
+#:
+#: Each row is four cameras fitted together on the first two decks and two on the third,
+#: two of them width-bound and two height-bound, which is what makes the aspect and the
+#: depth separable at all.  The reading is the value axis' own tick labels rather than the
+#: scene raster's box -- the instrument the whole depth reservation was measured with --
+#: and every row lands within 0.05 of its integer.
+#:
+#: **The category count is swept independently of the series count here, and that is the
+#: point.**  The ladder these replace, ``0.4 + 0.2 * ceil(m / 2)``, was fitted on
+#: five-category decks alone, where it is this law; three categories contradicted it.
 VIEW_3D_SHAPE_READINGS = [
-    ("bar3DChart", 1, 0.9908), ("bar3DChart", 2, 0.9952),
-    ("bar3DChart", 3, 0.9948), ("bar3DChart", 4, 0.9943),
-    ("line3DChart", 1, 0.5948), ("line3DChart", 2, 0.5939),
-    ("line3DChart", 3, 0.7891), ("line3DChart", 4, 0.7943),
-    ("area3DChart", 1, 0.4037), ("area3DChart", 2, 0.5962),
-    ("area3DChart", 3, 0.5910), ("area3DChart", 4, 0.7895),
+    # kind, categories, across, series, k
+    ("area3DChart", 2, 1, 1, 0.998), ("area3DChart", 2, 1, 2, 0.997),
+    ("area3DChart", 2, 1, 3, 1.998), ("area3DChart", 3, 2, 1, 0.998),
+    ("area3DChart", 3, 2, 2, 1.994), ("area3DChart", 3, 2, 3, 1.998),
+    ("area3DChart", 3, 2, 4, 2.997), ("area3DChart", 3, 2, 5, 2.998),
+    ("area3DChart", 3, 2, 6, 4.000), ("area3DChart", 5, 4, 1, 1.997),
+    ("area3DChart", 5, 4, 2, 2.991), ("area3DChart", 5, 4, 3, 2.993),
+    ("area3DChart", 5, 4, 4, 3.991), ("area3DChart", 5, 4, 5, 3.996),
+    ("area3DChart", 5, 4, 6, 5.011), ("area3DChart", 8, 7, 1, 3.988),
+    ("area3DChart", 8, 7, 2, 3.981), ("area3DChart", 8, 7, 3, 4.985),
+    ("line3DChart", 2, 2, 1, 0.999), ("line3DChart", 2, 2, 2, 1.996),
+    ("line3DChart", 2, 2, 3, 1.997), ("line3DChart", 3, 3, 1, 1.993),
+    ("line3DChart", 3, 3, 2, 1.995), ("line3DChart", 3, 3, 3, 2.994),
+    ("line3DChart", 3, 3, 4, 2.999), ("line3DChart", 3, 3, 5, 4.002),
+    ("line3DChart", 3, 3, 6, 3.998), ("line3DChart", 5, 5, 1, 2.988),
+    ("line3DChart", 5, 5, 2, 2.992), ("line3DChart", 5, 5, 3, 3.989),
+    ("line3DChart", 5, 5, 4, 3.991), ("line3DChart", 5, 5, 5, 4.999),
+    ("line3DChart", 5, 5, 6, 5.006), ("line3DChart", 8, 8, 1, 3.988),
+    ("line3DChart", 8, 8, 2, 4.985), ("line3DChart", 8, 8, 3, 4.983),
+    # ``view3d-band``: three more category counts, so that the floor's own parity is read
+    # rather than inferred from two counts either side of it.
+    ("area3DChart", 4, 3, 1, 1.987), ("area3DChart", 4, 3, 2, 1.992),
+    ("area3DChart", 4, 3, 3, 2.992), ("area3DChart", 6, 5, 1, 2.991),
+    ("area3DChart", 6, 5, 2, 2.989), ("area3DChart", 6, 5, 3, 3.965),
+    ("area3DChart", 7, 6, 1, 2.994), ("area3DChart", 7, 6, 2, 3.980),
+    ("area3DChart", 7, 6, 3, 3.996), ("line3DChart", 4, 4, 1, 1.991),
+    ("line3DChart", 4, 4, 2, 2.979), ("line3DChart", 4, 4, 3, 2.981),
+    ("line3DChart", 6, 6, 1, 3.001), ("line3DChart", 6, 6, 2, 3.984),
+    ("line3DChart", 6, 6, 3, 3.963), ("line3DChart", 7, 7, 1, 3.994),
+    ("line3DChart", 7, 7, 2, 3.987), ("line3DChart", 7, 7, 3, 4.954),
+    # The same area chart spelled ``crossBetween="between"``, which spans one interval
+    # more: these are the probes that say *across* is the axis' and not the type's, three
+    # of them landing a whole step above their ``midCat`` twins above.
+    ("area3DChart", 3, 3, 1, 1.992), ("area3DChart", 3, 3, 2, 1.981),
+    ("area3DChart", 5, 5, 1, 2.984), ("area3DChart", 5, 5, 2, 2.994),
+    ("area3DChart", 8, 8, 1, 3.992), ("area3DChart", 8, 8, 2, 4.987),
 ]
 
 
 def test_each_group_elements_scene_is_the_shape_its_raster_says():
-    """`three_d_scene_shape` against the boxes the probe decks' rasters occupy.
+    """`three_d_scene_shape` against the faces PowerPoint drew, over 60 cells.
 
-    PowerPoint draws the scene as one image object and that object's box *is* the scene's
-    box, so a camera sweep solves the scene's proportions without a single vertex.  The
-    ``bar3DChart`` rows are the control: they come back at the region's own aspect, which
-    is what the tick labels independently say, and the other two are read against them.
+    The aspect is ``floor((across + series) / 2) / categories`` of the region's own and
+    the depth is ``series / categories`` of the scene's width, and neither could be read
+    without the other: on five categories -- every earlier deck's count -- the depth's old
+    fitted constant and ``1 / categories`` are the same number, so the aspect fitted
+    against it came out as a ladder in the series count that held only there.
     """
     from pptx2svg.resolve.chart import three_d_scene_shape
 
-    for kind, series, aspect in VIEW_3D_SHAPE_READINGS:
-        shape = three_d_scene_shape(kind, series)
-        assert shape is not None, (kind, series)
-        assert shape[0] == pytest.approx(aspect, abs=0.011), (kind, series)
-        # A `bar3DChart` divides one depth between its series; the other two stand one
-        # series per row, and four counts came back 1.03, 2.01, 3.01 and 4.00 units.
-        assert shape[1] == (None if kind == "bar3DChart" else float(series))
+    for kind, categories, across, series, k in VIEW_3D_SHAPE_READINGS:
+        shape = three_d_scene_shape(
+            kind, series, categories=categories, across=across
+        )
+        assert shape is not None, (kind, categories, series)
+        assert shape[0] * categories == pytest.approx(k, abs=0.05), (
+            kind, categories, across, series
+        )
+        # One row of depth per series, where a `bar3DChart` divides one row between them.
+        assert shape[1] == float(series)
+    assert three_d_scene_shape("bar3DChart", 3) == (1.0, None)
+
+
+def test_a_stacked_area_chart_is_measured_and_still_keeps_its_flat_rectangle():
+    """The one 3-D group element whose scene is known and not drawn, and why.
+
+    A stacked ``area3DChart`` reads **``across / categories``** of the region's aspect on
+    **one shared row** of depth whatever its series count -- 0.998 at two categories,
+    1.994 at three, 3.990 at five and 6.965 at eight against ``across`` of 1, 2, 4 and 7,
+    with the ``between`` pair at 2.954 and 4.879 against 3 and 5, and two and three series
+    reading identically.  Its four cameras fit that box as well as any other cell's, which
+    is a change: the raster instrument could not fit it better than 1.6 pt and this one
+    does it inside 0.6.
+
+    It keeps the flat rectangle anyway, because what a camera is *for* is the axis, and
+    gallery slide 16 -- a stacked ``area3DChart`` -- already draws PowerPoint's own 0..50
+    by 5 without one.  Giving it a reservation moves that axis, so the measurement is
+    recorded and not shipped.  See ROADMAP.md 3.4.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import three_d_camera, three_d_scene_shape
+
+    view = SourceChartView3D(rot_x=15, rot_y=20, depth_percent=100, right_angle_axes=True)
+    for grouping in ("stacked", "percentStacked"):
+        assert three_d_scene_shape("area3DChart", 2, grouping, categories=5) is None
+        assert three_d_camera(view, "area3DChart", series=2, grouping=grouping) is None
 
 
 def test_a_pie_needs_no_camera_because_its_rectangle_is_already_powerpoints():
@@ -7887,10 +7987,11 @@ def test_the_three_d_warning_says_whether_the_camera_was_applied(chart_gallery):
 
     A chart whose plot rectangle is PowerPoint's and whose scene is missing has a
     different defect from one drawn in a rectangle PowerPoint never used, and the two of
-    the gallery's 3-D slides that still warn are one of each: 14's ``line3DChart`` gets
-    the camera, 15's ``pie3DChart`` needs none -- its flat rectangle is already
-    PowerPoint's -- and 16's **stacked** ``area3DChart`` is the one whose scene is not
-    settled.  13's ``bar3DChart`` no longer warns at all, because its scene is drawn.
+    the gallery's 3-D slides that still warn are one of each: 15's ``pie3DChart`` needs no
+    camera -- its flat rectangle is already PowerPoint's -- and 16's **stacked**
+    ``area3DChart`` is measured now and deliberately not given one, because its axis is
+    already right without.  13's ``bar3DChart`` and 14's ``line3DChart`` no longer warn at
+    all, because their scenes are drawn.
 
     The gate reads the series count and the grouping, so this has to pass them: a plot's
     kind alone would say "camera" for slide 16, which is the wrong claim about a chart
@@ -7899,13 +8000,13 @@ def test_the_three_d_warning_says_whether_the_camera_was_applied(chart_gallery):
     options = ConvertOptions()
     convert_pptx_to_model(chart_gallery, options)
     flattened = [w for w in options.warnings if w.code == "chart-3d-flattened"]
-    assert {w.slide_number for w in flattened} == {14, 15, 16}
+    assert {w.slide_number for w in flattened} == {15, 16}
     placed = {
         w.slide_number
         for w in flattened
         if "camera places and sizes" in w.message
     }
-    assert placed == {14}
+    assert placed == set()
     assert all("is drawn flat" in w.message for w in flattened)
 
 
@@ -7937,8 +8038,9 @@ def test_a_three_d_chart_says_it_is_drawn_flat(chart_gallery):
 
     **The warning is a claim about what this library drew**, so it has to stop when the
     drawing stops being flat: the gallery's ``bar3DChart`` draws its prisms, its floor
-    and its walls now, and leaving the warning on it would be as wrong as omitting it
-    from the three that are still flat.
+    and its walls, its ``line3DChart`` draws its ribbons in the same scene, and leaving
+    the warning on either would be as wrong as omitting it from the two that are still
+    flat.
     """
     options = ConvertOptions()
     model = convert_pptx_to_model(chart_gallery, options)
@@ -7949,7 +8051,7 @@ def test_a_three_d_chart_says_it_is_drawn_flat(chart_gallery):
         for warning in flattened
         for kind in ("bar3DChart", "line3DChart", "pie3DChart", "area3DChart")
         if kind in warning.message
-    } == {"line3DChart", "pie3DChart", "area3DChart"}
+    } == {"pie3DChart", "area3DChart"}
     assert all("drawn flat" in warning.message for warning in flattened)
 
     # Drawn, not refused: each of the four is a real chart element with children in it.

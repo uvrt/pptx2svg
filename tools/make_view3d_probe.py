@@ -43,6 +43,18 @@ divides is the whole frame and nothing else has to be subtracted from it.
     ``view3d-aspect`` gives every series count from one to four four cameras each, two of
     them width-bound and two height-bound, which is what separates the scene's aspect from
     its depth.  See ``three_d_scene_shape``.
+``view3d-cat`` / ``view3d-count`` / ``view3d-band``
+    The **category count against the series count**, which every deck above holds at five
+    -- and holding it at five is what hid ``1 / categories`` inside a fitted constant and
+    made the scene's aspect look like a ladder in the series count.  ``view3d-cat`` moves
+    the category count at one to three series, ``view3d-count`` takes the series count to
+    six at two category counts, and ``view3d-band`` settles what those two leave open:
+    three more category counts, an ``area3DChart`` spelled ``crossBetween="between"``, the
+    stacked shape at two more counts, and ``depthPercent``/``hPercent``/``gapDepth`` away
+    from their defaults.  Read with the plain (text) reader rather than ``--shapes``: the
+    value axis' extreme tick labels *are* the drawn face's edges.  What they settle:
+    ``aspect = floor((across + series) / 2) / categories`` and ``depth = series /
+    categories``.  See ``three_d_scene_shape``.
 ``view3d-mesh``
     The **solid inside** the scene rather than the scene's box: each prism's own three
     faces, found in the raster by their exact drawn colours, against the front plane its
@@ -565,8 +577,167 @@ MESH_PROBES: list[dict] = [
     ],
 ]
 
+#: **The scene aspect against the *category* count**, which every earlier deck held at
+#: five.  ``three_d_scene_shape``'s ladder ``0.4 + 0.2 * ceil(m / 2)`` was fitted on
+#: five-category decks -- which is exactly where the depth law's old form
+#: (``VIEW_3D_DEPTH_PROJECTION`` standing in for ``1 / categories``) and its corrected one
+#: agree -- and ``view3d-mesh``'s three-category ``area3DChart`` contradicts it.  So the
+#: aspect has to be re-derived rather than extended, and that needs the two counts varied
+#: **independently**: this deck moves the category count at a fixed series count and
+#: ``view3d-count`` moves the series count past where the ladder was read.
+#:
+#: Four cameras per cell, two of them width-bound (``rx0``, ``ry90``) and two height-bound
+#: (``base``, ``rx45``), which is what separates the scene's aspect from its depth without
+#: needing an estimate of the region at all: the ink box's own height over its width is
+#: ``(aspect + margin + depth*|sin rotX|) / (1 + margin + depth*|sin rotY|)``, in which the
+#: region cancels.  A ``bar3DChart`` on the same frame and the same category count is the
+#: control that says what the region's aspect is, measured the same way.
+CAT_COUNTS = (2, 3, 5, 8)
+
+#: A value shape per category count, so that no category is the maximum twice and a deck
+#: with eight categories is not the five-category table run off its end.
+CAT_SHAPES: dict[int, tuple[float, ...]] = {
+    2: (0.45, 1.0),
+    3: (0.45, 1.0, 0.7),
+    4: (0.3, 1.0, 0.55, 0.8),
+    5: (0.3, 1.0, 0.55, 0.8, 0.45),
+    6: (0.3, 1.0, 0.55, 0.8, 0.45, 0.9),
+    7: (0.3, 1.0, 0.55, 0.8, 0.45, 0.9, 0.6),
+    8: (0.3, 1.0, 0.55, 0.8, 0.45, 0.9, 0.6, 0.35),
+}
+
+#: Descending, so a slab or a ribbon standing further back is never entirely hidden by the
+#: one in front of it -- which matters for the *ink* box, since a scene whose back rows are
+#: covered still draws its floor and its walls but its ink box is read off whatever is
+#: painted.
+CAT_SCALES = (1.0, 0.8, 0.62, 0.48, 0.36, 0.26)
+
+CAT_FILLS = ("4472C4", "ED7D31", "FF3300", "103070", "70AD47", "7030A0")
+
+
+def _cat_probe(kind: str, cats: int, count: int, name: str, view: dict, **extra) -> dict:
+    probe = {
+        "key": f"{kind}-c{cats}-n{count}-{name}",
+        "high": 9.0,
+        "frame": VIEW_FRAME,
+        "kind": kind,
+        "view": view,
+        "series": count,
+        "colours": CAT_FILLS,
+        "categories": tuple(f"C{i + 1}" for i in range(cats)),
+        "factors": CAT_SHAPES[cats],
+        "scales": CAT_SCALES[:count],
+        "cats": cats,
+    }
+    probe.update(extra)
+    return probe
+
+
+CAT_PROBES: list[dict] = [
+    *[
+        _cat_probe(kind, cats, count, name, view)
+        for kind in ("line3D", "area3D")
+        for cats in CAT_COUNTS
+        for count in (1, 2, 3)
+        for name, view in ASPECT_CAMERAS
+    ],
+    # The control: a ``bar3DChart``'s scene is the region's own, so the same reading on the
+    # same frame says what the region is and what this instrument's own bias is.
+    *[
+        _cat_probe("bar3D", cats, 1, name, view)
+        for cats in CAT_COUNTS
+        for name, view in ASPECT_CAMERAS
+    ],
+]
+
+#: **The series count past the ladder**, at two category counts, plus the stacked
+#: ``area3DChart`` gallery slide 16 is.  Five and six series are the counts
+#: ``VIEW_3D_SHAPE_MAX_SERIES`` refuses for want of a reading.
+COUNT_PROBES: list[dict] = [
+    *[
+        _cat_probe(kind, cats, count, name, view)
+        for kind in ("line3D", "area3D")
+        for cats in (3, 5)
+        for count in (4, 5, 6)
+        for name, view in ASPECT_CAMERAS
+    ],
+    *[
+        _cat_probe("area3Dstack", cats, count, name, view)
+        for cats in (3, 5)
+        for count in (2, 3)
+        for name, view in ASPECT_CAMERAS
+    ],
+    *[
+        _cat_probe("bar3D", 5, count, name, view)
+        for count in (2, 4)
+        for name, view in ASPECT_CAMERAS
+    ],
+]
+
+#: **The band deck**, which settles what ``view3d-cat`` and ``view3d-count`` leave open
+#: once their law is written down.  Those two say the scene's aspect is
+#: ``floor((across + series) / 2) / categories`` of the region's, in which *across* is the
+#: category count for a ``line3DChart`` and one less for an ``area3DChart`` -- and every
+#: area probe on those decks draws ``c:crossBetween="midCat"``, which is the other thing
+#: that separates the two group elements.  So four questions, at two cameras a cell
+#: rather than four, the depth being settled (``series / categories``) and one
+#: height-bound camera therefore enough to read the aspect:
+#:
+#: * an ``area3DChart`` with ``crossBetween="between"`` -- gallery slide 16's own spelling
+#:   -- which says whether *across* is the axis' or the group element's;
+#: * three more category counts, 4, 6 and 7, against a law whose floor makes the even and
+#:   the odd counts behave differently;
+#: * a stacked ``area3DChart`` at two more counts, whose aspect reads ``categories - 1``
+#:   over the two it has been read at; and
+#: * ``depthPercent`` and ``hPercent`` away from their defaults at two category counts,
+#:   which is the multiplication those two are assumed to be.
+BAND_PROBES: list[dict] = [
+    *[
+        _cat_probe(kind, cats, count, name, view)
+        for kind in ("line3D", "area3D")
+        for cats in (4, 6, 7)
+        for count in (1, 2, 3)
+        for name, view in ASPECT_CAMERAS[:1] + ASPECT_CAMERAS[2:3]
+    ],
+    *[
+        _cat_probe("area3D", cats, count, f"btw-{name}", view, crossBetween="between")
+        for cats in (3, 5, 8)
+        for count in (1, 2)
+        for name, view in ASPECT_CAMERAS[:1] + ASPECT_CAMERAS[2:3]
+    ],
+    *[
+        _cat_probe("area3Dstack", cats, 2, name, view)
+        for cats in (2, 8)
+        for name, view in ASPECT_CAMERAS[:1] + ASPECT_CAMERAS[2:3]
+    ],
+    *[
+        _cat_probe("area3Dstack", cats, 2, f"btw-{name}", view, crossBetween="between")
+        for cats in (3, 5)
+        for name, view in ASPECT_CAMERAS[:1] + ASPECT_CAMERAS[2:3]
+    ],
+    *[
+        _cat_probe(kind, cats, 2, f"{tag}-{name}", dict(view, **override))
+        for kind in ("line3D", "area3D")
+        for cats in (3, 8)
+        for tag, override in (
+            ("d500", {"depthPercent": 500}),
+            ("h50", {"hPercent": 50}),
+        )
+        for name, view in ASPECT_CAMERAS[:1] + ASPECT_CAMERAS[2:3]
+    ],
+    *[
+        _cat_probe(kind, 5, 2, f"gd{gap}-{name}", view, gapDepth=gap)
+        for kind in ("line3D", "area3D")
+        for gap in (0, 500)
+        for name, view in ASPECT_CAMERAS[:1] + ASPECT_CAMERAS[2:3]
+    ],
+]
+
 DECKS = {
     "view3d-mesh": MESH_PROBES,
+    "view3d-cat": CAT_PROBES,
+    "view3d-count": COUNT_PROBES,
+    "view3d-band": BAND_PROBES,
     "view3d-meter": METER_PROBES,
     "view3d-view": VIEW_PROBES,
     "view3d-type": TYPE_PROBES,
@@ -634,7 +805,7 @@ def series_xml(
     )
 
 
-def axes_xml(kind: str) -> str:
+def axes_xml(kind: str, cross_between: str | None = None) -> str:
     """The category, value and (for a 3-D group) series axes this chart needs.
 
     The value axis carries gridlines and ten-point labels exactly as every earlier axis
@@ -654,7 +825,7 @@ def axes_xml(kind: str) -> str:
         if "3D" in kind
         else ""
     )
-    cross_between = "midCat" if kind.startswith("area") else "between"
+    cross_between = cross_between or ("midCat" if kind.startswith("area") else "between")
     return (
         "<c:catAx><c:axId val='100002'/>"
         "<c:scaling><c:orientation val='minMax'/></c:scaling>"
@@ -735,12 +906,23 @@ def group_xml(
         )
     if kind == "area3Dstack":
         # Gallery slide 16 is stacked and two-series, which is the one shape the single
-        # series above cannot rule out on its own.  Two is what *stacked* means here, so
-        # the count is fixed rather than read from the probe -- but the fills and the gap
-        # are the probe's, so a colour reading of this kind has a denominator.
+        # series above cannot rule out on its own, so **two** is the floor here: a probe
+        # that states no count still gets the pair.  The fills and the gap are the
+        # probe's, so a colour reading of this kind has a denominator.
+        count = max(series, 2)
+        shape = scales or (
+            (0.6, 0.4) if count == 2 else tuple(0.6 - 0.12 * i for i in range(count))
+        )
         stacked = "".join(
-            series_xml(high, index, scale, colours[index] if colours else None, categories)
-            for index, scale in enumerate((0.6, 0.4))
+            series_xml(
+                high,
+                index,
+                shape[index] if index < len(shape) else 0.2,
+                colours[index] if colours else None,
+                categories,
+                factors,
+            )
+            for index in range(count)
         )
         return (
             "<c:area3DChart><c:grouping val='stacked'/><c:varyColors val='0'/>"
@@ -786,7 +968,7 @@ def chart_part(probe: dict) -> bytes:
             probe.get("barDir", "col"),
             probe.get("grouping", "clustered"),
         )
-        + axes_xml(kind)
+        + axes_xml(kind, probe.get("crossBetween"))
         + "</c:plotArea>"
         "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
         "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr>"
