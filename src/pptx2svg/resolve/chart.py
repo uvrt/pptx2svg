@@ -853,12 +853,12 @@ AXIS_EDGE_RESERVE_PT = 2 * EDGE_INSET_PT
 #: at a fifth of its nominal length and no ratio of the scene's own proportions produces
 #: that fifth.
 #:
-#: Measured on 107 readings of ``view3d-view``, ``view3d-meter`` and ``view3d-type``:
-#: seven frames, seven depths from 20% to 2000%, nine pitches from -45 to 90 degrees,
-#: seven yaws and five stated heights.  Every one of them is the value axis' drawn length
-#: read from its own tick labels' centres, which PowerPoint leaves vector at 300 dpi
-#: beside the raster it draws the scene as.  See ROADMAP.md 3.4.
-VIEW_3D_DEPTH_PROJECTION = 0.2040
+#: Measured on 131 readings of the four ``view3d-*`` probe decks: seven frames, seven
+#: depths from 20% to 2000%, nine pitches from -45 to 90 degrees, seven yaws, five stated
+#: heights, five series counts and five gap depths.  Every one of them is the value axis'
+#: drawn length read from its own tick labels' centres, which PowerPoint leaves vector at
+#: 300 dpi beside the raster it draws the scene as.  See ROADMAP.md 3.4.
+VIEW_3D_DEPTH_PROJECTION = 0.2030
 
 #: What the scene keeps clear of its region beyond the depth, per unit of its own width.
 #:
@@ -868,7 +868,31 @@ VIEW_3D_DEPTH_PROJECTION = 0.2040
 #: both the right size to be it; nothing measured here separates them, and nothing here
 #: needs to.  Split evenly above and below the face, which fits the drawn placement to
 #: 0.98 pt rms where putting it all on one side costs 1.28.
-VIEW_3D_SCENE_MARGIN = 0.0077
+VIEW_3D_SCENE_MARGIN = 0.0079
+
+#: What the scene's depth is divided into, beyond its series: the drawn depth is
+#: ``depthPercent * (1 + gapDepth) / (series + this)`` of the scene's width.
+#:
+#: **The depth shrinks as series are added**, which is the opposite of what a row-per-
+#: series picture suggests and is measured over two frames: one to five series on a 195 pt
+#: frame reserved 0.0600, 0.0459, 0.0373, 0.0321 and 0.0283 of the scene's width, and the
+#: same five on a 120 pt frame agree.  The scene's *aspect* does not move with them -- the
+#: drawn face's height over its width stayed 0.2440 +- 0.0003 across all five -- so it is
+#: the depth that changes and not the box.
+#:
+#: ``c:gapDepth`` enters as ``1 + gapDepth`` and nowhere else.  Swept at 0, 50, 150, 300
+#: and 500% against one, two and four series, the depth is that factor times a shape in the
+#: series count alone, and the shape is the same at every gap: 0.4116, 0.6130, 1.0, 1.587
+#: and 2.375 of the default's depth, against ``(1 + gap) / 2.5``'s 0.4, 0.6, 1.0, 1.6, 2.4.
+#:
+#: Fitted free the divisor's constant comes out 1.512 over 131 readings, and 1.5 is both
+#: the round number in it and ``c:gapDepth``'s own default.  Whether that is the same 1.5
+#: is **not** settled: the gap sweep says the constant does not move with ``gapDepth`` at
+#: all, so if it is the default it is baked in rather than read.
+VIEW_3D_DEPTH_ROW_GAP = 1.5
+
+#: ``c:gapDepth``'s default, in percent.  ECMA-376 and the measurement agree.
+DEFAULT_GAP_DEPTH = 150.0
 
 #: What a **radial** axis -- a radar's, running from the centre to the rim -- can hold
 #: beyond its whole line boxes, in ems of one.  Its count is
@@ -1907,7 +1931,13 @@ def three_d_camera(
     return view if kind == "bar3DChart" else None
 
 
-def three_d_plot_rect(region: _Rect, view: "c.SourceChartView3D") -> _Rect:
+def three_d_plot_rect(
+    region: _Rect,
+    view: "c.SourceChartView3D",
+    *,
+    series: int = 1,
+    gap_depth: float | None = None,
+) -> _Rect:
     """Where a 3-D chart's **front face** lands inside the flat plot rectangle.
 
     A 3-D chart draws a box, and the plot rectangle the rest of this module means -- the
@@ -1920,7 +1950,10 @@ def three_d_plot_rect(region: _Rect, view: "c.SourceChartView3D") -> _Rect:
 
     The model, measured on the three ``view3d-*`` probe decks (ROADMAP.md 3.4):
 
-    * The scene is a box ``w`` wide, ``w * hPercent`` high and ``w * depthPercent`` deep.
+    * The scene is a box ``w`` wide, ``w * hPercent`` high, and as deep as
+      ``w * depthPercent * (1 + gapDepth) / (series + 1.5)`` -- see
+      :data:`VIEW_3D_DEPTH_ROW_GAP`, which is the one part of this that is a property of
+      the *plot* rather than of the camera.
     * **``c:hPercent`` absent is the region's own aspect.**  ``region.height /
       region.width`` reproduces the seven auto readings to 0.6%.  That is what closes the
       "0.2438 measured against 0.2456" this section recorded as unexplained: the estimate
@@ -1941,7 +1974,9 @@ def three_d_plot_rect(region: _Rect, view: "c.SourceChartView3D") -> _Rect:
     """
     rot_x = math.radians(view.rot_x or 0.0)
     rot_y = math.radians(view.rot_y or 0.0)
+    gap = (gap_depth if gap_depth is not None else DEFAULT_GAP_DEPTH) / 100.0
     depth = (view.depth_percent if view.depth_percent is not None else 100.0) / 100.0
+    depth *= (1.0 + max(gap, 0.0)) / (max(series, 1) + VIEW_3D_DEPTH_ROW_GAP)
     aspect = (
         view.h_percent / 100.0
         if view.h_percent is not None
@@ -4395,7 +4430,16 @@ class ChartBuilder:
         if view is None or scale is None:
             return 0.0
         region = self._three_d_region(scale)
-        return max(0.0, region.height - three_d_plot_rect(region, view).height)
+        return max(0.0, region.height - self._three_d_face(region, view).height)
+
+    def _three_d_face(self, region: _Rect, view: "c.SourceChartView3D") -> _Rect:
+        """:func:`three_d_plot_rect`, told how the depth is divided between the series."""
+        return three_d_plot_rect(
+            region,
+            view,
+            series=len(self.plot.series) or 1,
+            gap_depth=self.plot.gap_depth,
+        )
 
     def _axis_band_height(self, scale: "tuple[float, float, float] | None" = None) -> float:
         """The frame height a value axis up the side has to divide.
@@ -4623,7 +4667,7 @@ class ChartBuilder:
         # rectangle displaced and shrunk to make room for the depth.  `flat` asks for the
         # region itself, which is what the camera is fitted into.
         view = None if flat else self._three_d_view
-        return region if view is None else three_d_plot_rect(region, view)
+        return region if view is None else self._three_d_face(region, view)
 
     def _labels_rotate(
         self, font: ChartFont, categories: list[str], plot_width: float

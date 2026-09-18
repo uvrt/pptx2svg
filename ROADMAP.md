@@ -2896,7 +2896,7 @@ a half-fitted camera, and it is a different argument from the one against drawin
 
 | slide | group | SSIM | hist | what PowerPoint drew instead |
 | --- | --- | --- | --- | --- |
-| 13 | `bar3DChart` | 0.5828 → **0.5856** | 0.9760 → 0.9209 | extruded boxes on a floor, the plot pushed right and up by the depth — the plot rectangle is now PowerPoint's, the boxes are not |
+| 13 | `bar3DChart` | 0.5828 → **0.5882** | 0.9760 → 0.9404 | extruded boxes on a floor, the plot pushed right and up by the depth — the plot rectangle is now PowerPoint's, the boxes are not |
 | 14 | `line3DChart` | **0.0723** | 0.9108 | ribbons in depth — the least recognisable of the four |
 | 15 | `pie3DChart` | 0.7612 | **0.1336** | an ellipse half the height of our circle, with a shaded extruded side; the shading is what takes the histogram to 0.13 |
 | 16 | `area3DChart` | 0.7340 → **0.7648** | 0.9931 → 0.9837 | a 3-D box, and a value axis of 0–50 by 5 where ours drew 0–60 by 10 |
@@ -2960,12 +2960,13 @@ does to the *range* was the part that was wrong.
 
 #### The camera, shipped — `three_d_plot_rect`
 
-The reservation is a camera, and it turned out to be **two constants and a `min`**.
+The reservation is a camera, and it turned out to be **three constants and a `min`**.
 `resolve/chart.three_d_plot_rect` takes the region and the view and returns the front
-face; `three_d_camera` is the gate that decides whether a chart gets one at all. A third
-probe deck, `view3d-type` (39 slides, added to `tools/make_view3d_probe.py`), sweeps the
-same view per group element and adds the series count, which is what settled where the
-gate has to sit.
+face; `three_d_camera` is the gate that decides whether a chart gets one at all. Two more
+probe decks were written for it, both in `tools/make_view3d_probe.py`: `view3d-type` (39
+slides) sweeps the same view per group element, which settled where the gate has to sit,
+and `view3d-series` (32) sweeps the series count and `c:gapDepth`, which found the third
+constant.
 
 The model, in full:
 
@@ -2979,14 +2980,28 @@ The model, in full:
   seven auto readings come back to 0.6%. The three stated heights 50, 100 and 200 give
   the same reservation to within 1% of it, which is what says `hPercent` is an input to
   the scene's shape and not to the reservation.
-* **The depth projects to one constant.** `VIEW_3D_DEPTH_PROJECTION = 0.2040` of the
-  scene's width, per unit of `depthPercent`, per unit of the sine of the rotation — the
-  horizontal component reading `rotY` and the vertical one reading `rotX`, neither mixing
-  into the other. Fitted separately the two come out 0.2041 and 0.2083, and holding them
-  equal costs nothing (0.269 pt rms against 0.276). A **genuine yaw-then-pitch rotation**,
-  whose components do mix, misses the same readings by 3.0 pt rms, which is the direct
-  evidence that `rAngAx="1"` is an oblique projection and not a camera matrix.
-* **A fixed margin, `VIEW_3D_SCENE_MARGIN = 0.0077` of the width**, survives at zero depth
+* **The depth projects to one constant.** `VIEW_3D_DEPTH_PROJECTION = 0.2030` of the
+  scene's width, per unit of depth, per unit of the sine of the rotation — the horizontal
+  component reading `rotY` and the vertical one reading `rotX`, neither mixing into the
+  other. Fitted separately the two come out within 2% of each other, and holding them
+  equal costs nothing. A **genuine yaw-then-pitch rotation**, whose components do mix,
+  misses the same readings by 3.0 pt rms, which is the direct evidence that `rAngAx="1"`
+  is an oblique projection and not a camera matrix.
+* **The depth is `depthPercent · (1 + gapDepth) / (series + 1.5)` of the width**, and the
+  series count is the surprise: **adding series makes the scene shallower**. One to five
+  series on a 195 pt frame reserved 0.0600, 0.0459, 0.0373, 0.0321 and 0.0283 of the
+  scene's width, and the same five on a 120 pt frame agree. It is genuinely the depth and
+  not the box: the drawn face's height over its width held 0.2440 ± 0.0003 across all
+  five, read off the category labels rather than inferred. `c:gapDepth` enters as
+  `1 + gapDepth` and nowhere else — swept at 0, 50, 150, 300 and 500% against one, two and
+  four series it scales the depth by 0.4116, 0.6130, 1.0, 1.587 and 2.375 against
+  `(1 + gap) / 2.5`'s 0.4, 0.6, 1.0, 1.6, 2.4, and the shape in the series count is the
+  same at every one of them. The divisor's constant fits free at **1.512** over 131
+  readings; 1.5 is both the round number in it and `c:gapDepth`'s own default, and which
+  of those it is cannot be told here, because the gap sweep says the constant does not
+  move with `gapDepth` at all. Without this term the same fit is 5.09 pt rms and 25.9 pt
+  at worst; with it, 0.24 and 0.99.
+* **A fixed margin, `VIEW_3D_SCENE_MARGIN = 0.0079` of the width**, survives at zero depth
   *and* zero rotation: `<c:view3D/>` with nothing in it draws a scene 0.8% of its width
   shorter than its region. This is the "offset at zero depth" the old reading recorded as
   unidentified. It is now identified as a quantity and still not as a *thing* — a floor
@@ -3002,16 +3017,17 @@ The model, in full:
   the bottom, so the vertical sign turns at 180 and not at `cos(rotY)`'s 90. Sideways it
   is the sine, so a yaw past a half turn puts the depth left and the face right of it.
 
-**Residual: 0.26 pt rms and 0.86 pt worst**, over 107 readings — seven frames, seven
-depths from 20% to 2000%, nine pitches from −45 to 90 degrees, seven yaws and five stated
-heights. The face's drawn *position* follows to 0.98 pt rms. The probe grid is 0.24 pt,
-being the 300 dpi the scene beside it is rasterised at.
+**Residual: 0.24 pt rms and 0.99 pt worst**, over 131 readings — seven frames, seven
+depths from 20% to 2000%, nine pitches from −45 to 90 degrees, seven yaws, five stated
+heights, five series counts and five gap depths. The face's drawn *position* follows to
+about a point. The probe grid is 0.24 pt, being the 300 dpi the scene beside it is
+rasterised at.
 
 Read back as the thing that matters — does our axis match PowerPoint's? —
-`tools/read_view3d_probe.py --check` over the three decks goes from **77 of 152 slides to
-117**, and of the 109 that are a `bar3DChart` with right-angle axes, **108 match exactly**.
-The one miss is `v-h20`, `hPercent=20` on a 195 pt frame, where the model puts the face
-1.0 pt tall of PowerPoint's 120.00 and that point crosses an interval boundary.
+`tools/read_view3d_probe.py --check` over the four decks goes from **77 of 152 slides to
+142 of 184**, and of the 133 that are a `bar3DChart` with right-angle axes, **132 match
+exactly**. The one miss is `v-h20`, `hPercent=20` on a 195 pt frame, where the model puts
+the face a point tall of PowerPoint's 120.00 and that point crosses an interval boundary.
 
 #### Where the camera is deliberately *not* applied, and why
 
@@ -3025,10 +3041,11 @@ The one miss is `v-h20`, `hPercent=20` on a 195 pt frame, where the model puts t
   region's for a one-series `line3DChart` and `0.4 ×` for a one-series `area3DChart`
   against the bar's `1.0 ×`. What is *not* settled is how that factor moves with the
   series count: two series read 0.6 and 0.8 on the two elements and three series read 0.8,
-  and a `line3DChart`'s depth grows by one unit per series (0.0562, 0.1082, 0.1612 of its
-  width for one, two and three) where a `bar3DChart`'s **shrinks** (1.009, 0.730, 0.573 of
-  its nominal depth, which is `2.5 / (1.5 + n)` to 3% and `1/√n` to 3%, and 39 slides
-  cannot separate those two).
+  and a `line3DChart`'s depth *grows* by one unit per series (0.0562, 0.1082, 0.1612 of
+  its width for one, two and three) where a `bar3DChart`'s shrinks. The bar's law is now
+  measured — `(1 + gapDepth) / (series + 1.5)` — and the line's and the area's are not;
+  the same sweep on those two elements reads back through a scene whose aspect is not the
+  region's, which is the part that is missing.
 * **`rAngAx="0"`**, which draws a perspective scene: the face is no longer a rectangle, the
   bottom inset runs 64 to 93 pt where a right-angled scene's is 26, and five readings are
   not a projection.
@@ -3046,9 +3063,14 @@ solved still do.
 
 * **What 0.2040 *is*.** The depth is drawn at a fifth of its nominal length and no ratio of
   the scene's own proportions produces that fifth.
-* **The `line3DChart` / `area3DChart` aspect as a function of the series count**, above.
-  A `view3d-type` deck sweeping one to five series on each element at two frames would
-  settle it; it is the same shape of session as this one and about a third the size.
+* **The `line3DChart` / `area3DChart` aspect**, above — a constant `0.6` and `0.4` of the
+  region's at one series, and not settled as the series are added. `view3d-series` sweeps
+  one to four on both elements and the readings are in the deck; what is missing is the
+  scene *shape* those readings have to be divided by, which a second frame would give.
+* **Whether the `1.5` in the depth's divisor is `c:gapDepth`'s default or a constant of
+  its own.** The gap sweep says the divisor does not move with `gapDepth`, so it is baked
+  in either way, but the coincidence is worth one probe at a non-default gap and a high
+  series count.
 * **The perspective branch** (`rAngAx="0"`, and therefore the absent element).
 * **`hPercent=500`** reads back as an effective 4.6, not 5 — one reading, and the only
   place `hPercent` is not exactly the scene's aspect.
@@ -3070,12 +3092,19 @@ which of two defects it is**: a chart whose camera was applied says so, because 
 gridlines and marks are where PowerPoint puts them and only the scene is absent, where a
 chart without one is drawn in a rectangle PowerPoint never used.
 
-On the gallery, slide 13's SSIM goes 0.5828 → 0.5856 and its pixels over 10% 15.12% →
-13.26% while its **histogram falls 0.9760 → 0.9209** — the harness's own documented mask
-effect plus a real one: our flat bars now sit in a rectangle two thirds the height, so
-there is less coloured ink than PowerPoint's extruded prisms have. Rendered side by side
-the axis, the gridlines and the category positions line up where before they did not.
-That colour is Stage 2's to win back.
+On the gallery, slide 13 improves on three columns of four: SSIM 0.5828 → 0.5882, mean
+absolute error 16.91 → 13.48, pixels over 10% 15.12% → 10.26%, and the **histogram falls
+0.9760 → 0.9404** — the harness's own documented mask effect plus a real one: our flat
+bars sit in a shorter rectangle than they did, so there is less coloured ink than
+PowerPoint's extruded prisms have. Rendered side by side the axis, the gridlines and the
+category positions line up where before they did not. That colour is Stage 2's to win
+back.
+
+**One residual worth naming, because it is not the camera's.** Slide 13's drawn face comes
+out 232.7 pt tall where PowerPoint's is 224.9. The probe decks have no title and no legend,
+so their region is the frame less two insets and is known exactly; the gallery's is the
+frame less a title band and a legend band as well, and three points of error in either of
+those moves the face by about eight. The camera is fed the region it is given.
 
 ### 3.5 The horizontal legend's inter-entry gap — **done**
 

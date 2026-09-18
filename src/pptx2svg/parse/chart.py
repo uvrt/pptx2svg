@@ -293,6 +293,11 @@ class SourceChartPlot:
     bar_direction: str | None = None
     #: ``c:gapWidth`` in percent of one bar's width.
     gap_width: float | None = None
+    #: ``c:gapDepth`` in percent of one series row's depth.  A 3-D group only: it is what
+    #: divides the scene's depth between its series, and it scales the plot rectangle's
+    #: own depth reservation.  See
+    #: :func:`~pptx2svg.resolve.chart.three_d_plot_rect`.
+    gap_depth: float | None = None
     #: ``c:overlap`` in percent; negative separates clustered bars.
     overlap: float | None = None
     #: ``c:holeSize`` in percent, for doughnuts.
@@ -473,6 +478,7 @@ def _plot(node: Element) -> SourceChartPlot:
         vary_colors=_optional_flag(child(node, "varyColors")),
         bar_direction=attr(child(node, "barDir"), "val"),
         gap_width=num_attr(child(node, "gapWidth"), "val"),
+        gap_depth=num_attr(child(node, "gapDepth"), "val"),
         overlap=num_attr(child(node, "overlap"), "val"),
         hole_size=num_attr(child(node, "holeSize"), "val"),
         first_slice_angle=num_attr(child(node, "firstSliceAng"), "val"),

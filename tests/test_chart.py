@@ -7470,6 +7470,61 @@ def test_an_empty_view_3d_still_reserves_the_margin():
     assert face.height < height
 
 
+#: ``view3d-series``' own readings on the same 684 by 195 pt frame, one to five series.
+#: The two-character region is 647.97 pt wide because those two probes drew a ``10``.
+VIEW_3D_SERIES_READINGS = [
+    (1, 150, 652.54, 127.68),
+    (2, 150, 652.54, 133.92),
+    (3, 150, 652.54, 138.00),
+    (4, 150, 652.54, 140.64),
+    (5, 150, 652.54, 142.56),
+    (1, 0, 652.54, 142.08),
+    (1, 50, 652.54, 136.80),
+    (1, 300, 647.97, 115.92),
+    (1, 500, 647.97, 103.20),
+]
+
+
+@pytest.mark.parametrize(
+    "series,gap,region_width,drawn",
+    VIEW_3D_SERIES_READINGS,
+    ids=[f"n{n}-gap{g}" for n, g, _, _ in VIEW_3D_SERIES_READINGS],
+)
+def test_the_depth_is_divided_between_the_series(series, gap, region_width, drawn):
+    """``c:gapDepth`` and the series count both scale the depth, and only the depth.
+
+    Adding series makes the scene **shallower**, which is the opposite of the row-per-
+    series picture and is measured on two frames.  The scene's shape does not move with
+    them: the drawn face's height over its width held 0.2440 +- 0.0003 across all five.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import _Rect, three_d_plot_rect
+
+    region = _Rect(0.0, 0.0, region_width, VIEW_3D_REGION[1])
+    face = three_d_plot_rect(
+        region,
+        SourceChartView3D(rot_x=15, rot_y=20, depth_percent=100, right_angle_axes=True),
+        series=series,
+        gap_depth=gap,
+    )
+    assert face.height == pytest.approx(drawn, abs=1.0)
+
+
+def test_gap_depth_is_read_off_the_group():
+    """``c:gapDepth`` was not parsed before the camera needed it.
+
+    Absent it is ``None`` here and 150% where it is used, which is both ECMA-376's default
+    and the one the measurement agrees with.
+    """
+    assert chart(three_d_chart_xml()).plots[0].gap_depth is None
+    with_gap = chart(
+        three_d_chart_xml().replace(
+            "<c:axId val='100002'/>", "<c:gapDepth val='40'/><c:axId val='100002'/>", 1
+        )
+    )
+    assert with_gap.plots[0].gap_depth == 40.0
+
+
 def test_the_face_sits_at_the_corner_the_depth_leads_away_from():
     """Which side the room is taken from, measured on the yaw and pitch sweeps.
 
