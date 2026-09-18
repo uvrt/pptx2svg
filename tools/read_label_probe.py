@@ -231,7 +231,7 @@ def predict(item: dict, read: dict) -> tuple[float, str, str]:
     band = (
         chartmod.FRAME_PADDING_PT
         + (font.box.line_height + widest) * SIN_45
-        + chartmod.CATEGORY_LABEL_GAP_EM * font.box.size
+        + chartmod.CATEGORY_LABEL_GAP_ASCENT * font.box.ascent
     )
     return band, max(drawn, key=len), f"allowance={allowance:.2f}"
 

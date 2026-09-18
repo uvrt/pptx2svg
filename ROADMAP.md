@@ -2956,10 +2956,12 @@ out of each cell's drawn unit:
 | **`side_axis_intervals(drawn plot height + 36)`** | **0** |
 | `floor(drawn plot height / pitch) − 1` | 1 |
 
-and **36 pt is the flat chart's own furniture** — 10.01 pt of top inset plus a 25.87 pt
-category-label band, measured on the same deck's controls. So the count really is read off
-the frame less a depth reservation, exactly as this section claimed; what the reservation
-does to the *range* was the part that was wrong.
+and **36 pt is the flat chart's own furniture** — measured on the same deck's controls as
+10.01 pt of top inset plus a 25.87 pt category-label band, and since read off the
+gridlines rather than the tick labels' centres as 11.103 + 24.965. Both split 36.0 the
+same way to a tenth, which is why the reservation is unmoved by that correction. So the
+count really is read off the frame less a depth reservation, exactly as this section
+claimed; what the reservation does to the *range* was the part that was wrong.
 
 #### The camera, shipped — `three_d_plot_rect`
 
@@ -2977,6 +2979,8 @@ The model, in full:
   rectangle the same chart drawn flat would get. The `flat*` controls on `view3d-meter`
   give that rectangle directly — a 195 pt frame's is inset 10.01 pt at the top, 25.87 at
   the bottom, 10.587 at the right and 25.441 at the left for a two-character tick label.
+  Those four are tick-label centres and each carries about a point of PDF text-rect
+  convention; `axis-inset`'s gridlines put the same rectangle at 11.103 and 24.965.
 * **`c:hPercent` absent is the region's own aspect**, and **that closes the 0.7%**. The
   measured 0.2438 and the "plot area's own aspect" 0.2456 differed because the earlier
   estimate of the region was the part that was wrong: against the region above, the
@@ -3169,11 +3173,42 @@ thing that was looked at and did not settle.
   gradient**: see *What the other three still get wrong* below.
 * **The category-label band is not constant** across the view sweep: 25.63 to 30.91 pt
   where a flat chart's is 25.87.
-* **Our own flat plot rectangle is 3.7 pt low on this deck.** PowerPoint's is inset
-  10.01 pt at the top and 25.87 at the bottom; ours is 13.78 and 22.18, which is the same
-  *height* to 0.08 pt and the wrong split. It predates this work and is why the drawn face
-  sits about three points below PowerPoint's on the probe decks even where its size is
-  right. `_top_inset`'s `max(11.0, 5.0 + lineHeight/2)` is the suspect.
+* **Our own flat plot rectangle was never 3.7 pt low — the instrument was.** This entry
+  used to read that PowerPoint insets the plot 10.01 pt at the top and 25.87 at the
+  bottom where we inset 13.78 and 22.18: the same height, the wrong split, with
+  `_top_inset` the suspect. Both halves of that difference are **reading conventions**,
+  and neither is layout. `read_view3d_probe.ours` took our tick label's *box* centre,
+  and our label box is 1.5 line heights tall with its baseline near the top, which puts
+  it 2.67 pt below the tick at 10 pt; PowerPoint's side is a PDF text rect, which is the
+  digits' **ink** and sits 1.09 pt above the tick. 2.67 + 1.09 is the 3.77 pt "error" at
+  the top and the 3.69 at the bottom, to a hundredth.
+
+  **The gridlines settle it, because they are the rectangle.** `axis-inset` — 36 charts,
+  four faces, eight label sizes, read with `tools/read_axis_probe.py --insets` — puts the
+  plot's top edge on the topmost major gridline and its bottom on the category axis line,
+  and our top inset lands within **0.002 pt** of PowerPoint's on all 24 face/size cells.
+  `max(11.0, 5.0 + lineHeight/2)` is right, its floor is measured (six of the cells draw
+  their gridline at exactly 11.000), and it is the line box and not the pitch with Arial
+  in the sweep at eight sizes to say so.
+
+  What the same deck *did* find is one face-shaped error in the other half: the level
+  category band is `6.5 + (5/3) × ascent + descent`, not `6.5 + lineBox + 0.615 em`. Four
+  faces solve the coefficient on their own ascent to 1.6665, 1.6668, 1.6667 and 1.6667,
+  and the drawn baselines say it independently at 1.672 ± 0.04 of the ascent where against
+  the em the same readings run 1.38 to 1.64. Aptos — the only face the earlier four
+  readings used — has 2/3 of its ascent within 0.011 em of 0.615, which is why one face
+  could not see it. Shipped as `CATEGORY_LABEL_GAP_ASCENT`; the wrap ladder's twenty
+  readings in five faces went from a 0.11–0.60 pt per-face bias to inside 0.01 pt, and no
+  tick unit, truncation or wrap count moves anywhere in the corpus.
+
+  Two things the deck leaves open. **A short frame breaks the band**: 24 pt labels on a
+  90 pt frame take 46.88 pt in Aptos and 47.58 in Arial where every taller frame takes
+  50.82 and 47.79, and nothing here says what that floor is. And the **turned** band keeps
+  its em term (`CATEGORY_LABEL_GAP_EM`), because `ROTATED_LABEL_HEADROOM_PT` was solved
+  with the anchor inside it and the corpus' one rotated chart sits 0.4 pt from a
+  truncation boundary — see that constant's docstring, and the Yu Gothic metrics it names,
+  which are Noto Sans JP's 1.16/0.288 against the real `YuGothic-Regular`'s
+  0.8799/0.2222/0.5 pulled straight out of `real-financial-report.pdf`.
 
 #### The scene — measured on the gallery's own raster, and now built
 
@@ -3430,8 +3465,11 @@ the histogram *down* for the harness's documented mask reason plus a real one �
 in a shorter rectangle have less coloured ink than extruded prisms — and the prisms are
 what won it back.) Rendered side by side the two pictures are hard to tell apart: the
 remaining difference is that PowerPoint draws tick marks on both axes and that the whole
-scene sits about three points left of PowerPoint's, which is the plot-rectangle inset
-defect recorded at the end of this section and not the mesh.
+scene sits about three points left of PowerPoint's. That was blamed on the plot-rectangle
+inset defect recorded at the end of this section; there is no such defect — the flat
+rectangle's *left* inset is within 0.04 pt of PowerPoint's at every size of Aptos and
+Arial on `axis-inset` — so slide 13's three points are still unexplained, and they are
+horizontal where that suspicion was vertical.
 
 **Slide 14 does the same thing when its camera arrives**, and it is the only slide the
 per-type measurement moves: SSIM 0.0689 → 0.1207, mean absolute error 8.43 → 7.77, pixels
@@ -3714,6 +3752,107 @@ is a visible fraction of their coloured pixels.
   left side bearing, and which of them PowerPoint is actually positioning on cannot be told
   from a swatch legend alone. It was left alone because that constant also feeds side
   legends, which were measured separately.
+
+---
+
+### 3.6 The plot rectangle's top and bottom, separately — **measured; the top was right**
+
+3.4 recorded that "our own flat plot rectangle is 3.7 pt low", top inset too big and
+bottom band too small by the same amount, with `_top_inset` named as the suspect. **It was
+not. Nothing was 3.7 pt low.** The 3.7 is two reading conventions, and the whole of it is
+in the instrument:
+
+* our side was `read_view3d_probe.ours`, which took our tick label's **element box**
+  centre — a box 1.5 line heights tall with the baseline near its top, so its centre is
+  2.67 pt below the tick at 10 pt Aptos;
+* PowerPoint's side is a PDF text rect, which is the digits' **ink** and sits 1.09 pt
+  *above* the tick.
+
+Those two sum to 3.76 at the top and, with the sign flipped, 3.69 at the bottom, which is
+what was recorded. Both readers are fixed: `ours` now converts its box to the ink centre,
+and the view3d flat controls come back at −1.094 / +0.903 — PowerPoint's own text-rect
+convention and nothing else. With that reader the 3-D probes' rectangles agree within
+0.2–0.4 pt as well, so the camera never had a three-point residual under it either.
+
+#### The gridlines are the rectangle
+
+`axis-inset` (the sixteenth table in `tools/make_axis_probe.py`, 36 charts) sweeps the
+label size and the label face and is read with `tools/read_axis_probe.py --insets`, which
+takes the plot's top edge from the **topmost major gridline** and its bottom from the
+**category axis line**. Both are drawn strokes, neither is a glyph, and no convention gets
+between them and the rectangle. Aptos and Arial are what make it a sweep — Calibri is
+metric-compatible with Aptos to the unit — with Times New Roman and Courier New for a
+third and fourth set of `hhea` numbers.
+
+**The top inset is right at every one of the 24 face/size cells, to 0.002 pt.**
+`max(11.0, 5.0 + lineBox/2)`, the floor included: it binds for every face at 6 and 8 pt
+and for all but Aptos at 10, and each of those draws its top gridline at exactly 11.000 pt
+below the frame. It is the line **box** and not the pitch, and Arial is in the sweep at
+eight sizes to say so — half its line gap runs 0.10 to 0.46 pt, all of it outside the
+residual.
+
+**The bottom band had one face-shaped error.** It is
+`FRAME_PADDING_PT + (5/3) × ascent + descent`, not `FRAME_PADDING_PT + lineBox + 0.615 em`:
+
+| face | ascent/em | band/size | less descent | ÷ ascent |
+| --- | --- | --- | --- | --- |
+| Aptos | 0.9390 | 1.8466 | 1.5649 | 1.6665 |
+| Arial | 0.9053 | 1.7208 | 1.5089 | 1.6668 |
+| Times New Roman | 0.8911 | 1.7015 | 1.4852 | 1.6667 |
+| Courier New | 0.8325 | 1.6878 | 1.3875 | 1.6667 |
+
+Differencing the padding out leaves 6.500, 6.496, 6.499 and 6.497, which is
+`FRAME_PADDING_PT` exactly. The **drawn baselines** say the same thing independently and
+say which term the correction belongs to: a category label has no descender, so a PDF text
+rect's floor is its baseline, and the drop below the axis line is 1.672 ± 0.04 of the
+ascent across the same 24 charts where against the em it runs 1.38 to 1.64 and is no rule
+at all. Aptos' two thirds of an ascent is 0.626 em, within 0.011 of the 0.615 it replaces,
+which is exactly why four readings in one face could not see this.
+
+Confirmed on a deck it was not fitted on: the wrap ladder's **twenty readings in five
+faces** (Calibri among them) carried a per-face bias of 0.11 pt on Arial through 0.60 on
+Courier New, and every one of them now lands within **0.01 pt**. The six rotated readings
+in `ROTATED_LABEL_HEADROOM_PT`'s table prefer the ascent too — worst residual 0.16 pt
+against 0.28 — and the turned band is nonetheless left on the em; see below.
+
+#### What moved, and what did not
+
+The plot rectangle's height changes by 0.011 em of the label size — 0.11 pt at 10 pt
+Aptos, the other way for the other faces — so every chart in the corpus moves by about a
+tenth of a point and **no tick unit, truncation or wrap count moves at all**: the chart
+text of all ten oracle decks is byte-identical before and after, gallery 13, 14 and 16
+still draw PowerPoint's own tick labels string for string, and `side_axis_intervals` reads
+the frame less its furniture rather than the plot, so the band was never one of its
+inputs. `chart-gallery` 0.7044 → 0.7033, `real-financial-report` 0.9147 → 0.9151,
+`real-college-template` 0.8018 → 0.8017, `authoring-integration` 0.9290 → 0.9309, and the
+three deck-wide histograms that move all move up (0.8041 → 0.8059, 0.8751 → 0.8754,
+0.9984 → 0.9985). The gallery's tenth of a point is slide 11's, whose SSIM is 0.09 on a
+slide of hairlines and whose histogram goes 0.9171 → 0.9481 — the mask trap
+`tools/fidelity.py` documents; rendered side by side the two are indistinguishable. No
+deck without a chart moves by a pixel.
+
+#### Left open
+
+* **A short frame breaks the band.** 24 pt labels on a 90 pt frame take 46.876 pt in Aptos
+  and 47.578 in Arial where the same labels on 120, 195 and 330 pt frames take 50.818 and
+  47.793 — the top inset unmoved, the plot down to 20-odd points of height. Ours is 3.7 pt
+  too deep there and right on every frame that is not that short. Three readings; nothing
+  in the sweep says what the floor is.
+* **The turned band keeps the em term.** `ROTATED_LABEL_HEADROOM_PT` was solved from where
+  PowerPoint cut a label with the anchor inside the solution, so moving the anchor without
+  re-solving the headroom moves every truncation boundary — and the corpus' one rotated
+  chart, `real-financial-report`'s chart3, sits 0.4 pt from such a boundary. That chart
+  cannot arbitrate either: its labels are Yu Gothic, whose real metrics are
+  0.8799 / 0.2222 with a **0.5 em line gap** — pulled out of `real-financial-report.pdf`'s
+  own embedded `YuGothic-Regular` — where this library carries Noto Sans JP's 1.1600 /
+  0.2880 and no gap for that name. Its current 0.95 pt agreement is two errors cancelling.
+  Re-running `tools/make_label_probe.py`'s decks in faces whose ascents differ, and solving
+  the headroom and the anchor together, is what would settle it.
+* **Courier New's value-label column is too wide** — 1.0 pt at 10 pt and 2.4 at 24. That
+  is the *left* inset rather than the bottom band, and `VALUE_LABEL_GAP_EM = 0.645` is the
+  same shape of one-face fit this section corrected on the category side. Aptos, Arial and
+  Times New Roman are within 0.26 pt at every size, so nothing in the corpus is waiting on
+  it; `--insets` reports the left and right insets too, for whoever picks it up.
 
 ---
 

@@ -17,7 +17,7 @@ One chart per slide, the y axis carrying the gridlines and the x axis deleted, s
 export's page objects are unambiguous: the horizontal strokes are the y major gridlines
 and the only text is the y tick labels.
 
-**What the six decks found**, in the order they were built, because each one exists to
+**What the decks found**, in the order they were built, because each one exists to
 answer what the last one raised:
 
 ``axis-decade``
@@ -38,6 +38,12 @@ answer what the last one raised:
 ``axis-bar``
     A real bar chart obeys the same rule, and the corpus' by-500 axis is a *coarsened*
     by-200 one, which is where the shipped decade-and-halve rule came from.
+``axis-inset``
+    Not the axis at all but the **plot rectangle** it is drawn in, read off the gridlines
+    rather than the tick labels' centres: the top inset and the bottom category band,
+    separately, over four faces and eight label sizes.  What it found is in ROADMAP.md 3.6
+    -- the top inset was right to 0.002 pt and the band's gap term is two thirds of the
+    face's *ascent*.  Read it with ``--insets``.
 
 Usage -- the deck's file name picks its probe table::
 
@@ -45,6 +51,7 @@ Usage -- the deck's file name picks its probe table::
     osascript tools/powerpoint_export_pdf.applescript \\
         ~/pptx2svg-oracle/axis-decade.pptx ~/pptx2svg-oracle/axis-decade.pdf
     python3 tools/read_axis_probe.py ~/pptx2svg-oracle/axis-decade.pdf
+    python3 tools/read_axis_probe.py ~/pptx2svg-oracle/axis-inset.pdf --insets
 
 The decks and their exports are throwaway and are **not** committed; ``~/pptx2svg-oracle``
 is the directory PowerPoint is allowed to write to, and it is left holding its sixteen
@@ -695,7 +702,57 @@ CORPUS_RADAR = [
     )
 ]
 
+#: The sixteenth deck, and the only one read with ``--insets``: what the plot rectangle's
+#: **top and bottom insets are separately**, rather than what their sum is.
+#:
+#: Every earlier reading of the rectangle came off the extreme tick labels' centres, which
+#: carries whatever a PDF text rect's centre is against the tick it marks -- so the split
+#: between the top inset and the bottom band was never observed, only their sum.  The
+#: **major gridlines** are the rectangle itself: the topmost one is its top edge and the
+#: category axis line its bottom, both drawn strokes and neither a glyph.
+#:
+#: The sweep is the label's size and its face, because those are the only two things
+#: :meth:`~pptx2svg.resolve.chart.ChartBuilder._top_inset` and
+#: :meth:`~pptx2svg.resolve.chart.ChartBuilder._bottom_label_band` read.  Aptos and Arial
+#: are what separate a rule from a coincidence -- Calibri is metric-compatible with Aptos
+#: to the unit, so a Calibri reading confirms nothing an Aptos one did not -- and Times
+#: New Roman and Courier New add a third and fourth set of ``hhea`` numbers.  ``f`` holds
+#: the frame and sweeps the size; ``h`` holds the size and sweeps the frame, which both
+#: rules must ignore.
+def _inset_probe(size: int, face: str | None, height: int, tag: str) -> dict:
+    return {
+        "key": f"{tag}{'apt' if face is None else face[:3].lower()}{size // 100}-{height}",
+        "low": 0.0,
+        "high": 9.0,
+        "decade": 1.0,
+        "frame": (8686800, height * 12700),
+        "size": size,
+        "kind": "col",
+        **({"face": face} if face else {}),
+    }
+
+
+INSET_PROBES: list[dict] = [
+    *[
+        _inset_probe(size, face, 195, "f")
+        for face in (None, "Arial")
+        for size in (600, 800, 1000, 1200, 1400, 1800, 2400, 2800)
+    ],
+    *[
+        _inset_probe(size, face, 195, "f")
+        for face in ("Times New Roman", "Courier New")
+        for size in (800, 1000, 1400, 2400)
+    ],
+    *[
+        _inset_probe(size, face, height, "h")
+        for face in (None, "Arial")
+        for size in (1000, 2400)
+        for height in (90, 120, 330)
+    ],
+]
+
 DECKS = {
+    "axis-inset": INSET_PROBES,
     "axis-corpusradar": CORPUS_RADAR,
     "axis-ring": RING_PROBES,
     "axis-radar": RADAR_PROBES,

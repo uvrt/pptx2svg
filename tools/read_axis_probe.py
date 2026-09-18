@@ -16,10 +16,18 @@ Two traps, both of which quietly produce a plausible wrong number:
   tick and would write ``1.020`` for a thousand and twenty, so a naive ``float()`` reads
   0.98 as 98 -- which looks exactly like a chart with a hundredfold axis.
 
+``--insets`` reads something else off the same exports: the **plot rectangle**, as four
+insets from the chart frame, ours beside PowerPoint's.  It takes them from the gridlines
+rather than from the tick labels' centres, which is the difference between measuring the
+rectangle and measuring a text rect's idea of where a label's middle is -- see
+:func:`plot_insets` and ROADMAP.md 3.6.  Our side comes from the ``.pptx`` beside the
+export, so the deck has to be there too.
+
 Usage -- the table is chosen by the PDF's file name, and the optional substring filters
 to the probes whose key contains it::
 
     python3 tools/read_axis_probe.py ~/pptx2svg-oracle/axis-decade.pdf [substring]
+    python3 tools/read_axis_probe.py ~/pptx2svg-oracle/axis-inset.pdf --insets [substring]
 """
 
 from __future__ import annotations
@@ -35,7 +43,10 @@ import pypdfium2.raw as raw
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from make_axis_probe import probes_for  # noqa: E402
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent / "packages/pptx2svg-fonts/src")
+)
+from make_axis_probe import FRAME_OFF, probes_for  # noqa: E402
 
 from pptx2svg.resolve import chart as chartmod  # noqa: E402
 
@@ -316,9 +327,141 @@ def read_page(page, probe: dict) -> dict:
     }
 
 
+#: Where the chart frame sits on the page, in points, as ``tools/make_axis_probe.py``
+#: places every probe: one frame per slide at :data:`make_axis_probe.FRAME_OFF`.
+def _frame(probe: dict, page_height: float) -> tuple[float, float, float, float]:
+    """The probe's chart frame as ``(left, top, right, bottom)`` in PDF points."""
+    left = FRAME_OFF[0] / 12700
+    top = page_height - FRAME_OFF[1] / 12700
+    return (left, top, left + probe["frame"][0] / 12700, top - probe["frame"][1] / 12700)
+
+
+def plot_insets(page, probe: dict, page_height: float) -> dict | None:
+    """The drawn plot rectangle as four insets from the frame, read off the gridlines.
+
+    The **gridlines are the rectangle**: the topmost major gridline is the plot's top edge
+    and the category axis line its bottom, and both run the plot's full width.  That is
+    what separates the top inset from the bottom band, which no reading of the tick
+    labels' own centres can do -- a label centre carries whatever a PDF text rect's centre
+    is against the tick it marks, and the same unknown then enters both ends with opposite
+    signs.
+    """
+    strokes = [row for row in horizontal_strokes(page) if row[2] - row[1] > 100.0]
+    if len(strokes) < 2:
+        return None
+    left_edge, top_edge, right_edge, bottom_edge = _frame(probe, page_height)
+    # The widest stroke is a full-width gridline; a tick mark is not.
+    width = max(row[2] - row[1] for row in strokes)
+    lines = [row for row in strokes if row[2] - row[1] > width - 0.5]
+    return {
+        "top": round(top_edge - max(row[0] for row in lines), 3),
+        "bottom": round(min(row[0] for row in lines) - bottom_edge, 3),
+        "left": round(min(row[1] for row in lines) - left_edge, 3),
+        "right": round(right_edge - max(row[2] for row in lines), 3),
+        "count": len(lines),
+    }
+
+
+def our_insets(deck: Path, probes: list[dict]) -> list[dict | None]:
+    """The same four insets, off this library's own model, for the same deck.
+
+    Our gridlines are :class:`~pptx2svg.model.ConnectorElement` lines inside the chart
+    frame, so the rectangle comes back the same way PowerPoint's does rather than through
+    a second reimplementation of the layout.
+    """
+    from pptx2svg import ConvertOptions, convert_pptx_to_model
+    from pptx2svg import model as m
+
+    presentation = convert_pptx_to_model(deck, ConvertOptions())
+    page_height = presentation.slide_size.height / 12700
+    out: list[dict | None] = []
+    for probe, slide in zip(probes, presentation.slides):
+        lines: list[tuple[float, float, float]] = []
+
+        def walk(elements, ox=0.0, oy=0.0):
+            for element in elements:
+                transform = getattr(element, "transform", None)
+                if isinstance(element, m.ChartElement):
+                    walk(
+                        element.children,
+                        ox + transform.offset_x / 12700,
+                        oy + transform.offset_y / 12700,
+                    )
+                elif isinstance(element, m.GroupElement):
+                    walk(element.children, ox, oy)
+                elif isinstance(element, m.ConnectorElement) and transform is not None:
+                    if transform.extent_height < 0.5 and transform.extent_width > 100.0:
+                        x = ox + transform.offset_x / 12700
+                        lines.append(
+                            (
+                                page_height - (oy + transform.offset_y / 12700),
+                                x,
+                                x + transform.extent_width / 12700,
+                            )
+                        )
+
+        walk(slide.elements)
+        if len(lines) < 2:
+            out.append(None)
+            continue
+        left_edge, top_edge, right_edge, bottom_edge = _frame(probe, page_height)
+        width = max(row[2] - row[1] for row in lines)
+        lines = [row for row in lines if row[2] - row[1] > width - 0.5]
+        out.append(
+            {
+                "top": round(top_edge - max(row[0] for row in lines), 3),
+                "bottom": round(min(row[0] for row in lines) - bottom_edge, 3),
+                "left": round(min(row[1] for row in lines) - left_edge, 3),
+                "right": round(right_edge - max(row[2] for row in lines), 3),
+                "count": len(lines),
+            }
+        )
+    return out
+
+
+def insets_main(path: Path, only: str | None) -> int:
+    """``--insets``: the plot rectangle PowerPoint drew, against the one we draw.
+
+    The deck is the ``.pptx`` beside the export, which is where our side comes from.
+    """
+    probes = probes_for(path)
+    doc = pdfium.PdfDocument(path)
+    mine = our_insets(path.with_suffix(".pptx"), probes)
+    print(
+        "# key\tsize\tface\tframe\tpp_top\tpp_bot\tpp_h\tour_top\tour_bot\tour_h\t"
+        "d_top\td_bot\tpp_left\tour_left\td_left\tpp_right\tour_right"
+    )
+    for index, probe in enumerate(probes):
+        if only and only not in probe["key"]:
+            continue
+        page = doc[index]
+        theirs = plot_insets(page.raw, probe, page.get_height())
+        ours = mine[index]
+        if theirs is None or ours is None:
+            print(f"{probe['key']}\t(no gridlines)")
+            continue
+        height = probe["frame"][1] / 12700
+        print(
+            f"{probe['key']}\t{probe.get('size', 1000) / 100:g}\t"
+            f"{probe.get('face', 'Aptos')}\t{height:.0f}\t"
+            f"{theirs['top']:.3f}\t{theirs['bottom']:.3f}\t"
+            f"{height - theirs['top'] - theirs['bottom']:.3f}\t"
+            f"{ours['top']:.3f}\t{ours['bottom']:.3f}\t"
+            f"{height - ours['top'] - ours['bottom']:.3f}\t"
+            f"{ours['top'] - theirs['top']:+.3f}\t{ours['bottom'] - theirs['bottom']:+.3f}\t"
+            f"{theirs['left']:.3f}\t{ours['left']:.3f}\t{ours['left'] - theirs['left']:+.3f}\t"
+            f"{theirs['right']:.3f}\t{ours['right']:.3f}"
+        )
+    return 0
+
+
 def main() -> int:
     path = Path(sys.argv[1]).expanduser()
-    only = sys.argv[2] if len(sys.argv) > 2 else None
+    args = sys.argv[2:]
+    if "--insets" in args:
+        rest = [arg for arg in args if arg != "--insets"]
+        return insets_main(path, rest[0] if rest else None)
+    only = args[0] if args else None
     doc = pdfium.PdfDocument(path)
     rows = []
     for index, probe in enumerate(probes_for(path)):
