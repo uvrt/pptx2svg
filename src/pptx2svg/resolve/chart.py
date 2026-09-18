@@ -80,12 +80,80 @@ LABEL_INK_CENTRE_EM = 0.27
 VALUE_LABEL_GAP_EM = 0.645
 
 #: Slack between the category-label line and the plot area, over and above the label's
-#: own line height.  Fitted to 0.615 em over the same four cases; residual under 0.16 pt.
+#: own line height -- **two thirds of the face's ascent**, not a fraction of the em.
+#:
+#: This was ``0.615 * size`` for as long as every reading behind it was Aptos, whose
+#: ascent is 0.939 em and whose two thirds is 0.626: one face cannot tell an em term from
+#: an ascent term.  ``axis-inset`` does -- 24 charts, four faces, eight sizes, the plot
+#: rectangle read off its own **gridlines** rather than off the tick labels' centres --
+#: and the level band comes back as ``6.5 + (5/3) * ascent + descent`` with no em term in
+#: it at all.  Solving each face for the coefficient on its ascent:
+#:
+#: ====================  =========  =========  ===============  ==========
+#: face                  ascent/em  band/size  less descent/em  / ascent
+#: ====================  =========  =========  ===============  ==========
+#: Aptos                 0.9390     1.8466     1.5649           1.6665
+#: Arial                 0.9053     1.7208     1.5089           1.6668
+#: Times New Roman       0.8911     1.7015     1.4852           1.6667
+#: Courier New           0.8325     1.6878     1.3875           1.6667
+#: ====================  =========  =========  ===============  ==========
+#:
+#: -- four faces on 5/3 to four decimals, where a shared em term would have had to move
+#: by 0.06 em across them.  The 6.5 pt is :data:`FRAME_PADDING_PT` exactly: differencing
+#: it out leaves 6.500, 6.496, 6.499 and 6.497 over the four.
+#:
+#: The **drawn** baseline says the same thing independently, and says which of the band's
+#: three terms the correction belongs to: the category label's baseline hangs
+#: ``(5/3) * ascent`` below the axis line, measured on the same 24 charts at 1.672 +/-
+#: 0.04 of the ascent, where against the *em* the same readings run 1.38 to 1.64 and are
+#: no rule at all.  So the band is the padding, the baseline's own drop and the descender
+#: hanging below it, and the gap is in the drop.
+CATEGORY_LABEL_GAP_ASCENT = 2.0 / 3.0
+
+#: The same gap as :data:`CATEGORY_LABEL_GAP_ASCENT`, in the em terms it was fitted in,
+#: and used by the **turned** band alone -- :func:`rotated_label_anchor` and the rotated
+#: branch of :meth:`ChartBuilder._bottom_label_band`.
+#:
+#: It stays here rather than following the level band onto the ascent because the turned
+#: path's *other* constant was fitted against it: :data:`ROTATED_LABEL_HEADROOM_PT` is
+#: solved from where PowerPoint cut a label, the anchor is inside that solution, and
+#: moving the anchor without re-solving the headroom moves every truncation boundary.
+#: The corpus has exactly one chart with turned labels -- ``real-financial-report``'s
+#: chart3 -- and it sits 0.4 pt from such a boundary: on the ascent it loses the last
+#: character of ``グローバル``, which PowerPoint keeps whole.
+#:
+#: **That chart cannot arbitrate, and the reason is worth recording.**  Its labels are
+#: drawn in Yu Gothic, and pulling the font program straight out of
+#: ``real-financial-report.pdf`` gives ``YuGothic-Regular`` at 0.8799 ascent, 0.2222
+#: descent and a **0.5 em line gap**, where this library carries Noto Sans JP's 1.1600 and
+#: 0.2880 for that name and no gap at all.  So its anchor is built from an ascent 32% too
+#: large and its band from a box 1.84 pt too small, and the 0.95 pt this rule currently
+#: lands from PowerPoint's 69.538 is two errors cancelling.  With the real numbers and the
+#: gap carried, ``6.5 + (pitch + 60) * sin 45 + (2/3) * ascent`` gives 69.55 -- but that is
+#: one reading resting on a metrics fix this change does not make.
+#:
+#: What would settle it: the rotated probe decks of ``tools/make_label_probe.py``, run in
+#: faces whose ascents differ as ``axis-inset``'s do, re-solving the headroom and the
+#: anchor together.  Until then the six readings in :data:`ROTATED_LABEL_HEADROOM_PT`'s
+#: table are the only turned evidence, and they prefer the ascent -- which is why this is
+#: an open question rather than a settled em.
 CATEGORY_LABEL_GAP_EM = 0.615
 
-#: The plot area's inset above the topmost value label.  ``max(11.0, 5.0 + lineHeight/2)``
-#: reproduces all four measurements to within 0.02 pt, including the 8 pt probe where the
-#: floor is what binds.
+#: The plot area's inset above the topmost value label: ``max(11.0, 5.0 + lineHeight/2)``.
+#:
+#: **Confirmed, not fitted.**  The four readings this was first written from were Aptos at
+#: 8/10/14 and Arial at 12 pt; ``axis-inset`` puts 24 more behind it -- Aptos, Arial,
+#: Times New Roman and Courier New at 6 through 28 pt -- and every one of them lands
+#: within **0.002 pt** of this rule, which is the export's own coordinate quantisation.
+#: The floor is real and it is :data:`EDGE_INSET_PT`: it binds for every face at 6 and
+#: 8 pt and for Arial, Times New Roman and Courier New at 10 as well, and all of those
+#: draw their top gridline exactly 11.000 pt below the frame.  It is the **line box** and
+#: not the pitch, and Arial at eight sizes says so: half its line gap is 0.16 pt at 10 pt
+#: and 0.46 at 28, both far outside the residual.
+#:
+#: Two readings out of the 36 do not obey the *band* beside it, and they are one thing:
+#: 24 pt labels on a 90 pt frame keep this top inset and **shrink the bottom band**, by
+#: 3.9 pt in Aptos and 0.2 in Arial -- see :meth:`ChartBuilder._bottom_label_band`.
 TOP_INSET_BASE_PT = 5.0
 
 #: **One legend row**, which is one number for every legend there is: the baseline-to-
@@ -369,23 +437,29 @@ ROTATED_LABEL_DEGREES = -45.0
 #: constant at 14.70 pt through 39.94, and the formula reproduces all nine face/size pairs
 #: to 0.28 pt.  Split into the two pieces the cap needs separately:
 #:
-#: ====================  ==========  =========  ==========  ==========
-#: face and size         pad below   anchor A   sum, drawn  sum, rule
-#: ====================  ==========  =========  ==========  ==========
-#: Arial 6 pt                 7.582      7.117      14.699      14.93
-#: Arial 10 pt                8.062     12.435      20.497      20.55
-#: Arial 14 pt                8.302     17.643      25.945      26.17
-#: Arial 20 pt                9.502     24.855      34.357      34.60
-#: Arial 24 pt                9.920     30.022      39.942      40.22
-#: Aptos 10 pt                8.782     12.604      21.386      21.28
-#: ====================  ==========  =========  ==========  ==========
+#: ====================  ==========  =========  ==========  ==========  ==========
+#: face and size         pad below   anchor A   sum, drawn  sum, rule   on ascent
+#: ====================  ==========  =========  ==========  ==========  ==========
+#: Arial 6 pt                 7.582      7.117      14.699      14.93       14.86
+#: Arial 10 pt                8.062     12.435      20.497      20.55       20.44
+#: Arial 14 pt                8.302     17.643      25.945      26.17       26.01
+#: Arial 20 pt                9.502     24.855      34.357      34.60       34.37
+#: Arial 24 pt                9.920     30.022      39.942      40.22       39.95
+#: Aptos 10 pt                8.782     12.604      21.386      21.28       21.39
+#: ====================  ==========  =========  ==========  ==========  ==========
 #:
 #: ``A`` is the drop from the axis line to the **far end of the rotated baseline** and is
 #: ``ascent * cos 45 + CATEGORY_LABEL_GAP_EM * size``; the pad under the deepest pen is
 #: ``FRAME_PADDING_PT + descent * cos 45``.  Both are read straight off the export -- the
-#: pen positions are in the PDF -- rather than solved for.  The em term is the level
-#: band's own :data:`CATEGORY_LABEL_GAP_EM`, unturned, which is the other half of why this
-#: reads as the same band rather than a second one.
+#: pen positions are in the PDF -- rather than solved for.  The unturned term is the level
+#: band's own gap, which is the other half of why this reads as the same band rather than
+#: a second one.
+#:
+#: The fifth column is what the rule gives with that term on the **ascent** instead, as
+#: the level band now has it: it is better on every one of the six -- worst residual 0.16
+#: pt against 0.28 -- and it is *not* what the code does, because these same readings
+#: solved :data:`ROTATED_LABEL_HEADROOM_PT` with the em term inside them.  See
+#: :data:`CATEGORY_LABEL_GAP_EM` for what re-solving the pair would take.
 
 #: How far the deepest pen of a turned label may drop below the axis: **half the frame's
 #: height, less this**.  Past it PowerPoint cuts the label rather than reserving more.
@@ -1699,11 +1773,14 @@ class FontBox:
 
         What PowerPoint reserves for a label standing on its own -- the one-line category
         band, the top inset over the highest value label -- and the two are separately
-        measured.  ``CATEGORY_LABEL_GAP_EM`` and :meth:`ChartBuilder._top_inset` were both
-        fitted over Aptos at three sizes *and Arial at 12 pt*, to within 0.16 and 0.02 pt,
-        and Arial's gap at 12 pt is 0.39 pt: a one-line reserve that carried the gap could
-        not have fitted that tightly.  So the gap is between lines and not around them,
-        which is what typesetting has always said and is here measured rather than assumed.
+        measured.  :meth:`ChartBuilder._top_inset` is the box to within 0.002 pt over
+        ``axis-inset``'s 24 charts, four faces and eight sizes; half of Arial's gap runs
+        from 0.10 pt at 6 pt to 0.46 at 28, all of it outside that residual.  The level
+        category band is the box plus :data:`CATEGORY_LABEL_GAP_ASCENT`, and the same 24
+        charts put it on the box as well -- on the *ascent* for the gap term and on
+        ascent + descent for the line, with no room for a third of a point of leading in
+        either.  So the gap is between lines and not around them, which is what
+        typesetting has always said and is here measured rather than assumed.
         """
         return self.ascent + self.descent
 
@@ -1722,12 +1799,13 @@ class FontBox:
         **Four places in this file were checked and deliberately left on the line box**,
         because a measurement says so rather than because nobody looked:
 
-        * :meth:`ChartBuilder._top_inset`.  ``max(11.0, 5.0 + lineHeight/2)`` fits Aptos
-          at 8/10/14 pt *and Arial at 12 pt* to within 0.02 pt.  Half of Arial's gap at
-          12 pt is 0.20 pt, ten times that residual, so the inset is measurably the box.
-        * :data:`CATEGORY_LABEL_GAP_EM`, the level band's constant term, fitted over the
-          same four cases to 0.16 pt.  Same argument; see
-          :meth:`ChartBuilder._bottom_label_band`.
+        * :meth:`ChartBuilder._top_inset`.  ``max(11.0, 5.0 + lineHeight/2)`` reproduces
+          all 24 of ``axis-inset``'s readings to 0.002 pt, Arial and its line gap among
+          them at eight sizes.  Half that gap is 0.16 pt at 10 pt, eighty times the
+          residual, so the inset is measurably the box.
+        * :data:`CATEGORY_LABEL_GAP_ASCENT`, the level band's gap term.  Same argument on
+          the same 24 readings, and it is the **ascent** rather than the line box or the
+          em; see :meth:`ChartBuilder._bottom_label_band`.
         * :data:`TITLE_BAND_LINES`.  It is a *ratio* to the line box, and the only title
           ever measured is 18 pt Arial: 29.70 pt against a 20.109 pt box.  Expressed
           against the pitch the same measurement gives 1.4350 instead of 1.4769 and
@@ -5144,10 +5222,26 @@ class ChartBuilder:
     ) -> float:
         """How much of the frame the labels under the plot take.
 
-        Level and on one line, that is one line box plus its gap.  Turned, it is the same
-        three terms with the line box **and** the label's own width turned through 45
-        degrees, and the width is the one PowerPoint *draws* rather than the one the deck
-        authored -- see :data:`ROTATED_LABEL_HEADROOM_PT` and :func:`truncate_label`.
+        Level and on one line it is ``FRAME_PADDING_PT + (5/3) * ascent + descent``: the
+        padding, the baseline's own drop below the axis line, and the descender hanging
+        off it.  **The gap term is two thirds of the ascent and not a fraction of the
+        em**, which is :data:`CATEGORY_LABEL_GAP_ASCENT`'s own table -- 24 charts in four
+        faces off ``axis-inset``'s gridlines, where the previous four readings were one
+        face and could not separate the two.  For Aptos, the face all of them were drawn
+        in, the change is +0.011 em; for Courier New it is +0.06.
+
+        **A short frame breaks it**, and that is unresolved: 24 pt labels on a 90 pt frame
+        take a bottom band of 46.876 pt in Aptos and 47.578 in Arial where this rule --
+        and the same labels on 120, 195 and 330 pt frames -- give 50.818 and 47.793.  The
+        top inset does not move, the plot keeps a little over 20 pt of height, and nothing
+        in the sweep says what the floor is.  Ours is 3.7 pt too deep there and correct on
+        every frame that is not that short.
+
+        Turned, it is the same three terms with the line box **and** the label's own
+        width turned through 45 degrees -- its gap term still
+        :data:`CATEGORY_LABEL_GAP_EM`, for the reason recorded there, and the width the
+        one PowerPoint *draws* rather than the one the deck authored; see
+        :data:`ROTATED_LABEL_HEADROOM_PT` and :func:`truncate_label`.
         **Wrapped, it is the level band plus one
         line box for every line after the first** -- and the line that sets it is the one
         needing the most lines, not the widest string, although no probe separates those
@@ -5183,10 +5277,10 @@ class ChartBuilder:
         advance widths already stand on.
 
         **One line is the line box, not the pitch**, and that is measured too rather than
-        assumed: a ladder gives only the slope, but :data:`CATEGORY_LABEL_GAP_EM` was
-        fitted over Aptos at 8/10/14 pt *and Arial at 12 pt* to within 0.16 pt, and Arial's
-        gap at 12 pt is 0.39 pt.  A constant term carrying the gap could not have fitted
-        that closely.  Leading goes between lines, not above the first.
+        assumed: a ladder gives only the slope, but the level band itself is
+        ``6.5 + (5/3) * ascent + descent`` over ``axis-inset``'s four faces and eight
+        sizes, and Arial is in it at every size with its 0.33 pt gap at 10 pt nowhere in
+        the residual.  Leading goes between lines, not above the first.
 
         **Turned, the band is capped, and the cap is a truncation.**  This used to record
         an unidentified clamp: a label 4.18 band widths wide reserved 85.63 pt where the
@@ -5246,7 +5340,7 @@ class ChartBuilder:
             FRAME_PADDING_PT
             + box.line_height
             + box.pitch * (lines - 1)
-            + CATEGORY_LABEL_GAP_EM * box.size
+            + CATEGORY_LABEL_GAP_ASCENT * box.ascent
         )
 
     def _polar_region(self) -> _Rect:
@@ -5490,9 +5584,18 @@ class ChartBuilder:
     def _top_inset(self, label: FontBox) -> float:
         """Space above the plot area for the topmost value label to sit in.
 
-        ``max(11.0, 5.0 + lineHeight/2)`` fits Aptos at 8, 10 and 14 pt and Arial at 12 pt
-        to within 0.02 pt.  The floor is what binds at 8 pt, which is why a purely
-        proportional rule does not work.
+        ``max(11.0, 5.0 + lineHeight/2)``, and it is **right**: ``axis-inset`` reads the
+        plot's top edge off its own topmost gridline in four faces at eight sizes and this
+        rule lands within 0.002 pt of every one of the 24.  The floor binds at 6 and 8 pt
+        in every face and at 10 pt in all but Aptos, and each of those draws its gridline
+        at exactly 11.000 pt, so :data:`EDGE_INSET_PT` is the floor as a measurement and
+        not as a guard.
+
+        This was for a while suspected of putting the whole plot rectangle 3.7 pt low, on
+        a reading that differenced our tick labels' **boxes** against PowerPoint's
+        **ink**; see ``tools/read_view3d_probe.ours``, where that is now fixed, and
+        ROADMAP.md 3.4.  The gridlines were what settled it: they are the rectangle, and
+        they are where PowerPoint puts them.
         """
         return max(EDGE_INSET_PT, TOP_INSET_BASE_PT + label.line_height / 2)
 
@@ -6703,10 +6806,14 @@ class ChartBuilder:
 
         The baseline hangs off the *category axis*, not the frame, because ``nextTo`` means
         what it says: on a chart with negative values the axis floats above the plot's
-        lower edge and the labels follow it.  ``ascent + 0.615 em`` reproduces all five
-        measurements -- Aptos at 8/10/14 pt, Arial at 12 pt, and the negative probe --
-        with a worst residual of 0.63 pt, and is the same number as hanging the line's
-        descender one frame padding above the frame whenever the axis *is* at the foot.
+        lower edge and the labels follow it.  The drop is ``(5/3) * ascent`` and it is
+        **read off the drawn baselines**, not inferred from the band: ``axis-inset``'s
+        category labels have no descender, so a PDF text rect's own floor is the baseline,
+        and 24 of them in four faces give 1.672 +/- 0.04 of the ascent.  Against the em
+        the same readings run 1.38 to 1.64 and are no rule at all, which is what says the
+        drop follows the face rather than the size -- and it is the same number as hanging
+        the line's descender one frame padding above the frame whenever the axis *is* at
+        the foot, so this and :meth:`_bottom_label_band` stay one measurement.
 
         A label too wide for its band is broken across lines, each one centred in the band
         under the one above.  **The block is top-aligned**, so the first baseline is where
@@ -6716,7 +6823,7 @@ class ChartBuilder:
         nothing beneath it.
         """
         box = font.box
-        baseline = axis_y + box.ascent + CATEGORY_LABEL_GAP_EM * box.size
+        baseline = axis_y + box.ascent + CATEGORY_LABEL_GAP_ASCENT * box.ascent
         for position, text in labels:
             if not text:
                 continue

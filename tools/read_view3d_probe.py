@@ -9,6 +9,15 @@ raster instead, and are documented below.  The value axis' tick labels give
 * the **plot rectangle** -- the extreme ticks sit on the plot's own top and bottom edges,
   and the category labels' centres bracket its left and right ones.
 
+A label's centre is not the tick, though, and about a point of PDF text-rect convention
+rides on every inset read this way: ``tools/read_axis_probe.py --insets`` reads the same
+rectangle off the **gridlines** and puts a flat 195 pt frame's insets at 11.103 / 24.965
+where the flat controls here read 10.010 / 25.870.  That point is a constant of the
+instrument and cancels in a *difference* of two readings, which is what the depth
+reservation is -- but it does not cancel in an inset quoted on its own, and quoting one
+on its own is how ROADMAP.md 3.4 came to record a plot rectangle 3.7 pt low that was
+never there.  See :func:`ours`.
+
 That is the whole of the depth reservation: the difference between those insets and the
 ones a flat chart of the same data on the same frame gets.  ``--check`` renders the deck
 through this library and prints that difference per probe.
@@ -103,11 +112,22 @@ def ours(deck: Path, probes: list[dict]) -> list[dict]:
 
     The library's own model is read rather than its SVG, so the numbers are the layout's
     and not a rasteriser's: a chart's tick labels are ordinary text elements inside the
-    chart frame, and their boxes' centres are what PowerPoint's rect centres are compared
-    against.
+    chart frame.
+
+    **What is compared is the label's ink, not its box**, and that distinction cost this
+    file a phantom.  Our text element is a box ``1.5`` line heights tall whose baseline
+    sits near its *top* (:meth:`ChartBuilder._text`), so its centre is some 2.7 pt below
+    the tick it marks at 10 pt, where the PDF text rect pdfium reports for the same label
+    is the digits' own ink and sits on the tick.  Differencing the two read a 3.7 pt
+    displacement of the whole plot rectangle -- +3.8 at the top, -3.7 at the bottom, the
+    height right -- into a layout that is in fact correct: ``axis-inset``'s gridlines put
+    our plot's top edge within 0.002 pt of PowerPoint's at eight sizes in four faces.
+    So the box centre is converted to the ink centre here, which is the quantity the
+    export's own reading is.
     """
     from pptx2svg import ConvertOptions, convert_pptx_to_model
     from pptx2svg import model as m
+    from pptx2svg.resolve.chart import font_box
 
     presentation = convert_pptx_to_model(deck, ConvertOptions())
     page_height = presentation.slide_size.height / EMU
@@ -134,9 +154,21 @@ def ours(deck: Path, probes: list[dict]) -> list[dict]:
                     if not text:
                         continue
                     transform = element.transform
+                    run = next(
+                        run.properties
+                        for paragraph in element.text_body.paragraphs
+                        for run in paragraph.runs
+                        if run.text.strip()
+                    )
+                    box = font_box(run.font_family, run.font_size or 10.0)
                     x = ox + transform.offset_x / EMU + transform.extent_width / EMU / 2
+                    # The box's top plus our own first-baseline rule is the baseline; the
+                    # ink sits `ink_centre` above it.  See the docstring.
                     y = page_height - (
-                        oy + transform.offset_y / EMU + transform.extent_height / EMU / 2
+                        oy
+                        + transform.offset_y / EMU
+                        + box.first_baseline
+                        - box.ink_centre
                     )
                     try:
                         ticks.append((_number(text), y))

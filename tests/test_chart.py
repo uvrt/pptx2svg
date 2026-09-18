@@ -2197,6 +2197,12 @@ def _plot_bottom(children):
     return down.offset_y + down.extent_height
 
 
+def _plot_top(children):
+    """The plot's top edge: the same value-axis line's other end."""
+    lines = [c for c in children if isinstance(c, m.ConnectorElement)]
+    return max(lines, key=lambda line: line.transform.extent_height).transform.offset_y
+
+
 def test_a_series_longer_than_the_labelled_one_still_draws_every_bar():
     """Bars are indexed by the category list, so a short list used to lose their tails."""
     children, data = _build(
@@ -4023,14 +4029,19 @@ def test_labels_that_float_inside_the_plot_do_not_turn():
 WRAP_BAND_PT = 37.761
 
 
-def wrap_chart_xml(cats, face="Arial", size=10.0, values=None):
-    """The rotation sweep's chart with its label face and size pinned."""
+def wrap_chart_xml(cats, face="Arial", size=10.0, values=None, value_size=10.0):
+    """The rotation sweep's chart with its label face and size pinned.
+
+    ``value_size`` is the *value* axis' own size, which the wrap probes hold at 10 pt and
+    the inset probes set to the same size as the categories -- the value label is what
+    :meth:`ChartBuilder._top_inset` reads.
+    """
     text = (
         f"<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz='{int(size * 100)}'>"
         f"<a:latin typeface='{face}'/><a:cs typeface='{face}'/></a:defRPr></a:pPr>"
         "</a:p></c:txPr>"
     )
-    value_text = text.replace(f"sz='{int(size * 100)}'", "sz='1000'")
+    value_text = text.replace(f"sz='{int(size * 100)}'", f"sz='{int(value_size * 100)}'")
     body = rotation_chart_xml(cats, values=values)
     body = body.replace("<c:lblOffset val='100'/>", f"{text}<c:lblOffset val='100'/>")
     return body.replace(
@@ -4144,12 +4155,13 @@ WRAP_LADDER = {
     "courier-4": ("Courier New", ("MMMMM MMMMM MMMMM MMMMM",) * 5, 4, 57.370),
 }
 
-#: Every face lands inside this at every rung.  What it allows is the level band's own
-#: pre-existing bias, which runs from 0.11 pt heavy on Arial to 0.60 pt heavy on Courier
-#: New and was fitted long before this sweep; what the test is really asserting is that the
-#: *slope* is right, which is why the residual is flat across all four rungs instead of
-#: fanning out.
-WRAP_BAND_TOLERANCE_PT = 0.65
+#: Every face lands inside this at every rung, and it is now **0.01 pt**.  It used to be
+#: 0.65 to allow the level band's own per-face bias -- 0.11 pt heavy on Arial through 0.60
+#: on Courier New -- which was the em term standing in for two thirds of the ascent; see
+#: :data:`~pptx2svg.resolve.chart.CATEGORY_LABEL_GAP_ASCENT`.  These twenty readings are a
+#: deck the ascent law was not fitted on, they cover a fifth face (Calibri), and the bias
+#: they had is gone rather than reduced.
+WRAP_BAND_TOLERANCE_PT = 0.01
 
 #: Arial's ``hhea`` lineGap at 10 pt: 67 units of 2048, 0.0327 em.  It used to be how far
 #: short of PowerPoint our band fell for each line after the first -- Arial is the only one
@@ -4180,23 +4192,98 @@ def test_arial_carries_its_line_gap_and_the_residual_goes_flat():
     Arial is the only one of the five probe faces whose ``hhea`` lineGap is not zero, and
     PowerPoint adds it: 67 units of 2048 is 0.328 pt at 10 pt, which is exactly how far our
     band used to fall short per extra line.  With the gap carried -- Arial's own, read from
-    ``arial.ttf`` rather than from the Arimo we draw with -- the residual stops growing and
-    settles on the level band's own +0.11 pt bias, the same constant offset every other
-    face in the ladder shows.
+    ``arial.ttf`` rather than from the Arimo we draw with -- the residual stops growing.
 
-    The assertion is the *flatness*, not the value: a slope would mean the per-line term is
-    wrong again, and it is the slope that the substitute's 87-unit gap would have got wrong
-    in the other direction.
+    It used to settle on the level band's own +0.11 pt bias and it now settles on nothing:
+    the band's gap term is two thirds of the **ascent** rather than 0.615 of the em, and
+    all twenty rungs of this ladder land within 0.01 pt of PowerPoint.
+
+    The assertion is the *flatness* as much as the value: a slope would mean the per-line
+    term is wrong again, and it is the slope that the substitute's 87-unit gap would have
+    got wrong in the other direction.
     """
     residuals = []
     for name in ("arial-1", "arial-2", "arial-3", "arial-4"):
         _, cats, lines, expected = WRAP_LADDER[name]
         residuals.append(_bottom_inset(_wrap_probe(cats)) - expected)
     for residual in residuals:
-        assert residual == pytest.approx(0.110, abs=0.05)
+        assert residual == pytest.approx(0.0, abs=WRAP_BAND_TOLERANCE_PT)
     # A dropped gap would fan these out by 0.328 pt a rung; Tinos' 87-unit gap would fan
     # them the other way by 0.098.  Either is an order of magnitude outside this.
     assert max(residuals) - min(residuals) < 0.01
+
+
+#: The plot rectangle PowerPoint draws, as ``(top inset, bottom band)`` from the frame's
+#: own edges, per ``(face, label size)``.  Read off the ``axis-inset`` deck's **gridlines**
+#: -- the topmost major gridline is the plot's top edge and the category axis line its
+#: bottom -- on a 684 x 195 pt frame with five ``C1``..``C5`` categories and both axes in
+#: the same face and size.
+#:
+#: The gridlines are the instrument, and that is the point of the deck: every earlier
+#: reading of this rectangle came off the extreme tick labels' *centres*, which differ
+#: from the tick by whatever a PDF text rect's centre is -- about a point here -- and by
+#: whatever our own text box's centre is, about 2.7 pt the other way at 10 pt.  Those two
+#: unknowns had this library's plot rectangle recorded as 3.7 pt low for a while; it is
+#: not, and these 24 readings are why.
+PLOT_RECTANGLE = {
+    ("Aptos", 6.0): (11.000, 17.582),
+    ("Aptos", 8.0): (11.000, 21.272),
+    ("Aptos", 10.0): (11.103, 24.965),
+    ("Aptos", 12.0): (12.325, 28.663),
+    ("Aptos", 14.0): (13.545, 32.353),
+    ("Aptos", 18.0): (15.985, 39.737),
+    ("Aptos", 24.0): (19.647, 50.818),
+    ("Aptos", 28.0): (22.090, 58.207),
+    ("Arial", 6.0): (11.000, 16.820),
+    ("Arial", 8.0): (11.000, 20.262),
+    ("Arial", 10.0): (11.000, 23.712),
+    ("Arial", 12.0): (11.705, 27.153),
+    ("Arial", 14.0): (12.820, 30.590),
+    ("Arial", 18.0): (15.055, 37.473),
+    ("Arial", 24.0): (18.405, 47.793),
+    ("Arial", 28.0): (20.642, 54.685),
+    ("Times New Roman", 8.0): (11.000, 20.113),
+    ("Times New Roman", 10.0): (11.000, 23.515),
+    ("Times New Roman", 14.0): (12.753, 30.322),
+    ("Times New Roman", 24.0): (18.288, 47.332),
+    ("Courier New", 8.0): (11.000, 20.000),
+    ("Courier New", 10.0): (11.000, 23.380),
+    ("Courier New", 14.0): (12.930, 30.130),
+    ("Courier New", 24.0): (18.592, 47.005),
+}
+
+#: What the export's own coordinates are quantised to, near enough: every one of the 24
+#: readings above is reproduced inside this.
+PLOT_RECTANGLE_TOLERANCE_PT = 0.01
+
+
+def _inset_probe(face, size):
+    """``axis-inset``'s own chart: one face, one size, both axes, a 684 x 195 pt frame."""
+    body = wrap_chart_xml(
+        tuple(f"C{index + 1}" for index in range(5)),
+        face=face,
+        size=size,
+        value_size=size,
+    )
+    return _build(body, width=684.0, height=195.0)[0]
+
+
+@pytest.mark.parametrize(("face", "size"), list(PLOT_RECTANGLE))
+def test_the_plot_rectangle_is_where_powerpoint_draws_its_gridlines(face, size):
+    """Both insets, four faces, eight sizes, against the drawn rectangle itself.
+
+    The top is ``max(11, 5 + lineBox/2)`` and the floor is real: it binds for every face
+    at 6 and 8 pt and for all but Aptos at 10, and each of those draws its top gridline at
+    exactly 11.000 pt.  The bottom is ``6.5 + (5/3) * ascent + descent``, which is the one
+    of the two that had to move -- on Aptos alone an em term and an ascent term are the
+    same number to a hundredth, and Aptos is what every earlier reading was drawn in.
+    """
+    top, bottom = PLOT_RECTANGLE[(face, size)]
+    children = _inset_probe(face, size)
+    assert _pt(_plot_top(children)) == pytest.approx(top, abs=PLOT_RECTANGLE_TOLERANCE_PT)
+    assert _bottom_inset(children, frame_height=195.0) == pytest.approx(
+        bottom, abs=PLOT_RECTANGLE_TOLERANCE_PT
+    )
 
 
 def test_the_label_needing_the_most_lines_sets_the_band():
