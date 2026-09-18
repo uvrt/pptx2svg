@@ -6489,7 +6489,10 @@ class ChartBuilder:
                 return 0.0
             return value
 
-        faces: list[tuple[float, list[tuple[float, float]], int, float]] = []
+        # Each entry is one band's piece of one triangle: its screen polygon, which
+        # band it belongs to, the light on the whole triangle, and the depth key the
+        # painter's order runs on.
+        faces: list[tuple[list[tuple[float, float]], int, float, float]] = []
         for row in range(rows - 1):
             for col in range(len(categories) - 1):
                 corners = [
