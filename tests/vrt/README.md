@@ -53,6 +53,26 @@ its snapshots as an assertion that we are right:
 The three defects this list used to name on slides 6, 9 and 11 are **fixed** — see
 ROADMAP.md 3.2b — and those bytes are an assertion that we are right about them now.
 
+`feature-sweep.pptx` adds seven more, and they are the whole reason it exists. It is a
+deck built to make *unexercised* markup visible — one feature per slide, six of them
+fixed by the sweep that created it and seven deliberately not. A snapshot of a pinned
+slide records what this library does today and nothing else:
+
+| Defect | Frozen into |
+| --- | --- |
+| `a:ln@cmpd` — `dbl`, `thickThin`, `thinThick` and `tri` all draw as one stroke of the full width. SVG gives a path one centred stroke and cannot offset one outward from an arbitrary path. Declared by `line-compound-flattened` | `slide-07.svg`, and on table cell borders `slide-08.svg` |
+| `a:path@path` is read nowhere, so `circle`, `rect` and `shape` gradients all come out as the same radial | `slide-09.svg` |
+| `a:tile@flip` and `@algn` are dropped — an SVG `<pattern>` repeats one tile unchanged and cannot mirror alternate ones | `slide-10.svg` |
+| **The tile is about 8.3x too big.** `a:tile@sx` scales the picture's *native* size; we treat it as a fraction of the shape's bounding box. Measured against PowerPoint's export: 9.900 pt period in a 136.8 pt box, against our 82.08 pt | `slide-10.svg` |
+| `a:bodyPr@anchorCtr` appears nowhere in `src/`, so a text block is never centred as a block. The corpus has 654 of them and every one is the `"0"` default, so this slide is the only place it is ever set | `slide-11.svg` |
+| `a:outerShdw@rotWithShape='0'` and `a:blur@grow` are both ignored: the shadow always turns with the shape, and the blur is always clipped at the picture's edge | `slide-12.svg` |
+| **`a:pattFill` tiles finer than PowerPoint does** — about twice the line frequency on `horz`, and `dkDnDiag` differs in appearance as well as density. This one is a *rendered* feature that no deck in the corpus exercised | `slide-13.svg` |
+
+Slide 10's first defect was found by building this deck: tiled image fills drew a flat
+block of colour rather than tiling at all, because the `<pattern>` had no `viewBox` and
+its `<image width="100%">` resolved against the viewport instead of the tile. That is
+fixed; the size defect above is what is left.
+
 The rest of that list — the manually laid out legend, and body copy landing 1–2 px off —
 was measured on `real-college-template.pptx`, which is not committed and not snapshotted.
 Whether the same 1–2 px displacement is in these files is *unknown*, because five of the

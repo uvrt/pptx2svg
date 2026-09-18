@@ -62,6 +62,17 @@ def chart_gallery() -> Path:
     return FIXTURE_DIR / "chart-gallery.pptx"
 
 
+@pytest.fixture(scope="session")
+def feature_sweep() -> Path:
+    """One unexercised feature per slide -- see `tools/make_feature_sweep.py`.
+
+    Six slides are features the coverage sweep fixed and seven are features it did not.
+    A baseline on a pinned slide records what this library does today and is not a claim
+    that it is right; `tests/fixtures/FIXTURES-README.md` says which is which.
+    """
+    return FIXTURE_DIR / "feature-sweep.pptx"
+
+
 #: Decks that are not ours to redistribute live outside the repository, in the gitignored
 #: `scratch/` directory, so a checkout can still use one when the developer has a copy.
 LOCAL_DIR = Path(__file__).resolve().parents[1] / "scratch"

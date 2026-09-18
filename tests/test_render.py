@@ -507,13 +507,32 @@ UNRENDERED_FIELDS = {
     "Slide.slide_number": "identifies the slide; the caller decides what to do with it",
     "Slide.show_master_sp": "the resolver has already applied it to the element list",
 
+    # Read by the *resolver* and spent there, like a colour or a font: by the time the
+    # renderer runs there is nothing left to do with them.
+    "Outline.compound": (
+        "a:ln@cmpd names two or three parallel strokes across the line's stated width, "
+        "and SVG gives a path exactly one stroke, centred -- there is no way to offset a "
+        "stroke outward from an arbitrary path.  So the line is drawn once at the full "
+        "width and the resolver emits `line-compound-flattened` to say so.  It rides on "
+        "the model for callers of `convert_pptx_to_model`, who can still see what the "
+        "deck asked for"
+    ),
+
     # Genuinely not implemented.  These are roadmap items, listed so the gap is
     # visible rather than merely absent.
-    "BlipEffects.clr_change": "a:clrChange has no clean SVG filter equivalent",
-    "ClrChangeEffect.clr_from": "a:clrChange is not rendered",
-    "ClrChangeEffect.clr_to": "a:clrChange is not rendered",
-    "BlurEffect.grow": "we always let the blur grow past the shape's bounds",
-    "OuterShadow.rotate_with_shape": "shadows are emitted inside the shape's own transform",
+    "BlurEffect.grow": (
+        "a:blur@grow=0 asks for the blur to stop at the picture's edge and grow=1 (the "
+        "default) lets it spread past.  The blip filter region is fixed at 0%/100%, so "
+        "*both* are drawn clipped -- the grow=1 case loses the halo.  Expressible: the "
+        "region would have to widen with the radius, which means computing it per "
+        "picture rather than using one constant"
+    ),
+    "OuterShadow.rotate_with_shape": (
+        "a:outerShdw@rotWithShape=0 asks for the shadow to keep pointing the same way "
+        "while the shape turns.  The filter is emitted inside the shape's own transform, "
+        "so the shadow always turns with it; undoing that needs the shadow's direction "
+        "counter-rotated by the shape's rotation at resolve time"
+    ),
     "ImageFillTile.flip": "SVG patterns cannot mirror alternate tiles",
     "ImageFillTile.align": "tile origin comes from tx/ty alone",
     "TileInfo.flip": "SVG patterns cannot mirror alternate tiles",

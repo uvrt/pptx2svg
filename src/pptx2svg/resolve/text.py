@@ -37,6 +37,7 @@ Underline, strike, baseline and highlight stay excluded: no deck here sets one a
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass, replace
 from typing import Sequence
 
@@ -284,13 +285,53 @@ def _resolve_paragraph_properties(
         space_before=pick("space_before") or m.PercentSpacing(0),
         space_after=pick("space_after") or m.PercentSpacing(0),
         level=(local.level if local and local.level is not None else 0),
-        bullet=pick("bullet"),
+        bullet=_resolve_bullet(context, pick("bullet")),
         bullet_font=pick("bullet_font"),
         bullet_color=resolve_color(context.colors, bullet_color_source),
         bullet_size_pct=pick("bullet_size_pct"),
+        bullet_size_points=pick("bullet_size_points"),
         margin_left=pick("margin_left"),
         indent=pick("indent"),
         tab_stops=pick("tab_stops") or [],
+    )
+
+
+def _resolve_bullet(context, bullet: s.SourceBulletType | None) -> m.BulletType | None:
+    """Turn a parsed bullet into a model one.  Only ``a:buBlip`` needs anything done.
+
+    A picture bullet is a relationship id until here; every other spelling is already
+    what the renderer wants.  The blip is loaded eagerly, for the same reason
+    :class:`~pptx2svg.model.ImageElement` carries its bytes: the package is gone by the
+    time anything draws.
+
+    An unreadable blip resolves to *no bullet* rather than to a substituted character.
+    A deck that asks for a picture and gets a black disc has been quietly told a lie
+    about its own content; an absent bullet plus the warning is the honest answer.
+    """
+    if not isinstance(bullet, s.SourceBlipBullet):
+        return bullet
+
+    # Circular at module scope: view.py imports this file, at its own foot.
+    from .view import SUPPORTED_IMAGE_MIME_TYPES, _load_media_bytes
+
+    media = _load_media_bytes(context, bullet.relationship_id)
+    if media is None:
+        context.warn(
+            "unresolved-bullet-image",
+            "a paragraph has an a:buBlip picture bullet whose image part is missing or "
+            "unreadable; the paragraph is drawn with no bullet at all",
+        )
+        return None
+    payload, mime_type = media
+    if mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
+        context.warn(
+            "unresolved-bullet-image",
+            f"a paragraph has an a:buBlip picture bullet of type {mime_type}, which is "
+            "not embeddable; the paragraph is drawn with no bullet at all",
+        )
+        return None
+    return m.BlipBullet(
+        image_data=base64.b64encode(payload).decode("ascii"), mime_type=mime_type
     )
 
 

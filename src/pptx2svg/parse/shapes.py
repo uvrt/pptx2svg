@@ -36,6 +36,7 @@ from .drawing import (
     parse_outline,
     parse_relative_rect,
     parse_shape_style,
+    parse_svg_blip_rel_id,
     parse_text_transform,
     parse_transform,
 )
@@ -98,16 +99,47 @@ def parse_shape_node(node: Element) -> SourceShapeNode | None:
 
 
 def parse_alternate_content(node: Element) -> SourceShapeNode | None:
-    """``mc:AlternateContent`` -- prefer the ``mc:Fallback`` branch, which is plain DrawingML."""
-    for branch_name in ("Fallback", "Choice"):
-        branch = child(node, branch_name)
-        if branch is None:
-            continue
+    """``mc:AlternateContent`` -- take the best branch we can actually draw.
+
+    Markup Compatibility offers the same content twice: one or more ``mc:Choice``
+    branches using a newer feature, and an ``mc:Fallback`` spelling it in markup every
+    consumer understands.  Taking the Fallback unconditionally -- which this did -- is
+    safe and is sometimes worse, because a Fallback is a *lossy* rendering of the Choice
+    by construction.  The clearest case is a picture that is really an SVG: the Choice
+    carries the vector and the Fallback carries a raster PowerPoint made of it, and we
+    can embed the vector.
+
+    Reversing the order would be the wrong fix.  A Choice may need a feature nothing here
+    implements, and then its branch is what gets lost.  So the rule is neither order but
+    a test: **take the first Choice that parses to a node we can draw, and the Fallback
+    otherwise.**  A Choice in a foreign namespace parses to nothing (VML's ``v:shape`` is
+    not one of the six local names dispatched above) and a Choice holding content we can
+    only position parses to :class:`SourceUnsupported`; both fall through to the Fallback,
+    which is exactly the old behaviour for everything the old behaviour was right about.
+
+    A ``SourceUnsupported`` Choice is still better than nothing, so it is kept as a last
+    resort for the case where there is no Fallback at all.
+    """
+    positioned_only: SourceShapeNode | None = None
+
+    for branch in children(node, "Choice"):
         for candidate in branch:
+            parsed = parse_shape_node(candidate)
+            if parsed is None:
+                continue
+            if not isinstance(parsed, SourceUnsupported):
+                return parsed
+            if positioned_only is None:
+                positioned_only = parsed
+
+    fallback = child(node, "Fallback")
+    if fallback is not None:
+        for candidate in fallback:
             parsed = parse_shape_node(candidate)
             if parsed is not None:
                 return parsed
-    return None
+
+    return positioned_only
 
 
 # --------------------------------------------------------------------------------------
@@ -165,6 +197,7 @@ def parse_picture(pic: Element) -> SourceImage:
 
     return SourceImage(
         blip_relationship_id=ns_attr(blip, "embed"),
+        svg_relationship_id=parse_svg_blip_rel_id(blip),
         name=attr(c_nv_pr, "name"),
         shape_id=attr(c_nv_pr, "id"),
         alt_text=_alt_text(c_nv_pr),

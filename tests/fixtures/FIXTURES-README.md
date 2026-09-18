@@ -33,6 +33,8 @@
 | `sample-cjk.pptx`            | 本リポジトリの `tools/make_cjk_deck.py` が `sample.pptx` から**派生生成** | 6 | 同上（テーマの東アジア系フェイスのみ差し替え）             |
 | `sample-issue-387.pptx`      | 手作成        | 1          | インラインテキスト装飾（太字・斜体・太字斜体）             |
 | `authoring-integration.pptx` | document API  | 1          | from-scratch authoring API の package/render 統合 contract |
+| `chart-gallery.pptx`         | 本リポジトリの `tools/make_chart_gallery.py` が**生成** | 17 | チャート種別を 1 スライド 1 種で網羅 |
+| `feature-sweep.pptx`         | 本リポジトリの `tools/make_feature_sweep.py` が**生成** | 13 | コーパスのどのデッキも踏まない機能を 1 スライド 1 機能で網羅 |
 
 ## `sample-cjk.pptx`（`sample.pptx` からの派生。**取得したままのファイルではない**）
 
@@ -104,6 +106,103 @@ Dickinson College が公開しているサンプルプレゼンテーション�
 上記 4 点の知見は、いずれもこのデッキを必要としないテストとして
 `tests/test_chart.py` / `tests/test_render.py` に定着させてある。
 デッキ本体が無くても回帰は検出できる。
+
+## `feature-sweep.pptx`（`tools/make_feature_sweep.py` が**生成**。取得ファイルではない）
+
+### 存在理由
+
+このプロジェクトは「パーサは読んでいるのにレンダラが捨てている」という同じ欠陥に
+3 回刺されている（`flat_chart_kind` の 3-D 綴り消失、ChartEx フレームの誤診断、
+`a:clrChange`）。3 つ目はコードを読んで見つかったのではなく**カバレッジテスト**で
+見つかった。理由は単純で、**コーパスのどのデッキもその機能を踏んでいない**からである。
+動くスナップショットも下がる fidelity スコアも存在しないので、壊れていても何も鳴らない。
+
+このデッキはその穴を埋める。`chart-gallery.pptx` と同じ方針で **1 スライド 1 機能**に
+してあるので、スコアが原因まで一意に落ちる。
+
+### スナップショットを「正しさの主張」として読まないこと
+
+13 スライドのうち**正しく描けているのは 7 枚だけ**である。残りは*意図的に直していない*
+機能を、現状のまま記録するために置いてある。どれがどちらかは下表と
+`tools/make_feature_sweep.py` の `SLIDES` に書いてある。
+
+| # | 機能 | 状態 |
+| --- | --- | --- |
+| 1 | `a:clrChange` | 描画する（本スイープで実装） |
+| 2 | `asvg:svgBlip` | 描画する（本スイープで実装） |
+| 3 | `mc:AlternateContent` の分岐選択 | 描画する（本スイープで修正） |
+| 4 | `a:buBlip` | 描画する（本スイープで実装） |
+| 5 | `a:buSzPts` | 描画する（本スイープで実装） |
+| 6 | `a:alphaModFix` | 描画する（本スイープで実装） |
+| 7 | `a:ln@cmpd` | **描かない**。1 本の線に潰し `line-compound-flattened` で申告 |
+| 8 | `a:lnL/R/T/B@cmpd`（表の罫線） | **描かない**。同上、警告はスライドごとに 1 回 |
+| 9 | `a:path@path`（`circle` / `rect` / `shape`） | **一部のみ**。3 種とも同じ radial になる |
+| 10 | `a:tile@flip` / `@algn` | **描かない**。加えて**タイル寸法が約 8.3 倍**（下記） |
+| 11 | `a:bodyPr@anchorCtr` | **描かない**。`src/` に一度も現れない |
+| 12 | `a:outerShdw@rotWithShape` / `a:blur@grow` | **描かない** |
+| 13 | `a:pattFill` | 描画するが**タイルが細かすぎる**（下記） |
+
+### 採点できるように作ってある
+
+`tools/fidelity.py` がスキップするデッキは価値が大きく下がる（コーパス 7 枚のうち 3 枚は
+PowerPoint 側がフォントを置換するためスキップされている）。そこで `make_chart_gallery.py`
+と同じ制約を課してある。
+
+- **CJK を 1 文字も使わない**。Latin-1 の外の文字も使わない。
+- **書体を一切名指ししない**。`a:latin` / `a:ea` / `a:cs` に加え、`a:buFont` も書かない
+  （`fidelity.requested_faces` はこれを数える）。全スライドがテーマの Aptos だけを使う。
+
+結果として `requested_faces` は `Aptos` と `Aptos Display` の 2 つだけを返し、
+このマシンの PowerPoint は両方をネイティブに描くので**スキップされず採点される**
+（`fonts 2/2`）。
+
+### 出自
+
+すべて本リポジトリのもの。package skeleton（theme / master / layout / `presentation.xml`）は
+`authoring-integration.pptx`（本リポジトリの authoring API が生成したもの）から取り、
+master と layout は空にしてある。スライド 13 枚と `ppt/media/` の画像 4 点はすべて
+`tools/make_feature_sweep.py` が書く。ラスタは `zlib` で数十バイトずつ符号化し、
+ベクタは矩形の並びである。第三者のデッキも第三者の素材も含まない。
+
+画像を「厳密な単色ブロック」にしてあるのは意図的である。`a:clrChange` は**完全一致**で
+しか置換しないので写真では鍵にする色が存在せず、PNG は可逆なので PowerPoint が復号する
+色と resvg が復号する色が一致する。
+
+### このデッキが見つけた欠陥
+
+作った時点で 2 つ出た。どちらもコーパスが一度も踏んでいなかったので、それまで不可視だった。
+
+- **タイル画像塗りが一切タイルしていなかった**（スライド 10）。`<pattern>` に `viewBox` が
+  無く、中の `<image width="100%">` が**タイルではなくビューポート**（960px のスライド全体）
+  に対して解決されていたため、各タイルには画像の隅が極端に拡大されたものだけが入り、
+  結果は単色の塗りつぶしだった。`viewBox="0 0 1 1"` を与えて修正済み。
+  コーパスに `a:tile` は 1 つも無い。
+- **タイル寸法の解釈が誤っている**（スライド 10、未修正）。`a:tile@sx` を
+  「shape の bounding box に対する割合」として扱っているが、OOXML では
+  **画像の原寸に対する倍率**である。PowerPoint の書き出しを実測すると 136.8 pt 幅の箱で
+  周期 **9.900 pt**、こちらのモデルは `0.6 × 136.8 = 82.08 pt` で **約 8.3 倍**大きい。
+  ただし素直な予測（32 px を 96 dpi として 24 pt × 0.6 = 14.4 pt）とも一致しないため、
+  正しい規則は `sx` / 画像画素数 / 箱の寸法を振ったプローブ実測が要る。本スイープの範囲外。
+- **`a:pattFill` のタイルが PowerPoint より細かい**（スライド 13、未修正）。`horz` で
+  PowerPoint の約 2 倍の本数が出る。`dkDnDiag` は密度だけでなく見た目も異なる
+  （PowerPoint は太い斜帯、こちらは細かい網）。これも実測が要る。
+
+### 再生成と再エクスポート
+
+```bash
+python3 tools/make_feature_sweep.py                        # フィクスチャを書き直す
+python3 tools/make_feature_sweep.py ~/pptx2svg-oracle/feature-sweep.pptx
+osascript tools/powerpoint_export_pdf.applescript \
+    ~/pptx2svg-oracle/feature-sweep.pptx ~/pptx2svg-oracle/feature-sweep.pdf
+python3 -m pytest tests/test_vrt.py --update-snapshots
+python3 tools/fidelity.py --update
+```
+
+**受け入れ条件は「PowerPoint が開いて書き出せること」**である。修復（`[Repaired]`）される
+デッキはフィクスチャではない。`tests/deckbuilder.py` も `make_feature_sweep.py` も
+content-type の `Override` に先頭スラッシュを**自分で付ける**ので、`f"/{part}"` を渡すと
+`PartName="//ppt/..."` になり修復される。
+
 
 ## Authoring integration fixture の再生成
 
