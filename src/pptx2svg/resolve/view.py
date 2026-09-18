@@ -927,40 +927,6 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         )
     plot = plots[0]
 
-    three_d = sorted({p.kind for p in plots if is_three_d_kind(p.kind)})
-    if three_d:
-        # Not `chart-unsupported-type`: that code means "nothing was drawn".  This one is
-        # the other thing a renderer can be, and the deck should not have to guess which
-        # it got -- every category, value, label and axis in the picture is right, and the
-        # scene it stands for is missing.
-        #
-        # **The warning has to say which of the two it got.**  The camera now places and
-        # sizes the plot rectangle for the group elements it is measured on, so a chart
-        # that gets it has a different defect from one that does not: its axis, its
-        # gridlines and its marks are where PowerPoint puts them and only the scene is
-        # absent, where the other kind is drawn in a rectangle PowerPoint never used.
-        placed = any(
-            three_d_camera(
-                source.view_3d,
-                p.kind,
-                series=len(p.series) or 1,
-                grouping=p.grouping,
-            )
-            is not None
-            for p in plots
-        )
-        context.warn(
-            "chart-3d-flattened",
-            f"{label} holds {', '.join(three_d)} and is drawn flat: no floor, back wall, "
-            + (
-                "depth or extrusion. The c:view3D camera places and sizes the plot "
-                "rectangle, and its data, categories, axis and legend are drawn in full"
-                if placed
-                else "depth or extrusion, and the c:view3D camera is not applied. Its "
-                "data, categories, axis and legend are drawn in full"
-            ),
-        )
-
     transform = _resolve_transform(context, node.transform)
     if transform.extent_width <= 0 or transform.extent_height <= 0:
         return give_up("chart-unreadable", "has a zero-sized frame")
@@ -986,6 +952,46 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         plots=plots,
     )
     children, data = builder.build()
+
+    if builder.flattened_three_d:
+        # Not `chart-unsupported-type`: that code means "nothing was drawn".  This one is
+        # the other thing a renderer can be, and the deck should not have to guess which
+        # it got -- every category, value, label and axis in the picture is right, and the
+        # scene it stands for is missing.
+        #
+        # **It is asked of the builder rather than of the file**, because it is a claim
+        # about what this library drew: a `bar3DChart` whose prisms, floor and walls are
+        # drawn has nothing left to declare, and a chart holding one of those beside a
+        # `line3DChart` still has to declare the line.
+        #
+        # **The warning also says which of two defects it is.**  The camera places and
+        # sizes the plot rectangle for the group elements it is measured on, so a chart
+        # that gets it has a different defect from one that does not: its axis, its
+        # gridlines and its marks are where PowerPoint puts them and only the scene is
+        # absent, where the other kind is drawn in a rectangle PowerPoint never used.
+        placed = any(
+            three_d_camera(
+                source.view_3d,
+                p.kind,
+                series=len(p.series) or 1,
+                grouping=p.grouping,
+            )
+            is not None
+            for p in plots
+            if p.kind in builder.flattened_three_d
+        )
+        context.warn(
+            "chart-3d-flattened",
+            f"{label} holds {', '.join(builder.flattened_three_d)} and is drawn flat: "
+            "no floor, back wall, "
+            + (
+                "depth or extrusion. The c:view3D camera places and sizes the plot "
+                "rectangle, and its data, categories, axis and legend are drawn in full"
+                if placed
+                else "depth or extrusion, and the c:view3D camera is not applied. Its "
+                "data, categories, axis and legend are drawn in full"
+            ),
+        )
 
     return m.ChartElement(
         transform=transform,

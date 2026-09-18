@@ -300,6 +300,12 @@ class SourceChartPlot:
     gap_depth: float | None = None
     #: ``c:overlap`` in percent; negative separates clustered bars.
     overlap: float | None = None
+    #: ``c:shape`` -- what solid a 3-D bar is drawn as: ``box``, ``cylinder``, ``cone``,
+    #: ``pyramid``, ``coneToMax`` or ``pyramidToMax``.  Only ``box`` (the default, and
+    #: absent) is drawn as a mesh; the rest keep the flat rectangle and its warning,
+    #: because a box is not one of them and drawing one anyway would be a wrong picture
+    #: rather than a simplified one.
+    shape: str | None = None
     #: ``c:holeSize`` in percent, for doughnuts.
     hole_size: float | None = None
     first_slice_angle: float | None = None
@@ -480,6 +486,7 @@ def _plot(node: Element) -> SourceChartPlot:
         gap_width=num_attr(child(node, "gapWidth"), "val"),
         gap_depth=num_attr(child(node, "gapDepth"), "val"),
         overlap=num_attr(child(node, "overlap"), "val"),
+        shape=attr(child(node, "shape"), "val"),
         hole_size=num_attr(child(node, "holeSize"), "val"),
         first_slice_angle=num_attr(child(node, "firstSliceAng"), "val"),
         scatter_style=attr(child(node, "scatterStyle"), "val"),
