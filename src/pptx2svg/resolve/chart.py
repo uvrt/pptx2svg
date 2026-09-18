@@ -834,6 +834,66 @@ AXIS_END_LABEL_LINES = 2
 #: the reserve really is 22.02 or whether the missing hundredths are somewhere else.
 AXIS_EDGE_RESERVE_PT = 2 * EDGE_INSET_PT
 
+
+#: How far a 3-D scene's depth reaches across the drawing, per unit of the scene's own
+#: width, per unit of ``c:depthPercent``, per unit of the sine of the rotation.  It is the
+#: whole of the camera's projection, and it is one number.
+#:
+#: ``c:rAngAx="1"`` -- right-angle axes -- keeps the front face a true rectangle and draws
+#: the depth as a fixed offset, so the projection is a pair of lengths rather than a
+#: matrix: the depth lands at ``(this * depth * sin(rotY), this * depth * sin(rotX))`` of
+#: the scene's width, with the horizontal component untouched by ``rotX`` and the vertical
+#: one untouched by ``rotY`` except for its sign.  That separation is measured, not
+#: assumed: a genuine yaw-then-pitch rotation, whose two components mix, misses the same
+#: readings by 3.0 pt rms where this misses by 0.26.
+#:
+#: **One constant serves both axes.**  Fitted independently they come out 0.2041 and
+#: 0.2083 -- a vertical and a horizontal reading of the same foreshortening -- and holding
+#: them equal costs nothing.  What the number *is* is not identified: the depth is drawn
+#: at a fifth of its nominal length and no ratio of the scene's own proportions produces
+#: that fifth.
+#:
+#: Measured on 131 readings of the four ``view3d-*`` probe decks: seven frames, seven
+#: depths from 20% to 2000%, nine pitches from -45 to 90 degrees, seven yaws, five stated
+#: heights, five series counts and five gap depths.  Every one of them is the value axis'
+#: drawn length read from its own tick labels' centres, which PowerPoint leaves vector at
+#: 300 dpi beside the raster it draws the scene as.  See ROADMAP.md 3.4.
+VIEW_3D_DEPTH_PROJECTION = 0.2030
+
+#: What the scene keeps clear of its region beyond the depth, per unit of its own width.
+#:
+#: It survives at zero depth *and* zero rotation -- ``<c:view3D/>`` with nothing in it
+#: draws a scene 0.8% of its width shorter than the region it is given -- so it is neither
+#: the depth nor the projection.  A floor slab's own thickness and a wall's own edge are
+#: both the right size to be it; nothing measured here separates them, and nothing here
+#: needs to.  Split evenly above and below the face, which fits the drawn placement to
+#: 0.98 pt rms where putting it all on one side costs 1.28.
+VIEW_3D_SCENE_MARGIN = 0.0079
+
+#: What the scene's depth is divided into, beyond its series: the drawn depth is
+#: ``depthPercent * (1 + gapDepth) / (series + this)`` of the scene's width.
+#:
+#: **The depth shrinks as series are added**, which is the opposite of what a row-per-
+#: series picture suggests and is measured over two frames: one to five series on a 195 pt
+#: frame reserved 0.0600, 0.0459, 0.0373, 0.0321 and 0.0283 of the scene's width, and the
+#: same five on a 120 pt frame agree.  The scene's *aspect* does not move with them -- the
+#: drawn face's height over its width stayed 0.2440 +- 0.0003 across all five -- so it is
+#: the depth that changes and not the box.
+#:
+#: ``c:gapDepth`` enters as ``1 + gapDepth`` and nowhere else.  Swept at 0, 50, 150, 300
+#: and 500% against one, two and four series, the depth is that factor times a shape in the
+#: series count alone, and the shape is the same at every gap: 0.4116, 0.6130, 1.0, 1.587
+#: and 2.375 of the default's depth, against ``(1 + gap) / 2.5``'s 0.4, 0.6, 1.0, 1.6, 2.4.
+#:
+#: Fitted free the divisor's constant comes out 1.512 over 131 readings, and 1.5 is both
+#: the round number in it and ``c:gapDepth``'s own default.  Whether that is the same 1.5
+#: is **not** settled: the gap sweep says the constant does not move with ``gapDepth`` at
+#: all, so if it is the default it is baked in rather than read.
+VIEW_3D_DEPTH_ROW_GAP = 1.5
+
+#: ``c:gapDepth``'s default, in percent.  ECMA-376 and the measurement agree.
+DEFAULT_GAP_DEPTH = 150.0
+
 #: What a **radial** axis -- a radar's, running from the centre to the rim -- can hold
 #: beyond its whole line boxes, in ems of one.  Its count is
 #: ``floor(radius / line_box + this)``, clamped to 1..:data:`AXIS_MAX_INTERVALS`.
@@ -1844,6 +1904,109 @@ class _Rect:
     @property
     def height(self) -> float:
         return self.bottom - self.top
+
+
+def three_d_camera(
+    view: "c.SourceChartView3D | None", kind: str
+) -> "c.SourceChartView3D | None":
+    """The ``c:view3D`` this chart's plot rectangle is laid out through, or ``None``.
+
+    ``None`` means "keep the flat rectangle", and there are three ways to get it.
+
+    * The group element is not a ``bar3DChart``.  ``line3DChart`` and ``area3DChart`` do
+      **not** share its scene: on one frame and one view a ``bar3DChart`` drew a 127.68 pt
+      value axis where a ``line3DChart`` drew 88.56 and an ``area3DChart`` 59.04.  What
+      differs is measured -- their scenes are 0.6 and 0.4 as tall for the same width at one
+      series, and a ``line3DChart``'s depth *grows* with the series count where a
+      ``bar3DChart``'s shrinks (:data:`VIEW_3D_DEPTH_ROW_GAP`) -- but neither law is
+      pinned down, and a reservation fitted to within a few per cent is a wrong interval
+      count near every transition.  See ROADMAP.md 3.4.
+    * ``c:rAngAx="0"``, which draws a perspective scene this does not model.
+    * ``c:view3D`` absent altogether, which **selects that same perspective scene**
+      although ECMA-376 defaults the attribute to 1: the absent probe is identical to
+      0.001 pt to ``rotX=15 rotY=20 depthPercent=100 rAngAx=0``.
+    """
+    if view is None or view.right_angle_axes is False:
+        return None
+    return view if kind == "bar3DChart" else None
+
+
+def three_d_plot_rect(
+    region: _Rect,
+    view: "c.SourceChartView3D",
+    *,
+    series: int = 1,
+    gap_depth: float | None = None,
+) -> _Rect:
+    """Where a 3-D chart's **front face** lands inside the flat plot rectangle.
+
+    A 3-D chart draws a box, and the plot rectangle the rest of this module means -- the
+    one the value axis runs up, the categories run along and the marks are drawn in -- is
+    that box's front face.  The box is wider and taller than its face by the depth it is
+    drawn with, so the face is displaced and shrunk to make room, and that displacement
+    and shrink are the whole of what this computes.  PowerPoint rasterises the scene
+    itself and leaves the text beside it vector, which is why the face is measurable to a
+    quarter of a point although the picture it sits in is a photograph.
+
+    The model, measured on the three ``view3d-*`` probe decks (ROADMAP.md 3.4):
+
+    * The scene is a box ``w`` wide, ``w * hPercent`` high, and as deep as
+      ``w * depthPercent * (1 + gapDepth) / (series + 1.5)`` -- see
+      :data:`VIEW_3D_DEPTH_ROW_GAP`, which is the one part of this that is a property of
+      the *plot* rather than of the camera.
+    * **``c:hPercent`` absent is the region's own aspect.**  ``region.height /
+      region.width`` reproduces the seven auto readings to 0.6%.  That is what closes the
+      "0.2438 measured against 0.2456" this section recorded as unexplained: the estimate
+      of the region was the part that was wrong, not the rule.
+    * ``rAngAx="1"`` keeps the face a true rectangle whatever the rotation -- seven
+      pitches from 0 to 90 degrees held its height over its width at 0.2444 +- 0.001 while
+      both shrank -- and the depth projects to a fixed offset,
+      :data:`VIEW_3D_DEPTH_PROJECTION`.
+    * The box is scaled **isotropically** to fit the region and centred in it.  That
+      ``min`` is where the second branch comes from: the height binds at ordinary pitches
+      and the *width* binds at shallow ones, which is why the small-angle readings refused
+      to sit on the same curve as the rest.
+    * The face sits at the corner the depth leads away from.  ``rotX > 0`` tips the floor
+      towards the viewer and takes its room off the top; a ``rotY`` past a half turn
+      reverses that, which is measured -- 0 to 135 degrees of yaw all reserved at the top
+      and 180, 270 and 340 all reserved at the bottom -- and is not ``cos(rotY)``, which
+      would turn at 90.
+    """
+    rot_x = math.radians(view.rot_x or 0.0)
+    rot_y = math.radians(view.rot_y or 0.0)
+    gap = (gap_depth if gap_depth is not None else DEFAULT_GAP_DEPTH) / 100.0
+    depth = (view.depth_percent if view.depth_percent is not None else 100.0) / 100.0
+    depth *= (1.0 + max(gap, 0.0)) / (max(series, 1) + VIEW_3D_DEPTH_ROW_GAP)
+    aspect = (
+        view.h_percent / 100.0
+        if view.h_percent is not None
+        else region.height / region.width
+    )
+    if not (math.isfinite(aspect) and aspect > 0 and math.isfinite(depth) and depth >= 0):
+        return region
+    if region.width <= 0 or region.height <= 0:
+        return region
+
+    run = depth * VIEW_3D_DEPTH_PROJECTION * abs(math.sin(rot_y))
+    rise = depth * VIEW_3D_DEPTH_PROJECTION * abs(math.sin(rot_x))
+    width = min(
+        region.width / (1.0 + VIEW_3D_SCENE_MARGIN + run),
+        region.height / (aspect + VIEW_3D_SCENE_MARGIN + rise),
+    )
+    if not math.isfinite(width) or width <= 0:
+        return region
+    height = width * aspect
+    margin = width * VIEW_3D_SCENE_MARGIN / 2.0
+    slack_x = (region.width - width * (1.0 + VIEW_3D_SCENE_MARGIN + run)) / 2.0
+    slack_y = (region.height - height - width * (VIEW_3D_SCENE_MARGIN + rise)) / 2.0
+    # A half turn of yaw puts the depth in front of the face rather than behind it, and
+    # the room it needs moves to the other side with it.
+    reversed_ = (view.rot_y or 0.0) % 360.0 >= 180.0
+    left = region.left + slack_x + margin + (width * run if math.sin(rot_y) < 0 else 0.0)
+    top = region.top + slack_y + margin
+    if (math.sin(rot_x) > 0) != reversed_:
+        top += width * rise
+    return _Rect(left, top, left + width, top + height)
 
 
 @dataclass
@@ -4223,7 +4386,62 @@ class ChartBuilder:
             box_ea=font_box(family_ea, size) if family_ea else None,
         )
 
-    def _axis_band_height(self) -> float:
+    @property
+    def _three_d_view(self) -> "c.SourceChartView3D | None":
+        """The camera this group's plot rectangle is laid out through, or ``None``."""
+        return three_d_camera(self.chart.view_3d, self.plot.kind)
+
+    def _three_d_region(self, scale: tuple[float, float, float]) -> _Rect:
+        """The **flat** plot rectangle, which is the region the 3-D scene is fitted into.
+
+        Measured: PowerPoint lays the scene out inside the rectangle the same chart drawn
+        flat would get.  The ``flat*`` controls on ``view3d-meter`` give that rectangle
+        directly -- a 195 pt frame's is inset 10.01 pt at the top and 25.87 at the bottom
+        -- and the scene's own extent fills its height exactly at every ordinary pitch.
+        """
+        value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
+        category_axis = self._axis_for(0) or self._axis_of_kind("catAx")
+        return self._plot_rect(
+            self._tick_texts(scale, value_axis),
+            self._categories(self._series()),
+            self._label_font(value_axis),
+            self._label_font(category_axis),
+            scale,
+            flat=True,
+        )
+
+    def _three_d_reservation(self, scale: "tuple[float, float, float] | None") -> float:
+        """What the scene's depth takes off the height the value axis has to divide.
+
+        This is the whole of :func:`side_axis_intervals`' missing input.  The count was
+        never a function of the *frame* for a 3-D chart -- six cells on one and the same
+        120 pt frame need one, three to four and five to eight intervals -- and it is not a
+        function of the drawn plot either, because a flat chart's own furniture still comes
+        off the frame on top of it.  It is the frame less this, which reproduced all 52
+        cells of the two meter decks when the reservation was still being measured by hand.
+
+        *scale* is the finest axis the data could take, drawn at
+        :data:`AXIS_MAX_INTERVALS`.  The region depends on the tick labels and the labels
+        depend on the count, so the circle has to be cut somewhere; it is cut here, where
+        the error is a fraction of one label's width against a region six hundred points
+        wide.
+        """
+        view = self._three_d_view
+        if view is None or scale is None:
+            return 0.0
+        region = self._three_d_region(scale)
+        return max(0.0, region.height - self._three_d_face(region, view).height)
+
+    def _three_d_face(self, region: _Rect, view: "c.SourceChartView3D") -> _Rect:
+        """:func:`three_d_plot_rect`, told how the depth is divided between the series."""
+        return three_d_plot_rect(
+            region,
+            view,
+            series=len(self.plot.series) or 1,
+            gap_depth=self.plot.gap_depth,
+        )
+
+    def _axis_band_height(self, scale: "tuple[float, float, float] | None" = None) -> float:
         """The frame height a value axis up the side has to divide.
 
         The title and a legend above or below come off it, in exactly the bands
@@ -4231,6 +4449,8 @@ class ChartBuilder:
         legend took the interval count from 8 to 6 and a title took it to 6, both of which
         those bands predict.  A legend at the *side* left the count alone, so nothing is
         taken off for one.  See :func:`side_axis_intervals`.
+
+        A 3-D chart's scene comes off it as well; see :meth:`_three_d_reservation`.
         """
         height = self.frame.height
         title = self._title_box()
@@ -4239,7 +4459,7 @@ class ChartBuilder:
         legend = self._legend_position()
         if legend in ("b", "t", "tr") and not self._legend_overlays():
             height -= self._legend_band_height(self._legend_font())
-        return height
+        return height - self._three_d_reservation(scale)
 
     def _axis_band_width(self) -> float:
         """The frame width a value axis along the bottom has to divide.
@@ -4276,7 +4496,7 @@ class ChartBuilder:
         if radial_pt is not None:
             return radial_axis_intervals(radial_pt, font.box.pitch)
         if not horizontal:
-            return side_axis_intervals(self._axis_band_height(), font.box.pitch)
+            return side_axis_intervals(self._axis_band_height(provisional), font.box.pitch)
         widest = 0.0
         if provisional is not None:
             texts = [text for _, text in self._tick_texts(provisional, axis)]
@@ -4313,6 +4533,7 @@ class ChartBuilder:
         *,
         second_texts: list[tuple[float, str]] | None = None,
         second_font: ChartFont | None = None,
+        flat: bool = False,
     ) -> _Rect:
         frame = self.frame
         value_axis = self._axis_for(1) or self._axis_of_kind("valAx")
@@ -4441,7 +4662,12 @@ class ChartBuilder:
             bottom = frame.bottom - legend_bottom - self._top_inset(value_font.box)
         if bottom - top < 1.0:
             bottom = top + 1.0
-        return _Rect(left, top, right, bottom)
+        region = _Rect(left, top, right, bottom)
+        # A 3-D chart's plot rectangle is its scene's **front face**, which is this
+        # rectangle displaced and shrunk to make room for the depth.  `flat` asks for the
+        # region itself, which is what the camera is fitted into.
+        view = None if flat else self._three_d_view
+        return region if view is None else self._three_d_face(region, view)
 
     def _labels_rotate(
         self, font: ChartFont, categories: list[str], plot_width: float
@@ -6675,7 +6901,10 @@ def _resolve_view_3d(view: "c.SourceChartView3D | None") -> m.Chart3DView | None
     """``c:view3D`` into the render model, field for field and value for value.
 
     Nothing is defaulted on the way through.  A ``None`` here is the file's silence, and
-    the geometry that silence implies is measured but unbuilt -- see ROADMAP.md 3.4.
+    that silence has a meaning of its own: it selects the perspective scene
+    :func:`three_d_camera` refuses.  The layout reads
+    :attr:`~pptx2svg.parse.chart.SourceChart.view_3d` directly; this is the copy callers
+    of ``convert_pptx_to_model`` get.
     """
     if view is None:
         return None

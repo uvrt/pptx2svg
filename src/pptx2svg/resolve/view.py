@@ -50,6 +50,7 @@ from .chart import (
     ChartStyle,
     accent_colors,
     default_font_size,
+    three_d_camera,
 )
 from .color import ColorContext, build_effective_color_map, resolve_color
 
@@ -932,11 +933,23 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         # the other thing a renderer can be, and the deck should not have to guess which
         # it got -- every category, value, label and axis in the picture is right, and the
         # scene it stands for is missing.
+        #
+        # **The warning has to say which of the two it got.**  The camera now places and
+        # sizes the plot rectangle for the group elements it is measured on, so a chart
+        # that gets it has a different defect from one that does not: its axis, its
+        # gridlines and its marks are where PowerPoint puts them and only the scene is
+        # absent, where the other kind is drawn in a rectangle PowerPoint never used.
+        placed = any(three_d_camera(source.view_3d, p.kind) is not None for p in plots)
         context.warn(
             "chart-3d-flattened",
             f"{label} holds {', '.join(three_d)} and is drawn flat: no floor, back wall, "
-            "depth or extrusion, and the c:view3D camera is not applied. Its data, "
-            "categories, axis and legend are drawn in full",
+            + (
+                "depth or extrusion. The c:view3D camera places and sizes the plot "
+                "rectangle, and its data, categories, axis and legend are drawn in full"
+                if placed
+                else "depth or extrusion, and the c:view3D camera is not applied. Its "
+                "data, categories, axis and legend are drawn in full"
+            ),
         )
 
     transform = _resolve_transform(context, node.transform)

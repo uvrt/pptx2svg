@@ -167,7 +167,93 @@ VIEW_PROBES: list[dict] = [
     ],
 ]
 
-DECKS = {"view3d-meter": METER_PROBES, "view3d-view": VIEW_PROBES}
+#: The group element as a variable.  ``view3d-view`` swept ``c:view3D`` on a
+#: ``bar3DChart`` alone, and the three readings beside it on ``view3d-meter`` say the
+#: other 3-D group elements do *not* share its scene: on one frame and one view a
+#: ``bar3DChart`` drew a 127.68 pt axis where ``line3DChart`` drew 88.56 and
+#: ``area3DChart`` 59.04.  This repeats the sweep per element, and adds the series count,
+#: which is the depth's own row divisor and the obvious candidate for the difference.
+TYPE_CASES: list[tuple[str, dict | None, dict]] = [
+    ("base", DEFAULT_VIEW, {}),
+    ("d20", _view(depthPercent=20), {}),
+    ("d500", _view(depthPercent=500), {}),
+    ("rx0", _view(rotX=0), {}),
+    ("rx60", _view(rotX=60), {}),
+    ("ry0", _view(rotY=0), {}),
+    ("ry90", _view(rotY=90), {}),
+    ("h50", _view(hPercent=50), {}),
+    ("h200", _view(hPercent=200), {}),
+    ("s2", DEFAULT_VIEW, {"series": 2}),
+    ("s3", DEFAULT_VIEW, {"series": 3}),
+    ("f120", DEFAULT_VIEW, {"frame": (FRAME_WIDTH, 120 * 12700)}),
+    ("f330", DEFAULT_VIEW, {"frame": (FRAME_WIDTH, 330 * 12700)}),
+]
+
+TYPE_PROBES: list[dict] = [
+    {
+        "key": f"t-{kind}-{name}",
+        "high": 9.0,
+        "frame": VIEW_FRAME,
+        "kind": kind,
+        "view": view,
+        **extra,
+    }
+    for kind in ("bar3D", "line3D", "area3D")
+    for name, view, extra in TYPE_CASES
+]
+
+#: The **series count** as a variable, which ``view3d-type`` found and could not settle.
+#: A ``bar3DChart``'s depth reservation *shrinks* as series are added -- one, two and
+#: three series reserved 0.0600, 0.0459 and 0.0373 of the scene's width on one frame --
+#: and `2.5 / (1.5 + n)` and `1 / sqrt(n)` both reproduce those three to 3%.  They part
+#: company at six (0.333 against 0.408), which is what this deck is for.  ``gapDepth`` is
+#: swept beside it because the first of those two laws is written in terms of it.
+SERIES_PROBES: list[dict] = [
+    *[
+        {
+            "key": f"n{count}-f{height}",
+            "high": 9.0,
+            "frame": (FRAME_WIDTH, height * 12700),
+            "kind": "bar3D",
+            "view": DEFAULT_VIEW,
+            "series": count,
+        }
+        for height in (195, 120)
+        for count in (1, 2, 3, 4, 5, 6)
+    ],
+    *[
+        {
+            "key": f"g{gap}-s{count}",
+            "high": 9.0,
+            "frame": VIEW_FRAME,
+            "kind": "bar3D",
+            "view": DEFAULT_VIEW,
+            "series": count,
+            "gapDepth": gap,
+        }
+        for count in (1, 2, 4)
+        for gap in (0, 50, 300, 500)
+    ],
+    *[
+        {
+            "key": f"{kind}-n{count}",
+            "high": 9.0,
+            "frame": VIEW_FRAME,
+            "kind": kind,
+            "view": DEFAULT_VIEW,
+            "series": count,
+        }
+        for kind in ("line3D", "area3D")
+        for count in (1, 2, 3, 4)
+    ],
+]
+
+DECKS = {
+    "view3d-meter": METER_PROBES,
+    "view3d-view": VIEW_PROBES,
+    "view3d-type": TYPE_PROBES,
+    "view3d-series": SERIES_PROBES,
+}
 
 CATEGORIES = ("C1", "C2", "C3", "C4", "C5")
 #: The same shape every axis deck has used, so a value is never the maximum twice.
@@ -246,33 +332,43 @@ def axes_xml(kind: str) -> str:
     )
 
 
-def group_xml(kind: str, high: float) -> str:
-    """One ``c:*Chart`` group.  A 3-D group states three ``c:axId`` children, exactly."""
+def group_xml(kind: str, high: float, series: int = 1, gap_depth: int = 150) -> str:
+    """One ``c:*Chart`` group.  A 3-D group states three ``c:axId`` children, exactly.
+
+    *series* is the number of ``c:ser`` children, which is what a 3-D chart lays out
+    along its **depth** -- one row per series -- and therefore the lever that separates
+    "the scene's depth is ``depthPercent`` of its width" from "it is that per row".
+    """
+    body = "".join(
+        series_xml(high, index, 1.0 if series == 1 else 0.6 - 0.15 * index)
+        for index in range(series)
+    )
+    depth_gap = f"<c:gapDepth val='{gap_depth}'/>"
     ids3 = "<c:axId val='100002'/><c:axId val='100003'/><c:axId val='100004'/>"
     ids2 = "<c:axId val='100002'/><c:axId val='100003'/>"
     if kind == "bar3D":
         return (
             "<c:bar3DChart><c:barDir val='col'/><c:grouping val='clustered'/>"
-            "<c:varyColors val='0'/>" + series_xml(high) + "<c:gapWidth val='150'/>"
-            "<c:gapDepth val='150'/><c:shape val='box'/>" + ids3 + "</c:bar3DChart>"
+            "<c:varyColors val='0'/>" + body + "<c:gapWidth val='150'/>"
+            + depth_gap + "<c:shape val='box'/>" + ids3 + "</c:bar3DChart>"
         )
     if kind == "col":
         return (
             "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"
-            "<c:varyColors val='0'/>" + series_xml(high) + "<c:gapWidth val='150'/>"
+            "<c:varyColors val='0'/>" + body + "<c:gapWidth val='150'/>"
             + ids2 + "</c:barChart>"
         )
     if kind == "line3D":
         return (
             "<c:line3DChart><c:grouping val='standard'/><c:varyColors val='0'/>"
-            + series_xml(high)
-            + "<c:gapDepth val='150'/>" + ids3 + "</c:line3DChart>"
+            + body
+            + depth_gap + ids3 + "</c:line3DChart>"
         )
     if kind == "area3D":
         return (
             "<c:area3DChart><c:grouping val='standard'/><c:varyColors val='0'/>"
-            + series_xml(high)
-            + "<c:gapDepth val='150'/>" + ids3 + "</c:area3DChart>"
+            + body
+            + depth_gap + ids3 + "</c:area3DChart>"
         )
     if kind == "area3Dstack":
         # Gallery slide 16 is stacked and two-series, which is the one shape the single
@@ -297,7 +393,9 @@ def chart_part(probe: dict) -> bytes:
         + view_xml(probe["view"])
         + "<c:autoTitleDeleted val='1'/>"
         "<c:plotArea><c:layout/>"
-        + group_xml(kind, probe["high"])
+        + group_xml(
+            kind, probe["high"], probe.get("series", 1), probe.get("gapDepth", 150)
+        )
         + axes_xml(kind)
         + "</c:plotArea>"
         "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"

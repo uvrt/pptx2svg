@@ -293,6 +293,11 @@ class SourceChartPlot:
     bar_direction: str | None = None
     #: ``c:gapWidth`` in percent of one bar's width.
     gap_width: float | None = None
+    #: ``c:gapDepth`` in percent of one series row's depth.  A 3-D group only: it is what
+    #: divides the scene's depth between its series, and it scales the plot rectangle's
+    #: own depth reservation.  See
+    #: :func:`~pptx2svg.resolve.chart.three_d_plot_rect`.
+    gap_depth: float | None = None
     #: ``c:overlap`` in percent; negative separates clustered bars.
     overlap: float | None = None
     #: ``c:holeSize`` in percent, for doughnuts.
@@ -339,9 +344,11 @@ class SourceChartView3D:
     which is PowerPoint's own 3-D default *except* for ``rAngAx`` -- ECMA-376 gives that
     one a default of 1, and the picture PowerPoint draws is the one a 0 draws.
 
-    Nothing reads these yet.  They are carried because the geometry they decide is
-    measurable and unmeasured: see ROADMAP.md 3.4 for what each does to the plot
-    rectangle, and why the count that follows from it is still open.
+    :func:`~pptx2svg.resolve.chart.three_d_plot_rect` reads these and returns the plot
+    rectangle they imply -- the scene's own front face, displaced and shrunk by the depth
+    -- for the charts it is measured on.  The scene itself is still drawn flat, so the
+    fields are also the record of what the flattening threw away.  See ROADMAP.md 3.4 for
+    the fit, and for which charts are deliberately left with the flat rectangle.
     """
 
     #: ``c:rotX`` -- pitch, in degrees, -90..90.  Positive tips the floor towards the
@@ -355,10 +362,14 @@ class SourceChartView3D:
     depth_percent: float | None = None
     #: ``c:hPercent`` -- the scene's height as a percentage of its width, 5..500.
     #: Measured to be exactly that ratio: 20/50/100/200 came back as 0.1995, 0.4975,
-    #: 0.991 and 1.965 of the drawn width.  Absent, PowerPoint computes one from the
-    #: frame, which is the open part of the geometry.
+    #: 0.991 and 1.965 of the drawn width.  **Absent, it is the plot region's own
+    #: aspect**, which reproduces the seven frame readings to 0.6%.  500 is the one value
+    #: that does not follow: it reads back as an effective 4.6.
     h_percent: float | None = None
-    #: ``c:rAngAx`` -- right-angle axes, which turns the perspective off.
+    #: ``c:rAngAx`` -- right-angle axes, which turns the perspective off.  A true keeps
+    #: the front face a true rectangle and draws the depth as a fixed offset, which is the
+    #: projection :func:`~pptx2svg.resolve.chart.three_d_plot_rect` models; a false, and
+    #: the element's own absence, select a perspective scene that is not modelled.
     right_angle_axes: bool | None = None
     #: ``c:perspective`` -- 0..240, and ignored while :attr:`right_angle_axes` is true.
     #: Measured: ``rAngAx=1`` with ``perspective=120`` is identical to ``rAngAx=1``
@@ -467,6 +478,7 @@ def _plot(node: Element) -> SourceChartPlot:
         vary_colors=_optional_flag(child(node, "varyColors")),
         bar_direction=attr(child(node, "barDir"), "val"),
         gap_width=num_attr(child(node, "gapWidth"), "val"),
+        gap_depth=num_attr(child(node, "gapDepth"), "val"),
         overlap=num_attr(child(node, "overlap"), "val"),
         hole_size=num_attr(child(node, "holeSize"), "val"),
         first_slice_angle=num_attr(child(node, "firstSliceAng"), "val"),

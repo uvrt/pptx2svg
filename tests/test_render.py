@@ -477,11 +477,13 @@ UNRENDERED_FIELDS = {
         "kind", "series", "categories", "title", "grouping", "bar_direction",
         "value_axis", "legend_position", "three_d",
     )},
-    # `c:view3D`.  The scene is drawn flat and the chart warns `chart-3d-flattened` when
-    # it is, so nothing in render/ has a camera to apply; the view is carried for callers
-    # and for whoever builds one.  See ROADMAP.md 3.4.
-    "ChartData.view_3d": "the camera is parsed, not applied",
-    **{f"Chart3DView.{name}": "the camera is parsed, not applied" for name in (
+    # `c:view3D`.  The **resolver** applies it -- `three_d_plot_rect` turns it into the
+    # plot rectangle every child element is then laid out in -- so by the time render/
+    # sees the chart the camera has already been spent, exactly like a colour or a font.
+    # The view rides along for callers of `convert_pptx_to_model`, and for whoever draws
+    # the scene itself.  See ROADMAP.md 3.4.
+    "ChartData.view_3d": "applied by the resolver, carried for callers",
+    **{f"Chart3DView.{name}": "applied by the resolver, carried for callers" for name in (
         "rot_x", "rot_y", "depth_percent", "h_percent", "right_angle_axes", "perspective",
     )},
     **{f"ChartSeries.{name}": "chart data, not drawing" for name in (

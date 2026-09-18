@@ -608,10 +608,15 @@ class ChartAxisScale:
 class Chart3DView:
     """``c:view3D`` -- the camera a 3-D chart's scene was authored with.
 
-    Carried, not drawn: the scene itself is rendered flat (see :attr:`ChartData.three_d`),
-    and this is the record of what the flattening threw away.  ``None`` fields are
-    elements the file did not state; the defaults they take are PowerPoint's rather than
-    the schema's, and which is which is documented on
+    Half spent, half carried.  The **plot rectangle** this camera implies is applied where
+    it is measured -- a ``bar3DChart`` with right-angle axes is laid out in its scene's
+    front face, displaced and shrunk by the depth, see
+    :func:`~pptx2svg.resolve.chart.three_d_plot_rect` -- and the scene itself is still
+    drawn flat (see :attr:`ChartData.three_d`).  So this is both the record of what the
+    flattening threw away and the input whoever draws that scene will want.
+
+    ``None`` fields are elements the file did not state; the defaults they take are
+    PowerPoint's rather than the schema's, and which is which is documented on
     :class:`~pptx2svg.parse.chart.SourceChartView3D`.
     """
 
@@ -642,12 +647,15 @@ class ChartData:
     value_axis: ChartAxisScale | None = None
     #: ``b`` / ``t`` / ``l`` / ``r`` / ``tr``, or ``None`` when there is no legend.
     legend_position: str | None = None
-    #: Whether the group was authored as a 3-D spelling.  Such a chart is
-    #: **drawn flat**, and warns ``chart-3d-flattened`` when it is.  Its value axis is
-    #: still the one PowerPoint would draw: a 3-D axis is not padded, which is measured
-    #: and is why this flag has to survive the mapping to :attr:`kind`.
+    #: Whether the group was authored as a 3-D spelling.  Such a chart's **scene** is
+    #: still drawn flat -- no floor, no wall, no extrusion -- and it warns
+    #: ``chart-3d-flattened`` when it is.  Its value axis and its plot rectangle are
+    #: PowerPoint's own: a 3-D axis is not padded, and a ``bar3DChart``'s plot is the
+    #: front face its camera puts inside the frame.  Both are measured, and both are why
+    #: this flag has to survive the mapping to :attr:`kind`.
     three_d: bool = False
-    #: ``c:view3D``, when the file states it.  Nothing draws from it yet.
+    #: ``c:view3D``, when the file states it.  The plot rectangle is laid out through it;
+    #: the scene is not.  See :attr:`three_d`.
     view_3d: Chart3DView | None = None
 
 
