@@ -7361,8 +7361,23 @@ def test_the_three_d_spelling_survives_the_flattening():
     assert flat.view_3d is None
 
 
-@pytest.mark.parametrize("kind", ["bar3DChart", "line3DChart", "area3DChart"])
-def test_a_three_d_value_axis_is_not_padded(kind):
+@pytest.mark.parametrize(
+    "kind,unit,wide_unit",
+    [
+        # A `bar3DChart`'s camera is applied, so its axis is divided by the count the
+        # *drawn* plot leaves room for; ``view3d-meter``'s ``m195-F`` and ``m195-G`` are
+        # these two charts and PowerPoint drew them 0..50 by 10 and 0..100 by 20.
+        ("bar3DChart", 10.0, 20.0),
+        # A `line3DChart` and an `area3DChart` keep the flat plot rectangle -- their
+        # scenes are measured and not modelled, see `three_d_camera` -- so they are
+        # divided by the count the frame leaves room for and come out finer than
+        # PowerPoint's own 0..50 by 10 and 0..60 by 20.  Recorded rather than asserted
+        # away: the extent is the thing this test is about and it is right on all three.
+        ("line3DChart", 5.0, 10.0),
+        ("area3DChart", 5.0, 10.0),
+    ],
+)
+def test_a_three_d_value_axis_is_not_padded(kind, unit, wide_unit):
     """The measured half of the 3-D axis: the extent stops at the data.
 
     ``view3d-meter`` draws 0..50 and 0..96 on seven frames and three group elements.
@@ -7370,13 +7385,18 @@ def test_a_three_d_value_axis_is_not_padded(kind):
     headroom produces -- and fed back through `nice_axis_scale` the padded rule has **no
     solution at any interval count** on 34 of the two decks' 52 3-D cells, where the bare
     rule solves all 52.  The two flat controls on the same deck are the other way round.
+
+    The **unit** is the other half, and it is the depth reservation rather than the range:
+    see :func:`~pptx2svg.resolve.chart.three_d_plot_rect`.
     """
     _, data = _build(three_d_chart_xml(kind, high=50.0), width=684.0, height=195.0)
-    assert data.value_axis == m.ChartAxisScale(minimum=0.0, maximum=50.0, major_unit=5.0)
+    assert data.value_axis == m.ChartAxisScale(
+        minimum=0.0, maximum=50.0, major_unit=unit
+    )
 
     _, wider = _build(three_d_chart_xml(kind, high=96.0), width=684.0, height=195.0)
     assert wider.value_axis == m.ChartAxisScale(
-        minimum=0.0, maximum=100.0, major_unit=10.0
+        minimum=0.0, maximum=100.0, major_unit=wide_unit
     )
 
 
@@ -7388,6 +7408,178 @@ def test_the_same_data_on_a_flat_chart_keeps_its_headroom():
     """
     _, data = _build(three_d_chart_xml("barChart", view=""), width=684.0, height=195.0)
     assert data.value_axis == m.ChartAxisScale(minimum=0.0, maximum=60.0, major_unit=10.0)
+
+
+#: ``view3d-view``'s own readings, in points: the value axis PowerPoint drew on a 684 by
+#: 195 pt frame, whose flat plot rectangle is 652.54 by 159.12 for a one-character tick
+#: label.  Each is the distance between the extreme tick labels' centres in
+#: ``view3d-view.pdf``, which lands on the 0.24 pt grid of the 300 dpi raster beside it.
+VIEW_3D_REGION = (652.54, 159.12)
+VIEW_3D_READINGS = [
+    ("default", dict(rot_x=15, rot_y=20, depth_percent=100), 127.68),
+    # `rotX=0` leaves no vertical depth at all, so the *width* binds instead and the
+    # scene shrinks from the other side.  This is the second branch.
+    ("rotX=0", dict(rot_x=0, rot_y=20, depth_percent=100), 147.60),
+    ("rotX=90", dict(rot_x=90, rot_y=20, depth_percent=100), 84.96),
+    ("rotX=-15", dict(rot_x=-15, rot_y=20, depth_percent=100), 127.44),
+    ("depth=20%", dict(rot_x=15, rot_y=20, depth_percent=20), 147.36),
+    ("depth=2000%", dict(rot_x=15, rot_y=20, depth_percent=2000), 30.24),
+    ("hPercent=50", dict(rot_x=15, rot_y=20, depth_percent=100, h_percent=50), 141.84),
+    ("hPercent=200", dict(rot_x=15, rot_y=20, depth_percent=100, h_percent=200), 154.32),
+    # A half turn of yaw puts the depth in front of the scene rather than behind it.
+    ("rotY=180", dict(rot_x=15, rot_y=180, depth_percent=100), 127.44),
+    ("rotY=90", dict(rot_x=15, rot_y=90, depth_percent=100), 127.68),
+]
+
+
+@pytest.mark.parametrize(
+    "name,view,drawn", VIEW_3D_READINGS, ids=[row[0] for row in VIEW_3D_READINGS]
+)
+def test_the_three_d_camera_reproduces_the_probe_decks(name, view, drawn):
+    """The fit, against the readings it was fitted to, one probe at a time.
+
+    The whole camera is two constants and a ``min``.  A tolerance of one point is three
+    times the raster's own 0.24 pt grid and a hundredth of the frame; the fit's residual
+    over all 107 readings is 0.26 pt rms.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import _Rect, three_d_plot_rect
+
+    width, height = VIEW_3D_REGION
+    region = _Rect(0.0, 0.0, width, height)
+    face = three_d_plot_rect(region, SourceChartView3D(right_angle_axes=True, **view))
+    assert face.height == pytest.approx(drawn, abs=1.0)
+    # The face is inside its region, and it is the region that shrank rather than moved.
+    assert region.left <= face.left and face.right <= region.right
+    assert region.top <= face.top and face.bottom <= region.bottom
+
+
+def test_an_empty_view_3d_still_reserves_the_margin():
+    """``<c:view3D/>`` is rotX 0, rotY 0, depth 100% -- and still 0.8% short of its region.
+
+    PowerPoint drew a 155.04 pt axis for it where the region is 159.12 pt tall.  That
+    residue is :data:`~pptx2svg.resolve.chart.VIEW_3D_SCENE_MARGIN`, and it is what says
+    the reservation is not only the depth.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import _Rect, three_d_plot_rect
+
+    width, height = VIEW_3D_REGION
+    face = three_d_plot_rect(_Rect(0.0, 0.0, width, height), SourceChartView3D())
+    assert face.height == pytest.approx(155.04, abs=1.0)
+    assert face.height < height
+
+
+def test_the_face_sits_at_the_corner_the_depth_leads_away_from():
+    """Which side the room is taken from, measured on the yaw and pitch sweeps.
+
+    ``rotY`` from 0 to 135 degrees all reserved at the top and 180, 270 and 340 all at the
+    bottom, so the vertical turn is at the half turn and not at ``cos(rotY)``'s quarter.
+    Sideways it is the sine: a yaw past 180 puts the depth to the left and the face to the
+    right of it.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D as View
+    from pptx2svg.resolve.chart import _Rect, three_d_plot_rect
+
+    region = _Rect(0.0, 0.0, *VIEW_3D_REGION)
+
+    def face(**view):
+        return three_d_plot_rect(region, View(right_angle_axes=True, **view))
+
+    up = face(rot_x=15, rot_y=20, depth_percent=100)
+    down = face(rot_x=-15, rot_y=20, depth_percent=100)
+    assert up.height == pytest.approx(down.height, abs=0.5)
+    assert up.top > down.top
+
+    half_turn = face(rot_x=15, rot_y=200, depth_percent=100)
+    assert half_turn.top < up.top
+
+    right = face(rot_x=15, rot_y=90, depth_percent=100)
+    left = face(rot_x=15, rot_y=270, depth_percent=100)
+    assert right.width == pytest.approx(left.width, abs=0.5)
+    assert right.left < left.left
+
+
+def test_the_camera_is_applied_only_where_it_is_measured():
+    """A ``line3DChart``, an ``area3DChart`` and a perspective scene keep the flat rect.
+
+    The gate is not caution for its own sake.  On one frame and one view a ``bar3DChart``
+    drew a 127.68 pt value axis where a ``line3DChart`` drew 88.56 and an ``area3DChart``
+    59.04, so one camera cannot serve all three; and ``rAngAx="0"`` -- which an absent
+    ``c:view3D`` selects, against ECMA-376's own default -- draws a perspective scene this
+    does not model at all.
+    """
+    from pptx2svg.parse.chart import SourceChartView3D
+    from pptx2svg.resolve.chart import three_d_camera
+
+    right_angled = SourceChartView3D(
+        rot_x=15, rot_y=20, depth_percent=100, right_angle_axes=True
+    )
+    assert three_d_camera(right_angled, "bar3DChart") is right_angled
+    assert three_d_camera(SourceChartView3D(), "bar3DChart") is not None
+    assert three_d_camera(right_angled, "line3DChart") is None
+    assert three_d_camera(right_angled, "area3DChart") is None
+    assert three_d_camera(right_angled, "barChart") is None
+    assert three_d_camera(None, "bar3DChart") is None
+    assert (
+        three_d_camera(
+            SourceChartView3D(
+                rot_x=15, rot_y=20, depth_percent=100, right_angle_axes=False
+            ),
+            "bar3DChart",
+        )
+        is None
+    )
+
+
+def test_a_three_d_bar_chart_draws_in_the_faces_rectangle():
+    """End to end: the drawn plot is displaced and shrunk, and the flat one is not.
+
+    ``view3d-meter``'s ``m195-B`` and ``flat195-F`` are these two charts on the same
+    frame.  PowerPoint drew the 3-D one's value axis 127.68 pt long against the flat
+    chart's 159.12, and put its bottom edge within a point of the flat chart's own.
+    """
+    flat_children, _ = _build(
+        three_d_chart_xml("barChart", view=""), width=684.0, height=195.0
+    )
+    children, _ = _build(three_d_chart_xml(), width=684.0, height=195.0)
+
+    def rect(drawn):
+        lines = [c for c in drawn if isinstance(c, m.ConnectorElement)]
+        down = max(lines, key=lambda line: line.transform.extent_height).transform
+        across = max(lines, key=lambda line: line.transform.extent_width).transform
+        return (
+            _pt(across.offset_x),
+            _pt(down.offset_y),
+            _pt(across.offset_x + across.extent_width),
+            _pt(down.offset_y + down.extent_height),
+        )
+
+    flat_left, flat_top, flat_right, flat_bottom = rect(flat_children)
+    left, top, right, bottom = rect(children)
+    assert (flat_bottom - flat_top) == pytest.approx(159.0, abs=1.0)
+    assert (bottom - top) == pytest.approx(127.7, abs=1.5)
+    # The face keeps the region's floor and gives up the room above it.
+    assert bottom == pytest.approx(flat_bottom, abs=3.0)
+    assert top > flat_top
+    assert left > flat_left and right < flat_right
+
+
+def test_the_three_d_warning_says_whether_the_camera_was_applied(chart_gallery):
+    """The warning is a claim about what was drawn, so it has to track the gate.
+
+    A chart whose plot rectangle is PowerPoint's and whose scene is missing has a
+    different defect from one drawn in a rectangle PowerPoint never used, and slide 13 and
+    slide 14 of the gallery are one of each.
+    """
+    options = ConvertOptions()
+    convert_pptx_to_model(chart_gallery, options)
+    flattened = [w for w in options.warnings if w.code == "chart-3d-flattened"]
+    assert len(flattened) == 4
+    placed = [w for w in flattened if "camera places and sizes" in w.message]
+    assert len(placed) == 1
+    assert "bar3DChart" in placed[0].message
+    assert all("is drawn flat" in w.message for w in flattened)
 
 
 def test_the_gallerys_three_d_axes_are_powerpoints_own(chart_gallery):

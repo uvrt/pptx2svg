@@ -167,7 +167,46 @@ VIEW_PROBES: list[dict] = [
     ],
 ]
 
-DECKS = {"view3d-meter": METER_PROBES, "view3d-view": VIEW_PROBES}
+#: The group element as a variable.  ``view3d-view`` swept ``c:view3D`` on a
+#: ``bar3DChart`` alone, and the three readings beside it on ``view3d-meter`` say the
+#: other 3-D group elements do *not* share its scene: on one frame and one view a
+#: ``bar3DChart`` drew a 127.68 pt axis where ``line3DChart`` drew 88.56 and
+#: ``area3DChart`` 59.04.  This repeats the sweep per element, and adds the series count,
+#: which is the depth's own row divisor and the obvious candidate for the difference.
+TYPE_CASES: list[tuple[str, dict | None, dict]] = [
+    ("base", DEFAULT_VIEW, {}),
+    ("d20", _view(depthPercent=20), {}),
+    ("d500", _view(depthPercent=500), {}),
+    ("rx0", _view(rotX=0), {}),
+    ("rx60", _view(rotX=60), {}),
+    ("ry0", _view(rotY=0), {}),
+    ("ry90", _view(rotY=90), {}),
+    ("h50", _view(hPercent=50), {}),
+    ("h200", _view(hPercent=200), {}),
+    ("s2", DEFAULT_VIEW, {"series": 2}),
+    ("s3", DEFAULT_VIEW, {"series": 3}),
+    ("f120", DEFAULT_VIEW, {"frame": (FRAME_WIDTH, 120 * 12700)}),
+    ("f330", DEFAULT_VIEW, {"frame": (FRAME_WIDTH, 330 * 12700)}),
+]
+
+TYPE_PROBES: list[dict] = [
+    {
+        "key": f"t-{kind}-{name}",
+        "high": 9.0,
+        "frame": VIEW_FRAME,
+        "kind": kind,
+        "view": view,
+        **extra,
+    }
+    for kind in ("bar3D", "line3D", "area3D")
+    for name, view, extra in TYPE_CASES
+]
+
+DECKS = {
+    "view3d-meter": METER_PROBES,
+    "view3d-view": VIEW_PROBES,
+    "view3d-type": TYPE_PROBES,
+}
 
 CATEGORIES = ("C1", "C2", "C3", "C4", "C5")
 #: The same shape every axis deck has used, so a value is never the maximum twice.
@@ -246,32 +285,41 @@ def axes_xml(kind: str) -> str:
     )
 
 
-def group_xml(kind: str, high: float) -> str:
-    """One ``c:*Chart`` group.  A 3-D group states three ``c:axId`` children, exactly."""
+def group_xml(kind: str, high: float, series: int = 1) -> str:
+    """One ``c:*Chart`` group.  A 3-D group states three ``c:axId`` children, exactly.
+
+    *series* is the number of ``c:ser`` children, which is what a 3-D chart lays out
+    along its **depth** -- one row per series -- and therefore the lever that separates
+    "the scene's depth is ``depthPercent`` of its width" from "it is that per row".
+    """
+    body = "".join(
+        series_xml(high, index, 1.0 if series == 1 else 0.6 - 0.15 * index)
+        for index in range(series)
+    )
     ids3 = "<c:axId val='100002'/><c:axId val='100003'/><c:axId val='100004'/>"
     ids2 = "<c:axId val='100002'/><c:axId val='100003'/>"
     if kind == "bar3D":
         return (
             "<c:bar3DChart><c:barDir val='col'/><c:grouping val='clustered'/>"
-            "<c:varyColors val='0'/>" + series_xml(high) + "<c:gapWidth val='150'/>"
+            "<c:varyColors val='0'/>" + body + "<c:gapWidth val='150'/>"
             "<c:gapDepth val='150'/><c:shape val='box'/>" + ids3 + "</c:bar3DChart>"
         )
     if kind == "col":
         return (
             "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/>"
-            "<c:varyColors val='0'/>" + series_xml(high) + "<c:gapWidth val='150'/>"
+            "<c:varyColors val='0'/>" + body + "<c:gapWidth val='150'/>"
             + ids2 + "</c:barChart>"
         )
     if kind == "line3D":
         return (
             "<c:line3DChart><c:grouping val='standard'/><c:varyColors val='0'/>"
-            + series_xml(high)
+            + body
             + "<c:gapDepth val='150'/>" + ids3 + "</c:line3DChart>"
         )
     if kind == "area3D":
         return (
             "<c:area3DChart><c:grouping val='standard'/><c:varyColors val='0'/>"
-            + series_xml(high)
+            + body
             + "<c:gapDepth val='150'/>" + ids3 + "</c:area3DChart>"
         )
     if kind == "area3Dstack":
@@ -297,7 +345,7 @@ def chart_part(probe: dict) -> bytes:
         + view_xml(probe["view"])
         + "<c:autoTitleDeleted val='1'/>"
         "<c:plotArea><c:layout/>"
-        + group_xml(kind, probe["high"])
+        + group_xml(kind, probe["high"], probe.get("series", 1))
         + axes_xml(kind)
         + "</c:plotArea>"
         "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"

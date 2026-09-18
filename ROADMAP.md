@@ -2807,7 +2807,7 @@ picture than PowerPoint's but not a wrong one.
   sweep that settled it is **3.5**; one rule gives all four, because the gap is a function
   of the entries and not of the chart.
 
-### 3.4 3-D chart fallbacks (M–L) — **the numbers are done, the scene is not**
+### 3.4 3-D chart fallbacks (M–L) — **the camera is done, the scene is not**
 
 `bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents —
 `parse/chart.flat_chart_kind` does this and `bar3DChart` therefore already draws flat.
@@ -2815,8 +2815,10 @@ picture than PowerPoint's but not a wrong one.
 
 Since then: `c:view3D` is read, the 3-D spelling survives the flattening, the value axis
 is the one PowerPoint draws, and every such chart warns `chart-3d-flattened` rather than
-passing a simplified picture off as a faithful one. The camera is measured and **not**
-built; what is left of it is at the end of this section.
+passing a simplified picture off as a faithful one. **The camera is now built as well**,
+for the one group element it is measured on — a `bar3DChart` with right-angle axes is laid
+out in its scene's own front face — and the scene itself is still missing. What is left of
+it is at the end of this section.
 
 **They have now been compared against real output**, on slides 13–16 of
 `chart-gallery.pptx`, and the flat fallback is a good deal further from PowerPoint than
@@ -2894,7 +2896,7 @@ a half-fitted camera, and it is a different argument from the one against drawin
 
 | slide | group | SSIM | hist | what PowerPoint drew instead |
 | --- | --- | --- | --- | --- |
-| 13 | `bar3DChart` | 0.5844 | 0.9760 | extruded boxes on a floor, the plot pushed right and up by the depth |
+| 13 | `bar3DChart` | 0.5828 → **0.5856** | 0.9760 → 0.9209 | extruded boxes on a floor, the plot pushed right and up by the depth — the plot rectangle is now PowerPoint's, the boxes are not |
 | 14 | `line3DChart` | **0.0723** | 0.9108 | ribbons in depth — the least recognisable of the four |
 | 15 | `pie3DChart` | 0.7612 | **0.1336** | an ellipse half the height of our circle, with a shaded extruded side; the shading is what takes the histogram to 0.13 |
 | 16 | `area3DChart` | 0.7340 → **0.7648** | 0.9931 → 0.9837 | a 3-D box, and a value axis of 0–50 by 5 where ours drew 0–60 by 10 |
@@ -2956,58 +2958,124 @@ category-label band, measured on the same deck's controls. So the count really i
 the frame less a depth reservation, exactly as this section claimed; what the reservation
 does to the *range* was the part that was wrong.
 
-The reservation itself is a camera, and it is not shipped:
+#### The camera, shipped — `three_d_plot_rect`
 
-* **`c:hPercent` is exactly the scene's height over its width.** 20, 50, 100 and 200 came
-  back as 0.1995, 0.4975, 0.991 and 1.965 of the drawn width. (500 came back as 4.0, not
-  5.0, on a 195 pt frame — unexplained, one reading.)
-* **Absent, PowerPoint computes one from the frame**, and that auto value is what makes
-  the plot height a function of the frame's aspect: it came out 0.0369, 0.0824, 0.1287,
-  0.1747, 0.2436, 0.3308 and 0.4547 over the seven frames. It is close to the available
-  plot area's own aspect and not equal to it — 0.2438 measured against 0.2456 at 195 pt —
-  and that 0.7% is unexplained.
-* **The scene is scaled isotropically and centred.** Seven `rotX` values from 0 to 90 hold
-  height/width at 0.2444 ± 0.001 while both shrink, so the box's proportions are fixed
-  before the camera and the fit only scales it.
-* **The vertical reservation is linear in `depthPercent`, with an offset.**
-  `D_y / W = 0.0068 + 0.0515 · depth` reproduces all seven depths from 20% to 2000% to
-  0.001 of the width, and transfers to a second frame. The offset is a reservation the
-  scene takes at zero depth and is not identified.
-* **It is not `sin(rotX)`.** `0.0515 / sin(15°)` is 0.199, and the same ratio is 0.2007
-  for rotX 30, 45, 60 and 90 but 0.193 at 15 and 0.178 at 5. The small-angle end is where
-  the *width* becomes the binding constraint instead of the height, which is a second
-  branch and is why those readings do not belong on the same curve.
-* **`rotY` does not touch the count.** Seven values from 0 to 340 drew the same
-  127.44–127.68 pt axis; it moves the scene sideways only. `rAngAx=1` ignores
-  `c:perspective` — stated as 120, the reading is identical to the chart with no
-  perspective at all — and with `rAngAx=0` that same 120 takes the axis from 94.08 to
-  61.68 pt.
-* **An absent `c:view3D` is not an empty one.** The same chart on the same frame drew a
-  94.08 pt axis with the element absent and a 155.04 pt axis with `<c:view3D/>` present.
-  The absent case is identical to 0.001 pt to `rotX=15 rotY=20 depthPercent=100 rAngAx=0`
-  — **ECMA-376 gives `rAngAx` a default of 1** and the picture PowerPoint draws is the one
-  a 0 draws. Both are recorded on `SourceChartView3D`; neither is applied.
+The reservation is a camera, and it turned out to be **two constants and a `min`**.
+`resolve/chart.three_d_plot_rect` takes the region and the view and returns the front
+face; `three_d_camera` is the gate that decides whether a chart gets one at all. A third
+probe deck, `view3d-type` (39 slides, added to `tools/make_view3d_probe.py`), sweeps the
+same view per group element and adds the series count, which is what settled where the
+gate has to sit.
 
-What that leaves for whoever finishes it: the auto `hPercent`, the width-binding branch,
-`rotY`'s horizontal projection, the perspective projection (`rAngAx=0`, which is what the
-element's *absence* selects), and a category-label band that is not constant — it ran
-25.63 to 30.91 pt across the view sweep where a flat chart's is 25.87. Five parameters and
-two branches, against 113 probe readings that already exist and two tools that take them.
-It is a session, not a line.
+The model, in full:
 
-**Not shipped on purpose.** A reservation fitted to within a few per cent predicts the
-count correctly almost everywhere and wrongly near a transition, and a wrong count is a
-wrong axis — the same class of defect this section exists to record. The range rule above
-is measured, decoupled from the count, and right at every frame; the count stays as wrong
-as it was, which is "too fine on a short frame", and is now wrong in one place instead of
-two.
+* **The region is the flat plot rectangle.** PowerPoint lays the scene out inside the
+  rectangle the same chart drawn flat would get. The `flat*` controls on `view3d-meter`
+  give that rectangle directly — a 195 pt frame's is inset 10.01 pt at the top, 25.87 at
+  the bottom, 10.587 at the right and 25.441 at the left for a two-character tick label.
+* **`c:hPercent` absent is the region's own aspect**, and **that closes the 0.7%**. The
+  measured 0.2438 and the "plot area's own aspect" 0.2456 differed because the earlier
+  estimate of the region was the part that was wrong: against the region above, the
+  seven auto readings come back to 0.6%. The three stated heights 50, 100 and 200 give
+  the same reservation to within 1% of it, which is what says `hPercent` is an input to
+  the scene's shape and not to the reservation.
+* **The depth projects to one constant.** `VIEW_3D_DEPTH_PROJECTION = 0.2040` of the
+  scene's width, per unit of `depthPercent`, per unit of the sine of the rotation — the
+  horizontal component reading `rotY` and the vertical one reading `rotX`, neither mixing
+  into the other. Fitted separately the two come out 0.2041 and 0.2083, and holding them
+  equal costs nothing (0.269 pt rms against 0.276). A **genuine yaw-then-pitch rotation**,
+  whose components do mix, misses the same readings by 3.0 pt rms, which is the direct
+  evidence that `rAngAx="1"` is an oblique projection and not a camera matrix.
+* **A fixed margin, `VIEW_3D_SCENE_MARGIN = 0.0077` of the width**, survives at zero depth
+  *and* zero rotation: `<c:view3D/>` with nothing in it draws a scene 0.8% of its width
+  shorter than its region. This is the "offset at zero depth" the old reading recorded as
+  unidentified. It is now identified as a quantity and still not as a *thing* — a floor
+  slab's thickness and a wall's edge are both the right size to be it.
+* **The box is scaled isotropically and centred, and the `min` is the second branch.**
+  `sin(rotX)` was never refuted; what refuted it was reading the width-bound probes on the
+  height-bound curve. With the fit written as `min(region.width / (1 + across),
+  region.height / (aspect + up))` the small-angle readings land on the same two constants
+  as the rest: `rotX=0` and `rotX=5` are width-bound and `rotX=15` upwards are
+  height-bound.
+* **The face sits at the corner the depth leads away from, and the yaw's half turn flips
+  it.** `rotY` 0, 20, 45, 90 and 135 all reserved at the top and 180, 270 and 340 all at
+  the bottom, so the vertical sign turns at 180 and not at `cos(rotY)`'s 90. Sideways it
+  is the sine, so a yaw past a half turn puts the depth left and the face right of it.
+
+**Residual: 0.26 pt rms and 0.86 pt worst**, over 107 readings — seven frames, seven
+depths from 20% to 2000%, nine pitches from −45 to 90 degrees, seven yaws and five stated
+heights. The face's drawn *position* follows to 0.98 pt rms. The probe grid is 0.24 pt,
+being the 300 dpi the scene beside it is rasterised at.
+
+Read back as the thing that matters — does our axis match PowerPoint's? —
+`tools/read_view3d_probe.py --check` over the three decks goes from **77 of 152 slides to
+117**, and of the 109 that are a `bar3DChart` with right-angle axes, **108 match exactly**.
+The one miss is `v-h20`, `hPercent=20` on a 195 pt frame, where the model puts the face
+1.0 pt tall of PowerPoint's 120.00 and that point crosses an interval boundary.
+
+#### Where the camera is deliberately *not* applied, and why
+
+`three_d_camera` returns `None` — keep the flat rectangle — in three cases.
+
+* **`line3DChart` and `area3DChart` do not share the `bar3DChart` scene.** On one frame
+  and one view a `bar3DChart` drew a 127.68 pt value axis where a `line3DChart` drew 88.56
+  and an `area3DChart` 59.04. What differs is *measured*: both share the same depth
+  projection constant — a `line3DChart`'s `rotX=0`/`rotX=15` pair gives 0.2071 against the
+  bar's 0.2040 — and what differs is the scene's **aspect**, which comes out `0.6 ×` the
+  region's for a one-series `line3DChart` and `0.4 ×` for a one-series `area3DChart`
+  against the bar's `1.0 ×`. What is *not* settled is how that factor moves with the
+  series count: two series read 0.6 and 0.8 on the two elements and three series read 0.8,
+  and a `line3DChart`'s depth grows by one unit per series (0.0562, 0.1082, 0.1612 of its
+  width for one, two and three) where a `bar3DChart`'s **shrinks** (1.009, 0.730, 0.573 of
+  its nominal depth, which is `2.5 / (1.5 + n)` to 3% and `1/√n` to 3%, and 39 slides
+  cannot separate those two).
+* **`rAngAx="0"`**, which draws a perspective scene: the face is no longer a rectangle, the
+  bottom inset runs 64 to 93 pt where a right-angled scene's is 26, and five readings are
+  not a projection.
+* **`c:view3D` absent altogether**, which selects that same perspective scene although
+  ECMA-376 defaults `rAngAx` to 1 — the absent probe is identical to 0.001 pt to
+  `rotX=15 rotY=20 depthPercent=100 rAngAx=0`.
+
+A reservation fitted to within a few per cent predicts the count correctly almost
+everywhere and wrongly near a transition, and a wrong count is a wrong axis. That is why
+the gate is where it is rather than "apply it to everything and see": three of the four
+gallery 3-D slides had the right axis before this change, and the two whose camera is not
+solved still do.
+
+#### What is still open
+
+* **What 0.2040 *is*.** The depth is drawn at a fifth of its nominal length and no ratio of
+  the scene's own proportions produces that fifth.
+* **The `line3DChart` / `area3DChart` aspect as a function of the series count**, above.
+  A `view3d-type` deck sweeping one to five series on each element at two frames would
+  settle it; it is the same shape of session as this one and about a third the size.
+* **The perspective branch** (`rAngAx="0"`, and therefore the absent element).
+* **`hPercent=500`** reads back as an effective 4.6, not 5 — one reading, and the only
+  place `hPercent` is not exactly the scene's aspect.
+* **The category-label band is not constant** across the view sweep: 25.63 to 30.91 pt
+  where a flat chart's is 25.87.
+* **Our own flat plot rectangle is 3.7 pt low on this deck.** PowerPoint's is inset
+  10.01 pt at the top and 25.87 at the bottom; ours is 13.78 and 22.18, which is the same
+  *height* to 0.08 pt and the wrong split. It predates this work and is why the drawn face
+  sits about three points below PowerPoint's on the probe decks even where its size is
+  right. `_top_inset`'s `max(11.0, 5.0 + lineHeight/2)` is the suspect.
 
 #### What the four still get wrong
 
-The scene: floor, back wall, depth, extrusion and shading. Every 3-D chart now emits one
+The scene: floor, back wall, depth, extrusion and shading. Every 3-D chart still emits one
 `chart-3d-flattened` warning naming its group element and saying what is missing, which is
 the difference between a silent wrong picture and a declared one — and a different code
-from `chart-unsupported-type`, which means nothing was drawn at all.
+from `chart-unsupported-type`, which means nothing was drawn at all. **The warning now says
+which of two defects it is**: a chart whose camera was applied says so, because its axis,
+gridlines and marks are where PowerPoint puts them and only the scene is absent, where a
+chart without one is drawn in a rectangle PowerPoint never used.
+
+On the gallery, slide 13's SSIM goes 0.5828 → 0.5856 and its pixels over 10% 15.12% →
+13.26% while its **histogram falls 0.9760 → 0.9209** — the harness's own documented mask
+effect plus a real one: our flat bars now sit in a rectangle two thirds the height, so
+there is less coloured ink than PowerPoint's extruded prisms have. Rendered side by side
+the axis, the gridlines and the category positions line up where before they did not.
+That colour is Stage 2's to win back.
 
 ### 3.5 The horizontal legend's inter-entry gap — **done**
 
