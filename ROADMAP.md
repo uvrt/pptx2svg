@@ -2496,7 +2496,7 @@ The per-slide numbers are the measurement; the mean is not.
 | 11 | `stockChart` | 0.0384 | 0.9608 | 0.045 | was 0.0499 and the picture is **right** now: the three wrong swatches are gone and the legend lays out on PowerPoint's own cell. Every other number improved — histogram 0.9593 to 0.9608, mean absolute error 5.53 to 5.02, pixels over 10% 4.81 to 4.40 — and the SSIM fell anyway. See below and 3.2b |
 | 12 | `surfaceChart` | 0.5313 | −0.0470 | 0.133 | deferred by design: our empty frame against a full 3-D surface and its banded legend. The negative histogram is two unrelated images, which is the honest number |
 | 13 | `bar3DChart` | 0.5844 | 0.9760 | 0.242 | see 3.4 |
-| 14 | `line3DChart` | 0.0723 | 0.9108 | 0.063 | see 3.4 |
+| 14 | `line3DChart` | 0.0689 → **0.1207** | 0.9292 → 0.8976 | 0.061 | its camera is applied now, and the histogram falls for the documented mask reason. See 3.4 |
 | 15 | `pie3DChart` | 0.7612 | 0.1336 | 0.241 | see 3.4 |
 | 16 | `area3DChart` | **0.7648** | 0.9837 | 0.286 | was 0.7340 / 0.9931: its axis is PowerPoint's 0–50 by 5 now rather than 0–60 by 10, which is more ink in the right places and slightly more black on a slide whose scene is a raster. See 3.4 |
 | 17 | combo | **0.7433** | 0.9994 | 0.232 | was 0.6120: both groups, the right-hand axis and the two-entry legend are drawn now. See 3.3 and 3.5 |
@@ -2807,7 +2807,7 @@ picture than PowerPoint's but not a wrong one.
   sweep that settled it is **3.5**; one rule gives all four, because the gap is a function
   of the entries and not of the chart.
 
-### 3.4 3-D chart fallbacks (M–L) — **the camera is done, the scene is not**
+### 3.4 3-D chart fallbacks (M–L) — **the camera and the scene's colour are done, the mesh is not**
 
 `bar3DChart`, `line3DChart`, `pie3DChart`, `area3DChart` parse as their 2-D equivalents —
 `parse/chart.flat_chart_kind` does this and `bar3DChart` therefore already draws flat.
@@ -2897,7 +2897,7 @@ a half-fitted camera, and it is a different argument from the one against drawin
 | slide | group | SSIM | hist | what PowerPoint drew instead |
 | --- | --- | --- | --- | --- |
 | 13 | `bar3DChart` | 0.5828 → **0.5882** | 0.9760 → 0.9404 | extruded boxes on a floor, the plot pushed right and up by the depth — the plot rectangle is now PowerPoint's, the boxes are not |
-| 14 | `line3DChart` | **0.0723** | 0.9108 | ribbons in depth — the least recognisable of the four |
+| 14 | `line3DChart` | 0.0689 → **0.1207** | 0.9292 → 0.8976 | ribbons in depth — the least recognisable of the four, and its plot rectangle is now PowerPoint's |
 | 15 | `pie3DChart` | 0.7612 | **0.1336** | an ellipse half the height of our circle, with a shaded extruded side; the shading is what takes the histogram to 0.13 |
 | 16 | `area3DChart` | 0.7340 → **0.7648** | 0.9931 → 0.9837 | a 3-D box, and a value axis of 0–50 by 5 where ours drew 0–60 by 10 |
 
@@ -3029,23 +3029,90 @@ Read back as the thing that matters — does our axis match PowerPoint's? —
 exactly**. The one miss is `v-h20`, `hPercent=20` on a 195 pt frame, where the model puts
 the face a point tall of PowerPoint's 120.00 and that point crosses an interval boundary.
 
-#### Where the camera is deliberately *not* applied, and why
+#### The scene per group element — read off the raster, not the axis
 
-`three_d_camera` returns `None` — keep the flat rectangle — in three cases.
+Two more decks, `view3d-shape` (67 slides) and `view3d-aspect` (52), settle what the last
+pass could not, and they do it with a **different instrument**. Slide 13's camera was
+already known to land on the image object's own corners to about two points, so *the
+raster's box is the scene's box* — which means every slide gives the scene's width and
+height directly, including for the one group element that draws no axis at all.
+`tools/read_view3d_probe.py --shapes` reads those boxes and `--colours` reads the ink.
 
-* **`line3DChart` and `area3DChart` do not share the `bar3DChart` scene.** On one frame
-  and one view a `bar3DChart` drew a 127.68 pt value axis where a `line3DChart` drew 88.56
-  and an `area3DChart` 59.04. What differs is *measured*: both share the same depth
-  projection constant — a `line3DChart`'s `rotX=0`/`rotX=15` pair gives 0.2071 against the
-  bar's 0.2040 — and what differs is the scene's **aspect**, which comes out `0.6 ×` the
-  region's for a one-series `line3DChart` and `0.4 ×` for a one-series `area3DChart`
-  against the bar's `1.0 ×`. What is *not* settled is how that factor moves with the
-  series count: two series read 0.6 and 0.8 on the two elements and three series read 0.8,
-  and a `line3DChart`'s depth *grows* by one unit per series (0.0562, 0.1082, 0.1612 of
-  its width for one, two and three) where a `bar3DChart`'s shrinks. The bar's law is now
-  measured — `(1 + gapDepth) / (series + 1.5)` — and the line's and the area's are not;
-  the same sweep on those two elements reads back through a scene whose aspect is not the
-  region's, which is the part that is missing.
+Fitted per group element and series count — the region, the scene's aspect and its depth,
+against eleven or four cameras each, two of them width-bound and two height-bound so the
+aspect and the depth separate:
+
+| group | aspect, as a multiple of the region's | depth | fit |
+| --- | --- | --- | --- |
+| `bar3DChart` | 0.991, 0.995, 0.995, 0.994 at one to four series — **the region's own**, which is the control that says the instrument reads what the tick labels read | 1.04, 0.75, 0.59, 0.49 — `(1 + gapDepth) / (series + 1.5)` | 0.14 pt rms |
+| `line3DChart` | **0.6, 0.6, 0.8, 0.8** | **1.03, 2.01, 3.01, 4.00** — one unit per series | 0.08 pt rms |
+| `area3DChart` | **0.4, 0.6, 0.6, 0.8** | 1.03, 2.01, 3.01, 4.00 | 0.14 pt rms |
+| `area3DChart` stacked, two series | 0.80 | 1.04 — one row, shared | 1.60 pt rms |
+| `pie3DChart` | no scene box at all — see below | — | — |
+
+**The depth column is a ratio and not an absolute**, and the `bar3DChart` row is what
+says so: its law is `(1 + gapDepth) / (series + 1.5)`, which is 1.0, 0.714, 0.556 and
+0.455, and the raster reads 3 to 7% over that at every count. The image object overshoots
+the scene it holds by a little — the gallery's was about two points wider than the camera's
+own corners — and that excess lands in the depth when the projection constant is held at
+the 0.2030 the tick labels measured. So what is read here is each group element *against
+the bar measured the same way*, which is exactly what this section needed and is why the
+bar is on the deck at all.
+
+So 3.4's two single readings of 0.6 and 0.4 were right, and the factor multiplies a
+*stated* `c:hPercent` too: `hPercent=200` on a `line3DChart` draws a scene of aspect 1.198
+where a `bar3DChart`'s is 2.0. The depth is the other half — a `line3DChart`'s **grows by
+one unit per series** where a `bar3DChart`'s shrinks, which this section recorded as a
+direction and now has as a law.
+
+`@silurus/ooxml` was read for the shape of this question and not for its numbers, and it
+corroborates the shape: it carries a `sceneDepthScale` of 0.10 for its Bar family against
+0.40 for line and area, and a `perspectiveTangentGain` of 1 against 2, which its own
+comments call a compatibility choice fitted to a local corpus. That each group element has
+its own scene geometry is therefore agreed on from two directions. Its split is two
+families where this measures three group elements, its factors are depth and not aspect,
+and none of its numbers is used here.
+
+**The aspect climbs a ladder and the ladder is not identified.** Eight readings, every one
+a fifth exactly: `0.4 + 0.2 · ceil(m / 2)` at `m = series` for a `line3DChart` and
+`series − 1` for an `area3DChart`. Nothing here says what that staircase *is*, and a
+linear reading of it makes a `line3DChart`'s scene taller than its region past six series,
+which is certainly wrong. So `VIEW_3D_SHAPE_MAX_SERIES` stops it at the four counts it was
+read at, and beyond them the chart keeps its flat rectangle exactly as before.
+
+**Read back as the thing that matters** — does our axis match PowerPoint's? — the three
+raster decks' 178 probes go from **109 drawn exactly as PowerPoint drew them to 170**.
+`line3DChart` goes 3/16 → 14/16 and `area3DChart` 1/16 → 14/16 on `view3d-aspect`, both go
+to 19/19 on `view3d-shape`, and on `view3d-meter` — the deck this section's axis rule was
+measured on — `type-line3D-F/G` and `type-area3D-F/G` all four land exactly, one of them
+with a drawn plot of 59.040 pt against our 59.049. **No probe that matched before stops
+matching**, and `bar3DChart` holds at 49/49, 13/13 and 16/16.
+
+One of those four is worth naming because it looks like a regression and is not: a
+one-series `area3DChart` with 0..50 of data is drawn by PowerPoint as **0..60 by 20**. Its
+scene is 0.4 of the region's aspect, so the axis has room for three intervals rather than
+five, and the bare rule rounds 50 outwards to whole units of 20. The extent exceeding the
+data is the rule working, not a headroom.
+
+#### Where the camera is still deliberately *not* applied, and why
+
+`three_d_camera` returns `None` — keep the flat rectangle — in these cases.
+
+* **A `pie3DChart`, because its rectangle is already PowerPoint's.** Its scene raster is
+  the plot region itself — 662.40 × 173.28 pt on a 195 pt frame — at *every* camera and
+  every frame, and only the ink inside it moves. `rotY` and `depthPercent` change nothing
+  at all: yaws of 20, 45, 90, 135, 180 and 270 degrees and depths of 20% and 500% all drew
+  the same 481.92 × 168.24 pt of ink, to the hundredth of a point. Only `rotX` and
+  `hPercent` move a pie, and they move it *inside* a rectangle that does not change. That
+  also refutes the reference renderer's pie for PowerPoint: `@silurus/ooxml` folds `rotY`
+  into the camera and rotates the whole solid with it.
+* **A stacked `area3DChart`**, which is gallery slide 16's own shape. It reads 0.8 rather
+  than the 0.6 its standard twin reads and one unit of depth rather than two — a stacked
+  group shares a row — but its four cameras do not fit one box to better than 1.6 pt where
+  every other group fits to 0.14. Its width is not the region's at every width-bound camera
+  the way the others' is, so the box being fitted is not the box being drawn. The shape is
+  *different* and not yet *known*.
+* **More series than the ladder was read at**, above.
 * **`rAngAx="0"`**, which draws a perspective scene: the face is no longer a rectangle, the
   bottom inset runs 64 to 93 pt where a right-angled scene's is 26, and five readings are
   not a projection.
@@ -3054,19 +3121,24 @@ the face a point tall of PowerPoint's 120.00 and that point crosses an interval 
   `rotX=15 rotY=20 depthPercent=100 rAngAx=0`.
 
 A reservation fitted to within a few per cent predicts the count correctly almost
-everywhere and wrongly near a transition, and a wrong count is a wrong axis. That is why
-the gate is where it is rather than "apply it to everything and see": three of the four
-gallery 3-D slides had the right axis before this change, and the two whose camera is not
-solved still do.
+everywhere and wrongly near a transition, and a wrong count is a wrong axis. That is still
+why the gate is where it is; what changed is that two of the three group elements it used
+to exclude are now measured rather than named, and the remaining exclusions are each a
+thing that was looked at and did not settle.
 
 #### What is still open
 
 * **What 0.2040 *is*.** The depth is drawn at a fifth of its nominal length and no ratio of
   the scene's own proportions produces that fifth.
-* **The `line3DChart` / `area3DChart` aspect**, above — a constant `0.6` and `0.4` of the
-  region's at one series, and not settled as the series are added. `view3d-series` sweeps
-  one to four on both elements and the readings are in the deck; what is missing is the
-  scene *shape* those readings have to be divided by, which a second frame would give.
+* **What the aspect ladder is.** `0.4 + 0.2 · ceil(m / 2)` reproduces all eight
+  `line3DChart` and `area3DChart` readings exactly and is a description, not a law. Two
+  probes would narrow it: five and six series on both elements, and the same counts on a
+  second frame.
+* **What `c:gapDepth` does to a `line3DChart` or an `area3DChart`.** Every probe of those
+  two was drawn at its default 150%, so the depth's `series` rows are measured and the
+  `(1 + gapDepth)` factor the bar's law carries is only assumed for them.
+* **The stacked `area3DChart`'s scene**, above — 0.8 and one shared row at two series, on a
+  fit three times looser than any other group's. Gallery slide 16 is this shape.
 * **Whether the `1.5` in the depth's divisor is `c:gapDepth`'s default or a constant of
   its own.** The gap sweep says the divisor does not move with `gapDepth`, so it is baked
   in either way, but the coincidence is worth one probe at a non-default gap and a high
@@ -3074,6 +3146,19 @@ solved still do.
 * **The perspective branch** (`rAngAx="0"`, and therefore the absent element).
 * **`hPercent=500`** reads back as an effective 4.6, not 5 — one reading, and the only
   place `hPercent` is not exactly the scene's aspect.
+* **The front face's lift**, in the colour sweep below: measured, bounded at eleven levels
+  of 255, zero over the whole ordinary camera, and not identified.
+* **Eight probes of the 178 still miss, and they are two things.** Four are the stacked
+  `area3DChart` above, which keeps its flat rectangle. The other four are one camera: at
+  `rotX=45` a three- or four-series `line3DChart` or `area3DChart` draws one interval
+  coarser than we do. That is the pitch where the scene is most compressed and the count
+  sits on a boundary, which is exactly the failure mode the gate exists for — it is now
+  four such slides rather than the sixty-nine misses the flat rectangle had.
+* **What a `pie3DChart` does with `rotX` and `hPercent`.** They are the only two inputs
+  that move it, and what they move is the ink inside a rectangle that does not change:
+  0, 15, 30 and 60 degrees of pitch drew ink 640.32, 481.92, 287.52 and 185.28 pt wide, all
+  about 168 tall. Its plot rectangle needs nothing, so this is the mesh's problem and not
+  the camera's.
 * **The category-label band is not constant** across the view sweep: 25.63 to 30.91 pt
   where a flat chart's is 25.87.
 * **Our own flat plot rectangle is 3.7 pt low on this deck.** PowerPoint's is inset
@@ -3101,6 +3186,8 @@ still flat. What that picture has to become was read off `chart-gallery.pdf`'s s
   exactly; the top face is **0.758×** it and the right face **0.632×**, per channel, and
   both multipliers are the same for both series — `#4472C5` gives `#345695` and `#2A487E`,
   `#ED7E30` gives `#B55E24` and `#97501E`. The faces meet with no stroke between them.
+  The camera sweep below refines both numbers, adds the two faces this camera does not
+  show, and settles what they *are*: constants.
 * **The bars stand at 0.3 to 0.7 of the depth.** Their bases are drawn 6.1 pt above the
   front face's own bottom edge on a scene whose depth rises 20.1 pt, which is 0.30; the
   visible right face is 10.5 pt wide against a 27.9 pt depth, which is 0.38 of it. One row
@@ -3112,19 +3199,85 @@ still flat. What that picture has to become was read off `chart-gallery.pdf`'s s
   back-right: a diagonal up the side wall along the depth vector, then a horizontal across
   the back wall. The category axis is the front bottom edge alone.
 
-**Two things stop this being built, and only one of them is work.** The first is that
-`line3DChart`, `area3DChart` and `pie3DChart` have no camera yet, so three of the four
-slides would still be flat and the fourth would be drawn — a split that is defensible but
-buys a quarter of the section. The second is the reason not to build even that quarter
-yet: **every colour above was read at one camera**, `rotX=15 rotY=20`. PowerPoint lights a
-3-D chart from a rig, and a rig's shading moves with the rotation; nothing here measures
-whether 0.758 and 0.632 are constants or the value of a cosine at fifteen degrees. The
-probe decks read text and cannot answer it — a colour probe would have to sample the
-raster at each view, which is a different reader from the one this section has.
+**Both of the things that stopped this being built have now been measured.** They were:
+that three of the four group elements had no camera, so three of the four slides would
+still be flat; and that **every colour above was read at one camera**, `rotX=15 rotY=20`,
+so nothing said whether 0.758 and 0.632 were constants or the value of a cosine at fifteen
+degrees. The scene per group element is the section above. The colour is the section
+below, and the answer is that they are constants.
 
-A wrong scene reads as a bug where an honest flat drawing with a warning does not, and a
-scene lit correctly at one angle and wrongly at every other is exactly that. So: the
-camera ships, the scene waits for a colour reader.
+#### The colour does not move with the camera, and that refutes the lighting model
+
+`view3d-colour` — 42 slides, a four-series `bar3DChart` on a 684 × 330 pt frame with its
+fills **stated** rather than themed — sweeps the camera and reads the prism faces off each
+slide's own raster. Twelve pitches from 0 to 90 degrees, fifteen yaws from 0 to 315,
+eight diagonals that take the pitch down to −45, two depths, two stated heights and one,
+two and four series.
+
+**Every face is the same byte wherever it is drawn at all.** A `4472C4` prism's top face
+is `#345695` and its right face `#2A487E` on every one of the forty-two slides that shows
+that face; the faces change *size* with the camera — a top face runs 5.9k pixels at five
+degrees of pitch and 42k at ninety — and never colour. A degenerate camera *hides* a face
+— there is no top at `rotX=0` and no side at `rotY=0` — and never recolours one. So the
+shading is fixed to the box and not to the camera.
+
+That is the measurement Stage 2 was waiting on, and it decides against the reference
+implementation's model. `@silurus/ooxml`'s `meshMaterialFactor` is
+`max(0.78, min(1, 0.78 + 0.24 · lambert))` against a hand-chosen light `(−0.20, 0.25, 1)`,
+and — this is the part that matters — it evaluates the dot product on the **camera-space**
+normal, rotating every vertex by the yaw and the pitch before taking the cross product. Its
+factors therefore *must* move with the rotation. PowerPoint's do not move at all. The
+*shape* of its rule survives and its numbers do not: one flat factor per face, multiplying
+the sRGB triple, no gradient and no per-pixel work — which is exactly what the raster
+shows.
+
+Four values, and a prism has no fifth:
+
+| face | factor | `4472C4` → | `ED7D31` → |
+| --- | --- | --- | --- |
+| front | 1.0 | `#4472C4` | `#ED7D31` |
+| top | **0.7587** | `#345695` | `#B55E24` |
+| right | **0.6364** | `#2A487E` | `#97501E` |
+| left *and* bottom | **0.3947** | `#1A2C4E` | `#5E3212` |
+
+`left` and `bottom` are **one** value and not two, which is the set's one
+over-determination: a prism yawed past a half turn shows its left face and one pitched from
+below shows its underside, and both come back the same hex. Which face a factor belongs to
+is decided by where the pixels are, not by the value — a top face's centroid sits above the
+front face's and a side face's beside it — so nothing here assumes the ordering it found.
+
+**The multiply is in sRGB, not in linear light.** The four fills are chosen for channel
+spread — `FF3300` carries a zero channel and a dark one, `103070` is dark throughout —
+because scaling the linear light and converting back is an *affine* map in sRGB,
+`k · c − 0.055 · (1 − k)`, whose offset is invisible on a bright channel and a tenth of a
+dark one. Fitted over twelve channels a face, a per-channel sRGB multiply lands within
+**1.3 levels** everywhere, which is the one level the export's own rounding moves a flat
+fill by; the linear scaling misses by up to **5.8**. `103070`'s top face is drawn `#0C2456`,
+and a linear scaling that gets its blue right puts its red at 10 where PowerPoint drew 12.
+That is the *opposite* answer from 3.2's chart accent cycle, which PowerPoint modulates in
+linear light — two colour spaces for two operations, which is a finding and not an
+inconsistency to resolve.
+
+Read as lighting, the four are `ambient + diffuse · max(0, n · light)` with an ambient of
+0.395, a diffuse of 0.747 and a light 22 degrees right of the viewer and 29 above — the left
+and bottom faces being the two the light misses, which is why they share the ambient
+exactly. That is three parameters against four faces with `left == bottom` its only check,
+so it is a *consistent reading* rather than a confirmed model. A curved extrusion — a
+`pie3DChart`'s rim, or `c:shape` of `cylinder` — would sweep the whole cosine and is the
+experiment that would settle it.
+
+**One residual, and it is small and unexplained.** The *front* face is lifted by a constant
+added to all three channels alike — not scaled: at `rotX=−45` a `103070` prism's front is
+`#1B3B7B`, eleven levels up on every channel, which no multiplier produces. It is zero to
+within half a level over the whole ordinary camera — every pitch from 10 to 90 degrees and
+every yaw from 10 to 150, which includes PowerPoint's own default 15/20 — and grows only as
+the scene degenerates: +1 at five degrees of either, +2 at zero pitch or at a yaw of 0 or
+180, +3 to +4 past a half turn, +6 at `rotX=−15`, +10 at `rotX=0 rotY=0` where no other
+face is drawn at all, and +11 at `rotX=−45`. It is not a white blend (that moves a dark
+channel more than a bright one, and this does not), not a gradient (the face is one flat
+colour over three hundred thousand pixels) and not compression (the rasters are
+`FlateDecode`, lossless). Recorded in `VIEW_3D_FRONT_LIFT_MAX`; a mesh can paint the front
+face as the fill.
 
 #### What the four still get wrong
 
@@ -3136,13 +3289,22 @@ which of two defects it is**: a chart whose camera was applied says so, because 
 gridlines and marks are where PowerPoint puts them and only the scene is absent, where a
 chart without one is drawn in a rectangle PowerPoint never used.
 
-On the gallery, slide 13 improves on three columns of four: SSIM 0.5828 → 0.5882, mean
-absolute error 16.91 → 13.48, pixels over 10% 15.12% → 10.26%, and the **histogram falls
+On the gallery, slide 13 improved on three columns of four: SSIM 0.5828 → 0.5882, mean
+absolute error 16.91 → 13.48, pixels over 10% 15.12% → 10.26%, and the **histogram fell
 0.9760 → 0.9404** — the harness's own documented mask effect plus a real one: our flat
 bars sit in a shorter rectangle than they did, so there is less coloured ink than
 PowerPoint's extruded prisms have. Rendered side by side the axis, the gridlines and the
 category positions line up where before they did not. That colour is Stage 2's to win
-back.
+back, and it now has the four numbers to win it back with.
+
+**Slide 14 does the same thing when its camera arrives**, and it is the only slide the
+per-type measurement moves: SSIM 0.0689 → 0.1207, mean absolute error 8.43 → 7.77, pixels
+over 10% 6.45% → 6.05%, histogram 0.9292 → 0.8976 for the same mask reason. Slides 13 and
+15 are untouched and slide 16 keeps its flat rectangle, its `pie3DChart` and stacked
+`area3DChart` being the two the gate still refuses. The deck goes 0.6928 → 0.6959 and
+0.8025 → 0.8007, and **no other deck in the corpus moves at all** — this changes the plot
+rectangle of one group element that only the gallery holds. Gallery 13, 14 and 16 still
+draw PowerPoint's own tick labels, read off both sides and compared string by string.
 
 **One residual worth naming, because it is not the camera's.** Slide 13's drawn face comes
 out 232.7 pt tall where PowerPoint's is 224.9. The probe decks have no title and no legend,

@@ -894,6 +894,82 @@ VIEW_3D_DEPTH_ROW_GAP = 1.5
 #: ``c:gapDepth``'s default, in percent.  ECMA-376 and the measurement agree.
 DEFAULT_GAP_DEPTH = 150.0
 
+#: What a prism's faces are painted, as a multiple of the series' own fill **per sRGB
+#: channel**.  Nothing draws these yet; they are what a 3-D mesh has to paint with.
+#:
+#: **They are constants, and that is the measurement.**  ROADMAP.md 3.4 read a top face at
+#: 0.758 and a right face at 0.632 off gallery slide 13 at one camera -- ``rotX=15
+#: rotY=20`` -- and could not say whether those were constants or a cosine evaluated at
+#: fifteen degrees.  ``view3d-colour`` sweeps the camera and reads the faces off each
+#: slide's own raster: **twelve pitches from 0 to 90 degrees, fifteen yaws from 0 to 315
+#: and eight diagonals down to -45 of pitch draw every face the same byte**.  PowerPoint
+#: draws a ``4472C4`` prism's top face ``#345695`` and its right face ``#2A487E`` on every
+#: one of the forty-two slides that shows that face -- a degenerate camera hides one, it
+#: never recolours it -- at every depth, every stated height and one, two and four series.
+#: The faces change size with the camera and never colour.  (The factors reproduce those
+#: hexes to a level rather than to the byte; one level is what the export's own rounding
+#: moves a flat fill by, and no single factor does better across all four fills.)
+#:
+#: So the shading is fixed to the *box* and not to the camera -- which refutes, for
+#: PowerPoint, the model the reference renderer `@silurus/ooxml` uses.  Its
+#: ``meshMaterialFactor`` is a clamped affine Lambert term against a hand-chosen light,
+#: evaluated on the **camera-space** normal, so its factors necessarily move with the
+#: rotation; PowerPoint's do not move at all.  Its *shape* -- one flat factor per face,
+#: multiplying the sRGB triple -- is right, and its numbers are not ours.
+#:
+#: **The multiply is in sRGB, not in linear light**, which is worth stating because this
+#: project has the opposite finding recorded next door: ROADMAP.md 3.2 measured
+#: PowerPoint's chart accent cycle modulating the **linear-light** value of each channel,
+#: and records that doing the same in HLS on sRGB -- which `resolve/color`'s ``lumMod``
+#: still does -- puts accent1's blue at 150 against the 173 PowerPoint drew.  Fitted over
+#: four fills chosen for spread -- ``4472C4``, ``ED7D31``,
+#: ``FF3300`` and ``103070``, twelve channels a face -- a per-channel sRGB multiply lands
+#: within **1.3 levels** on every channel of every face, which is the one level the
+#: export's own rounding moves a flat fill by; scaling the linear light and converting
+#: back misses by up to **5.8**, most of it on the dark channels a linear
+#: scaling's additive sRGB offset moves hardest.  Two different colour spaces for two
+#: different operations is the finding, not an inconsistency to resolve.
+#:
+#: The faces, and which is which, are told apart by where they are drawn rather than by
+#: their value: a top face's pixels sit above the front face's, a side face's beside them.
+#: ``left`` and ``bottom`` are **one** value and not two -- a prism yawed past a half turn
+#: shows its left face and one pitched from below shows its underside, and both come back
+#: ``#1A2C4E`` from ``#4472C4`` -- which is the one over-determination in the set.
+#:
+#: Read as lighting, the four values are ``ambient + diffuse * max(0, n . light)`` with an
+#: ambient of 0.395, a diffuse of 0.747 and a light at **22 degrees right of the viewer and
+#: 29 degrees above** -- the left and bottom faces being the ones the light misses, which
+#: is why they share the ambient exactly.  That reading is *consistent* rather than
+#: *confirmed*: three parameters against four faces, with ``left == bottom`` its only
+#: check.  A curved extrusion -- a ``pie3DChart``'s rim, or ``c:shape`` of ``cylinder`` --
+#: would sweep the whole cosine and is the experiment that would settle it.
+VIEW_3D_FACE_SHADES = {
+    "front": 1.0,
+    "top": 0.7587,
+    "right": 0.6364,
+    "left": 0.3947,
+    "bottom": 0.3947,
+}
+
+#: What the **front** face is lifted by, in 8-bit levels added to every channel alike.
+#:
+#: The one thing in the scene's colour that does move with the camera, and it is not a
+#: scaling: at ``rotX=15 rotY=20`` a ``103070`` prism's front face is ``#103070`` exactly,
+#: and at ``rotX=-45`` it is ``#1B3B7B`` -- eleven levels up on all three channels, which
+#: no multiplier produces.  It is zero to within the export's own half-level over the
+#: whole ordinary camera -- every pitch from 10 to 90 degrees and every yaw from 10 to 150
+#: -- and grows only as the scene degenerates: +1 at five degrees of either, +2 at zero
+#: pitch or at a yaw of 0 or 180, +3 to +4 at yaws past a half turn, +6 at ``rotX=-15``,
+#: +10 at ``rotX=0 rotY=0`` where no other face is drawn at all, and +11 at ``rotX=-45``.
+#:
+#: **What it is is not identified.**  It is not a white blend (that would move a dark
+#: channel more than a bright one, and it does not), it is not a gradient (the face is one
+#: flat colour over three hundred thousand pixels) and it is not compression (the rasters
+#: are ``FlateDecode``).  The face is the fill at every camera anyone would author, so a
+#: mesh can paint it as the fill; this is recorded because it is measured, not because it
+#: is needed.
+VIEW_3D_FRONT_LIFT_MAX = 11.0
+
 #: What a **radial** axis -- a radar's, running from the centre to the rim -- can hold
 #: beyond its whole line boxes, in ems of one.  Its count is
 #: ``floor(radius / line_box + this)``, clamped to 1..:data:`AXIS_MAX_INTERVALS`.
@@ -1906,29 +1982,107 @@ class _Rect:
         return self.bottom - self.top
 
 
+#: How many series a ``line3DChart``'s or ``area3DChart``'s scene shape is measured for.
+#:
+#: The aspect below climbs a ladder in the series count and the ladder's *law* is not
+#: identified, so beyond the counts it was read at the shape would be an extrapolation of
+#: a staircase -- and past six series a linear reading of it makes a ``line3DChart``'s
+#: scene taller than its region, which is certainly wrong.  Outside this range the chart
+#: keeps its flat rectangle, exactly as it did before the shape was measured at all.
+VIEW_3D_SHAPE_MAX_SERIES = 4
+
+
+def three_d_scene_shape(
+    kind: str, series: int = 1, grouping: str | None = None
+) -> "tuple[float, float | None] | None":
+    """How tall and how deep this group element's scene is, or ``None`` if unmeasured.
+
+    Returns ``(aspect, rows)``: the scene's height over its width **as a multiple of the
+    one a ``bar3DChart`` would get**, and how many units of ``depthPercent`` deep it is,
+    where ``None`` means the bar's own row-sharing law (:data:`VIEW_3D_DEPTH_ROW_GAP`).
+
+    **Measured on ``view3d-shape`` and ``view3d-aspect``**, which read the scene off the
+    raster instead of the axis: PowerPoint draws a 3-D chart's scene as one image object
+    and that object's box *is* the scene's box, to two points on the gallery.  So every
+    probe gives the box's width and height directly, and a camera sweep over one group
+    element solves the same projection the tick labels do -- a ``bar3DChart``'s eleven
+    cameras come back at 0.99 of the region's aspect and one unit of depth, which is the
+    control that says the instrument reads what the axis reads.
+
+    Against that control:
+
+    * **A ``line3DChart``'s scene is 0.6 of the region's aspect and an ``area3DChart``'s
+      0.4**, at one series -- confirming the two readings 3.4 recorded, now over eleven
+      cameras each and to 0.1 pt rms rather than one reading each.  The factor multiplies
+      a *stated* ``c:hPercent`` too: ``hPercent=200`` on a ``line3DChart`` drew a scene of
+      aspect 1.198 where the bar's is 2.0.
+    * **The depth is one unit per series**, where a ``bar3DChart``'s is
+      ``(1 + gapDepth) / (series + 1.5)`` of one: one to four series came back 1.03, 2.01,
+      3.01 and 4.00 units on the same frame.  That is 3.4's "the line's depth grows by one
+      per series" read exactly.
+    * **The aspect climbs a ladder in the series count** -- 0.6, 0.6, 0.8, 0.8 for a
+      ``line3DChart`` and 0.4, 0.6, 0.6, 0.8 for an ``area3DChart``, which is one ladder
+      ``0.4 + 0.2 * ceil(m / 2)`` read at ``m = series`` for the line and ``series - 1``
+      for the area.  Every one of those eight is a fifth exactly, fitted at 0.1 pt rms
+      over four cameras; **what the ladder is** is not identified, which is why
+      :data:`VIEW_3D_SHAPE_MAX_SERIES` stops it where it was read.
+    * **Stacked is not settled.**  A stacked two-series ``area3DChart`` -- gallery slide
+      16's own shape -- reads 0.8 rather than the 0.6 its standard twin reads, and one
+      unit of depth rather than two, which says a stacked group shares a row.  Its four
+      cameras do not fit one box to better than 1.6 pt where every other group fits to
+      0.14, so the shape is *different* and not yet *known*; it keeps the flat rectangle.
+    * **A ``pie3DChart`` has no scene box to measure.**  Its raster is the plot region
+      itself at every camera and every frame -- 662.40 x 173.28 pt on a 195 pt frame
+      whether the yaw is 0 or 270 -- and only the ink inside it moves.  ``rotY`` and
+      ``depthPercent`` change nothing at all: 20, 45, 90, 135, 180 and 270 degrees of yaw
+      and depths of 20% and 500% all drew the same 481.92 x 168.24 pt of ink to the
+      hundredth of a point.  So a pie's flat rectangle is already PowerPoint's, and there
+      is nothing here for a camera to correct.
+    """
+    if kind == "bar3DChart":
+        return 1.0, None
+    if kind not in ("line3DChart", "area3DChart"):
+        return None
+    if (grouping or "") in ("stacked", "percentStacked"):
+        return None
+    if not 1 <= series <= VIEW_3D_SHAPE_MAX_SERIES:
+        return None
+    steps = series if kind == "line3DChart" else series - 1
+    return 0.4 + 0.2 * math.ceil(steps / 2), float(series)
+
+
 def three_d_camera(
-    view: "c.SourceChartView3D | None", kind: str
+    view: "c.SourceChartView3D | None",
+    kind: str,
+    *,
+    series: int = 1,
+    grouping: str | None = None,
 ) -> "c.SourceChartView3D | None":
     """The ``c:view3D`` this chart's plot rectangle is laid out through, or ``None``.
 
     ``None`` means "keep the flat rectangle", and there are three ways to get it.
 
-    * The group element is not a ``bar3DChart``.  ``line3DChart`` and ``area3DChart`` do
-      **not** share its scene: on one frame and one view a ``bar3DChart`` drew a 127.68 pt
-      value axis where a ``line3DChart`` drew 88.56 and an ``area3DChart`` 59.04.  What
-      differs is measured -- their scenes are 0.6 and 0.4 as tall for the same width at one
-      series, and a ``line3DChart``'s depth *grows* with the series count where a
-      ``bar3DChart``'s shrinks (:data:`VIEW_3D_DEPTH_ROW_GAP`) -- but neither law is
-      pinned down, and a reservation fitted to within a few per cent is a wrong interval
-      count near every transition.  See ROADMAP.md 3.4.
+    * :func:`three_d_scene_shape` has nothing measured for this group element, this
+      grouping or this many series -- a ``pie3DChart``, whose plot rectangle is already
+      PowerPoint's; a stacked ``area3DChart``; more series than the shape was read at; or
+      a 2-D group element, which has no scene at all.
     * ``c:rAngAx="0"``, which draws a perspective scene this does not model.
     * ``c:view3D`` absent altogether, which **selects that same perspective scene**
       although ECMA-376 defaults the attribute to 1: the absent probe is identical to
       0.001 pt to ``rotX=15 rotY=20 depthPercent=100 rAngAx=0``.
+
+    A ``line3DChart`` and an ``area3DChart`` pass this gate now and did not before: their
+    scenes are not a ``bar3DChart``'s -- on one frame and one view a ``bar3DChart`` drew a
+    127.68 pt value axis where a ``line3DChart`` drew 88.56 and an ``area3DChart`` 59.04
+    -- but the difference is now measured rather than named.  Read back as the axis, the
+    two raster decks' 119 probes go from **56 drawn exactly as PowerPoint drew them to
+    113**, and no probe that matched before stops matching.
     """
     if view is None or view.right_angle_axes is False:
         return None
-    return view if kind == "bar3DChart" else None
+    if three_d_scene_shape(kind, series, grouping) is None:
+        return None
+    return view
 
 
 def three_d_plot_rect(
@@ -1937,6 +2091,8 @@ def three_d_plot_rect(
     *,
     series: int = 1,
     gap_depth: float | None = None,
+    kind: str = "bar3DChart",
+    grouping: str | None = None,
 ) -> _Rect:
     """Where a 3-D chart's **front face** lands inside the flat plot rectangle.
 
@@ -1958,6 +2114,13 @@ def three_d_plot_rect(
       region.width`` reproduces the seven auto readings to 0.6%.  That is what closes the
       "0.2438 measured against 0.2456" this section recorded as unexplained: the estimate
       of the region was the part that was wrong, not the rule.
+    * **The group element scales both.**  *kind* and *grouping* go to
+      :func:`three_d_scene_shape`, which multiplies that aspect -- by 0.6 for a
+      ``line3DChart`` at one series, by 0.4 for an ``area3DChart`` -- and says how the
+      depth divides: one row per series for those two where a ``bar3DChart`` shares one.
+      A combination that function has nothing measured for falls back to the bar's scene
+      here rather than refusing, because the refusing is :func:`three_d_camera`'s job and
+      it happens first: nothing in this module reaches this function without passing it.
     * ``rAngAx="1"`` keeps the face a true rectangle whatever the rotation -- seven
       pitches from 0 to 90 degrees held its height over its width at 0.2444 +- 0.001 while
       both shrank -- and the depth projects to a fixed offset,
@@ -1976,8 +2139,16 @@ def three_d_plot_rect(
     rot_y = math.radians(view.rot_y or 0.0)
     gap = (gap_depth if gap_depth is not None else DEFAULT_GAP_DEPTH) / 100.0
     depth = (view.depth_percent if view.depth_percent is not None else 100.0) / 100.0
-    depth *= (1.0 + max(gap, 0.0)) / (max(series, 1) + VIEW_3D_DEPTH_ROW_GAP)
-    aspect = (
+    scale, rows = three_d_scene_shape(kind, series, grouping) or (1.0, None)
+    if rows is None:
+        depth *= (1.0 + max(gap, 0.0)) / (max(series, 1) + VIEW_3D_DEPTH_ROW_GAP)
+    else:
+        # A ``line3DChart`` and an ``area3DChart`` stand one series per row of depth and
+        # the row count is the series count, where a ``bar3DChart`` divides one depth
+        # between them.  What ``c:gapDepth`` does to these two is *not* measured -- every
+        # probe was drawn at its default 150% -- so it is read here only through the bar.
+        depth *= rows
+    aspect = scale * (
         view.h_percent / 100.0
         if view.h_percent is not None
         else region.height / region.width
@@ -4389,7 +4560,12 @@ class ChartBuilder:
     @property
     def _three_d_view(self) -> "c.SourceChartView3D | None":
         """The camera this group's plot rectangle is laid out through, or ``None``."""
-        return three_d_camera(self.chart.view_3d, self.plot.kind)
+        return three_d_camera(
+            self.chart.view_3d,
+            self.plot.kind,
+            series=len(self.plot.series) or 1,
+            grouping=self.plot.grouping,
+        )
 
     def _three_d_region(self, scale: tuple[float, float, float]) -> _Rect:
         """The **flat** plot rectangle, which is the region the 3-D scene is fitted into.
@@ -4439,6 +4615,8 @@ class ChartBuilder:
             view,
             series=len(self.plot.series) or 1,
             gap_depth=self.plot.gap_depth,
+            kind=self.plot.kind,
+            grouping=self.plot.grouping,
         )
 
     def _axis_band_height(self, scale: "tuple[float, float, float] | None" = None) -> float:
