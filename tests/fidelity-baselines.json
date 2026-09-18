@@ -197,6 +197,141 @@
     ],
     "ssim": 0.7345
   },
+  "feature-sweep": {
+    "fonts": {
+      "available": [
+        "Aptos",
+        "Aptos Display"
+      ],
+      "conditional": [],
+      "hash": "ae15a1311a30",
+      "instead": [],
+      "missing": [],
+      "substituted": [],
+      "uncovered": ""
+    },
+    "histogram": 0.902,
+    "slides": [
+      {
+        "coverage": 0.1133,
+        "histogram": 0.9945,
+        "mean_abs": 1.02,
+        "over10": 2.067,
+        "over64": 0.664,
+        "sparse": false,
+        "ssim": 0.9511
+      },
+      {
+        "coverage": 0.1111,
+        "histogram": 0.9867,
+        "mean_abs": 1.088,
+        "over10": 2.685,
+        "over64": 0.502,
+        "sparse": false,
+        "ssim": 0.9514
+      },
+      {
+        "coverage": 0.1079,
+        "histogram": 0.99,
+        "mean_abs": 0.969,
+        "over10": 2.39,
+        "over64": 0.484,
+        "sparse": false,
+        "ssim": 0.9567
+      },
+      {
+        "coverage": 0.0245,
+        "histogram": 0.8738,
+        "mean_abs": 0.947,
+        "over10": 1.772,
+        "over64": 0.544,
+        "sparse": false,
+        "ssim": 0.811
+      },
+      {
+        "coverage": 0.0553,
+        "histogram": 0.9846,
+        "mean_abs": 3.145,
+        "over10": 3.303,
+        "over64": 1.731,
+        "sparse": false,
+        "ssim": 0.6877
+      },
+      {
+        "coverage": 0.2057,
+        "histogram": 0.9959,
+        "mean_abs": 0.811,
+        "over10": 1.681,
+        "over64": 0.409,
+        "sparse": false,
+        "ssim": 0.9711
+      },
+      {
+        "coverage": 0.0563,
+        "histogram": 0.9672,
+        "mean_abs": 2.442,
+        "over10": 3.004,
+        "over64": 1.647,
+        "sparse": false,
+        "ssim": 0.5111
+      },
+      {
+        "coverage": 0.0509,
+        "histogram": 0.7591,
+        "mean_abs": 2.698,
+        "over10": 3.653,
+        "over64": 1.936,
+        "sparse": false,
+        "ssim": 0.6275
+      },
+      {
+        "coverage": 0.1978,
+        "histogram": 0.6187,
+        "mean_abs": 4.819,
+        "over10": 18.708,
+        "over64": 1.997,
+        "sparse": false,
+        "ssim": 0.8931
+      },
+      {
+        "coverage": 0.2001,
+        "histogram": 0.9943,
+        "mean_abs": 15.089,
+        "over10": 11.604,
+        "over64": 9.948,
+        "sparse": false,
+        "ssim": 0.1857
+      },
+      {
+        "coverage": 0.0391,
+        "histogram": 0.7303,
+        "mean_abs": 2.077,
+        "over10": 2.479,
+        "over64": 0.969,
+        "sparse": false,
+        "ssim": 0.7068
+      },
+      {
+        "coverage": 0.1209,
+        "histogram": 0.9514,
+        "mean_abs": 3.246,
+        "over10": 4.323,
+        "over64": 2.306,
+        "sparse": false,
+        "ssim": 0.8782
+      },
+      {
+        "coverage": 0.2131,
+        "histogram": 0.8798,
+        "mean_abs": 19.335,
+        "over10": 19.585,
+        "over64": 13.606,
+        "sparse": false,
+        "ssim": 0.0563
+      }
+    ],
+    "ssim": 0.7067
+  },
   "real-basic-theme": {
     "fonts": {
       "available": [
