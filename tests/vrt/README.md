@@ -64,7 +64,7 @@ slide records what this library does today and nothing else:
 | `a:path@path` is read nowhere, so `circle`, `rect` and `shape` gradients all come out as the same radial | `slide-09.svg` |
 | `a:tile@flip` and `@algn` are dropped — an SVG `<pattern>` repeats one tile unchanged and cannot mirror alternate ones | `slide-10.svg` |
 | **The tile is about 8.3x too big.** `a:tile@sx` scales the picture's *native* size; we treat it as a fraction of the shape's bounding box. Measured against PowerPoint's export: 9.900 pt period in a 136.8 pt box, against our 82.08 pt | `slide-10.svg` |
-| `a:bodyPr@anchorCtr` appears nowhere in `src/`, so a text block is never centred as a block | `slide-11.svg` |
+| `a:bodyPr@anchorCtr` appears nowhere in `src/`, so a text block is never centred as a block. The corpus has 654 of them and every one is the `"0"` default, so this slide is the only place it is ever set | `slide-11.svg` |
 | `a:outerShdw@rotWithShape='0'` and `a:blur@grow` are both ignored: the shadow always turns with the shape, and the blur is always clipped at the picture's edge | `slide-12.svg` |
 | **`a:pattFill` tiles finer than PowerPoint does** — about twice the line frequency on `horz`, and `dkDnDiag` differs in appearance as well as density. This one is a *rendered* feature that no deck in the corpus exercised | `slide-13.svg` |
 

@@ -588,8 +588,12 @@ def slide_anchor_ctr() -> str:
     """PINNED, NOT FIXED.  ``a:bodyPr@anchorCtr`` -- centre the text block, not the lines.
 
     It centres the *bounding box of the lines* horizontally in the shape while leaving
-    each line's own alignment alone.  ``anchorCtr`` appears nowhere in ``src/``; 654
-    occurrences sit in the corpus doing nothing.
+    each line's own alignment alone.  ``anchorCtr`` appears nowhere in ``src/``.
+
+    The corpus carries 654 of them and **every one is ``anchorCtr="0"``**, the default --
+    so the gap costs the corpus nothing and a count of occurrences would have been a
+    misleading way to rank it.  This slide is the only place the attribute is ever set,
+    which is exactly why it had to be authored rather than found.
     """
     paragraphs = (
         f"<a:p><a:pPr algn='l'/>{run('short', 1600)}</a:p>"
