@@ -11,12 +11,15 @@ Break opportunities follow the two scripts PowerPoint decks actually mix:
 * **CJK** -- every character is its own break opportunity, because CJK text has no
   spaces.
 
-``WRAP_TOLERANCE_RATIO`` exists because the measurements are estimates -- a substitute
-font that measures ~1% wide, or a face whose ``kern`` feature we do not apply, would
-otherwise push the last word of a line that fits in PowerPoint onto a line of its own,
-and that error compounds down a text box.  **PowerPoint's own budget has no slack in it
-at all**; the constant is sized to our error rather than to its rule, and both halves of
-that sentence are measured.  See the constant.
+``WRAP_TOLERANCE_RATIO`` used to be an allowance for the ``kern`` feature we did not
+apply.  We apply it now -- see :mod:`pptx2svg.text.kerning` -- and the constant is a
+floating-point epsilon, which is what **PowerPoint's own budget has no slack in it at
+all** means once the measurement it was covering for is right.  See the constant.
+
+Kerning reaches the wrap through :func:`_join_kern` rather than through the token widths
+alone, and that is not an optimisation: a CJK paragraph gives every character its own
+token, so a kern pair almost always straddles a token boundary and measuring tokens
+separately would charge none of them.
 """
 
 from __future__ import annotations
@@ -36,24 +39,29 @@ DEFAULT_FONT_SIZE = 18.0
 #: ``k`` characters at ``delta = 0`` and ``k - 1`` at ``delta = -0.25 pt``.  The rule is
 #: ``sum of advances <= width - lIns - rIns - marL``, inclusive, to a quarter of a point.
 #:
-#: So this is not a model of PowerPoint.  It is an allowance for the error in *our*
-#: measurement, and the error it has to cover is now measured rather than guessed at:
-#: PowerPoint applies the face's OpenType ``kern`` feature to Japanese and we do not.
-#: Noto Sans JP kerns キス and ンプ by -30/1000 em and ト、 by -20/1000, so a line we
-#: measure is *wider* than the one PowerPoint lays out, by 0% to 0.684% over the fifteen
-#: lines of ``sample-cjk``.  Without slack we break those lines one character early.
+#: **So this is now an epsilon and nothing else**, which is the whole of what modelling
+#: ``kern`` bought here.  It was 0.02, then 0.005, and both were allowances for *our*
+#: measurement error rather than models of PowerPoint's rule: PowerPoint applies the
+#: face's OpenType ``kern`` feature and we did not, so every line we measured was wider
+#: than the one it laid out -- by 0% to 0.684% over ``sample-cjk``'s fifteen lines, and by
+#: 1.5% for a string of nothing but kerned pairs (キスキスキス), which is outside any
+#: window a single constant could sit in.  :mod:`pptx2svg.text.kerning` removed the error
+#: instead of budgeting for it.
 #:
-#: The corpus brackets the constant from both sides.  Slide 3's line needs at least
-#: 0.231% to keep its nineteenth character, which PowerPoint keeps; slide 2's twenty-first
-#: character overhangs by 0.813% and PowerPoint rejects it, so anything at or above that
-#: reproduces the defect this number was lowered to fix.  0.005 is the middle of the
-#: measured window.  The old 0.02 sat above the whole of it.
+#: What is left is arithmetic, not typography.  A line of ``k`` full-width glyphs is a sum
+#: of ``k`` floating-point advances and the box is one multiplication, and the two agree
+#: only to a few parts in 10^15; at exactly zero the probe's own case -- a box of
+#: ``k * size`` fitting ``k`` -- fails on the last bit of the mantissa.  ``1e-6`` of a
+#: line is 0.0004 px on a 400 px box, nine orders of magnitude inside the narrowest thing
+#: it could wrongly admit (a glyph is ~2.5% of a forty-character line), and five thousand
+#: times smaller than the constant it replaces.
 #:
-#: **No constant is right in general** and it is worth saying why rather than discovering
-#: it later: a string of nothing but kerned pairs -- キスキスキス -- loses 1.5% of its
-#: width to ``kern``, which is outside the window above.  Modelling ``kern`` is the fix;
-#: see ROADMAP.md.
-WRAP_TOLERANCE_RATIO = 0.005
+#: The one caller still measuring wide is an **embedded** face:
+#: :mod:`pptx2svg.fonts.embedded` builds its table from a cut-down sfnt reader that does
+#: not parse GPOS, so its ``FontMetrics.kerning`` is ``None``.  Widening this constant is
+#: not the fix for that -- the fix is a GPOS reader -- and no deck in the corpus embeds a
+#: face that kerns.
+WRAP_TOLERANCE_RATIO = 1e-6
 
 #: Characters a line may not *begin* with (行頭禁則), and which therefore pull their
 #: left-hand neighbour down with them when a break would land before one.
@@ -208,18 +216,107 @@ def _split_token_by_chars(
         char_width = measurer.measure_text_width(
             char, font_size, properties.bold, properties.font_family, properties.font_family_ea
         )
-        if current_width + char_width > available_width and current:
+        join = (
+            _kern_between(
+                measurer,
+                current[-1].text,
+                char,
+                font_size,
+                properties.bold,
+                properties.font_family,
+                properties.font_family_ea,
+            )
+            if current
+            else 0.0
+        )
+        if current_width + join + char_width > available_width and current:
             lines.append(current)
             current = []
             current_width = 0.0
+            join = 0.0
         current.append(
             _Token(text=char, properties=properties, width=char_width, breakable=False)
         )
-        current_width += char_width
+        current_width += join + char_width
 
     if current:
         lines.append(current)
     return lines
+
+
+def _join_kern(
+    previous: _Token | None,
+    token: _Token,
+    default_font_size: float,
+    font_scale: float,
+    measurer: TextMeasurer,
+) -> float:
+    """What the ``kern`` feature takes off the join between two adjacent tokens.
+
+    Tokens are measured one at a time, and for CJK *every character is its own token*, so
+    without this the Japanese kern pairs -- the ones that made this worth modelling --
+    would all fall between tokens and none would be charged.
+
+    The two tokens must come from the same run, tested by identity of their properties
+    exactly as :func:`_merge_segments` tests it.  That is not a shortcut: the width this
+    paragraph is finally *drawn* at is the sum of the merged segments' widths, so a join
+    charged here that `_merge_segments` will not merge would make the line the layout
+    fits and the line the renderer centres disagree.
+    """
+    if previous is None or previous.properties is not token.properties:
+        return 0.0
+    if not previous.text or not token.text:
+        return 0.0
+    properties = token.properties
+    font_size = properties.font_size * font_scale if properties.font_size else default_font_size
+    return _kern_between(
+        measurer,
+        previous.text,
+        token.text,
+        font_size,
+        properties.bold,
+        properties.font_family,
+        properties.font_family_ea,
+    )
+
+
+def _kern_between(
+    measurer: TextMeasurer,
+    left: str,
+    right: str,
+    font_size: float,
+    bold: bool,
+    font_family: str | None,
+    font_family_ea: str | None,
+) -> float:
+    """:meth:`TextMeasurer.kern_between`, or zero for a measurer that has no such method.
+
+    ``TextMeasurer`` is a structural protocol and a public one: a caller may pass its own
+    object, and one written before kerning was modelled answers widths perfectly well.
+    Such a measurer simply does not kern, which is what it did before and what its own
+    ``measure_text_width`` will keep doing -- the alternative is an ``AttributeError`` in
+    the middle of a wrap.
+    """
+    method = getattr(measurer, "kern_between", None)
+    if method is None:
+        return 0.0
+    return method(left, right, font_size, bold, font_family, font_family_ea)
+
+
+def _line_width(
+    tokens: list[_Token],
+    default_font_size: float,
+    font_scale: float,
+    measurer: TextMeasurer,
+) -> float:
+    """A token run's width, kerning across the joins included."""
+    total = 0.0
+    previous: _Token | None = None
+    for token in tokens:
+        total += _join_kern(previous, token, default_font_size, font_scale, measurer)
+        total += token.width
+        previous = token
+    return total
 
 
 def _merge_segments(tokens: list[_Token]) -> list[LineSegment]:
@@ -304,9 +401,14 @@ def _layout_tokens(
             current_width = 0.0
             continue
 
-        if current_width + token.width <= available_width + tolerance:
+        # The join is charged only while the token stays on this line; a token that goes
+        # down starts a line, and a line's first token kerns against nothing.
+        join = _join_kern(
+            current[-1] if current else None, token, default_font_size, font_scale, measurer
+        )
+        if current_width + join + token.width <= available_width + tolerance:
             current.append(token)
-            current_width += token.width
+            current_width += join + token.width
             continue
 
         if not current:
@@ -323,7 +425,9 @@ def _layout_tokens(
                         lines.append(WrappedLine(segments=segments))
                 else:
                     current = chunk
-                    current_width = sum(item.width for item in chunk)
+                    current_width = _line_width(
+                        chunk, default_font_size, font_scale, measurer
+                    )
             continue
 
         # The line is full. Whether we may break here or not, the token moves down --
@@ -339,7 +443,7 @@ def _layout_tokens(
             current = carried
         else:
             current = carried + [token]
-        current_width = sum(item.width for item in current)
+        current_width = _line_width(current, default_font_size, font_scale, measurer)
 
     if current:
         segments = _trim_trailing_spaces(_merge_segments(current))

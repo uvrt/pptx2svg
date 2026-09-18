@@ -264,3 +264,67 @@ def test_baselines_file_is_readable_and_carries_font_provenance():
             continue
         assert "ssim" in entry, name
         assert "histogram" in entry, name
+
+
+def test_the_metric_clones_carry_the_originals_kern_pairs():
+    """"Metric-compatible" turns out to cover the pair table too, and that is measured.
+
+    The whole ``text/`` subsystem rests on measuring a Calibri deck with Carlito, and
+    kerning was the one part of that claim nobody had checked -- a clone is free to kern
+    however it likes.  Over the ~570 characters the metric tables store, **exactly one
+    pair out of 9,409 disagrees by as much as 0.5/1000 em**: Calibri kerns ``",`` by
+    -78/1000 em and Carlito does not.  Arimo matches Arial and Tinos matches Times New
+    Roman pair for pair, and Cousine and Courier New both kern nothing at all.
+
+    Two characters are excluded and it is worth saying which: the soft hyphen (U+00AD) and
+    the no-break space (U+00A0), where the originals carry pairs the clones do not.  A
+    soft hyphen is never laid out as ink; a no-break space is, and its pairs are the one
+    known residue -- at most 55/1000 em on a single join against Arial.
+
+    Local only: it reads the licensed originals in place through the same profile the
+    fidelity harness uses, and nothing from them is copied anywhere.
+    """
+    pytest.importorskip("fontTools", reason="fontTools is not installed")
+    profile = _profile()
+    sys.path.insert(0, str(ROOT / "tools"))
+    import extract_font_metrics as extractor
+    from pptx2svg.fonts import bundle_dir
+
+    bundle = bundle_dir()
+    if bundle is None:
+        pytest.skip("pptx2svg-fonts is not importable")
+    characters = extractor.SAMPLE + extractor.CJK_SAMPLE
+    ignorable = {"\u00ad", "\u00a0"}  # soft hyphen, no-break space: never laid out as ink
+
+    for clone, original, filename in (
+        ("Carlito", "Calibri", "Carlito-Regular.ttf"),
+        ("Arimo", "Arial", "Arimo[wght].ttf"),
+        ("Tinos", "Times New Roman", "Tinos-Regular.ttf"),
+        ("Cousine", "Courier New", "Cousine-Regular.ttf"),
+    ):
+        styles = profile["faces"].get(original)
+        if not styles or "regular" not in styles:
+            continue
+        office_path = Path(styles["regular"]["path"])
+        clone_font = extractor._open(bundle / filename, None, 0)
+        office_font = extractor._open(
+            office_path, None, extractor.collection_index(office_path, original)
+        )
+
+        def per_mille(font):
+            pairs = extractor.effective_kern(font, characters)
+            pairs = pairs or extractor.legacy_kern(font, characters)
+            upm = font["head"].unitsPerEm
+            return {key: value * 1000 / upm for key, value in pairs.items()}
+
+        ours, theirs = per_mille(clone_font), per_mille(office_font)
+        shared = (set(ours) | set(theirs)) - {
+            key for key in set(ours) | set(theirs) if ignorable & set(key)
+        }
+        disagree = {
+            key: (ours.get(key, 0.0), theirs.get(key, 0.0))
+            for key in shared
+            if abs(ours.get(key, 0.0) - theirs.get(key, 0.0)) >= 0.5
+        }
+        disagree.pop(('"', ","), None)  # the one known divergence; see the docstring
+        assert not disagree, f"{clone} vs {original}: {list(disagree.items())[:5]}"

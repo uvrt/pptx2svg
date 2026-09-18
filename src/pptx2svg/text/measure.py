@@ -5,6 +5,11 @@ deck lays out identically on every machine.  When a character has no entry -- an
 font we have no table for at all -- it falls back to a per-category width ratio, which is
 crude but keeps wrapping sane for exotic fonts.
 
+A string is the sum of its advances **and the face's ``kern`` pairs across the joins**,
+which PowerPoint charges and this used not to; see :mod:`pptx2svg.text.kerning`.  The one
+caller that must not is the chart engine, which lays its text out unkerned and draws it
+kerned -- measured, and recorded on :func:`pptx2svg.resolve.chart.text_width`.
+
 :class:`FontToolsTextMeasurer` is the opt-in alternative: point it at real font files and
 it reads their true advance widths with fontTools.  Use it when fidelity to a specific
 machine's fonts matters more than reproducibility.
@@ -96,7 +101,26 @@ class TextMeasurer(Protocol):
         font_family: str | None = None,
         font_family_ea: str | None = None,
     ) -> float:
-        """Width in CSS pixels."""
+        """Width in CSS pixels, with the face's ``kern`` feature applied."""
+
+    def kern_between(
+        self,
+        left: str,
+        right: str,
+        font_size_pt: float,
+        bold: bool = False,
+        font_family: str | None = None,
+        font_family_ea: str | None = None,
+    ) -> float:
+        """The ``kern`` adjustment across the join of two adjacent strings, in pixels.
+
+        Usually negative, and zero for every pair that does not kern.  It exists because
+        the caller that most needs kerning measures the string in pieces:
+        :mod:`pptx2svg.text.wrap` gives every CJK character its own token, so measuring
+        each token on its own would drop *every* Japanese kern pair -- the ones this was
+        written for.  ``left`` and ``right`` are whole strings and only the join between
+        them is charged, so a caller can add it as it appends.
+        """
 
     def line_height_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
@@ -154,11 +178,19 @@ class DefaultTextMeasurer:
             EAST_ASIAN_SYNTHETIC_BOLD_PT * PX_PER_PT if bold else 0.0
         )
         total = 0.0
+        #: The character before this one and the table it was measured from, for the
+        #: kern pair between them.  A pair whose two halves come from *different* tables
+        #: gets no adjustment: kerning is a property of one face, and a shaper breaks the
+        #: run at the font boundary the same way.
+        previous: tuple[str, FontMetrics | None] = ("", None)
 
         for char in text:
             code_point = ord(char)
             east_asian = is_cjk(code_point)
             metrics = ea_metrics if east_asian and ea_metrics else latin_metrics
+            if metrics is not None and metrics is previous[1]:
+                total += _kern_px(previous[0], char, base_size_px, metrics, bold)
+            previous = (char, metrics)
             if metrics is None:
                 width = base_size_px * _heuristic_ratio(char, code_point)
                 if bold and not east_asian:
@@ -181,6 +213,29 @@ class DefaultTextMeasurer:
                     width += synthetic_bold_px
             total += width
         return total
+
+    def kern_between(
+        self,
+        left: str,
+        right: str,
+        font_size_pt: float,
+        bold: bool = False,
+        font_family: str | None = None,
+        font_family_ea: str | None = None,
+    ) -> float:
+        if not left or not right:
+            return 0.0
+        first, second = left[-1], right[0]
+        latin_metrics = self._metrics(font_family)
+        ea_metrics = self._metrics(font_family_ea)
+
+        def table(char: str) -> FontMetrics | None:
+            return ea_metrics if is_cjk(ord(char)) and ea_metrics else latin_metrics
+
+        metrics = table(first)
+        if metrics is None or metrics is not table(second):
+            return 0.0
+        return _kern_px(first, second, font_size_pt * PX_PER_PT, metrics, bold)
 
     def line_height_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
@@ -215,6 +270,27 @@ def _first_baseline_ratio(descender_ratio: float) -> float:
     rule there is something else and is left alone rather than guessed at.
     """
     return max(0.0, DEFAULT_LINE_HEIGHT_RATIO - descender_ratio)
+
+
+def _kern_px(
+    first: str, second: str, base_size_px: float, metrics: FontMetrics, bold: bool
+) -> float:
+    """What the ``kern`` feature takes off the join between two characters, in pixels.
+
+    Zero for a face with no kern table, which is how it stays free for the eighteen
+    monospaced and full-width faces and for every embedded one.
+
+    The bold question is settled the same way the advance widths settle it: the bold
+    pairs are used exactly when the bold *widths* are, so a face whose bold cut we do not
+    have is kerned with its upright pairs rather than not kerned at all.
+    """
+    table = metrics.kerning
+    if table is None:
+        return 0.0
+    units = table.adjustment(first, second, bold and bool(metrics.bold_widths))
+    if not units:
+        return 0.0
+    return (units / metrics.units_per_em) * base_size_px
 
 
 def _measure_with_metrics(
@@ -254,6 +330,7 @@ class FontToolsTextMeasurer:
         self._font_paths = font_paths
         self._fallback = fallback or DefaultTextMeasurer()
         self._cache: dict[str, object] = {}
+        self._kern_cache: dict[int, dict[str, int]] = {}
 
     def _face(self, font_family: str | None):
         if not font_family:
@@ -290,8 +367,12 @@ class FontToolsTextMeasurer:
 
         base_size_px = font_size_pt * PX_PER_PT
         total = 0.0
+        previous: tuple[str, object] = ("", None)
         for char in text:
             font = east_asian if is_cjk(ord(char)) and east_asian is not None else latin
+            if font is not None and font is previous[1]:
+                total += self._kern_px(font, previous[0], char, base_size_px)
+            previous = (char, font)
             advance = _advance_width(font, char)
             if advance is None:
                 total += self._fallback.measure_text_width(
@@ -301,6 +382,57 @@ class FontToolsTextMeasurer:
             units_per_em = font["head"].unitsPerEm  # type: ignore[index]
             total += (advance / units_per_em) * base_size_px
         return total
+
+    def kern_between(
+        self,
+        left: str,
+        right: str,
+        font_size_pt: float,
+        bold: bool = False,
+        font_family: str | None = None,
+        font_family_ea: str | None = None,
+    ) -> float:
+        if not left or not right:
+            return 0.0
+        first, second = left[-1], right[0]
+        latin = self._face(font_family)
+        east_asian = self._face(font_family_ea)
+        if latin is None and east_asian is None:
+            return self._fallback.kern_between(
+                left, right, font_size_pt, bold, font_family, font_family_ea
+            )
+
+        def face(char: str):
+            return east_asian if is_cjk(ord(char)) and east_asian is not None else latin
+
+        font = face(first)
+        if font is None or font is not face(second):
+            return 0.0
+        return self._kern_px(font, first, second, font_size_pt * PX_PER_PT)
+
+    def _kern_px(self, font, first: str, second: str, base_size_px: float) -> float:
+        """The real file's ``kern`` adjustment for one pair, in pixels.
+
+        Read straight out of GPOS, with the legacy ``kern`` table as the fallback for a
+        face that has one and no feature -- the same two sources
+        ``tools/extract_font_metrics.py`` bakes the static tables from, so this measurer
+        and the default one answer alike for a face that appears in both.
+
+        Cached per pair rather than expanded up front: a face carries thousands of pairs
+        and a deck asks about a few hundred.
+        """
+        pairs = self._kern_cache.get(id(font))
+        if pairs is None:
+            pairs = {}
+            self._kern_cache[id(font)] = pairs
+        key = first + second
+        units = pairs.get(key)
+        if units is None:
+            units = _font_kern_units(font, first, second)
+            pairs[key] = units
+        if not units:
+            return 0.0
+        return (units / font["head"].unitsPerEm) * base_size_px
 
     def line_height_ratio(
         self, font_family: str | None = None, font_family_ea: str | None = None
@@ -317,6 +449,90 @@ class FontToolsTextMeasurer:
         hhea = font["hhea"]  # type: ignore[index]
         units_per_em = font["head"].unitsPerEm  # type: ignore[index]
         return _first_baseline_ratio(abs(hhea.descender) / units_per_em)
+
+
+def _font_kern_units(font, first: str, second: str) -> int:
+    """One pair's ``kern`` adjustment, in the file's own units.
+
+    Mirrors ``tools/extract_font_metrics.py``: within one lookup the first subtable that
+    *covers* the pair wins and the rest of that lookup is skipped, while separate lookups
+    each get a pass and their adjustments add.  A face with no GPOS ``kern`` feature but
+    a legacy ``kern`` table falls back to that.
+    """
+    try:
+        cmap = font.getBestCmap()
+        left = cmap.get(ord(first))
+        right = cmap.get(ord(second))
+        if left is None or right is None:
+            return 0
+        total = 0
+        covered = False
+        for lookup in _gpos_kern_lookups(font):
+            for subtable in lookup:
+                value = _pair_adjustment(subtable, left, right)
+                if value is not None:
+                    total += value
+                    covered = True
+                    break
+        if covered:
+            return total
+        if "kern" not in font:
+            return 0
+        for subtable in font["kern"].kernTables:
+            total += subtable.kernTable.get((left, right), 0)
+        return total
+    except Exception:  # a font whose tables will not parse simply does not kern
+        return 0
+
+
+def _gpos_kern_lookups(font) -> list[list]:
+    """The ``kern`` feature's pair-adjustment subtables, grouped by lookup."""
+    if "GPOS" not in font:
+        return []
+    gpos = font["GPOS"].table
+    if gpos is None or gpos.FeatureList is None:
+        return []
+    wanted: set[int] = set()
+    for record in gpos.FeatureList.FeatureRecord:
+        if record.FeatureTag == "kern":
+            wanted.update(record.Feature.LookupListIndex)
+    groups: list[list] = []
+    for index in sorted(wanted):
+        lookup = gpos.LookupList.Lookup[index]
+        group = []
+        for subtable in lookup.SubTable:
+            if lookup.LookupType == 9:  # extension positioning
+                subtable = subtable.ExtSubTable
+                kind = subtable.LookupType
+            else:
+                kind = lookup.LookupType
+            if kind == 2:
+                group.append(subtable)
+        if group:
+            groups.append(group)
+    return groups
+
+
+def _pair_adjustment(subtable, left: str, right: str) -> int | None:
+    """``None`` when the subtable does not cover the pair, which is not the same as 0."""
+    coverage = subtable.Coverage.glyphs
+    if subtable.Format == 1:
+        try:
+            index = coverage.index(left)
+        except ValueError:
+            return None
+        for record in subtable.PairSet[index].PairValueRecord:
+            if record.SecondGlyph == right:
+                return getattr(record.Value1, "XAdvance", 0) or 0
+        return None
+    if left not in coverage:
+        return None
+    first = subtable.ClassDef1.classDefs.get(left, 0)
+    second = subtable.ClassDef2.classDefs.get(right, 0)
+    if first >= subtable.Class1Count or second >= subtable.Class2Count:
+        return None
+    value = subtable.Class1Record[first].Class2Record[second].Value1
+    return getattr(value, "XAdvance", 0) or 0
 
 
 def _advance_width(font, char: str) -> float | None:

@@ -909,3 +909,132 @@ def test_the_east_asian_face_is_reported_only_when_east_asian_text_is_drawn():
 
     with_japanese = resolved_families(deck("Modern プラットフォーム"))
     assert "ＭＳ Ｐゴシック" in with_japanese
+
+
+# --------------------------------------------------------------------------------------
+# Kerning
+# --------------------------------------------------------------------------------------
+
+def test_the_kern_pairs_are_the_ones_the_font_file_carries():
+    """The three Noto Sans JP pairs the defect was first measured on.
+
+    Read out of the shipped file's GPOS table and confirmed against the pen origins in
+    PowerPoint's own export of ``sample-cjk.pptx``; they are quoted in ROADMAP.md and in
+    ``text/kerning.py``, so a table that lost them would leave three documents describing
+    a fourth thing.
+    """
+    table = METRICS["Noto Sans JP"].kerning
+    assert table is not None
+    assert table.adjustment("キ", "ス") == -30
+    assert table.adjustment("ン", "プ") == -30
+    assert table.adjustment("ト", "、") == -20
+    # No face in this table kerns an ideograph; cjk_width remains their whole story.
+    assert table.adjustment("東", "京") == 0
+
+
+def test_a_string_of_nothing_but_kern_pairs_loses_one_and_a_half_percent():
+    """The number ROADMAP.md named as outside any constant tolerance's reach.
+
+    キスキスキス is six full-width glyphs, so six ems, and three of
+    its five joins kern by -30/1000 em.  That is 1.5% -- three times the widest slack
+    ``WRAP_TOLERANCE_RATIO`` ever usefully carried, which is why the feature had to be
+    modelled rather than budgeted for.
+    """
+    measurer = DefaultTextMeasurer()
+    text = "キス" * 3
+    width = measurer.measure_text_width(text, 32.0, font_family_ea="Noto Sans JP")
+    unkerned = 6 * 32.0 * PX_PER_PT
+    assert width / unkerned == pytest.approx(1 - 0.015, abs=1e-6)
+
+
+def test_a_pair_that_straddles_the_script_split_is_not_kerned():
+    """Kerning is one face's property, and a shaper breaks the run at the font boundary.
+
+    The Latin and East Asian halves of a mixed run are measured from *different* tables --
+    that is what ``font_family_ea`` is for -- so a join between them has no pair to look
+    up, however adjacent the two characters are on the line.
+    """
+    measurer = DefaultTextMeasurer()
+    assert measurer.kern_between("A", "ス", 32.0, False, "Arial", "Noto Sans JP") == 0.0
+    assert measurer.kern_between("キ", "A", 32.0, False, "Arial", "Noto Sans JP") == 0.0
+    # ...while the same two faces kern happily within themselves.
+    assert measurer.kern_between("キ", "ス", 32.0, False, "Arial", "Noto Sans JP") < 0.0
+    assert measurer.kern_between("A", "V", 32.0, False, "Arial", "Noto Sans JP") < 0.0
+
+
+def test_a_face_that_does_not_kern_carries_no_table_at_all():
+    """Monospace and full-width designs do not kern, and that is a fact about them.
+
+    Storing an empty table for the fourteen would say the generator looked and found
+    nothing; ``None`` says the same thing in the field the measurer already tests.
+    """
+    for family in ("Courier New", "ＭＳ ゴシック", "SimSun",
+                   "Lucida Console"):
+        assert metrics_for(family).kerning is None, family
+    for family in ("Calibri", "Arial", "Cambria", "Aptos", "Noto Sans JP"):
+        assert metrics_for(family).kerning is not None, family
+
+
+def test_the_bold_cut_has_its_own_kern_pairs():
+    """Bold kerning follows bold widths: a different cut is a different design.
+
+    Not a scaled copy of the upright table -- Caladea's bold carries 11,883 pairs against
+    the upright's 9,606 -- so the measurer picks the bold matrix on exactly the condition
+    it picks the bold widths.
+    """
+    measurer = DefaultTextMeasurer()
+    for family in ("Calibri", "Cambria", "Noto Sans JP"):
+        table = metrics_for(family).kerning
+        assert table.bold_left, family
+        assert table.bold_matrix != table.matrix, family
+    upright = measurer.measure_text_width("AV Today", 32.0, False, "Calibri")
+    bold = measurer.measure_text_width("AV Today", 32.0, True, "Calibri")
+    assert bold > upright
+
+
+def test_the_fonttools_measurer_agrees_with_the_baked_table_on_kerning():
+    """The opt-in measurer reads GPOS itself, so the two must answer alike.
+
+    Not a tautology: ``tools/extract_font_metrics.py`` bakes a *class matrix* re-derived
+    from the kern function while :class:`FontToolsTextMeasurer` evaluates the subtables
+    directly, so agreement is evidence the compression is lossless.
+    """
+    pytest.importorskip("fontTools", reason="fontTools is not installed")
+    from pptx2svg.text.measure import FontToolsTextMeasurer
+
+    bundle = _bundle()
+    measurer = FontToolsTextMeasurer(
+        {"Noto Sans JP": str(bundle / "NotoSansJP[wght].ttf"),
+         "Carlito": str(bundle / "Carlito-Regular.ttf")}
+    )
+    baked = DefaultTextMeasurer()
+    for text in ("キスキスキス",
+                 "プラットフォーム",
+                 "ト、ンプ"):
+        live = measurer.measure_text_width(text, 32.0, font_family_ea="Noto Sans JP")
+        table = baked.measure_text_width(text, 32.0, font_family_ea="Noto Sans JP")
+        assert live == pytest.approx(table, abs=1e-6), text
+    for text in ("AV Today, Yes", "Waterfall Chart", "Performance Overview"):
+        live = measurer.measure_text_width(text, 18.0, font_family="Carlito")
+        table = baked.measure_text_width(text, 18.0, font_family="Carlito")
+        assert live == pytest.approx(table, abs=1e-6), text
+
+
+def test_chart_text_is_measured_without_kerning_because_powerpoint_lays_it_out_that_way():
+    """The one caller that must *not* kern, and it is measured rather than overlooked.
+
+    ``chart-gallery``'s horizontal legends turn each entry name's advance directly into
+    the next key's x, and against PowerPoint's own export the unkerned advance lands
+    every one of twenty-odd entries within 0.033 pt while the kerned one moves five of
+    slide 9's out by 0.23 to 0.67 pt.  The same export *draws* those names kerned.  See
+    :func:`pptx2svg.resolve.chart.text_width`.
+    """
+    from pptx2svg.resolve.chart import text_width
+
+    measurer = DefaultTextMeasurer()
+    for family, text in (("Aptos", "Plan"), ("Calibri", "AV Today"), ("Arial", "Watery")):
+        metrics = metrics_for(family)
+        unkerned = sum(metrics.widths[char] for char in text) / metrics.units_per_em * 10.0
+        assert text_width(text, family, 10.0) == pytest.approx(unkerned, abs=1e-9)
+        slide = measurer.measure_text_width(text, 10.0, font_family=family) / PX_PER_PT
+        assert slide < unkerned, (family, text)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate ``src/pptx2svg/text/metrics.py`` from the fonts we actually ship.
+"""Regenerate ``text/metrics.py`` and ``text/kerning.py`` from the fonts we actually ship.
 
 The whole point of the metrics table is that layout is computed from the *same* advance
 widths the rasteriser will draw with.  Keeping that true by hand does not work -- the
@@ -30,10 +30,17 @@ are places where "measure with what we draw with" is the *wrong* rule:
   face by :func:`verify_fixed_pitch` and pruned to the two dozen characters that break the
   rule.  Nothing is downloaded, licensed or shipped for them.  See :data:`FIXED_PITCH`.
 
+**Kern pairs are the third thing on that footing, and the largest.**  A kern value is a
+measurement of a design, exactly as an advance width is, and the same faces are read for
+both.  They go to ``text/kerning.py`` rather than into the advance table because they are
+twice its size; :func:`classify_kern` is where the size question was settled and
+:func:`effective_kern` is where the three sources -- ``PairPos`` format 1, format 2 and
+the legacy ``kern`` table -- are reduced to one function of two characters.
+
 Usage::
 
-    python3 tools/extract_font_metrics.py --check     # exit 1 if metrics.py is stale
-    python3 tools/extract_font_metrics.py --write     # rewrite metrics.py
+    python3 tools/extract_font_metrics.py --check     # exit 1 if either file is stale
+    python3 tools/extract_font_metrics.py --write     # rewrite both
 
 Needs fontTools (``pip install pptx2svg[measure]``).  Dev-only: the library itself never
 reads a font file at runtime.
@@ -53,9 +60,12 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "pptx2svg-fonts" / "src"))
 
 TARGET = ROOT / "src" / "pptx2svg" / "text" / "metrics.py"
+KERN_TARGET = ROOT / "src" / "pptx2svg" / "text" / "kerning.py"
 
 BEGIN = "# --- BEGIN GENERATED METRICS (tools/extract_font_metrics.py) ---"
 END = "# --- END GENERATED METRICS ---"
+KERN_BEGIN = "# --- BEGIN GENERATED KERNING (tools/extract_font_metrics.py) ---"
+KERN_END = "# --- END GENERATED KERNING ---"
 
 #: Faces we measure but never draw, resolved through the same local font profile the
 #: fidelity harness uses (``tools/fidelity.py --write-profile``).  Going through the
@@ -297,6 +307,204 @@ def _is_cjk(char: str) -> bool:
 
 
 # --------------------------------------------------------------------------------------
+# Reading one face's kern pairs
+# --------------------------------------------------------------------------------------
+
+def _kern_lookups(font) -> list:
+    """The GPOS lookups the ``kern`` feature reaches, across every script it is under.
+
+    Taking the union over scripts rather than one script's list is deliberate: a deck
+    mixes Latin and Japanese in one text box and PowerPoint kerns both, so the table has
+    to answer for both.  Where a face registers ``kern`` under several scripts they share
+    the same lookups anyway -- checked over all eight bundled faces.
+    """
+    if "GPOS" not in font:
+        return []
+    gpos = font["GPOS"].table
+    if gpos is None or gpos.FeatureList is None:
+        return []
+    wanted = set()
+    for record in gpos.FeatureList.FeatureRecord:
+        if record.FeatureTag == "kern":
+            wanted.update(record.Feature.LookupListIndex)
+    return [gpos.LookupList.Lookup[index] for index in sorted(wanted)]
+
+
+def _pair_subtables(lookups) -> list[list]:
+    """Pair-adjustment subtables, grouped by lookup; see :func:`effective_kern`."""
+    groups = []
+    for lookup in lookups:
+        group = []
+        for subtable in lookup.SubTable:
+            if lookup.LookupType == 9:  # extension positioning: unwrap it
+                subtable = subtable.ExtSubTable
+                kind = subtable.LookupType
+            else:
+                kind = lookup.LookupType
+            if kind == 2:
+                group.append(subtable)
+        if group:
+            groups.append(group)
+    return groups
+
+
+def _x_advance(value) -> int:
+    return 0 if value is None else (getattr(value, "XAdvance", 0) or 0)
+
+
+def _pair_adjustment(subtable, first: str, second: str) -> int | None:
+    """What one ``PairPos`` subtable does to ``first``, or ``None`` if it covers neither.
+
+    ``None`` and ``0`` are different answers and the difference is load-bearing: a
+    subtable that covers the pair and adjusts it by nothing *stops* the lookup, so a
+    later subtable in the same lookup must not be consulted.
+    """
+    coverage = subtable.Coverage.glyphs
+    if subtable.Format == 1:
+        try:
+            index = coverage.index(first)
+        except ValueError:
+            return None
+        for record in subtable.PairSet[index].PairValueRecord:
+            if record.SecondGlyph == second:
+                return _x_advance(record.Value1)
+        return None
+    if first not in coverage:
+        return None
+    first_class = subtable.ClassDef1.classDefs.get(first, 0)
+    second_class = subtable.ClassDef2.classDefs.get(second, 0)
+    if first_class >= subtable.Class1Count or second_class >= subtable.Class2Count:
+        return None
+    return _x_advance(subtable.Class1Record[first_class].Class2Record[second_class].Value1)
+
+
+def effective_kern(font, characters: list[str]) -> dict[tuple[str, str], int]:
+    """``{(first, second): units}`` for every pair among ``characters`` that kerns.
+
+    The OpenType rule this implements, and both halves matter: *within* one lookup the
+    first subtable that covers the pair wins and the rest are skipped, while each lookup
+    is its own pass over the run, so several lookups' adjustments **add**.  Reading only
+    the first subtable of the first lookup -- the obvious shortcut -- measures Lato and
+    Cambria wrong, which both split their kerning across a format-1 lookup and a
+    format-2 one.
+    """
+    cmap = font.getBestCmap()
+    groups = _pair_subtables(_kern_lookups(font))
+    glyphs = {char: cmap[ord(char)] for char in characters if ord(char) in cmap}
+    pairs: dict[tuple[str, str], int] = {}
+    for first, first_glyph in glyphs.items():
+        for second, second_glyph in glyphs.items():
+            total = 0
+            for group in groups:
+                for subtable in group:
+                    value = _pair_adjustment(subtable, first_glyph, second_glyph)
+                    if value is not None:
+                        total += value
+                        break
+            if total:
+                pairs[(first, second)] = total
+    return pairs
+
+
+def legacy_kern(font, characters: list[str]) -> dict[tuple[str, str], int]:
+    """The same, from the pre-OpenType ``kern`` table.
+
+    Only reached for a face that has one and no GPOS ``kern`` feature.  Every face here
+    that carries a ``kern`` table carries the feature as well and the feature is the one
+    a shaper reads, so this is the fallback for a face none of ours turns out to be --
+    written because the roadmap asked for it and because the next Office face to arrive
+    may well be one.
+    """
+    if "kern" not in font:
+        return {}
+    cmap = font.getBestCmap()
+    by_glyph: dict[str, str] = {}
+    for char in characters:
+        glyph = cmap.get(ord(char))
+        if glyph is not None:
+            by_glyph.setdefault(glyph, char)
+    pairs: dict[tuple[str, str], int] = {}
+    try:
+        subtables = font["kern"].kernTables
+    except Exception:  # pragma: no cover - a malformed kern table is not worth a crash
+        return {}
+    for subtable in subtables:
+        for (first, second), value in subtable.kernTable.items():
+            if value and first in by_glyph and second in by_glyph:
+                key = (by_glyph[first], by_glyph[second])
+                pairs[key] = pairs.get(key, 0) + value
+    return {key: value for key, value in pairs.items() if value}
+
+
+def classify_kern(pairs: dict[tuple[str, str], int]):
+    """``{(a, b): v}`` -> ``(left classes, right classes, matrix)``.
+
+    Two characters share a left class when their whole row of adjustments is identical,
+    and a right class when their column is.  Derived from the function rather than from
+    the font's own ``ClassDef`` tables, so an explicit-pair face, a class-matrix face and
+    a legacy ``kern`` table all compress into one shape -- and so the result is canonical,
+    which is what lets ``--check`` compare two runs byte for byte.
+
+    The decomposition is exact whenever one exists, and one always does: in the worst
+    case every character gets its own class and the matrix is the pair list again.  See
+    :func:`verify_kern` for the assertion that it round-trips.
+    """
+    rows: dict[str, dict[str, int]] = {}
+    columns: dict[str, dict[str, int]] = {}
+    for (first, second), value in pairs.items():
+        rows.setdefault(first, {})[second] = value
+        columns.setdefault(second, {})[first] = value
+
+    def grouped(vectors: dict[str, dict[str, int]]) -> list[str]:
+        by_signature: dict[tuple, list[str]] = {}
+        for char, vector in vectors.items():
+            by_signature.setdefault(tuple(sorted(vector.items())), []).append(char)
+        order = sorted(by_signature, key=lambda sig: min(by_signature[sig]))
+        return ["".join(sorted(by_signature[sig])) for sig in order]
+
+    left = grouped(rows)
+    right = grouped(columns)
+    left_index = {char: i for i, group in enumerate(left, 1) for char in group}
+    right_index = {char: i for i, group in enumerate(right, 1) for char in group}
+
+    matrix: dict[int, dict[int, int]] = {}
+    for (first, second), value in pairs.items():
+        matrix.setdefault(left_index[first], {})[right_index[second]] = value
+    return tuple(left), tuple(right), matrix
+
+
+def verify_kern(key: str, pairs: dict[tuple[str, str], int], classified) -> None:
+    """Assert the class matrix reproduces the pair list exactly, in both directions."""
+    from pptx2svg.text.kerning import KernTable
+
+    left, right, matrix = classified
+    table = KernTable(left=left, right=right, matrix=matrix)
+    for (first, second), value in pairs.items():
+        if table.adjustment(first, second) != value:
+            raise SystemExit(f"{key}: class matrix loses the pair {first!r}{second!r}")
+    for group in left:
+        for first in group:
+            for other in right:
+                for second in other:
+                    if table.adjustment(first, second) != pairs.get((first, second), 0):
+                        raise SystemExit(
+                            f"{key}: class matrix invents the pair {first!r}{second!r}"
+                        )
+
+
+def read_kern(regular: Path, bold: Path, bold_weight: int | None, index: int = 0) -> dict:
+    """One face's upright and bold kern tables, or ``{}`` for a face that does not kern."""
+    characters = SAMPLE + CJK_SAMPLE
+    upright = _open(regular, None, index)
+    pairs = effective_kern(upright, characters) or legacy_kern(upright, characters)
+    bold_font = _open(bold, bold_weight, index)
+    bold_pairs = effective_kern(bold_font, characters) or legacy_kern(bold_font, characters)
+    if not pairs and not bold_pairs:
+        return {}
+    return {"pairs": pairs, "bold_pairs": bold_pairs}
+
+
+# --------------------------------------------------------------------------------------
 # Which faces make up the table
 # --------------------------------------------------------------------------------------
 
@@ -535,6 +743,88 @@ def _width_block(name: str, widths: dict[str, int]) -> list[str]:
     return [f"        {name}={{"] + _width_rows(widths) + ["        },"]
 
 
+def _string_literal(text: str) -> str:
+    """One class's characters as a Python string literal: readable ASCII, escaped above."""
+    out = []
+    for char in text:
+        if char == '"':
+            out.append('\\"')
+        elif char == "\\":
+            out.append("\\\\")
+        elif 0x20 <= ord(char) < 0x7F:
+            out.append(char)
+        else:
+            out.append(f"\\u{ord(char):04x}")
+    return '"' + "".join(out) + '"'
+
+
+def _wrapped(pieces: list[str], indent: str, opener: str, closer: str, width: int = 96):
+    """``opener`` + comma-separated ``pieces`` + ``closer``, folded to ``width`` columns."""
+    lines = [indent + opener]
+    row = ""
+    for piece in pieces:
+        candidate = f"{row} {piece}" if row else piece
+        if row and len(indent) + 4 + len(candidate) > width:
+            lines.append(indent + "    " + row)
+            row = piece
+        else:
+            row = candidate
+    if row:
+        lines.append(indent + "    " + row)
+    lines.append(indent + closer)
+    return lines
+
+
+def _class_block(name: str, classes: tuple[str, ...]) -> list[str]:
+    if not classes:
+        return [f"        {name}=(),"]
+    pieces = [_string_literal(group) + "," for group in classes]
+    return _wrapped(pieces, "        ", f"{name}=(", "),")
+
+
+def _matrix_block(name: str, matrix: dict[int, dict[int, int]]) -> list[str]:
+    if not matrix:
+        return [f"        {name}={{}},"]
+    lines = [f"        {name}={{"]
+    for first in sorted(matrix):
+        row = matrix[first]
+        cells = [f"{second}: {row[second]}," for second in sorted(row)]
+        one_line = f"            {first}: {{{' '.join(cells)[:-1]}}},"
+        # A row that fits on one line goes on one line.  Folding every row costs two
+        # lines of braces and twelve columns of indent each, which over four thousand
+        # rows is a third of this file.
+        if len(one_line) <= 96:
+            lines.append(one_line)
+        else:
+            lines += _wrapped(cells, "            ", f"{first}: {{", "},")
+    lines.append("        },")
+    return lines
+
+
+def render_kern_entry(key: str, kern: dict) -> str:
+    left, right, matrix = classify_kern(kern["pairs"])
+    verify_kern(key, kern["pairs"], (left, right, matrix))
+    bold_left, bold_right, bold_matrix = classify_kern(kern["bold_pairs"])
+    verify_kern(f"{key} bold", kern["bold_pairs"], (bold_left, bold_right, bold_matrix))
+    pairs = len(kern["pairs"]) + len(kern["bold_pairs"])
+    cells = sum(len(row) for row in matrix.values())
+    cells += sum(len(row) for row in bold_matrix.values())
+    lines = [f'    "{key}": KernTable(']
+    lines.append(f"        # {_kern_note(pairs, cells)}")
+    lines += _class_block("left", left)
+    lines += _class_block("right", right)
+    lines += _matrix_block("matrix", matrix)
+    lines += _class_block("bold_left", bold_left)
+    lines += _class_block("bold_right", bold_right)
+    lines += _matrix_block("bold_matrix", bold_matrix)
+    lines.append("    ),")
+    return "\n".join(lines)
+
+
+def _kern_note(pairs: int, cells: int) -> str:
+    return f"{pairs} kern pairs in {cells} matrix cells; see the module docstring"
+
+
 def render_entry(key: str, face: dict, note: str) -> str:
     lines = [f'    "{key}": FontMetrics(']
     lines.append(f"        # {note}")
@@ -548,6 +838,11 @@ def render_entry(key: str, face: dict, note: str) -> str:
     lines.append(f'        bold_default_width={face["bold_default_width"]},')
     lines.append(f'        bold_cjk_width={face["bold_cjk_width"]},')
     lines += _width_block("bold_widths", face["bold_widths"])
+    # The pairs themselves live in text/kerning.py: they are twice the size of every
+    # advance width in this file put together, and a reader looking up how wide "W" is
+    # should not have to scroll past them.  ``.get`` rather than ``[...]`` because a face
+    # that does not kern has no entry there at all.
+    lines.append(f'        kerning=_KERN.get("{key}"),')
     lines.append("    ),")
     return "\n".join(lines)
 
@@ -659,6 +954,92 @@ def build_block() -> str:
     return "\n".join(parts)
 
 
+def build_kern_block() -> str:
+    """The ``KERNING`` table for ``src/pptx2svg/text/kerning.py``.
+
+    Faces that do not kern are simply absent, which is what ``_KERN.get`` in the metrics
+    table expects.  The emitted source is executed and compared against the data it came
+    from before it is returned: the class strings fold across lines with implicit
+    concatenation, and that is exactly the kind of thing a generator gets subtly wrong.
+    """
+    parts = ["KERNING: dict[str, KernTable] = {"]
+    tables: dict[str, dict] = {}
+    for key, (regular, bold, weight) in source_faces().items():
+        kern = read_kern(regular, bold, weight)
+        if kern:
+            tables[key] = kern
+            parts.append(render_kern_entry(key, kern))
+    local = measured_only_faces()
+    for key in MEASURED_ONLY:
+        entry = local.get(key)
+        if entry is not None and entry[0].exists() and entry[1].exists():
+            kern = read_kern(*entry)
+            if kern:
+                tables[key] = kern
+                parts.append(render_kern_entry(key, kern))
+        else:
+            # Same rule as the advance widths: without the licensed original installed,
+            # re-emit what is checked in rather than dropping the face.
+            checked = _checked_in_kern(key)
+            if checked is not None:
+                parts.append(checked)
+    parts.append("}")
+    block = "\n".join(parts)
+    _verify_kern_block(block, tables)
+    return block
+
+
+def _verify_kern_block(block: str, tables: dict[str, dict]) -> None:
+    from pptx2svg.text.kerning import KernTable
+
+    namespace: dict = {"KernTable": KernTable}
+    exec(compile(block, "<kerning>", "exec"), namespace)
+    emitted = namespace["KERNING"]
+    for key, kern in tables.items():
+        table = emitted[key]
+        for bold, pairs in ((False, kern["pairs"]), (True, kern["bold_pairs"])):
+            for (first, second), value in pairs.items():
+                if table.adjustment(first, second, bold) != value:
+                    raise SystemExit(f"{key}: emitted source loses {first!r}{second!r}")
+
+
+def _checked_in_kern(key: str) -> str | None:
+    """Re-render the checked-in entry for a face we cannot measure here.
+
+    Byte-identical to what the measured path would write, which is the whole point: the
+    pair count in the note is recovered from the matrix (a cell stands for
+    ``len(left class) * len(right class)`` pairs) rather than guessed at, so ``--check``
+    stays green on a machine with no Office.
+    """
+    from pptx2svg.text.kerning import KERNING as CURRENT
+
+    table = CURRENT.get(key)
+    if table is None:
+        return None
+    pairs = _kern_pair_count(table.left, table.right, table.matrix)
+    pairs += _kern_pair_count(table.bold_left, table.bold_right, table.bold_matrix)
+    cells = sum(len(row) for row in table.matrix.values())
+    cells += sum(len(row) for row in table.bold_matrix.values())
+    lines = [f'    "{key}": KernTable(']
+    lines.append(f"        # {_kern_note(pairs, cells)}")
+    lines += _class_block("left", table.left)
+    lines += _class_block("right", table.right)
+    lines += _matrix_block("matrix", table.matrix)
+    lines += _class_block("bold_left", table.bold_left)
+    lines += _class_block("bold_right", table.bold_right)
+    lines += _matrix_block("bold_matrix", table.bold_matrix)
+    lines.append("    ),")
+    return "\n".join(lines)
+
+
+def _kern_pair_count(left, right, matrix) -> int:
+    return sum(
+        len(left[first - 1]) * len(right[second - 1])
+        for first, row in matrix.items()
+        for second in row
+    )
+
+
 def _checked_in(key: str) -> dict:
     from pptx2svg.text.metrics import METRICS as CURRENT
 
@@ -682,38 +1063,50 @@ def _checked_in(key: str) -> dict:
     }
 
 
-def splice(text: str, block: str) -> str:
-    start = text.index(BEGIN) + len(BEGIN)
-    end = text.index(END)
-    return text[:start] + "\n\n" + block + "\n\n" + text[end:]
+def splice(text: str, block: str, begin: str = BEGIN, end: str = END) -> str:
+    start = text.index(begin) + len(begin)
+    stop = text.index(end)
+    return text[:start] + "\n\n" + block + "\n\n" + text[stop:]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--write", action="store_true", help="rewrite metrics.py in place")
-    group.add_argument("--check", action="store_true", help="exit 1 if metrics.py is stale")
+    group.add_argument("--write", action="store_true", help="rewrite the tables in place")
+    group.add_argument("--check", action="store_true", help="exit 1 if a table is stale")
     args = parser.parse_args()
 
-    current = TARGET.read_text(encoding="utf-8")
-    updated = splice(current, build_block())
+    # The kern block is built first: it is what ``_KERN.get`` in the metrics block reads,
+    # so writing metrics.py against a stale kerning.py would key entries to tables that
+    # are about to change.
+    jobs = [
+        (KERN_TARGET, KERN_BEGIN, KERN_END, build_kern_block()),
+        (TARGET, BEGIN, END, build_block()),
+    ]
+
+    stale = []
+    for target, begin, end, block in jobs:
+        current = target.read_text(encoding="utf-8")
+        updated = splice(current, block, begin, end)
+        if updated == current:
+            continue
+        if args.write:
+            target.write_text(updated, encoding="utf-8")
+            print(f"wrote {target.relative_to(ROOT)}")
+        else:
+            stale.append(target.relative_to(ROOT))
 
     if args.write:
-        if updated == current:
-            print("metrics.py already matches the bundled fonts")
-            return 0
-        TARGET.write_text(updated, encoding="utf-8")
-        print(f"wrote {TARGET.relative_to(ROOT)}")
         return 0
 
-    if updated != current:
+    if stale:
         print(
-            "metrics.py does not match the bundled fonts; "
+            f"{', '.join(str(path) for path in stale)} does not match the bundled fonts; "
             "run tools/extract_font_metrics.py --write",
             file=sys.stderr,
         )
         return 1
-    print("metrics.py matches the bundled fonts")
+    print("metrics.py and kerning.py match the bundled fonts")
     return 0
 
 
