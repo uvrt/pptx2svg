@@ -1039,7 +1039,8 @@ ignored. All of them now render, with two deliberate exceptions noted at the end
 | **Complex-script fonts** (`a:cs`) | Done — last in the `font-family` stack |
 | **Text body rotation** (`a:bodyPr@rot`) | Done |
 | **Hidden shapes** (`cNvPr@hidden`) | Done |
-| **Image tile / stretch** | Done |
+| **Image tile / stretch** | Done, and the tile is now **measured**: `a:tile@sx`/`@sy` scale the *picture's* natural size (`pixels * 72 / density`, 144 dpi when the file states none), not the shape's box. `@algn`, `@tx`/`@ty` and `@flip` all drawn — a mirrored axis doubles the SVG cell and holds the mirror inside it, which is what PowerPoint's own export does |
+| **Pattern fills** (`a:pattFill`) | Done — **all 54** presets of `ST_PresetPatternVal`, each an 8x8 bitmap read out of PowerPoint's PDF export, on a measured **8.0 pt** cell. Was 23 presets on a 6 pt cell, with the other 31 falling through to a flat solid fill in silence. The lattice's *phase* is measured but not reproduced — see `render/fill.py` |
 | **Multi-column text** (`a:bodyPr@numCol`) | Done, except mid-paragraph breaks |
 | **Justified text** (`algn="just"`) | **Deferred** — see below |
 
@@ -1178,8 +1179,6 @@ place regressions hide.
   starts paragraph 4 at the bottom of the left column and finishes it at the top of the
   right one. Fixing it means making the wrapper's line list the unit of column layout,
   and deciding what a continuation does about its bullet.
-- **Tile flip and alignment** (`a:tile@flip`, `@algn`). SVG patterns cannot mirror
-  alternate tiles.
 
 ### Fixtures
 
@@ -4483,8 +4482,14 @@ under a transform. All of them match PowerPoint already.
   as a single stroke.
 - **Rectangular gradients** — we treat every `a:path` gradient as radial;
   `a:path path="rect"` is a distinct shape gradient.
-- **Pattern fills** — we implement ~25 presets, **[pptx-renderer]** has 52+. Same additive,
-  low-risk shape as 5.1.
+- ~~**Pattern fills** — we implement ~25 presets, **[pptx-renderer]** has 52+.~~ **Done**,
+  and not by counting presets against another renderer: all 54 of `ST_PresetPatternVal`
+  are drawn from the 8x8 bitmaps PowerPoint's own PDF export carries, on the 8.0 pt cell
+  the same export states. Reading the count off a competitor would have kept the two
+  defects that actually mattered — the cell was 8 *pixels*, a third too fine, and several
+  of the 23 that were implemented did not match the preset they named (`horz` and `ltHorz`
+  were the same drawing; `lgGrid` was on a double cell; `dkDnDiag` was two hairlines where
+  PowerPoint draws a 2 px diagonal). See `tools/make_fill_probe.py`.
 - **Prefer the SVG picture extension** — `mc:AlternateContent` may offer `asvg:svgBlip`
   (vector) in its `Choice` with a raster `Fallback`. `parse/shapes.py:parse_alternate_content`
   currently always prefers `Fallback`; since we can embed SVG directly, preferring a

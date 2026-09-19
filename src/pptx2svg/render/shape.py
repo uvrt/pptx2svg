@@ -13,7 +13,7 @@ from .. import model as m
 from ..units import emu_to_px
 from .context import RenderContext, num
 from .effect import render_blip_effects, render_effects
-from .fill import render_fill_attrs, render_markers, render_outline_attrs
+from .fill import render_fill_attrs, render_markers, render_outline_attrs, tile_pattern
 from .geometry import render_geometry
 from .text import compute_sp_autofit_height, render_text_body
 
@@ -87,7 +87,7 @@ def render_shape(shape: m.ShapeElement, context: RenderContext) -> str:
     width = emu_to_px(transform.extent_width)
     height = emu_to_px(transform.extent_height)
 
-    fill_attrs = render_fill_attrs(shape.fill, context)
+    fill_attrs = render_fill_attrs(shape.fill, context, (0, 0, width, height))
     outline_attrs = render_outline_attrs(shape.outline, context)
     filter_attr = render_effects(shape.effects, context)
 
@@ -173,27 +173,26 @@ def render_image(image: m.ImageElement, context: RenderContext) -> str:
             + (f" {blip_attr}" if blip_attr else "")
             + "/></g>"
         )
-    elif image.tile is not None:
-        # `a:tile` repeats the bitmap instead of stretching it.  The tile is sized as a
-        # fraction of the frame, matching how `render/fill.py` handles a tiled shape
-        # fill -- `sx`/`sy` are really percentages of the bitmap's own pixel size, which
-        # would mean decoding the image to find out, and the two paths agreeing with
-        # each other matters more than either being exact.
-        tile = image.tile
-        tile_width = max(1e-6, width * tile.sx)
-        tile_height = max(1e-6, height * tile.sy)
-        pattern_id = context.new_id("imgtile")
-        context.add_def(
-            f'<pattern id="{pattern_id}" patternUnits="userSpaceOnUse" '
-            f'x="{num(emu_to_px(tile.tx))}" y="{num(emu_to_px(tile.ty))}" '
-            f'width="{num(tile_width)}" height="{num(tile_height)}">'
-            f'<image href="{href}" width="{num(tile_width)}" height="{num(tile_height)}" '
-            'preserveAspectRatio="none"'
-            + (f" {blip_attr}" if blip_attr else "")
-            + "/></pattern>"
+    elif image.tile is not None and (
+        tiled := tile_pattern(
+            (tile_id := context.new_id("imgtile")),
+            href,
+            image.image_data,
+            image.tile,
+            (0, 0, width, height),
+            blip_attr,
         )
+    ):
+        # `a:tile` repeats the bitmap instead of stretching it, at the picture's **own**
+        # size scaled by `sx`/`sy` -- not at a fraction of the frame, which is what this
+        # drew until the fill path was measured.  The two paths carry the identical
+        # `a:tile`, so they now share one builder rather than agreeing by hand; and when
+        # the builder cannot read the picture's natural size it returns nothing and this
+        # falls through to drawing one stretched copy, which is the same wrong as an
+        # untiled fill rather than a tiling at an invented pitch.
+        context.add_def(tiled)
         inner.append(
-            f'<rect width="{num(width)}" height="{num(height)}" fill="url(#{pattern_id})"/>'
+            f'<rect width="{num(width)}" height="{num(height)}" fill="url(#{tile_id})"/>'
         )
     else:
         # `a:stretch/a:fillRect` insets the bitmap from the frame's edges as a fraction
@@ -277,7 +276,7 @@ def render_table(table: m.TableElement, context: RenderContext) -> str:
             height = row_offsets[end_row] - y
 
             if cell.fill is not None:
-                fill_attrs = render_fill_attrs(cell.fill, context)
+                fill_attrs = render_fill_attrs(cell.fill, context, (x, y, width, height))
                 parts.append(
                     f'<rect x="{num(x)}" y="{num(y)}" width="{num(width)}" '
                     f'height="{num(height)}" {fill_attrs}/>'

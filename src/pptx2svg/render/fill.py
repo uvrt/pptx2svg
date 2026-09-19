@@ -11,11 +11,14 @@ rasterisation backends, do not apply CSS selectors reliably.
 
 from __future__ import annotations
 
+import base64
 import math
 
 from .. import model as m
-from ..units import emu_to_px
+from ..imagemeta import natural_size_pt
+from ..units import PX_PER_PT, emu_to_px
 from .context import RenderContext, num
+from .pattern import PATTERN_CELL_BITS, PATTERN_CELL_PT, cell_rectangles
 
 #: Dash patterns as multiples of the stroke width (ECMA-376 §20.1.10.49).
 DASH_PATTERNS: dict[str, list[float]] = {
@@ -32,8 +35,19 @@ DASH_PATTERNS: dict[str, list[float]] = {
 ARROW_SIZE_PX: dict[str, float] = {"sm": 5, "med": 8, "lg": 12}
 
 
-def render_fill_attrs(fill: m.Fill | None, context: RenderContext) -> str:
-    """``fill="..."`` (plus ``fill-opacity``) for a shape."""
+def render_fill_attrs(
+    fill: m.Fill | None,
+    context: RenderContext,
+    box: tuple[float, float, float, float] | None = None,
+) -> str:
+    """``fill="..."`` (plus ``fill-opacity``) for a shape.
+
+    ``box`` is the filled rectangle -- ``(x, y, width, height)`` in the user space the
+    fill is referenced from, all in pixels.  Only a tiled image fill needs it, and it
+    needs it for a reason no other fill does: ``a:tile@algn`` registers the tile grid
+    against one of the box's nine corners and edges, so without the box there is no
+    right answer, only a guess that it is the top-left one.
+    """
     if fill is None or isinstance(fill, m.NoFill):
         return 'fill="none"'
 
@@ -45,7 +59,7 @@ def render_fill_attrs(fill: m.Fill | None, context: RenderContext) -> str:
         return f'fill="{_gradient_ref(fill, context)}"'
 
     if isinstance(fill, m.ImageFill):
-        return f'fill="{_image_fill_ref(fill, context)}"'
+        return f'fill="{_image_fill_ref(fill, context, box)}"'
 
     if isinstance(fill, m.PatternFill):
         return _pattern_fill_attrs(fill, context)
@@ -88,48 +102,204 @@ def _gradient_ref(fill: m.GradientFill, context: RenderContext) -> str:
     return f"url(#{gradient_id})"
 
 
-def _image_fill_ref(fill: m.ImageFill, context: RenderContext) -> str:
+def _image_fill_ref(
+    fill: m.ImageFill,
+    context: RenderContext,
+    box: tuple[float, float, float, float] | None = None,
+) -> str:
     pattern_id = context.new_id("imgfill")
     href = f"data:{fill.mime_type};base64,{fill.image_data}"
 
     if fill.tile is not None:
-        # A tiled fill repeats at sx/sy of the shape's bounding box.
-        #
-        # The tile needs a `viewBox`, and without one this drew a solid colour rather
-        # than tiling at all.  `patternUnits="objectBoundingBox"` sizes the *tile* as a
-        # fraction of the shape, but it says nothing about the units its children are in:
-        # those stay user space, so the `width="100%"` on the image below resolved
-        # against the **viewport** -- the whole 960 px slide -- and each tile showed one
-        # hugely magnified corner of the picture.  Every tiled image fill in the library
-        # came out as a flat block of whatever colour that corner happened to be.
-        #
-        # A `viewBox` fixes it by giving the tile its own coordinate system: `0 0 1 1`
-        # with the image at 1x1 maps exactly one copy of the picture onto exactly one
-        # tile, whatever the tile's size in user units turns out to be.
-        width = num(fill.tile.sx * 100)
-        height = num(fill.tile.sy * 100)
-        context.add_def(
-            f'<pattern id="{pattern_id}" patternUnits="objectBoundingBox" '
-            f'width="{width}%" height="{height}%" viewBox="0 0 1 1" '
-            f'preserveAspectRatio="none">'
-            f'<image href="{href}" width="1" height="1" preserveAspectRatio="none"/>'
-            "</pattern>"
-        )
-    else:
-        context.add_def(
-            f'<pattern id="{pattern_id}" patternContentUnits="objectBoundingBox" '
-            f'width="1" height="1">'
-            f'<image href="{href}" width="1" height="1" preserveAspectRatio="none"/>'
-            "</pattern>"
-        )
+        tile = tile_pattern(pattern_id, href, fill.image_data, fill.tile, box)
+        if tile is not None:
+            context.add_def(tile)
+            return f"url(#{pattern_id})"
+        # The picture's natural size is what a tile is measured in, and a format
+        # `imagemeta` cannot read has none to measure.  Stretching one copy over the
+        # shape is wrong, but it is the same wrong as an untiled fill rather than a
+        # tiling at an invented pitch.
+
+    context.add_def(
+        f'<pattern id="{pattern_id}" patternContentUnits="objectBoundingBox" '
+        f'width="1" height="1">'
+        f'<image href="{href}" width="1" height="1" preserveAspectRatio="none"/>'
+        "</pattern>"
+    )
     return f"url(#{pattern_id})"
 
 
-def _pattern_fill_attrs(fill: m.PatternFill, context: RenderContext) -> str:
-    content = _pattern_content(
-        fill.preset, fill.foreground_color.hex, fill.foreground_color.alpha
+#: ``@flip`` -> whether the cell carries a copy mirrored across x, and across y.
+_TILE_FLIPS: dict[str, tuple[bool, bool]] = {
+    "none": (False, False),
+    "x": (True, False),
+    "y": (False, True),
+    "xy": (True, True),
+}
+
+
+def tile_pattern(
+    pattern_id: str,
+    href: str,
+    image_data: str,
+    tile: m.ImageFillTile | m.TileInfo,
+    box: tuple[float, float, float, float] | None,
+    image_attrs: str = "",
+) -> str | None:
+    """One ``<pattern>`` for ``a:tile``, sized and registered the way PowerPoint does.
+
+    **The tile is the picture's own size scaled by ``sx``/``sy``.**  It has nothing to do
+    with the shape.  This file used to say "a tiled fill repeats at sx/sy of the shape's
+    bounding box", and the measurement refutes it: deck ``fill-tile`` drew the same 32 px
+    picture at ``sx=100%`` on boxes of 68x48, 136x96, 272x192 and 400x96 pt and got a
+    16.0000 pt cell on all four.  Scaling the picture's natural size instead (see
+    :mod:`pptx2svg.imagemeta`) reproduces every row of that deck: 25, 50, 60, 150 and 200%
+    of a 16 pt picture drew 4, 8, 9.6, 24 and 32 pt, and ``sx != sy`` moved the two axes
+    independently.  ``feature-sweep`` slide 10 is the same arithmetic -- a 32 px untagged
+    PNG at ``sx=60%`` is 16 x 0.6 = 9.6 pt, which is what PowerPoint drew there, against
+    the 82.08 pt this drew from the box.
+
+    Shared with the ``p:pic`` path in :mod:`pptx2svg.render.shape`, which carries the
+    identical ``a:tile`` and used to size it from the frame for the stated reason that the
+    two paths agreeing mattered more than either being right.  They agree here too, on the
+    measurement.
+
+    ``@algn`` registers the grid against the box and ``@tx``/``@ty`` then translate it;
+    see :func:`_tile_origin`.  ``@flip`` mirrors alternate copies, which an SVG
+    ``<pattern>`` cannot do by repeating one tile -- so the cell is doubled and holds the
+    mirrored copies itself, which is exactly what PowerPoint's own export does (a
+    ``flip="xy"`` tile of a 32 px picture exports as a **64 x 64** image on a doubled
+    cell).  Measured: from the registration point the order is original then mirror in
+    both axes, and ``flip="x"`` mirrors **horizontally**.
+    """
+    try:
+        data = base64.b64decode(image_data, validate=True)
+    except (ValueError, TypeError):
+        return None
+    natural = natural_size_pt(data)
+    if natural is None:
+        return None
+
+    width = natural[0] * PX_PER_PT * tile.sx
+    height = natural[1] * PX_PER_PT * tile.sy
+    if width <= 0 or height <= 0:
+        return None
+
+    mirror_x, mirror_y = _TILE_FLIPS.get(tile.flip, (False, False))
+    cell_width = width * (2 if mirror_x else 1)
+    cell_height = height * (2 if mirror_y else 1)
+
+    x, y = _tile_origin(tile.align, box, width, height)
+    x += emu_to_px(tile.tx)
+    y += emu_to_px(tile.ty)
+
+    copies = [(0.0, 0.0, 1, 1)]
+    if mirror_x:
+        copies.append((2 * width, 0.0, -1, 1))
+    if mirror_y:
+        copies.append((0.0, 2 * height, 1, -1))
+    if mirror_x and mirror_y:
+        copies.append((2 * width, 2 * height, -1, -1))
+
+    images = "".join(
+        f'<image href="{href}" width="{num(width)}" height="{num(height)}" '
+        f'preserveAspectRatio="none"'
+        + (f" {image_attrs}" if image_attrs else "")
+        + (
+            ""
+            if (scale_x, scale_y) == (1, 1)
+            else f' transform="translate({num(offset_x)}, {num(offset_y)}) '
+            f'scale({scale_x}, {scale_y})"'
+        )
+        + "/>"
+        for offset_x, offset_y, scale_x, scale_y in copies
     )
-    if content is None:
+    return (
+        f'<pattern id="{pattern_id}" patternUnits="userSpaceOnUse" '
+        f'x="{num(x)}" y="{num(y)}" '
+        f'width="{num(cell_width)}" height="{num(cell_height)}">{images}</pattern>'
+    )
+
+
+def _tile_origin(
+    align: str,
+    box: tuple[float, float, float, float] | None,
+    width: float,
+    height: float,
+) -> tuple[float, float]:
+    """Where ``@algn`` puts the grid, in the same space as ``box``.
+
+    Measured on deck ``fill-algn``, which had to be built twice.  The first sweep put all
+    nine alignments on a 136 x 96 pt box with an 8 pt tile, and 136 and 96 are 17 and 12
+    whole tiles -- so left-, centre- and right-registration all landed on the same lattice
+    and the sweep said nothing at all.  Re-run on a 130 x 90 box with an 8 pt tile and a
+    137 x 83 box with a 12 pt one -- indivisible in both axes both times -- the three rules
+    separate cleanly:
+
+    * leading (``tl``/``l``/``bl`` in x, ``tl``/``t``/``tr`` in y) puts the tile's leading
+      edge on the box's, so the origin is the box's own left or top;
+    * trailing puts the tile's trailing edge on the box's, so the origin is the box's end
+      minus one tile -- read as -6 on 130 pt / 8 pt and -7 on 137 pt / 12 pt, which is
+      that value modulo the cell;
+    * centred puts **one tile's centre on the box's centre** -- read as -3 and -9.5 for the
+      same two, which is ``(box - tile) / 2`` modulo the cell.
+
+    The two axes are chosen independently by the two halves of the name, so the nine
+    values are one product of three rules with three rather than nine separate cases.
+    """
+    if box is None:
+        return 0.0, 0.0
+    left, top, box_width, box_height = box
+    if align in ("tr", "r", "br"):
+        x = left + box_width - width
+    elif align in ("t", "ctr", "b"):
+        x = left + (box_width - width) / 2
+    else:
+        x = left
+    if align in ("bl", "b", "br"):
+        y = top + box_height - height
+    elif align in ("l", "ctr", "r"):
+        y = top + (box_height - height) / 2
+    else:
+        y = top
+    return x, y
+
+
+def _pattern_fill_attrs(fill: m.PatternFill, context: RenderContext) -> str:
+    """``a:pattFill`` as a ``<pattern>`` of the preset's measured 8 x 8 cell.
+
+    The cell is **8.0 pt**, which is ``PATTERN_CELL_PT * PX_PER_PT`` pixels here, and one
+    bit of the preset's bitmap is one point.  The old code used 8 *pixels*, which is 6 pt,
+    so every pattern in the library tiled a third too finely; see
+    :mod:`pptx2svg.render.pattern` for how the cell and all 54 bitmaps were measured.
+
+    **The lattice's phase is measured but not reproduced.**  PowerPoint registers the grid
+    to the slide's own top-left corner: deck ``fill-pitch`` put a shape's left edge at
+    36.0, 36.5, 38.0, 41.0, 100.3, 173.75, 260.125 and 411.0 pt and the exported pattern
+    origin snapped every one down to the 8 pt lattice -- 32, 32, 32, 40, 96, 168, 256, 408
+    -- so two shapes whose left edges differ by 4 pt get patterns half a cell out of step
+    with each other.  This registers to each shape's own top-left instead, which is the
+    phase PowerPoint gives a shape that happens to sit on an 8 pt boundary.  The cost is
+    exactly that offset and never the pitch, and it is visible: rendered at 5760 px,
+    ``feature-sweep`` slide 13's ``cross`` box (at 452, 52 pt, both 4 past a lattice point)
+    puts its first rule 3.938 pt into the box for PowerPoint and 0.188 pt for us, on an
+    identical 8.0000 pt period -- while the ``horz`` box at 244, 168 pt, which *is* on the
+    lattice, matches rule for rule.
+
+    It is left alone because reproducing it needs a concept this renderer does not have --
+    the shape's position on the *slide* -- and because that concept immediately raises two
+    further questions no probe here answers.  A shape inside a group knows only its offset
+    within the group, and a group may also rotate, flip and scale; and a *rotated* shape
+    would need to know whether PowerPoint turns the hatch with it or leaves it square to
+    the page, which is a device-space brush's usual behaviour and would make the phase a
+    property of the drawing surface rather than of the document.  Landing one corner of
+    that -- the ungrouped, unrotated case -- would be fitting the fixture rather than the
+    law.  Measure those two first; the instrument is ``tools/make_fill_probe.py``.
+    """
+    rectangles = cell_rectangles(fill.preset)
+    if rectangles is None:
+        # Not a value ST_PresetPatternVal allows at all.  A flat foreground is a poor
+        # picture, but every value the schema does allow is measured.
         opacity = (
             f' fill-opacity="{num(fill.foreground_color.alpha)}"'
             if fill.foreground_color.alpha < 1
@@ -137,80 +307,30 @@ def _pattern_fill_attrs(fill: m.PatternFill, context: RenderContext) -> str:
         )
         return f'fill="{fill.foreground_color.hex}"{opacity}'
 
-    svg, size = content
+    cell = PATTERN_CELL_PT * PX_PER_PT
+    unit = cell / PATTERN_CELL_BITS
     pattern_id = context.new_id("patt")
+
+    foreground = fill.foreground_color
+    fg_opacity = f' fill-opacity="{num(foreground.alpha)}"' if foreground.alpha < 1 else ""
     bg_opacity = (
         f' fill-opacity="{num(fill.background_color.alpha)}"'
         if fill.background_color.alpha < 1
         else ""
     )
+    marks = "".join(
+        f'<rect x="{num(x * unit)}" y="{num(y * unit)}" '
+        f'width="{num(width * unit)}" height="{num(height * unit)}" '
+        f'fill="{foreground.hex}"{fg_opacity}/>'
+        for x, y, width, height in rectangles
+    )
     context.add_def(
         f'<pattern id="{pattern_id}" patternUnits="userSpaceOnUse" '
-        f'width="{num(size)}" height="{num(size)}">'
-        f'<rect width="{num(size)}" height="{num(size)}" '
-        f'fill="{fill.background_color.hex}"{bg_opacity}/>{svg}</pattern>'
+        f'width="{num(cell)}" height="{num(cell)}">'
+        f'<rect width="{num(cell)}" height="{num(cell)}" '
+        f'fill="{fill.background_color.hex}"{bg_opacity}/>{marks}</pattern>'
     )
     return f'fill="url(#{pattern_id})"'
-
-
-def _pattern_content(preset: str, fg: str, alpha: float) -> tuple[str, float] | None:
-    """Hatch/stipple tiles for ``a:pattFill`` presets."""
-    size = 8.0
-    opacity = f' opacity="{num(alpha)}"' if alpha < 1 else ""
-
-    def line(x1: float, y1: float, x2: float, y2: float) -> str:
-        return (
-            f'<line x1="{num(x1)}" y1="{num(y1)}" x2="{num(x2)}" y2="{num(y2)}" '
-            f'stroke="{fg}" stroke-width="1"{opacity}/>'
-        )
-
-    def dot(x: float, y: float, w: float, h: float) -> str:
-        return (
-            f'<rect x="{num(x)}" y="{num(y)}" width="{num(w)}" height="{num(h)}" '
-            f'fill="{fg}"{opacity}/>'
-        )
-
-    if preset in ("ltHorz", "horz"):
-        return line(0, 4, 8, 4), size
-    if preset in ("ltVert", "vert"):
-        return line(4, 0, 4, 8), size
-    if preset in ("ltDnDiag", "dnDiag"):
-        return line(0, 0, 8, 8), size
-    if preset in ("ltUpDiag", "upDiag"):
-        return line(0, 8, 8, 0), size
-    if preset == "dkHorz":
-        return line(0, 2, 8, 2) + line(0, 6, 8, 6), size
-    if preset == "dkVert":
-        return line(2, 0, 2, 8) + line(6, 0, 6, 8), size
-    if preset == "dkDnDiag":
-        return line(0, 0, 8, 8) + line(-4, 0, 4, 8), size
-    if preset == "dkUpDiag":
-        return line(0, 8, 8, 0) + line(4, 8, 12, 0), size
-    if preset in ("cross", "smGrid"):
-        return line(0, 4, 8, 4) + line(4, 0, 4, 8), size
-    if preset == "lgGrid":
-        return line(0, 0, 16, 0) + line(0, 0, 0, 16), 16.0
-    if preset == "diagCross":
-        return line(0, 0, 8, 8) + line(0, 8, 8, 0), size
-    if preset == "pct5":
-        return dot(0, 0, 1, 1), size
-    if preset == "pct10":
-        return dot(0, 0, 1, 1) + dot(4, 4, 1, 1), size
-    if preset == "pct20":
-        return dot(0, 0, 2, 2) + dot(4, 4, 2, 2), size
-    if preset == "pct25":
-        return dot(0, 0, 2, 2) + dot(4, 0, 2, 2) + dot(2, 4, 2, 2) + dot(6, 4, 2, 2), size
-    if preset.startswith("pct"):
-        try:
-            percent = int(preset[3:])
-        except ValueError:
-            return None
-        return (
-            f'<rect width="{num(size)}" height="{num(size)}" fill="{fg}" '
-            f'opacity="{num(percent / 100)}"{opacity}/>',
-            size,
-        )
-    return None
 
 
 def render_outline_attrs(outline: m.Outline | None, context: RenderContext) -> str:

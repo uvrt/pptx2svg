@@ -210,7 +210,7 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.902,
+    "histogram": 0.9061,
     "slides": [
       {
         "coverage": 0.1133,
@@ -295,12 +295,12 @@
       },
       {
         "coverage": 0.2001,
-        "histogram": 0.9943,
-        "mean_abs": 15.089,
-        "over10": 11.604,
-        "over64": 9.948,
+        "histogram": 0.9911,
+        "mean_abs": 12.714,
+        "over10": 10.422,
+        "over64": 8.34,
         "sparse": false,
-        "ssim": 0.1857
+        "ssim": 0.1806
       },
       {
         "coverage": 0.0391,
@@ -321,16 +321,16 @@
         "ssim": 0.8782
       },
       {
-        "coverage": 0.2131,
-        "histogram": 0.8798,
-        "mean_abs": 19.335,
-        "over10": 19.585,
-        "over64": 13.606,
+        "coverage": 0.2168,
+        "histogram": 0.9357,
+        "mean_abs": 19.372,
+        "over10": 19.563,
+        "over64": 13.995,
         "sparse": false,
-        "ssim": 0.0563
+        "ssim": 0.0535
       }
     ],
-    "ssim": 0.7067
+    "ssim": 0.7061
   },
   "real-basic-theme": {
     "fonts": {

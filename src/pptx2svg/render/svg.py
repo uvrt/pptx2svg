@@ -83,7 +83,7 @@ def _render_background(
         )
 
     if fill is not None:
-        attrs = render_fill_attrs(fill, context)
+        attrs = render_fill_attrs(fill, context, (0, 0, width, height))
         return f'<rect width="{num(width)}" height="{num(height)}" {attrs}/>'
 
     # PowerPoint's implicit background is white, not transparent.
