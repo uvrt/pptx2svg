@@ -536,9 +536,19 @@ def slide_gradient_paths() -> str:
 def slide_pattern_fills() -> str:
     """RENDERED.  ``a:pattFill`` -- a regression pin for a feature with no fixture.
 
-    Every preset here is one ``render/fill.py`` draws.  Nothing in the corpus uses a
-    pattern fill at all, so this slide is the only thing that would catch the tile
-    geometry drifting.
+    Nothing in the corpus uses a pattern fill at all, so this slide is the only thing that
+    would catch the cell geometry drifting -- and it earned its place immediately: at
+    SSIM 0.0563 it is what showed that the cell was a hardcoded 8 *pixels* (6 pt) where
+    PowerPoint's is 8 **points**, and that ``dkDnDiag`` was drawn as two hairlines where
+    PowerPoint draws a 2 px diagonal.  Both are fixed from measurements taken with
+    ``tools/make_fill_probe.py``; every preset here is now the bitmap PowerPoint's own PDF
+    export carries for it.
+
+    Read the score with care.  Both rasterisers quantise a pattern's period to whole
+    device pixels and round it opposite ways: at the fidelity harness's 1280 px the 8 pt
+    cell is 14.22 px, pdfium draws it at 15 and resvg at 14, which drifts a pixel a cell
+    and holds SSIM near zero however right the vector output is.  Rendered at 5760 px the
+    two agree rule for rule.  The histogram is the number that moved: 0.8798 to 0.9357.
     """
     presets = ("ltUpDiag", "dkDnDiag", "cross", "diagCross", "horz", "pct25")
     parts = []
@@ -557,11 +567,20 @@ def slide_pattern_fills() -> str:
 
 
 def slide_tile_fill() -> str:
-    """PINNED, NOT FIXED.  ``a:tile@flip`` and ``@algn``.
+    """``a:tile@flip`` and ``@algn`` -- **the on-slide caption and label are now stale.**
 
-    Both are excused in ``UNRENDERED_FIELDS``: an SVG ``<pattern>`` repeats one tile
-    unchanged, so it cannot mirror alternate ones.  All four boxes therefore tile the
-    same way, and the ``flip`` ones should show a mirrored L in PowerPoint's export.
+    They say NOT RENDERED, and both are drawn: a mirrored axis doubles the SVG pattern
+    cell and holds the mirror inside it, which is exactly what PowerPoint's own export
+    does.  The deeper defect this slide pinned is fixed too -- the tile was sized at
+    ``sx`` of the *shape's box* and came out 8.3x too big, where ``sx`` scales the
+    picture's own natural size (``tools/make_fill_probe.py``, deck ``fill-tile``).
+
+    The text is left wrong on purpose, for now.  Correcting it rewrites
+    ``tests/fixtures/feature-sweep.pptx``, which forces a fresh PowerPoint export of
+    ``feature-sweep.pdf`` -- the oracle every recorded number for this deck was measured
+    against.  Doing that in the same change as a renderer fix would mix two causes in one
+    before-and-after table.  Regenerate the deck and re-export it as its own change, and
+    take ``state`` here from ``pinned`` to ``rendered`` with it.
     """
     parts = []
     for index, (flip, align) in enumerate(

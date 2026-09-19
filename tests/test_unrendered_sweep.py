@@ -651,16 +651,26 @@ def test_the_compound_warning_fires_once_per_slide_on_the_fixture(feature_sweep)
 def test_a_tiled_image_fill_actually_tiles(feature_sweep):
     """Found by building this fixture: it used to draw one flat block of colour.
 
-    ``patternUnits="objectBoundingBox"`` sizes the tile but says nothing about the units
-    its children are in, so the ``width="100%"`` on the tile's ``<image>`` resolved
+    ``patternUnits="objectBoundingBox"`` sized the tile but said nothing about the units
+    its children were in, so the ``width="100%"`` on the tile's ``<image>`` resolved
     against the viewport -- the whole 960 px slide -- and every tile showed one hugely
-    magnified corner of the picture.  A ``viewBox`` on the pattern is what maps one copy
-    of the image onto one tile.
+    magnified corner of the picture.  A ``viewBox`` was the first fix for that.
+
+    The tile is now measured rather than taken from the shape's box, so the pattern *and*
+    its image are both sized in user units and there is no percentage left to resolve
+    against the wrong thing.  What this pins is the invariant the ``viewBox`` was standing
+    in for: one copy of the picture covers exactly one cell, at a cell of a stated finite
+    size.  Slide 10's picture is 32 px with no ``pHYs`` and ``sx=sy=60%``, so the cell is
+    ``32 * 72 / 144 * 0.6 = 9.6 pt`` -- 12.8 px -- which is what PowerPoint draws there.
     """
     svg = convert_pptx_to_svg(str(feature_sweep), ConvertOptions(width=960, slide_numbers=[10]))[0]
     patterns = re.findall(r"<pattern[^>]*>", svg)
     assert patterns, "no tiled fill on the tile slide"
     for pattern in patterns:
-        assert 'viewBox="0 0 1 1"' in pattern, pattern
+        assert 'patternUnits="userSpaceOnUse"' in pattern, pattern
+        assert "%" not in pattern, pattern
+        # 12.8 for a plain tile; a mirrored axis doubles the cell and puts the mirror
+        # inside it, which is what PowerPoint's own export does.
+        assert re.search(r'width="(12\.8|25\.6)" height="(12\.8|25\.6)"', pattern), pattern
     assert '<image href="data:image/png;base64,' in svg
-    assert 'width="1" height="1"' in svg
+    assert 'width="12.8" height="12.8"' in svg

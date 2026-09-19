@@ -358,7 +358,17 @@ def test_tabs_are_left_alone_in_a_centred_paragraph():
 # -- Images ------------------------------------------------------------------------------
 
 
-def image_svg(**kwargs) -> str:
+#: A real 4 x 4 PNG, base64 as the model carries it.  ``a:tile`` is sized from the
+#: picture's own natural size now, so a tile test needs bytes something can actually read
+#: a size out of; "AAAA" is fine for every other image test, which only moves the frame.
+#: With no ``pHYs`` this is 4 px at PowerPoint's 144 dpi default, so 2.0 x 2.0 pt.
+TINY_PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAADElEQVR42mNgIB0AAAA0AAFIo31vAAAA"
+    "AElFTkSuQmCC"
+)
+
+
+def image_svg(image_data: str = "AAAA", **kwargs) -> str:
     from pptx2svg.render.shape import render_image
 
     context = RenderContext(
@@ -366,7 +376,7 @@ def image_svg(**kwargs) -> str:
     )
     element = m.ImageElement(
         transform=m.Transform(extent_width=1000000, extent_height=500000),
-        image_data="AAAA",
+        image_data=image_data,
         mime_type="image/png",
         **kwargs,
     )
@@ -387,9 +397,271 @@ def test_an_all_zero_stretch_rect_still_fills_the_frame():
     assert 'x="0"' in image and 'width="104.987"' in image
 
 
-def test_tile_repeats_the_bitmap_through_a_pattern():
-    svg = image_svg(tile=m.TileInfo(sx=0.5, sy=0.25, tx=91440, ty=0))
+def test_tile_repeats_the_bitmap_at_the_picture_s_own_size():
+    """The cell is the *picture* scaled by sx/sy -- not a fraction of the frame.
+
+    Measured; see :mod:`pptx2svg.imagemeta`.  ``TINY_PNG`` is 4 px with no stated density,
+    so 4 * 72 / 144 = 2.0 pt natural, and at ``sx=0.5`` / ``sy=0.25`` the cell is 1.0 x
+    0.5 pt -- 1.333 x 0.667 px.  The frame here is 105 x 52 px and does not enter it.
+    ``tx`` of 91440 EMU is 7.2 pt, which translates the grid by 9.6 px.
+    """
+    svg = image_svg(TINY_PNG, tile=m.TileInfo(sx=0.5, sy=0.25, tx=91440, ty=0))
     assert "<rect" in svg and 'fill="url(#' in svg
+    pattern = re.search(r"<pattern [^>]*>", svg).group()
+    assert 'width="1.333" height="0.667"' in pattern, pattern
+    assert 'x="9.6" y="0"' in pattern, pattern
+
+
+def test_a_tile_of_a_picture_whose_size_cannot_be_read_falls_back_to_one_copy():
+    """A format :mod:`pptx2svg.imagemeta` cannot read has no natural size to scale.
+
+    Drawing one stretched copy is wrong, but it is the same wrong as an untiled fill --
+    whereas tiling at a pitch invented from the frame is a picture nothing measured.
+    """
+    svg = image_svg(tile=m.TileInfo(sx=0.5, sy=0.25))
+    assert "<pattern" not in svg
+    assert re.search(r'<image [^>]*width="104.987"', svg)
+
+
+# -- Pattern and tile fills, against PowerPoint's own measurements -------------------------
+
+
+#: Every value ``ST_PresetPatternVal`` allows (ECMA-376 §20.1.10.51).  Spelled out here
+#: rather than read from the table under test, so that a preset dropped from the table
+#: fails instead of quietly shrinking what "all of them" means.
+PRESET_PATTERN_VALUES = (
+    "pct5", "pct10", "pct20", "pct25", "pct30", "pct40", "pct50", "pct60", "pct70",
+    "pct75", "pct80", "pct90",
+    "horz", "vert", "ltHorz", "ltVert", "dkHorz", "dkVert", "narHorz", "narVert",
+    "dashHorz", "dashVert",
+    "cross", "dnDiag", "upDiag", "ltDnDiag", "ltUpDiag", "dkDnDiag", "dkUpDiag",
+    "wdDnDiag", "wdUpDiag", "dashDnDiag", "dashUpDiag", "diagCross",
+    "smGrid", "lgGrid", "dotGrid", "smCheck", "lgCheck",
+    "openDmnd", "solidDmnd", "dotDmnd",
+    "plaid", "sphere", "weave", "divot", "shingle", "wave", "trellis", "zigZag",
+    "smConfetti", "lgConfetti", "horzBrick", "diagBrick",
+)
+
+
+def pattern_svg(preset: str, width: float = 200, height: float = 100) -> str:
+    from pptx2svg.render.fill import render_fill_attrs
+
+    context = RenderContext()
+    attrs = render_fill_attrs(
+        m.PatternFill(
+            preset=preset,
+            foreground_color=m.ResolvedColor(hex="#112233"),
+            background_color=m.ResolvedColor(hex="#ffffff"),
+        ),
+        context,
+        (0, 0, width, height),
+    )
+    return "".join(context.defs) + attrs
+
+
+def test_every_preset_pattern_value_is_drawn():
+    """All 54, not the 23 that used to be implemented.
+
+    The other 31 fell through to a flat solid fill, silently -- a deck using ``weave`` or
+    ``sphere`` got a block of colour and no warning.
+    """
+    from pptx2svg.render.pattern import PRESET_CELLS
+
+    assert set(PRESET_CELLS) == set(PRESET_PATTERN_VALUES)
+    for preset in PRESET_PATTERN_VALUES:
+        svg = pattern_svg(preset)
+        assert "<pattern" in svg, preset
+        assert 'fill="#112233"' in svg, preset
+
+
+def test_the_pattern_cell_is_eight_points_whatever_the_shape():
+    """Measured: 8.0000 pt for every preset on boxes from 24x18 to 640x320 pt.
+
+    The old code used ``size = 8.0`` in *pixels*, which is 6 pt, so every pattern in the
+    library tiled a third too finely.  8 pt is ``8 * 96 / 72 = 10.667`` px here.
+    """
+    for width, height in ((24, 18), (200, 100), (640, 320)):
+        pattern = re.search(r"<pattern [^>]*>", pattern_svg("cross", width, height)).group()
+        assert 'width="10.667" height="10.667"' in pattern, (width, height)
+
+
+def test_the_measured_cells_survive_the_rectangle_merge():
+    """``cell_rectangles`` merges runs; it must not change which bits are set."""
+    from pptx2svg.render.pattern import PATTERN_CELL_BITS, PRESET_CELLS, cell_rectangles
+
+    for preset, rows in PRESET_CELLS.items():
+        grid = [[0] * PATTERN_CELL_BITS for _ in range(PATTERN_CELL_BITS)]
+        for x, y, width, height in cell_rectangles(preset):
+            for row in range(y, y + height):
+                for column in range(x, x + width):
+                    grid[row][column] = 1
+        rebuilt = tuple(
+            sum(bit << (PATTERN_CELL_BITS - 1 - index) for index, bit in enumerate(row))
+            for row in grid
+        )
+        assert rebuilt == rows, preset
+
+
+def test_the_presets_that_the_old_code_read_off_their_names():
+    """Three readings the names suggest and PowerPoint's own bitmaps refute.
+
+    These are why the table is measured rather than written: ``horz`` and ``ltHorz`` were
+    aliased to one drawing, ``lgGrid`` was drawn on a cell twice the size, and
+    ``dkDnDiag`` was drawn as two hairlines.  See ``src/pptx2svg/render/pattern.py``.
+    """
+    from pptx2svg.render.pattern import PRESET_CELLS
+
+    # `horz` is one rule per cell; `ltHorz` is two.  Not the same drawing.
+    assert PRESET_CELLS["horz"] != PRESET_CELLS["ltHorz"]
+    assert sum(bin(row).count("1") for row in PRESET_CELLS["ltHorz"]) == 2 * sum(
+        bin(row).count("1") for row in PRESET_CELLS["horz"]
+    )
+    # `lgGrid` and `cross` are the *same* bitmap, on the same 8 pt cell.
+    assert PRESET_CELLS["lgGrid"] == PRESET_CELLS["cross"]
+    # `dkDnDiag` is a 2 px wide diagonal, so every row has an even number of bits set and
+    # twice as many as `ltDnDiag`'s hairline.
+    assert sum(bin(row).count("1") for row in PRESET_CELLS["dkDnDiag"]) == 2 * sum(
+        bin(row).count("1") for row in PRESET_CELLS["ltDnDiag"]
+    )
+
+
+def test_a_picture_states_its_natural_size_in_pixels_and_density():
+    """``pixels * 72 / density``, with 144 dpi when the file states none.  Measured."""
+    import base64
+    import struct
+    import zlib
+
+    from pptx2svg.imagemeta import natural_size_pt
+
+    def png(width: int, height: int, dpi: int | None) -> bytes:
+        def chunk(tag: bytes, payload: bytes) -> bytes:
+            return (
+                struct.pack(">I", len(payload))
+                + tag
+                + payload
+                + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF)
+            )
+
+        raw = b"".join(b"\x00" + b"\x00\x00\x00" * width for _ in range(height))
+        out = b"\x89PNG\r\n\x1a\n" + chunk(
+            b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+        )
+        if dpi is not None:
+            per_metre = int(round(dpi / 0.0254))
+            out += chunk(b"pHYs", struct.pack(">IIB", per_metre, per_metre, 1))
+        return out + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
+
+    assert natural_size_pt(png(32, 32, None)) == pytest.approx((16.0, 16.0))
+    assert natural_size_pt(png(64, 64, None)) == pytest.approx((32.0, 32.0))
+    assert natural_size_pt(png(32, 32, 72)) == pytest.approx((32.0, 32.0), rel=1e-3)
+    assert natural_size_pt(png(32, 32, 96)) == pytest.approx((24.0, 24.0), rel=1e-3)
+    assert natural_size_pt(png(32, 32, 300)) == pytest.approx((7.68, 7.68), rel=1e-3)
+    assert natural_size_pt(png(48, 24, None)) == pytest.approx((24.0, 12.0))
+    assert natural_size_pt(base64.b64decode(TINY_PNG)) == pytest.approx((2.0, 2.0))
+    assert natural_size_pt(b"not an image at all") is None
+
+
+def test_the_density_law_is_the_picture_s_and_not_the_png_format_s():
+    """A JPEG says its density in a JFIF ``APP0``, and gets the same answer.
+
+    Measured: deck ``fill-jpeg`` repeated the whole density sweep as JPEGs and every cell
+    matched its PNG twin, with a JPEG written at no density -- JFIF ``units=0`` -- landing
+    on the same 144 dpi default.
+    """
+    import io
+
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    from pptx2svg.imagemeta import natural_size_pt
+
+    def jpeg(dpi):
+        buffer = io.BytesIO()
+        kwargs = {"dpi": (dpi, dpi)} if dpi else {}
+        Image.new("RGB", (32, 32), (9, 9, 9)).save(buffer, "JPEG", **kwargs)
+        return buffer.getvalue()
+
+    assert natural_size_pt(jpeg(None)) == pytest.approx((16.0, 16.0))
+    assert natural_size_pt(jpeg(72)) == pytest.approx((32.0, 32.0))
+    assert natural_size_pt(jpeg(96)) == pytest.approx((24.0, 24.0))
+    assert natural_size_pt(jpeg(300)) == pytest.approx((7.68, 7.68))
+
+
+def tile_svg(box, **tile) -> str:
+    from pptx2svg.render.fill import render_fill_attrs
+
+    context = RenderContext()
+    attrs = render_fill_attrs(
+        m.ImageFill(
+            image_data=TINY_PNG, mime_type="image/png", tile=m.ImageFillTile(**tile)
+        ),
+        context,
+        box,
+    )
+    return "".join(context.defs) + attrs
+
+
+def test_a_tile_is_the_picture_s_own_size_not_the_shape_s():
+    """Measured: the same picture at ``sx=100%`` gave the same cell on four box sizes."""
+    for box in ((0, 0, 40, 40), (0, 0, 400, 100), (0, 0, 33, 7)):
+        pattern = re.search(r"<pattern [^>]*>", tile_svg(box)).group()
+        # TINY_PNG is 2.0 pt natural, which is 2.667 px.
+        assert 'width="2.667" height="2.667"' in pattern, box
+
+
+@pytest.mark.parametrize(
+    "align, expected",
+    [
+        # A 24 x 12 px box with a 2.667 px tile: the leading edge is 0, the trailing edge
+        # 24 - 2.667 = 21.333 across and 12 - 2.667 = 9.333 down, and the centred one
+        # (24 - 2.667) / 2 = 10.667 and (12 - 2.667) / 2 = 4.667.
+        ("tl", (0.0, 0.0)),
+        ("t", (10.667, 0.0)),
+        ("tr", (21.333, 0.0)),
+        ("l", (0.0, 4.667)),
+        ("ctr", (10.667, 4.667)),
+        ("r", (21.333, 4.667)),
+        ("bl", (0.0, 9.333)),
+        ("b", (10.667, 9.333)),
+        ("br", (21.333, 9.333)),
+    ],
+)
+def test_tile_alignment_registers_the_grid_against_the_box(align, expected):
+    """All nine, measured on boxes indivisible by the tile in both axes.
+
+    A first sweep put them on a box that *was* a whole number of tiles, where the three
+    rules coincide and the reading says nothing; see :func:`~pptx2svg.render.fill._tile_origin`.
+    """
+    pattern = re.search(r"<pattern [^>]*>", tile_svg((0, 0, 24, 12), align=align)).group()
+    x, y = re.search(r' x="([-\d.]+)" y="([-\d.]+)"', pattern).groups()
+    assert (float(x), float(y)) == pytest.approx(expected, abs=0.002)
+
+
+def test_tile_offsets_translate_the_grid():
+    """``@tx``/``@ty`` are EMU and move the origin by exactly that much."""
+    pattern = re.search(
+        r"<pattern [^>]*>", tile_svg((0, 0, 24, 12), tx=91440, ty=-45720)
+    ).group()
+    assert ' x="9.6" y="-4.8"' in pattern, pattern
+
+
+@pytest.mark.parametrize(
+    "flip, cell, copies",
+    [("none", (2.667, 2.667), 1), ("x", (5.333, 2.667), 2),
+     ("y", (2.667, 5.333), 2), ("xy", (5.333, 5.333), 4)],
+)
+def test_tile_flip_doubles_the_cell_and_mirrors_inside_it(flip, cell, copies):
+    """An SVG ``<pattern>`` repeats one tile unchanged, so the mirror has to live in the
+    cell -- which is exactly what PowerPoint's own export does, writing a ``flip="xy"``
+    tile of a 32 px picture as a 64 x 64 image on a doubled cell.
+    """
+    svg = tile_svg((0, 0, 24, 12), flip=flip)
+    pattern = re.search(r"<pattern [^>]*>", svg).group()
+    assert f'width="{cell[0]}" height="{cell[1]}"' in pattern, pattern
+    images = re.findall(r"<image [^>]*/>", svg)
+    assert len(images) == copies
+    # Each copy is still one picture's worth, whatever the cell grew to.
+    assert all('width="2.667" height="2.667"' in image for image in images), images
 
 
 # -- Multi-column text -------------------------------------------------------------------
@@ -533,10 +805,6 @@ UNRENDERED_FIELDS = {
         "so the shadow always turns with it; undoing that needs the shadow's direction "
         "counter-rotated by the shape's rotation at resolve time"
     ),
-    "ImageFillTile.flip": "SVG patterns cannot mirror alternate tiles",
-    "ImageFillTile.align": "tile origin comes from tx/ty alone",
-    "TileInfo.flip": "SVG patterns cannot mirror alternate tiles",
-    "TileInfo.align": "tile origin comes from tx/ty alone",
 }
 
 
