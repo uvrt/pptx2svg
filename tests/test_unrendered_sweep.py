@@ -15,6 +15,7 @@ half, which runs without PowerPoint and pins the exact output.
 
 from __future__ import annotations
 
+import zipfile
 import base64
 import re
 import sys
@@ -594,9 +595,24 @@ def test_the_fixture_is_exactly_what_its_generator_writes(tmp_path, feature_swee
     """
     written = tmp_path / "feature-sweep.pptx"
     _generator().write_deck(written)
-    assert written.read_bytes() == feature_sweep.read_bytes(), (
-        "tests/fixtures/feature-sweep.pptx is not what tools/make_feature_sweep.py "
-        "writes; regenerate it rather than editing the deck by hand"
+
+    # **Per part, not per archive.**  A .pptx is a zip, and `zipfile` compresses with
+    # `zlib`, whose output is a function of the zlib build CPython was linked against
+    # rather than of the input alone.  Comparing archive bytes therefore asserted "this
+    # deck was generated on a machine with the same zlib as this one", which passed on
+    # macOS and failed all four Windows legs of CI.  The claim worth making is that every
+    # *part* is what the generator writes; that is what provenance means here, and it is
+    # decided by the same bytes everywhere.
+    with zipfile.ZipFile(written) as fresh, zipfile.ZipFile(feature_sweep) as committed:
+        assert fresh.namelist() == committed.namelist(), (
+            "tests/fixtures/feature-sweep.pptx holds different parts from what "
+            "tools/make_feature_sweep.py writes; regenerate it rather than editing it"
+        )
+        differing = [n for n in fresh.namelist() if fresh.read(n) != committed.read(n)]
+    assert not differing, (
+        "these parts of tests/fixtures/feature-sweep.pptx are not what "
+        f"tools/make_feature_sweep.py writes: {differing}; regenerate the deck rather "
+        "than editing it by hand"
     )
 
 
