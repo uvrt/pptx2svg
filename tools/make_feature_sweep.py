@@ -150,9 +150,34 @@ def png(rows: list[list[tuple[int, int, int, int]]]) -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IDAT", _stored_deflate(raw))
         + chunk(b"IEND", b"")
     )
+
+
+def _stored_deflate(raw: bytes) -> bytes:
+    """A zlib stream of *raw* in uncompressed blocks, byte-identical on every platform.
+
+    ``zlib.compress`` is **not** a deterministic function of its input: the output depends
+    on the zlib build CPython was linked against, and Windows ships a different one.  The
+    committed fixture is checked byte-for-byte against what this generator writes -- that
+    is the deck's provenance claim -- so an encoder that varies by platform failed all four
+    Windows legs of CI while passing everywhere else.
+
+    Deflate's stored block is fully specified by RFC 1951 and has no encoder freedom at
+    all, so writing it by hand removes the dependency rather than pinning a version of it.
+    These images are a few hundred bytes of flat colour; the ~0.1% the compression bought
+    is not worth a fixture that only reproduces on the machine that wrote it.
+    """
+    blocks = bytearray(b"\x78\x01")  # zlib header: deflate, 32K window, no preset dict
+    for start in range(0, max(len(raw), 1), 0xFFFF):
+        piece = raw[start : start + 0xFFFF]
+        final = 1 if start + 0xFFFF >= len(raw) else 0
+        blocks += bytes([final])
+        blocks += struct.pack("<HH", len(piece), len(piece) ^ 0xFFFF)
+        blocks += piece
+    blocks += struct.pack(">I", zlib.adler32(raw) & 0xFFFFFFFF)
+    return bytes(blocks)
 
 
 #: Four exact, saturated blocks.  ``a:clrChange`` keys on the first of them, so they have
