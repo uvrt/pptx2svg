@@ -35,6 +35,10 @@ def __getattr__(name: str):
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
 
 
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(dir(_shared)))
+
+
 def resolved_families(resolved) -> list[str]:
     """Every typeface a resolved deck actually draws with.
 
