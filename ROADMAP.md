@@ -600,6 +600,52 @@ draw, instead of at one with no kana in it.
 
 ---
 
+## The shared package: `ooxml-common` — **extracted, on branch `extract-shared-package`**
+
+The format-neutral half of this library moved to a new repository,
+[`ooxml-common`](https://github.com/uvrt/ooxml-common), **with its git history**
+(`git filter-repo`; `git log --follow` on any moved file reaches this repository's first
+commit). The reason is docx2svg: it needs these measurements, and depending on a
+PowerPoint renderer to measure a Word document, or copying the tables into a second set
+of constants that could drift, were both worse. The boundary is docx2svg's
+`ROADMAP.md`, Phase 1, which measured it from this package's import graph.
+
+**What moved** — everything that already imported nothing from `model.py`:
+`opc`, `xmlutil`, `units`, `fonts/`, `text/{kerning,metrics,fontmap,measure}`, and
+`guides` with `render/{pattern,preset_specs}` under `ooxml_common.drawingml`. One split:
+`fonts/check.py`'s report and `check_families` moved; `check_deck`, `deck_families` and
+`resolved_families`, which walk the resolved slide model, stayed in `pptx2svg.fonts.check`.
+
+**Nothing changed from the outside.** Every old path is a thin re-export whose module
+*is* the shared module (`pptx2svg.text.metrics is ooxml_common.text.metrics`), so state,
+identity and monkeypatching are unchanged; `pptx2svg.fonts`, which is still a package
+here, forwards reads and writes of the shared names. The suite (2,522 passed, 43
+skipped), every VRT snapshot and every fidelity baseline are identical, and the runtime
+is still standard-library only — `ooxml-common` has no dependencies.
+
+**What stayed, and why:**
+
+* `text/wrap.py` and `render/text.py`. The line breaker's method transfers to Word and
+  its types do not; which paragraph protocol a shared one takes is docx2svg's Phase 3's
+  question, answered by breaking lines against Word, not in advance.
+* `render/fill.py` and `render/geometry.py` take `model.py`'s DrawingML *value* types
+  (`Fill`, `Outline`, `PresetGeometry`, ...). Lifting those types out first is the next
+  step that would let both follow.
+* The generators, `tools/extract_font_metrics.py` and `tools/derive_preset_geometry.py`.
+  The first reads Office's faces through the fidelity harness's font profile, the second's
+  `SPEC_DRIVEN` is this renderer's policy. Both now write into whichever `ooxml-common` is
+  installed (the editable sibling checkout).
+* The fidelity harness: it scores rasterised slides and shares no code with docx2svg's.
+* `packages/pptx2svg-fonts`, unchanged in name and place. The shared code finds it by
+  import name only, and renaming a distribution is the disruptive option; if it is ever
+  renamed, the moment to do it is before its first PyPI release.
+
+`INSTALL_HINT` still says `pip install 'pptx2svg[fonts]'` and embedded faces are still
+relabelled `pptx2svg embedded: …`, both in shared code now: changing either changes this
+library's output, which this move was not allowed to do.
+
+---
+
 ## Fonts — **done**
 
 The problem, stated precisely: layout was computed from a table of advance widths, the
