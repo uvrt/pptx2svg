@@ -24,8 +24,13 @@ jobs:
       - name: Install
         # The font bundle is a sibling distribution inside this repository, not a PyPI
         # release, so it is installed from the checkout rather than resolved by name.
+        #
+        # ooxml-common is a runtime dependency that is not on PyPI yet either, so it is
+        # installed from its repository first and `pip install -e .` then finds the
+        # requirement already satisfied.  Once it is published, delete that line.
         run: |
           python -m pip install --upgrade pip
+          python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@main"
           python -m pip install -e .[dev]
           python -m pip install -e packages/pptx2svg-fonts
 
