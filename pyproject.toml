@@ -25,7 +25,16 @@ classifiers = [
   "Topic :: Office/Business :: Office Suites",
   "Typing :: Typed",
 ]
-dependencies = []
+# Still standard-library only at runtime: ooxml-common is the format-neutral half of this
+# library (OPC, units, DrawingML data, fonts, the measured text metrics), extracted with
+# its history so docx2svg can share it, and it has no dependencies of its own.  See
+# ROADMAP.md, "The shared package".
+#
+# It is not on PyPI yet, so until it is this requirement is satisfied by installing it
+# first -- from a sibling checkout (`pip install -e ../ooxml-common`) or, as CI does,
+# from its repository URL.  A direct URL cannot go here instead: PyPI refuses to publish
+# a distribution whose dependencies name one.
+dependencies = ["ooxml-common>=0.1"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

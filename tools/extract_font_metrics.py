@@ -59,8 +59,26 @@ sys.path.insert(0, str(ROOT / "src"))
 # So a source checkout works without `pip install -e packages/pptx2svg-fonts`.
 sys.path.insert(0, str(ROOT / "packages" / "pptx2svg-fonts" / "src"))
 
-TARGET = ROOT / "src" / "pptx2svg" / "text" / "metrics.py"
-KERN_TARGET = ROOT / "src" / "pptx2svg" / "text" / "kerning.py"
+
+
+def _shared_source(module: str) -> Path:
+    """The file a module of ooxml-common was loaded from.
+
+    The two tables moved to ooxml-common with their history, and this generator stayed
+    here, beside the fidelity harness whose font profile it reads.  So it writes into
+    whichever ooxml-common this interpreter imports -- a sibling checkout installed with
+    ``pip install -e ../ooxml-common``, which is the only install worth ``--write``-ing.
+    """
+    import importlib.util
+
+    spec = importlib.util.find_spec(module)
+    if spec is None or not spec.origin:
+        raise SystemExit(f"{module} is not importable; pip install -e ../ooxml-common")
+    return Path(spec.origin)
+
+
+TARGET = _shared_source("ooxml_common.text.metrics")
+KERN_TARGET = _shared_source("ooxml_common.text.kerning")
 
 BEGIN = "# --- BEGIN GENERATED METRICS (tools/extract_font_metrics.py) ---"
 END = "# --- END GENERATED METRICS ---"

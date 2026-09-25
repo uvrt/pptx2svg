@@ -44,7 +44,25 @@ import zipfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-TARGET = HERE.parent / "src/pptx2svg/render/preset_specs.py"
+
+
+def _shared_source(module: str) -> Path:
+    """The file a module of ooxml-common was loaded from.
+
+    ``preset_specs`` moved to ooxml-common with its history; this compiler stayed here,
+    because :data:`SPEC_DRIVEN` is this renderer's policy about which presets come from
+    the specification.  It writes into whichever ooxml-common this interpreter imports --
+    a sibling checkout installed with ``pip install -e ../ooxml-common``.
+    """
+    import importlib.util
+
+    spec = importlib.util.find_spec(module)
+    if spec is None or not spec.origin:
+        raise SystemExit(f"{module} is not importable; pip install -e ../ooxml-common")
+    return Path(spec.origin)
+
+
+TARGET = _shared_source("ooxml_common.drawingml.preset_specs")
 
 DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 

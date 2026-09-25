@@ -406,7 +406,8 @@ def test_the_generated_table_records_the_source_it_was_compiled_from():
     """A shape that looks wrong gets diffed against the spec, so the file has to say
     which edition it came from -- and that has to be the edition the tool accepts."""
     tool = load_tool()
-    source = Path(__file__).resolve().parent.parent / "src/pptx2svg/render/preset_specs.py"
+    # The table moved to ooxml-common; the tool that writes it did not.
+    source = Path(importlib.util.find_spec("ooxml_common.drawingml.preset_specs").origin)
     assert tool.SOURCE_SHA256["presetShapeDefinitions.xml"] in source.read_text(encoding="utf-8")
 
 

@@ -453,10 +453,19 @@ what addresses a shape unambiguously. Alt text is still emitted as `aria-label` 
 ## Development
 
 ```bash
+pip install -e ../ooxml-common        # a checkout of https://github.com/uvrt/ooxml-common
 pip install -e '.[dev]'
 pip install -e packages/pptx2svg-fonts
 pytest
 ```
+
+The format-neutral half of this library -- the OPC reader, units, DrawingML guides, preset
+geometry and patterns, the font modules and the measured text metrics -- lives in
+[ooxml-common](https://github.com/uvrt/ooxml-common), extracted with its history so that
+docx2svg can measure text with the same tables. It is a runtime dependency with no
+dependencies of its own, and not on PyPI yet, so it is installed first. Every old import
+path (`pptx2svg.opc`, `pptx2svg.text.metrics`, `pptx2svg.fonts`, ...) still works and
+returns the same module object.
 
 `pptx2svg-fonts` is a sibling distribution in this repository and is not on PyPI yet, so
 it is installed from the checkout rather than named as a dependency.
@@ -478,8 +487,10 @@ trusting one, and rebaseline deliberately:
 pytest tests/test_vrt.py --update-snapshots    # then read the diff
 ```
 
-The metrics table in `pptx2svg/text/metrics.py` is **generated** from the font files in
-`packages/pptx2svg-fonts`. Do not edit it by hand:
+The metrics table, now `ooxml_common/text/metrics.py` in ooxml-common, is **generated**
+from the font files in `packages/pptx2svg-fonts` by a tool that stayed here, and the tool
+writes into whichever ooxml-common is installed -- the editable sibling checkout. Do not
+edit the table by hand:
 
 ```bash
 python3 tools/extract_font_metrics.py --check    # fails if the table has drifted
@@ -488,7 +499,7 @@ python3 tools/extract_font_metrics.py --write    # regenerate
 
 A test runs `--check`, so a font update that is not accompanied by a regenerated table
 fails the suite rather than silently making layout wrong. The same idea applies to the
-two other generated tables: `render/preset_specs.py` comes from
+two other generated tables: ooxml-common's `drawingml/preset_specs.py` comes from
 `tools/derive_preset_geometry.py`, and `parse/table_styles_builtin.py` from
 `tools/derive_table_styles.py`, which measures the styles by rendering them through
 PowerPoint. Edit the tool, not the table.
