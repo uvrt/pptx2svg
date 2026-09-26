@@ -30,17 +30,36 @@ the mask is why.  The score is a mean over the pixels that are ink in *either* i
 removing something we drew and PowerPoint did not shrinks the denominator as well as the
 error.  If the region removed was scoring *better* than the slide's average -- which wrong
 ink in roughly the right place usually is -- the mean falls even though the total loss
-drops.  Measured on ``chart-gallery`` slide 11: deleting three legend swatches PowerPoint
-does not draw took SSIM 0.0499 to 0.0384 while the unnormalised structural loss fell 42577
-to 39502, the legend row's own share of it fell 3334 to 259, and every other column
-improved (histogram 0.9593 to 0.9608, mean absolute error 5.53 to 5.02, pixels over 10%
-4.81 to 4.40).  The renders are visually indistinguishable.
+drops.  Measured on ``chart-gallery`` slide 11 (under the pdfium truth, below): deleting
+three legend swatches PowerPoint does not draw took SSIM 0.0499 to 0.0384 while the
+unnormalised structural loss fell 42577 to 39502, the legend row's own share of it fell
+3334 to 259, and every other column improved (histogram 0.9593 to 0.9608, mean absolute
+error 5.53 to 5.02, pixels over 10% 4.81 to 4.40).  The renders are visually
+indistinguishable.
 
 So when SSIM falls alone while the other columns rise, look at the pictures before
-believing the number -- and prefer the unnormalised loss for that comparison.  This is the
-same class of problem as the pixel-difference metric described above, which is why it is
-recorded here rather than fixed: no single scalar survives a change in what counts as
-foreground.
+believing the number -- and prefer the unnormalised loss (``loss``: the sum of ``1 -
+SSIM`` over the mask, recorded per slide) for that comparison.  This is the same class of
+problem as the pixel-difference metric described above, which is why it is recorded here
+rather than fixed: no single scalar survives a change in what counts as foreground.  The
+one-rasteriser truth below does not remove it -- the mask is still the union of both
+images' ink -- but it removes the other thing that moved a sparse slide's mean: the two
+rasterisers' disagreement at every edge, which was most of what a line chart's 0.67 was.
+
+**One rasteriser for both sides** (``--truth``).  PowerPoint's PDF used to be rasterised
+by pdfium and our SVG by resvg, so part of every score was pdfium against resvg: pdfium
+grid-fits glyph outlines (a stem moves by up to a pixel) and widens an axis-aligned fill
+to whole pixels.  The sibling ``docx2svg`` measured it on Word's own page: pdfium against
+MuPDF on the *same* PDF scores 0.890, MuPDF against resvg 0.996.  The default truth is
+now ``svg``: PowerPoint's page converted to SVG by ``tools/pdf_svg.py`` (PyMuPDF, glyphs
+redrawn unhinted from the embedded programs, validated against the PDF page by page) and
+rasterised by resvg like ours, so a pixel that differs is a layout or drawing difference.
+Where PowerPoint embedded a *bitmap* -- a 3-D chart's scene, an effect it rasterised --
+the truth is still that bitmap, and our vector drawing is scored against it; ``pdf_svg.py
+--bitmaps`` lists those regions.  ``--truth pdfium`` is the old instrument, kept for
+comparison, and the baselines record both (ROADMAP.md, "0.5 The instrument: one
+rasteriser for both sides").  The converted pages hold Microsoft's glyph outlines, so they
+are cached only in the oracle directory's ``svg/``, never in the repository.
 
 Foreground IoU was considered and deliberately left out: the upstream project dropped it
 because thin-stroke shapes lose about half their IoU to one pixel of anti-aliasing even
@@ -102,9 +121,10 @@ two decks that record the real-world case.
 The bundled substitutes are what we *ship*; ``pptx2svg fonts --check`` and
 ``tests/test_fonts.py`` cover those.  They are deliberately not the reference here.
 
-Dev-only.  This needs numpy, pillow, pypdfium2, fontTools and a rasteriser; the library
-itself stays standard-library-only, which is why this lives in ``tools/`` and not in
-``src/``.
+Dev-only.  This needs numpy, pillow, pypdfium2, fontTools and a rasteriser, and PyMuPDF
+for the ``svg`` truth (the ``fidelity`` extra, in the project's ``.venv``: README.md); the
+library itself stays standard-library-only, which is why this lives in ``tools/`` and not
+in ``src/``.
 
 Setting the machine up -- which fonts to install where, and how to undo it -- is in
 ``FONTS.md`` under "Making the oracle draw Japanese".  It is there rather than here
@@ -114,8 +134,10 @@ wonder why a Japanese deck is skipped will be reading that page.
 Usage::
 
     python3 tools/fidelity.py --write-profile                        # once per machine
-    python3 tools/fidelity.py --oracle ~/pptx2svg-oracle             # score and compare
-    python3 tools/fidelity.py --oracle ~/pptx2svg-oracle --update    # rewrite baselines
+    .venv/bin/python tools/fidelity.py --oracle ~/pptx2svg-oracle    # score and compare
+    .venv/bin/python tools/fidelity.py --truth pdfium                # the old instrument
+    .venv/bin/python tools/fidelity.py --slides                      # every slide's score
+    .venv/bin/python tools/fidelity.py --update                      # rewrite baselines (both truths)
 """
 
 from __future__ import annotations
@@ -157,6 +179,12 @@ MAX_SSIM_DROP = 0.02
 FOREGROUND_MAX = 245
 #: Below this much foreground the slide is too sparse to score; treat it as a pass.
 MIN_FOREGROUND = 0.015
+
+#: How PowerPoint's page is rasterised: ``svg`` -- converted by ``tools/pdf_svg.py`` and
+#: drawn by resvg, like ours (the default); ``pdfium`` -- the PDF drawn by pdfium (the old
+#: instrument, kept for comparison).  See the module docstring.
+TRUTHS = ("svg", "pdfium")
+DEFAULT_TRUTH = "svg"
 
 
 # --------------------------------------------------------------------------------------
@@ -253,7 +281,8 @@ def histogram_correlation(a_rgb, b_rgb, mask) -> float:
 
 
 def score(ours_rgb, truth_rgb) -> dict:
-    """SSIM, histogram correlation and the legacy pixel percentages for one slide."""
+    """SSIM, histogram correlation, the unnormalised structural loss and the legacy pixel
+    percentages for one slide."""
     import numpy as np
 
     mask, _ = foreground_mask(ours_rgb, truth_rgb)
@@ -274,10 +303,15 @@ def score(ours_rgb, truth_rgb) -> dict:
         # declining to score at all.
         result["ssim"] = 1.0
         result["histogram"] = 1.0
+        result["loss"] = 0.0
         result["sparse"] = True
         return result
 
-    result["ssim"] = round(float(ssim_map(ours_gray, truth_gray)[mask].mean()), 4)
+    ssim = ssim_map(ours_gray, truth_gray)[mask]
+    result["ssim"] = round(float(ssim.mean()), 4)
+    # The unnormalised structural loss: what SSIM's mean hides when the mask changes (see
+    # the module docstring).
+    result["loss"] = round(float((1 - ssim).sum()), 1)
     result["histogram"] = round(histogram_correlation(ours_rgb, truth_rgb, mask), 4)
     result["sparse"] = False
     return result
@@ -1071,17 +1105,41 @@ def _supported(target, **kwargs) -> dict:
     return {name: value for name, value in kwargs.items() if name in accepted}
 
 
-def render_pair(deck: Path, pdf: Path, slide_index: int, profile: dict):
-    """Our PNG and PowerPoint's, as equally sized RGB arrays.
+_TRUTH_CACHE: dict = {}
 
-    Our side is rendered with the *licensed* faces from the profile and nothing else --
-    not the host's fonts, not the bundled substitutes.  That is the only configuration in
-    which a difference between the two images is attributable to this library: PowerPoint
-    drew with Microsoft's Calibri, so we draw with Microsoft's Calibri, and what is left
-    over is layout.
-    """
+
+def truth_image(pdf: Path, slide_index: int, truth: str = DEFAULT_TRUTH):
+    """PowerPoint's page ``slide_index`` as an RGB array :data:`WIDTH` px across.
+
+    ``svg``: converted by ``tools/pdf_svg.py`` (cached in the oracle directory's ``svg/``,
+    the PDF's own directory) and drawn by resvg on the device grid, as ours is.
+    ``pdfium``: the PDF drawn by pdfium at the scale that makes it :data:`WIDTH` wide."""
     import numpy as np
+
+    if truth == "svg":
+        import pdf_svg
+
+        if not pdf_svg.available():
+            raise RuntimeError("the svg truth needs PyMuPDF (the fidelity extra): see README.md, "
+                               "'Checking fidelity against PowerPoint', or pass --truth pdfium")
+        key = (str(Path(pdf).resolve()), Path(pdf).stat().st_mtime_ns)
+        if key not in _TRUTH_CACHE:
+            _TRUTH_CACHE.clear()  # one deck at a time: run() walks them in order
+            _TRUTH_CACHE[key] = pdf_svg.page_svgs(Path(pdf), oracle=Path(pdf).parent)
+        svg = _TRUTH_CACHE[key][slide_index]
+        return pdf_svg.rasterise(svg, pdf_svg.dpi_for_width(svg, WIDTH))
+    if truth != "pdfium":
+        raise ValueError(f"unknown truth {truth!r}: one of {TRUTHS}")
     import pypdfium2 as pdfium
+
+    page = pdfium.PdfDocument(str(pdf))[slide_index]
+    return np.asarray(page.render(scale=WIDTH / page.get_size()[0]).to_pil().convert("RGB"))
+
+
+def our_image(deck: Path, slide_index: int, profile: dict):
+    """Our PNG of slide ``slide_index``, :data:`WIDTH` px across, drawn with the profile's
+    faces (see :func:`render_pair`)."""
+    import numpy as np
     from PIL import Image
 
     sys.path.insert(0, SOURCE_ROOT)
@@ -1110,12 +1168,48 @@ def render_pair(deck: Path, pdf: Path, slide_index: int, profile: dict):
     ours = Image.open(
         io.BytesIO(svg_to_png(svg, backend="resvg", **raster_kwargs))
     ).convert("RGB")
+    return np.asarray(ours)
 
-    page = pdfium.PdfDocument(str(pdf))[slide_index]
-    truth = page.render(scale=WIDTH / page.get_size()[0]).to_pil().convert("RGB")
-    if truth.size != ours.size:
-        truth = truth.resize(ours.size, Image.LANCZOS)
-    return np.asarray(ours), np.asarray(truth)
+
+def _same_size(truth, ours, name: str):
+    """``truth`` at ``ours``' size.  The two are drawn at one scale, so they may differ
+    only by a row or column of rounding, which is cropped or padded with white; anything
+    more is refused rather than resampled -- a resampled truth scores the resampling."""
+    import numpy as np
+
+    rows, cols = ours.shape[:2]
+    if abs(truth.shape[0] - rows) > 1 or abs(truth.shape[1] - cols) > 1:
+        raise ValueError(f"{name}: PowerPoint's page is {truth.shape[1]} x {truth.shape[0]} px and ours "
+                         f"{cols} x {rows}; they should be drawn at one scale")
+    out = np.full_like(ours, 255)
+    r, c = min(rows, truth.shape[0]), min(cols, truth.shape[1])
+    out[:r, :c] = truth[:r, :c]
+    return out
+
+
+def render_pair(deck: Path, pdf: Path, slide_index: int, profile: dict, truth: str = DEFAULT_TRUTH):
+    """Our PNG and PowerPoint's, as equally sized RGB arrays.
+
+    Our side is rendered with the *licensed* faces from the profile and nothing else --
+    not the host's fonts, not the bundled substitutes.  That is the only configuration in
+    which a difference between the two images is attributable to this library: PowerPoint
+    drew with Microsoft's Calibri, so we draw with Microsoft's Calibri, and what is left
+    over is layout.  PowerPoint's side is rasterised as ``truth`` says (:data:`TRUTHS`).
+    """
+    ours = our_image(deck, slide_index, profile)
+    return ours, _matched(truth_image(pdf, slide_index, truth), ours, truth, f"{deck.stem} slide {slide_index + 1}")
+
+
+def _matched(reference, ours, truth: str, name: str):
+    """PowerPoint's raster at ours' size (:func:`_same_size`); under ``pdfium``, the old
+    instrument's own fallback -- a Lanczos resample -- kept so that its numbers stay its
+    numbers."""
+    if truth == "pdfium" and reference.shape != ours.shape:
+        import numpy as np
+        from PIL import Image
+
+        return np.asarray(Image.fromarray(reference).resize((ours.shape[1], ours.shape[0]), Image.LANCZOS))
+    return _same_size(reference, ours, name)
 
 
 def skip_reason(fonts: dict) -> str | None:
@@ -1162,42 +1256,109 @@ def slide_count(deck: Path) -> int:
         )
 
 
-def run(oracle_dir: Path, profile: dict) -> dict:
-    """Score every deck in ``oracle_dir`` that has a matching exported PDF.
+def _means(slides: list[dict]) -> dict:
+    """The deck's means over the slides whose truth is trusted: a slide whose converted
+    page failed validation (``"unvalidated"``) is scored and printed, never averaged."""
+    kept = [s for s in slides if "unvalidated" not in s]
+    if not kept:
+        return {"ssim": None, "histogram": None, "loss": None, "slides_scored": 0}
+    return {
+        "ssim": round(sum(s["ssim"] for s in kept) / len(kept), 4),
+        "histogram": round(sum(s["histogram"] for s in kept) / len(kept), 4),
+        "loss": round(sum(s["loss"] for s in kept), 1),
+        "slides_scored": len(kept),
+    }
+
+
+def truth_verdict(pdf: Path, slide_index: int, truth: str = DEFAULT_TRUTH) -> str | None:
+    """Why PowerPoint's page ``slide_index`` may not be trusted as ``truth``, or ``None``.
+
+    Under ``svg`` the converted page must have passed ``tools/pdf_svg.py``'s validation
+    (at 300 dpi and at the scoring resolution; computed once and cached beside the
+    conversion).  A page that fails is reported with the reason, not silently scored."""
+    if truth != "svg":
+        return None
+    import pdf_svg
+
+    verdict = pdf_svg.verdicts(Path(pdf), oracle=Path(pdf).parent, width=WIDTH).get(slide_index + 1)
+    if verdict is None:
+        return "no validation of this page"
+    return None if verdict["faithful"] else "converted page failed validation: " + verdict["why"]
+
+
+def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,)) -> dict:
+    """Score every deck in ``oracle_dir`` that has a matching exported PDF, against each
+    of ``truths`` (:data:`TRUTHS`), rendering ours once: ``{truth: {deck: entry}}``.
 
     A deck whose faces the profile cannot supply is recorded as ``skipped`` rather than
     scored.  Comparing it anyway would mean our render used substitute outlines while
     PowerPoint used Microsoft's, and every glyph would differ for a reason that has
     nothing to do with the renderer.
     """
-    results: dict[str, dict] = {}
+    results: dict[str, dict] = {truth: {} for truth in truths}
     for deck in sorted(oracle_dir.glob("*.pptx")):
         pdf = deck.with_suffix(".pdf")
         if not pdf.exists():
             continue
         fonts = font_profile(deck, profile, pdf)
-        entry: dict = {"fonts": fonts, "slides": []}
+        entries = {truth: {"fonts": fonts, "slides": []} for truth in truths}
         reason = skip_reason(fonts)
         if reason:
-            entry["skipped"] = reason
-            results[deck.stem] = entry
+            for truth in truths:
+                entries[truth]["skipped"] = reason
+                results[truth][deck.stem] = entries[truth]
             continue
         for index in range(slide_count(deck)):
-            ours, truth = render_pair(deck, pdf, index, profile)
-            entry["slides"].append(score(ours, truth))
-        entry["ssim"] = round(
-            sum(s["ssim"] for s in entry["slides"]) / len(entry["slides"]), 4
-        )
-        entry["histogram"] = round(
-            sum(s["histogram"] for s in entry["slides"]) / len(entry["slides"]), 4
-        )
-        results[deck.stem] = entry
+            ours = our_image(deck, index, profile)
+            for truth in truths:
+                reference = _matched(truth_image(pdf, index, truth), ours, truth, f"{deck.stem} slide {index + 1}")
+                row = score(ours, reference)
+                why = truth_verdict(pdf, index, truth)
+                if why:
+                    row["unvalidated"] = why
+                entries[truth]["slides"].append(row)
+        for truth in truths:
+            entries[truth].update(_means(entries[truth]["slides"]))
+            results[truth][deck.stem] = entries[truth]
     return results
 
 
-def report(results: dict, baselines: dict | None = None) -> int:
-    """Print a table and return the number of failures."""
+def baseline_for(baselines: dict | None, name: str, truth: str) -> dict | None:
+    """The recorded entry of deck ``name`` under ``truth``: the top-level entry is the
+    default truth's (``"truth"`` says which), and ``"pdfium"`` inside it the old
+    instrument's.  ``None`` where nothing comparable was recorded."""
+    if not baselines or name not in baselines:
+        return None
+    entry = baselines[name]
+    if entry.get("truth", "pdfium") == truth:
+        return entry
+    other = entry.get(truth)
+    if other is None:
+        return None
+    return {**other, "fonts": entry["fonts"]}
+
+
+def baselines_payload(results: dict) -> dict:
+    """What ``--update`` writes: per deck, the default truth's entry, stamped with the
+    truth and the converter's version, holding the ``pdfium`` truth's slides and means
+    beside it when both were scored."""
+    import pdf_svg
+
+    out = {}
+    for name, entry in results[DEFAULT_TRUTH].items():
+        record = dict(entry, truth=DEFAULT_TRUTH, converter=pdf_svg.converter_version())
+        if "pdfium" in results and not entry.get("skipped"):
+            old = results["pdfium"][name]
+            record["pdfium"] = {k: old[k] for k in ("slides", "ssim", "histogram", "loss")}
+        out[name] = record
+    return out
+
+
+def report(results: dict, baselines: dict | None = None, truth: str = DEFAULT_TRUTH,
+           slides: bool = False) -> int:
+    """Print a table of ``results`` (one truth's) and return the number of failures."""
     failures = 0
+    print(f"[truth: {truth}]")
     print(f"{'deck':26} {'SSIM':>7} {'hist':>7} {'>10%':>7} {'fonts':>7}  verdict")
     for name, entry in results.items():
         fonts = entry["fonts"]
@@ -1205,14 +1366,17 @@ def report(results: dict, baselines: dict | None = None) -> int:
         if entry.get("skipped"):
             print(f"{name:26} {'-':>7} {'-':>7} {'-':>7} {supply:>7}  SKIPPED: {entry['skipped']}")
             continue
-        over10 = sum(s["over10"] for s in entry["slides"]) / len(entry["slides"])
+        kept = [s for s in entry["slides"] if "unvalidated" not in s] or entry["slides"]
+        over10 = sum(s["over10"] for s in kept) / len(kept)
         notes = []
         if entry["ssim"] < MIN_SSIM:
             notes.append(f"SSIM<{MIN_SSIM}")
         if entry["histogram"] < MIN_HISTOGRAM:
             notes.append(f"hist<{MIN_HISTOGRAM}")
-        if baselines and name in baselines:
-            previous = baselines[name]
+        previous = baseline_for(baselines, name, truth)
+        if baselines and name in baselines and previous is None:
+            notes.append(f"no baseline under the {truth} truth; nothing to compare")
+        if previous is not None:
             if previous.get("skipped"):
                 notes.append("baseline was skipped; nothing to compare")
             elif previous["fonts"]["hash"] != fonts["hash"]:
@@ -1229,6 +1393,16 @@ def report(results: dict, baselines: dict | None = None) -> int:
             f"{name:26} {entry['ssim']:7.4f} {entry['histogram']:7.4f} "
             f"{over10:7.2f} {supply:>7}  {verdict}"
         )
+        if slides:
+            for index, slide in enumerate(entry["slides"]):
+                print(f"{'':4}slide {index + 1:>2}: SSIM {slide['ssim']:.4f}  hist {slide['histogram']:.4f}  "
+                      f"loss {slide['loss']:>8}  mean |diff| {slide['mean_abs']:>6}  >10% {slide['over10']:>6}"
+                      + ("  (sparse)" if slide["sparse"] else "")
+                      + (f"  NOT AVERAGED: {slide['unvalidated']}" if "unvalidated" in slide else ""))
+        else:
+            for index, slide in enumerate(entry["slides"]):
+                if "unvalidated" in slide:
+                    print(f"{'':4}slide {index + 1} not averaged: {slide['unvalidated']}")
 
     return failures
 
@@ -1246,6 +1420,14 @@ def main() -> int:
         action="store_true",
         help="record this machine's licensed fonts into tests/font-profile.local.json",
     )
+    parser.add_argument(
+        "--truth",
+        choices=TRUTHS,
+        default=DEFAULT_TRUTH,
+        help="how PowerPoint's page is rasterised (default svg: converted by tools/pdf_svg.py, "
+        "then resvg like ours; pdfium: the old instrument).  --update records both",
+    )
+    parser.add_argument("--slides", action="store_true", help="also print every slide's score")
     parser.add_argument("--json", action="store_true", help="dump raw scores instead of a table")
     parser.add_argument("--src", help="import pptx2svg from this tree instead of ./src")
     args = parser.parse_args()
@@ -1289,23 +1471,37 @@ def main() -> int:
         print(f"no such directory: {oracle_dir}", file=sys.stderr)
         return 2
 
-    results = run(oracle_dir, profile)
-    if not results:
+    truths = TRUTHS if args.update else (args.truth,)
+    if "svg" in truths:
+        import pdf_svg
+
+        if not pdf_svg.available():
+            print(
+                "the svg truth needs PyMuPDF, which is not installed in this interpreter.\n"
+                "Install the fidelity extra into the project's .venv (README.md, 'Checking "
+                "fidelity against PowerPoint'),\nor score with the old instrument: --truth pdfium",
+                file=sys.stderr,
+            )
+            return 2
+    results = run(oracle_dir, profile, truths)
+    if not results[truths[0]]:
         print(f"no deck.pptx/deck.pdf pairs in {oracle_dir}", file=sys.stderr)
         return 2
 
     if args.json:
-        print(json.dumps(results, indent=2, sort_keys=True))
+        print(json.dumps(results if args.update else results[args.truth], indent=2, sort_keys=True))
         return 0
 
     baselines = None
     if BASELINE_PATH.exists() and not args.update:
         baselines = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-    failures = report(results, baselines)
+    failures = 0
+    for truth in truths:
+        failures += report(results[truth], baselines, truth, args.slides)
 
     if args.update:
         BASELINE_PATH.write_text(
-            json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(baselines_payload(results), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         print(f"\nwrote {BASELINE_PATH.relative_to(ROOT)}")
         return 0

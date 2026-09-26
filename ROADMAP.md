@@ -1067,6 +1067,107 @@ family, each fill type, each bullet scheme, each table configuration). **[pptx-r
 does this with a case generator and a support catalogue; the generated-corpus idea ports
 directly even though their generator does not.
 
+### 0.5 The instrument: one rasteriser for both sides
+
+0.3 rasterised PowerPoint's PDF with pdfium and our SVG with resvg, so part of every
+score was pdfium against resvg. The sibling `docx2svg` measured how much (its ROADMAP
+5.13): on Word's own page, pdfium against MuPDF on the *same* PDF scores 0.890, MuPDF
+against resvg 0.996 -- pdfium grid-fits glyph outlines and widens axis-aligned fills to
+whole pixels. The instrument here is now the one it adopted: **PowerPoint's page is
+converted to SVG, and resvg rasterises both sides.** `tools/fidelity.py --truth svg` is
+the default; `--truth pdfium`, the old instrument, is kept, and its numbers re-recorded
+through the new code equal the committed ones exactly (every slide, every column).
+
+**The converter** is `tools/pdf_svg.py`, a copy of `docx2svg`'s (its commit `02822f8`)
+taking the oracle directory as an argument, as `fidelity.py` itself is copied per
+harness: PyMuPDF (`page.get_svg_image(text_as_path=True)`), development only, behind the
+`fidelity` extra, which is not part of `dev` (AGPL-3.0: fine for a local tool never
+distributed with the library; nothing under `src/` imports it; CI does not install it,
+and the tests that need it skip). It carries the sibling's two corrections -- every glyph
+redrawn **unhinted** from the embedded program (PowerPoint's Aptos moves 30-35 font units
+under MuPDF's hinting: measured here too, on every Aptos page) and the page sized in
+**device pixels** -- and three more that PowerPoint's pages needed, each found by the
+validation below:
+
+* **Stroked text.** PowerPoint draws a run it has no bold face for with the regular face,
+  filled and stroked, and sets the line width before the `cm` that scales the text
+  object (`1.166667 w 2 Tr q 0.24 0 0 0.24 … cm BT`: a stroke 0.28 pt wide). MuPDF's SVG
+  writer takes the width as though it were already in page space -- 1.17 pt, four times
+  too wide -- so `real-financial-report`'s bold Japanese came out as blots, 17,000 pixels
+  beyond anti-aliasing a page. `stroked_text_widths` recomputes each stroked glyph's
+  width from MuPDF's own device calls (the line width times the expansion of the
+  transform current when the text is painted). 192 glyphs on `real-financial-report`,
+  `sample` and `real-basic-theme`.
+* **ICC-tagged images.** `real-college-template`'s photograph is tagged Adobe RGB (1998).
+  Both PDF rasterisers honour the profile; the SVG carries the samples only and resvg
+  reads them as sRGB, 9-11 levels off. `srgb_images` converts such an image to sRGB with
+  its profile and rendering intent (little CMS, as MuPDF uses) and embeds it as a PNG.
+* **MuPDF's own SVG reader does not tile a `<pattern>`** (it scores 0.08 against its own
+  PDF raster on `feature-sweep`'s tile fills, where resvg's raster of the same SVG agrees
+  with MuPDF's PDF raster to anti-aliasing). As for `<mask>`, the same-engine route is
+  skipped on such a page and resvg's route decides.
+
+**Validated on every page the harness reads** (`python tools/pdf_svg.py --validate`):
+all 61 pages of the 11 exports in `~/pptx2svg-oracle`, the three skipped decks' included,
+at 300 dpi and at the scoring resolution (1280 px across: 128 dpi on the 720 pt slides,
+96 on the 960 pt ones). The sibling's criteria, per page: same engine by two routes
+(MuPDF's raster of the PDF against MuPDF's raster of the SVG); no more than 20 pixels
+beyond anti-aliasing (MuPDF's PDF raster against resvg's SVG raster, bitmaps included);
+no flat colour more than 2 levels apart; every glyph the embedded program's, no `<text>`
+in the SVG, and resvg drawing it with no font available. Two adjustments, both measured:
+
+* **At the scoring resolution the gate is taken on rasters drawn at 4x and averaged
+  down.** At 96-128 dpi MuPDF's glyph cache puts a glyph on a sub-pixel grid that is a
+  larger share of a stem, and it minifies an embedded bitmap with a filter of its own:
+  at 1x, 28-101 isolated pixels a page on `chart-gallery`, on its text and its 3-D
+  scenes, even between MuPDF's two routes, on pages that hold at 300 dpi. At 4x, none.
+  The supersampled gate must also score SSIM 0.98 or more (passing pages: 0.985-1.0).
+* **At 300 dpi, stroked text goes through MuPDF's glyph cache too**:
+  `real-financial-report` page 2 shows 222 isolated pixels at 1x, 3 with both rasters
+  drawn at 2x, 0 at 4x. Where the 1x gate fails, the 2x one decides (and the same-engine
+  route may still change no colour).
+
+**59 of 61 pages pass. Two fail, and are not scored:**
+
+| Page | What | Why it cannot be held |
+| --- | --- | --- |
+| `feature-sweep` 13 | `a:pattFill` presets: PowerPoint embeds each pattern as a 64 x 64 px tile at 576 dpi | resvg, MuPDF and pdfium each sample the tiling in their own phase: 0.39 even at 300 dpi supersampled; at 128 dpi 0.82. No rasteriser agrees with another here |
+| `feature-sweep` 10 | `a:tile` picture fills: tiled images | faithful at 300 dpi (resvg against MuPDF's PDF raster 0.98, nothing beyond); at 128 dpi the supersampled gate scores 0.89. pdfium places the tiles in another phase altogether: its old score on this slide, 0.18, was mostly that |
+
+`tools/fidelity.py` reads each page's verdict (cached as `validation-1280.json` beside the
+conversion, computed once per PDF and converter version) and **reports a failing slide
+rather than averaging it**: the deck mean is over the validated slides.
+
+**Bitmaps PowerPoint embedded** (`python tools/pdf_svg.py --bitmaps`): no rasteriser can
+un-rasterise these, so in these regions our vector drawing is scored against
+PowerPoint's raster, now drawn by resvg's filter instead of pdfium's:
+
+| Deck, page | Bitmap | What it is |
+| --- | --- | --- |
+| `chart-gallery` 12-16 | 1,289-2,011 px, 300 dpi, soft mask, one a page | the surface, `bar3D`, `line3D`, `pie3D` and `area3D` scenes |
+| `feature-sweep` 1 | 1,067 x 268, 300 dpi, soft mask | the `a:clrChange` picture, recoloured by PowerPoint and re-rasterised (the untouched one beside it is the deck's own 192 x 48) |
+| `feature-sweep` 6 | two 734 x 184, 300 dpi, soft mask | the `a:alphaModFix` 50% and 20% pictures (the opaque one is the deck's own) |
+| `feature-sweep` 9 | two 136 x 96 at **72 dpi**, two 567 x 401 at 300 dpi, soft mask | the four gradient fills: `lin` and `path=circle` rasterised at one pixel a point, `path=rect` and `path=shape` at 300 dpi |
+| `feature-sweep` 12 | 551 x 384 and 650 x 590 at 300 dpi, soft mask; 668 x 168 | the two `a:outerShdw` shadows and the `a:blur grow` picture |
+| `feature-sweep` 13 | six 64 x 64 at 576 dpi | the pattern tiles (above) |
+| `real-college-template` 2-9 | 1,525 x 300 and 514 x 101, 300 dpi, soft mask | the logo, an EMF PowerPoint rasterised (slide 3's CMYK one included) |
+| `real-product-page` 1 | three 1,231 x 788 and three 160 x 160, 300 / 640 dpi, soft mask | the cards' shadows and the icons (the deck is skipped) |
+| `real-basic-theme` 2 | 396 x 396, 300 dpi, soft mask | a picture with `a:alphaModFix` (the deck is skipped) |
+
+The rest are the decks' own pictures at their own resolution: `feature-sweep`'s swatches
+(2, 3), picture bullets (4, 32 x 32 with their alpha), tiles (10); `real-college-template`
+8's photograph (1,029 x 683, 118 dpi, the Adobe RGB one); `authoring-integration`'s
+4 x 4 px image. **The converted pages hold Microsoft's glyph outlines**: they are cached
+only in `~/pptx2svg-oracle/svg/`, `pdf_svg.py` refuses to write one inside this or any
+git checkout, and none is committed.
+
+**Cost.** Converting all 61 pages takes 4 seconds, and is cached. A scoring run costs
+about 70 s against the old instrument's 54 (both truths, rendering ours once: 98 s). The
+full validation is the expensive part -- about 70 CPU-seconds a page at both resolutions,
+18 minutes for the corpus on four cores -- and runs once per export and converter
+version; `tests/test_pdf_svg.py` holds a sample of three pages (about a minute) and a
+refusal (feature-sweep 13).
+
 ---
 
 ## Phase 1 — Parsed but not rendered — **done**
