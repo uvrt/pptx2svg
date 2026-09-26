@@ -1,5 +1,6 @@
 {
   "authoring-integration": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Aptos",
@@ -12,21 +13,43 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9985,
+    "histogram": 0.9999,
+    "loss": 12947.6,
+    "pdfium": {
+      "histogram": 0.9985,
+      "loss": 13999.4,
+      "slides": [
+        {
+          "coverage": 0.2198,
+          "histogram": 0.9985,
+          "loss": 13999.4,
+          "mean_abs": 1.499,
+          "over10": 2.636,
+          "over64": 0.852,
+          "sparse": false,
+          "ssim": 0.9309
+        }
+      ],
+      "ssim": 0.9309
+    },
     "slides": [
       {
-        "coverage": 0.2198,
-        "histogram": 0.9985,
-        "mean_abs": 1.499,
-        "over10": 2.636,
-        "over64": 0.852,
+        "coverage": 0.2169,
+        "histogram": 0.9999,
+        "loss": 12947.6,
+        "mean_abs": 1.297,
+        "over10": 2.078,
+        "over64": 0.735,
         "sparse": false,
-        "ssim": 0.9309
+        "ssim": 0.9352
       }
     ],
-    "ssim": 0.9309
+    "slides_scored": 1,
+    "ssim": 0.9352,
+    "truth": "svg"
   },
   "chart-gallery": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Aptos",
@@ -39,300 +62,654 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8443,
+    "histogram": 0.86,
+    "loss": 492935.5,
+    "pdfium": {
+      "histogram": 0.8443,
+      "loss": 510402.7,
+      "slides": [
+        {
+          "coverage": 0.0778,
+          "histogram": 0.9954,
+          "loss": 23359.7,
+          "mean_abs": 2.983,
+          "over10": 2.883,
+          "over64": 1.724,
+          "sparse": false,
+          "ssim": 0.674
+        },
+        {
+          "coverage": 0.1377,
+          "histogram": 0.9988,
+          "loss": 8939.4,
+          "mean_abs": 1.379,
+          "over10": 2.121,
+          "over64": 0.705,
+          "sparse": false,
+          "ssim": 0.9295
+        },
+        {
+          "coverage": 0.0375,
+          "histogram": 0.5247,
+          "loss": 6039.9,
+          "mean_abs": 1.342,
+          "over10": 2.64,
+          "over64": 0.789,
+          "sparse": false,
+          "ssim": 0.8251
+        },
+        {
+          "coverage": 0.3935,
+          "histogram": 0.9998,
+          "loss": 42314.2,
+          "mean_abs": 4.065,
+          "over10": 4.152,
+          "over64": 2.803,
+          "sparse": false,
+          "ssim": 0.8833
+        },
+        {
+          "coverage": 0.03,
+          "histogram": 0.5809,
+          "loss": 5959.3,
+          "mean_abs": 1.209,
+          "over10": 2.246,
+          "over64": 0.66,
+          "sparse": false,
+          "ssim": 0.7843
+        },
+        {
+          "coverage": 0.0891,
+          "histogram": 0.9929,
+          "loss": 34896.9,
+          "mean_abs": 3.887,
+          "over10": 3.687,
+          "over64": 2.54,
+          "sparse": false,
+          "ssim": 0.5751
+        },
+        {
+          "coverage": 0.2379,
+          "histogram": 0.9993,
+          "loss": 19034.7,
+          "mean_abs": 1.638,
+          "over10": 1.792,
+          "over64": 1.245,
+          "sparse": false,
+          "ssim": 0.9132
+        },
+        {
+          "coverage": 0.1877,
+          "histogram": 0.9999,
+          "loss": 4840.5,
+          "mean_abs": 0.622,
+          "over10": 0.739,
+          "over64": 0.385,
+          "sparse": false,
+          "ssim": 0.972
+        },
+        {
+          "coverage": 0.2723,
+          "histogram": 0.9987,
+          "loss": 27481.4,
+          "mean_abs": 2.218,
+          "over10": 2.285,
+          "over64": 1.688,
+          "sparse": false,
+          "ssim": 0.8905
+        },
+        {
+          "coverage": 0.0353,
+          "histogram": 0.7089,
+          "loss": 7179.2,
+          "mean_abs": 1.551,
+          "over10": 2.673,
+          "over64": 0.871,
+          "sparse": false,
+          "ssim": 0.7793
+        },
+        {
+          "coverage": 0.0424,
+          "histogram": 0.9481,
+          "loss": 35555.5,
+          "mean_abs": 4.82,
+          "over10": 4.185,
+          "over64": 2.874,
+          "sparse": false,
+          "ssim": 0.09
+        },
+        {
+          "coverage": 0.1505,
+          "histogram": 0.9095,
+          "loss": 59733.0,
+          "mean_abs": 6.614,
+          "over10": 5.911,
+          "over64": 4.12,
+          "sparse": false,
+          "ssim": 0.5694
+        },
+        {
+          "coverage": 0.212,
+          "histogram": 0.999,
+          "loss": 52442.2,
+          "mean_abs": 5.505,
+          "over10": 4.835,
+          "over64": 3.349,
+          "sparse": false,
+          "ssim": 0.7316
+        },
+        {
+          "coverage": 0.0475,
+          "histogram": 0.6027,
+          "loss": 18332.4,
+          "mean_abs": 3.072,
+          "over10": 3.263,
+          "over64": 1.969,
+          "sparse": false,
+          "ssim": 0.5812
+        },
+        {
+          "coverage": 0.2389,
+          "histogram": 0.1159,
+          "loss": 49235.6,
+          "mean_abs": 21.542,
+          "over10": 23.807,
+          "over64": 20.475,
+          "sparse": false,
+          "ssim": 0.7764
+        },
+        {
+          "coverage": 0.2984,
+          "histogram": 0.9801,
+          "loss": 67360.8,
+          "mean_abs": 10.417,
+          "over10": 9.709,
+          "over64": 8.735,
+          "sparse": false,
+          "ssim": 0.7551
+        },
+        {
+          "coverage": 0.2123,
+          "histogram": 0.9993,
+          "loss": 47698.0,
+          "mean_abs": 5.624,
+          "over10": 5.393,
+          "over64": 3.561,
+          "sparse": false,
+          "ssim": 0.7562
+        }
+      ],
+      "ssim": 0.7345
+    },
     "slides": [
       {
-        "coverage": 0.0778,
-        "histogram": 0.9954,
-        "mean_abs": 2.983,
-        "over10": 2.883,
-        "over64": 1.724,
+        "coverage": 0.0764,
+        "histogram": 0.9972,
+        "loss": 21922.2,
+        "mean_abs": 2.877,
+        "over10": 2.661,
+        "over64": 1.585,
         "sparse": false,
-        "ssim": 0.674
+        "ssim": 0.6885
       },
       {
-        "coverage": 0.1377,
-        "histogram": 0.9988,
-        "mean_abs": 1.379,
-        "over10": 2.121,
-        "over64": 0.705,
+        "coverage": 0.1368,
+        "histogram": 0.9996,
+        "loss": 8419.8,
+        "mean_abs": 1.284,
+        "over10": 1.68,
+        "over64": 0.587,
         "sparse": false,
-        "ssim": 0.9295
+        "ssim": 0.9332
       },
       {
-        "coverage": 0.0375,
-        "histogram": 0.5247,
-        "mean_abs": 1.342,
-        "over10": 2.64,
-        "over64": 0.789,
+        "coverage": 0.0356,
+        "histogram": 0.6206,
+        "loss": 4740.1,
+        "mean_abs": 1.062,
+        "over10": 2.099,
+        "over64": 0.585,
         "sparse": false,
-        "ssim": 0.8251
+        "ssim": 0.8554
       },
       {
-        "coverage": 0.3935,
-        "histogram": 0.9998,
-        "mean_abs": 4.065,
-        "over10": 4.152,
-        "over64": 2.803,
+        "coverage": 0.3927,
+        "histogram": 0.9997,
+        "loss": 41894.3,
+        "mean_abs": 3.929,
+        "over10": 4.001,
+        "over64": 2.783,
+        "sparse": false,
+        "ssim": 0.8842
+      },
+      {
+        "coverage": 0.03,
+        "histogram": 0.5433,
+        "loss": 5208.4,
+        "mean_abs": 1.051,
+        "over10": 1.968,
+        "over64": 0.529,
+        "sparse": false,
+        "ssim": 0.8116
+      },
+      {
+        "coverage": 0.0883,
+        "histogram": 0.9952,
+        "loss": 33860.0,
+        "mean_abs": 3.651,
+        "over10": 3.376,
+        "over64": 2.462,
+        "sparse": false,
+        "ssim": 0.584
+      },
+      {
+        "coverage": 0.2372,
+        "histogram": 0.9989,
+        "loss": 18551.1,
+        "mean_abs": 1.606,
+        "over10": 1.719,
+        "over64": 1.175,
+        "sparse": false,
+        "ssim": 0.9151
+      },
+      {
+        "coverage": 0.1869,
+        "histogram": 1.0,
+        "loss": 3958.9,
+        "mean_abs": 0.543,
+        "over10": 0.637,
+        "over64": 0.314,
+        "sparse": false,
+        "ssim": 0.977
+      },
+      {
+        "coverage": 0.2715,
+        "histogram": 0.9984,
+        "loss": 26836.8,
+        "mean_abs": 2.114,
+        "over10": 2.217,
+        "over64": 1.608,
+        "sparse": false,
+        "ssim": 0.8927
+      },
+      {
+        "coverage": 0.0344,
+        "histogram": 0.6623,
+        "loss": 6895.1,
+        "mean_abs": 1.792,
+        "over10": 2.86,
+        "over64": 1.074,
+        "sparse": false,
+        "ssim": 0.7828
+      },
+      {
+        "coverage": 0.0416,
+        "histogram": 0.9604,
+        "loss": 34798.6,
+        "mean_abs": 4.46,
+        "over10": 3.782,
+        "over64": 2.664,
+        "sparse": false,
+        "ssim": 0.0924
+      },
+      {
+        "coverage": 0.1458,
+        "histogram": 0.9106,
+        "loss": 53851.4,
+        "mean_abs": 6.561,
+        "over10": 5.365,
+        "over64": 3.87,
+        "sparse": false,
+        "ssim": 0.5993
+      },
+      {
+        "coverage": 0.2085,
+        "histogram": 0.9987,
+        "loss": 49075.6,
+        "mean_abs": 5.358,
+        "over10": 4.474,
+        "over64": 3.059,
+        "sparse": false,
+        "ssim": 0.7446
+      },
+      {
+        "coverage": 0.0479,
+        "histogram": 0.8533,
+        "loss": 23788.1,
+        "mean_abs": 3.958,
+        "over10": 3.187,
+        "over64": 2.12,
+        "sparse": false,
+        "ssim": 0.4609
+      },
+      {
+        "coverage": 0.2381,
+        "histogram": 0.1091,
+        "loss": 48641.8,
+        "mean_abs": 21.497,
+        "over10": 23.72,
+        "over64": 20.395,
+        "sparse": false,
+        "ssim": 0.7783
+      },
+      {
+        "coverage": 0.2951,
+        "histogram": 0.9735,
+        "loss": 64448.5,
+        "mean_abs": 10.425,
+        "over10": 9.368,
+        "over64": 8.641,
+        "sparse": false,
+        "ssim": 0.763
+      },
+      {
+        "coverage": 0.2112,
+        "histogram": 0.9996,
+        "loss": 46044.8,
+        "mean_abs": 5.273,
+        "over10": 4.982,
+        "over64": 3.454,
+        "sparse": false,
+        "ssim": 0.7634
+      }
+    ],
+    "slides_scored": 17,
+    "ssim": 0.7368,
+    "truth": "svg"
+  },
+  "feature-sweep": {
+    "converter": "pymupdf-1.28.2-f3",
+    "fonts": {
+      "available": [
+        "Aptos",
+        "Aptos Display"
+      ],
+      "conditional": [],
+      "hash": "ae15a1311a30",
+      "instead": [],
+      "missing": [],
+      "substituted": [],
+      "uncovered": ""
+    },
+    "histogram": 0.9313,
+    "loss": 106007.8,
+    "pdfium": {
+      "histogram": 0.9061,
+      "loss": 466679.2,
+      "slides": [
+        {
+          "coverage": 0.1133,
+          "histogram": 0.9945,
+          "loss": 5111.9,
+          "mean_abs": 1.02,
+          "over10": 2.067,
+          "over64": 0.664,
+          "sparse": false,
+          "ssim": 0.9511
+        },
+        {
+          "coverage": 0.1111,
+          "histogram": 0.9867,
+          "loss": 4974.0,
+          "mean_abs": 1.088,
+          "over10": 2.685,
+          "over64": 0.502,
+          "sparse": false,
+          "ssim": 0.9514
+        },
+        {
+          "coverage": 0.1079,
+          "histogram": 0.99,
+          "loss": 4301.1,
+          "mean_abs": 0.969,
+          "over10": 2.39,
+          "over64": 0.484,
+          "sparse": false,
+          "ssim": 0.9567
+        },
+        {
+          "coverage": 0.0245,
+          "histogram": 0.8738,
+          "loss": 4265.1,
+          "mean_abs": 0.947,
+          "over10": 1.772,
+          "over64": 0.544,
+          "sparse": false,
+          "ssim": 0.811
+        },
+        {
+          "coverage": 0.0553,
+          "histogram": 0.9846,
+          "loss": 15914.7,
+          "mean_abs": 3.145,
+          "over10": 3.303,
+          "over64": 1.731,
+          "sparse": false,
+          "ssim": 0.6877
+        },
+        {
+          "coverage": 0.2057,
+          "histogram": 0.9959,
+          "loss": 5471.7,
+          "mean_abs": 0.811,
+          "over10": 1.681,
+          "over64": 0.409,
+          "sparse": false,
+          "ssim": 0.9711
+        },
+        {
+          "coverage": 0.0563,
+          "histogram": 0.9672,
+          "loss": 25364.6,
+          "mean_abs": 2.442,
+          "over10": 3.004,
+          "over64": 1.647,
+          "sparse": false,
+          "ssim": 0.5111
+        },
+        {
+          "coverage": 0.0509,
+          "histogram": 0.7591,
+          "loss": 17491.6,
+          "mean_abs": 2.698,
+          "over10": 3.653,
+          "over64": 1.936,
+          "sparse": false,
+          "ssim": 0.6275
+        },
+        {
+          "coverage": 0.1978,
+          "histogram": 0.6187,
+          "loss": 19479.9,
+          "mean_abs": 4.819,
+          "over10": 18.708,
+          "over64": 1.997,
+          "sparse": false,
+          "ssim": 0.8931
+        },
+        {
+          "coverage": 0.2001,
+          "histogram": 0.9911,
+          "loss": 151085.0,
+          "mean_abs": 12.714,
+          "over10": 10.422,
+          "over64": 8.34,
+          "sparse": false,
+          "ssim": 0.1806
+        },
+        {
+          "coverage": 0.0391,
+          "histogram": 0.7303,
+          "loss": 10552.3,
+          "mean_abs": 2.077,
+          "over10": 2.479,
+          "over64": 0.969,
+          "sparse": false,
+          "ssim": 0.7068
+        },
+        {
+          "coverage": 0.1209,
+          "histogram": 0.9514,
+          "loss": 13581.1,
+          "mean_abs": 3.246,
+          "over10": 4.323,
+          "over64": 2.306,
+          "sparse": false,
+          "ssim": 0.8782
+        },
+        {
+          "coverage": 0.2168,
+          "histogram": 0.9357,
+          "loss": 189086.2,
+          "mean_abs": 19.372,
+          "over10": 19.563,
+          "over64": 13.995,
+          "sparse": false,
+          "ssim": 0.0535
+        }
+      ],
+      "ssim": 0.7061
+    },
+    "slides": [
+      {
+        "coverage": 0.1112,
+        "histogram": 0.9994,
+        "loss": 3051.1,
+        "mean_abs": 0.665,
+        "over10": 1.359,
+        "over64": 0.424,
+        "sparse": false,
+        "ssim": 0.9702
+      },
+      {
+        "coverage": 0.1083,
+        "histogram": 0.999,
+        "loss": 3405.0,
+        "mean_abs": 0.782,
+        "over10": 1.863,
+        "over64": 0.345,
+        "sparse": false,
+        "ssim": 0.9659
+      },
+      {
+        "coverage": 0.1049,
+        "histogram": 0.9991,
+        "loss": 2282.9,
+        "mean_abs": 0.582,
+        "over10": 1.501,
+        "over64": 0.23,
+        "sparse": false,
+        "ssim": 0.9764
+      },
+      {
+        "coverage": 0.0221,
+        "histogram": 0.9853,
+        "loss": 2592.7,
+        "mean_abs": 0.774,
+        "over10": 1.425,
+        "over64": 0.311,
+        "sparse": false,
+        "ssim": 0.8728
+      },
+      {
+        "coverage": 0.0534,
+        "histogram": 0.9999,
+        "loss": 14624.7,
+        "mean_abs": 2.939,
+        "over10": 2.951,
+        "over64": 1.494,
+        "sparse": false,
+        "ssim": 0.703
+      },
+      {
+        "coverage": 0.2048,
+        "histogram": 0.9983,
+        "loss": 3214.3,
+        "mean_abs": 0.558,
+        "over10": 1.112,
+        "over64": 0.345,
+        "sparse": false,
+        "ssim": 0.983
+      },
+      {
+        "coverage": 0.0543,
+        "histogram": 0.9734,
+        "loss": 24505.3,
+        "mean_abs": 2.181,
+        "over10": 2.11,
+        "over64": 1.404,
+        "sparse": false,
+        "ssim": 0.5099
+      },
+      {
+        "coverage": 0.045,
+        "histogram": 0.7239,
+        "loss": 15086.0,
+        "mean_abs": 2.333,
+        "over10": 2.842,
+        "over64": 1.25,
+        "sparse": false,
+        "ssim": 0.6361
+      },
+      {
+        "coverage": 0.1956,
+        "histogram": 0.628,
+        "loss": 14552.3,
+        "mean_abs": 4.483,
+        "over10": 18.34,
+        "over64": 1.594,
+        "sparse": false,
+        "ssim": 0.9193
+      },
+      {
+        "coverage": 0.1987,
+        "histogram": 0.9782,
+        "loss": 16461.2,
+        "mean_abs": 1.953,
+        "over10": 3.521,
+        "over64": 1.459,
+        "sparse": false,
+        "ssim": 0.9101,
+        "unvalidated": "converted page failed validation: 128.0 dpi (4x), MuPDF/resvg SSIM 0.8875 beyond 20 colour 0"
+      },
+      {
+        "coverage": 0.0345,
+        "histogram": 0.998,
+        "loss": 9883.5,
+        "mean_abs": 2.007,
+        "over10": 2.039,
+        "over64": 0.879,
+        "sparse": false,
+        "ssim": 0.6891
+      },
+      {
+        "coverage": 0.1191,
+        "histogram": 0.9402,
+        "loss": 12810.0,
+        "mean_abs": 3.053,
+        "over10": 3.92,
+        "over64": 2.18,
         "sparse": false,
         "ssim": 0.8833
       },
       {
-        "coverage": 0.03,
-        "histogram": 0.5809,
-        "mean_abs": 1.209,
-        "over10": 2.246,
-        "over64": 0.66,
+        "coverage": 0.2183,
+        "histogram": 0.6487,
+        "loss": 110398.6,
+        "mean_abs": 13.463,
+        "over10": 19.062,
+        "over64": 10.776,
         "sparse": false,
-        "ssim": 0.7843
-      },
-      {
-        "coverage": 0.0891,
-        "histogram": 0.9929,
-        "mean_abs": 3.887,
-        "over10": 3.687,
-        "over64": 2.54,
-        "sparse": false,
-        "ssim": 0.5751
-      },
-      {
-        "coverage": 0.2379,
-        "histogram": 0.9993,
-        "mean_abs": 1.638,
-        "over10": 1.792,
-        "over64": 1.245,
-        "sparse": false,
-        "ssim": 0.9132
-      },
-      {
-        "coverage": 0.1877,
-        "histogram": 0.9999,
-        "mean_abs": 0.622,
-        "over10": 0.739,
-        "over64": 0.385,
-        "sparse": false,
-        "ssim": 0.972
-      },
-      {
-        "coverage": 0.2723,
-        "histogram": 0.9987,
-        "mean_abs": 2.218,
-        "over10": 2.285,
-        "over64": 1.688,
-        "sparse": false,
-        "ssim": 0.8905
-      },
-      {
-        "coverage": 0.0353,
-        "histogram": 0.7089,
-        "mean_abs": 1.551,
-        "over10": 2.673,
-        "over64": 0.871,
-        "sparse": false,
-        "ssim": 0.7793
-      },
-      {
-        "coverage": 0.0424,
-        "histogram": 0.9481,
-        "mean_abs": 4.82,
-        "over10": 4.185,
-        "over64": 2.874,
-        "sparse": false,
-        "ssim": 0.09
-      },
-      {
-        "coverage": 0.1505,
-        "histogram": 0.9095,
-        "mean_abs": 6.614,
-        "over10": 5.911,
-        "over64": 4.12,
-        "sparse": false,
-        "ssim": 0.5694
-      },
-      {
-        "coverage": 0.212,
-        "histogram": 0.999,
-        "mean_abs": 5.505,
-        "over10": 4.835,
-        "over64": 3.349,
-        "sparse": false,
-        "ssim": 0.7316
-      },
-      {
-        "coverage": 0.0475,
-        "histogram": 0.6027,
-        "mean_abs": 3.072,
-        "over10": 3.263,
-        "over64": 1.969,
-        "sparse": false,
-        "ssim": 0.5812
-      },
-      {
-        "coverage": 0.2389,
-        "histogram": 0.1159,
-        "mean_abs": 21.542,
-        "over10": 23.807,
-        "over64": 20.475,
-        "sparse": false,
-        "ssim": 0.7764
-      },
-      {
-        "coverage": 0.2984,
-        "histogram": 0.9801,
-        "mean_abs": 10.417,
-        "over10": 9.709,
-        "over64": 8.735,
-        "sparse": false,
-        "ssim": 0.7551
-      },
-      {
-        "coverage": 0.2123,
-        "histogram": 0.9993,
-        "mean_abs": 5.624,
-        "over10": 5.393,
-        "over64": 3.561,
-        "sparse": false,
-        "ssim": 0.7562
+        "ssim": 0.4513,
+        "unvalidated": "converted page failed validation: 300 dpi (2x), MuPDF/resvg SSIM 0.3906 beyond 297129 colour 240; 128.0 dpi (4x), MuPDF/resvg SSIM 0.8231 beyond 1457 colour 0"
       }
     ],
-    "ssim": 0.7345
-  },
-  "feature-sweep": {
-    "fonts": {
-      "available": [
-        "Aptos",
-        "Aptos Display"
-      ],
-      "conditional": [],
-      "hash": "ae15a1311a30",
-      "instead": [],
-      "missing": [],
-      "substituted": [],
-      "uncovered": ""
-    },
-    "histogram": 0.9061,
-    "slides": [
-      {
-        "coverage": 0.1133,
-        "histogram": 0.9945,
-        "mean_abs": 1.02,
-        "over10": 2.067,
-        "over64": 0.664,
-        "sparse": false,
-        "ssim": 0.9511
-      },
-      {
-        "coverage": 0.1111,
-        "histogram": 0.9867,
-        "mean_abs": 1.088,
-        "over10": 2.685,
-        "over64": 0.502,
-        "sparse": false,
-        "ssim": 0.9514
-      },
-      {
-        "coverage": 0.1079,
-        "histogram": 0.99,
-        "mean_abs": 0.969,
-        "over10": 2.39,
-        "over64": 0.484,
-        "sparse": false,
-        "ssim": 0.9567
-      },
-      {
-        "coverage": 0.0245,
-        "histogram": 0.8738,
-        "mean_abs": 0.947,
-        "over10": 1.772,
-        "over64": 0.544,
-        "sparse": false,
-        "ssim": 0.811
-      },
-      {
-        "coverage": 0.0553,
-        "histogram": 0.9846,
-        "mean_abs": 3.145,
-        "over10": 3.303,
-        "over64": 1.731,
-        "sparse": false,
-        "ssim": 0.6877
-      },
-      {
-        "coverage": 0.2057,
-        "histogram": 0.9959,
-        "mean_abs": 0.811,
-        "over10": 1.681,
-        "over64": 0.409,
-        "sparse": false,
-        "ssim": 0.9711
-      },
-      {
-        "coverage": 0.0563,
-        "histogram": 0.9672,
-        "mean_abs": 2.442,
-        "over10": 3.004,
-        "over64": 1.647,
-        "sparse": false,
-        "ssim": 0.5111
-      },
-      {
-        "coverage": 0.0509,
-        "histogram": 0.7591,
-        "mean_abs": 2.698,
-        "over10": 3.653,
-        "over64": 1.936,
-        "sparse": false,
-        "ssim": 0.6275
-      },
-      {
-        "coverage": 0.1978,
-        "histogram": 0.6187,
-        "mean_abs": 4.819,
-        "over10": 18.708,
-        "over64": 1.997,
-        "sparse": false,
-        "ssim": 0.8931
-      },
-      {
-        "coverage": 0.2001,
-        "histogram": 0.9911,
-        "mean_abs": 12.714,
-        "over10": 10.422,
-        "over64": 8.34,
-        "sparse": false,
-        "ssim": 0.1806
-      },
-      {
-        "coverage": 0.0391,
-        "histogram": 0.7303,
-        "mean_abs": 2.077,
-        "over10": 2.479,
-        "over64": 0.969,
-        "sparse": false,
-        "ssim": 0.7068
-      },
-      {
-        "coverage": 0.1209,
-        "histogram": 0.9514,
-        "mean_abs": 3.246,
-        "over10": 4.323,
-        "over64": 2.306,
-        "sparse": false,
-        "ssim": 0.8782
-      },
-      {
-        "coverage": 0.2168,
-        "histogram": 0.9357,
-        "mean_abs": 19.372,
-        "over10": 19.563,
-        "over64": 13.995,
-        "sparse": false,
-        "ssim": 0.0535
-      }
-    ],
-    "ssim": 0.7061
+    "slides_scored": 11,
+    "ssim": 0.8281,
+    "truth": "svg"
   },
   "real-basic-theme": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Arial",
@@ -354,9 +731,11 @@
       "uncovered": ""
     },
     "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
-    "slides": []
+    "slides": [],
+    "truth": "svg"
   },
   "real-college-template": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Arial",
@@ -370,93 +749,203 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8754,
+    "histogram": 0.8879,
+    "loss": 260819.9,
+    "pdfium": {
+      "histogram": 0.8754,
+      "loss": 342524.4,
+      "slides": [
+        {
+          "coverage": 0.9828,
+          "histogram": 1.0,
+          "loss": 8376.1,
+          "mean_abs": 0.632,
+          "over10": 1.309,
+          "over64": 0.446,
+          "sparse": false,
+          "ssim": 0.9931
+        },
+        {
+          "coverage": 0.9958,
+          "histogram": 0.9998,
+          "loss": 15895.4,
+          "mean_abs": 0.932,
+          "over10": 2.43,
+          "over64": 0.594,
+          "sparse": false,
+          "ssim": 0.987
+        },
+        {
+          "coverage": 0.0292,
+          "histogram": 0.1195,
+          "loss": 8521.0,
+          "mean_abs": 1.139,
+          "over10": 2.488,
+          "over64": 0.634,
+          "sparse": false,
+          "ssim": 0.7627
+        },
+        {
+          "coverage": 0.1805,
+          "histogram": 0.9902,
+          "loss": 136486.1,
+          "mean_abs": 11.879,
+          "over10": 9.848,
+          "over64": 6.72,
+          "sparse": false,
+          "ssim": 0.3846
+        },
+        {
+          "coverage": 0.5657,
+          "histogram": 0.9997,
+          "loss": 32804.0,
+          "mean_abs": 1.824,
+          "over10": 2.884,
+          "over64": 1.208,
+          "sparse": false,
+          "ssim": 0.9528
+        },
+        {
+          "coverage": 0.0473,
+          "histogram": 0.9611,
+          "loss": 15288.0,
+          "mean_abs": 2.668,
+          "over10": 3.308,
+          "over64": 1.582,
+          "sparse": false,
+          "ssim": 0.7372
+        },
+        {
+          "coverage": 0.0745,
+          "histogram": 0.9715,
+          "loss": 44734.2,
+          "mean_abs": 6.326,
+          "over10": 5.905,
+          "over64": 3.636,
+          "sparse": false,
+          "ssim": 0.5112
+        },
+        {
+          "coverage": 0.5786,
+          "histogram": 0.8365,
+          "loss": 80419.6,
+          "mean_abs": 4.515,
+          "over10": 20.793,
+          "over64": 0.514,
+          "sparse": false,
+          "ssim": 0.8869
+        },
+        {
+          "coverage": 0.0062,
+          "histogram": 1.0,
+          "loss": 0.0,
+          "mean_abs": 0.157,
+          "over10": 0.389,
+          "over64": 0.101,
+          "sparse": true,
+          "ssim": 1.0
+        }
+      ],
+      "ssim": 0.8017
+    },
     "slides": [
       {
-        "coverage": 0.9828,
+        "coverage": 0.9821,
         "histogram": 1.0,
-        "mean_abs": 0.632,
-        "over10": 1.309,
-        "over64": 0.446,
+        "loss": 7855.5,
+        "mean_abs": 0.469,
+        "over10": 0.519,
+        "over64": 0.318,
         "sparse": false,
-        "ssim": 0.9931
+        "ssim": 0.9935
       },
       {
-        "coverage": 0.9958,
+        "coverage": 0.9952,
         "histogram": 0.9998,
-        "mean_abs": 0.932,
-        "over10": 2.43,
-        "over64": 0.594,
+        "loss": 13295.3,
+        "mean_abs": 0.806,
+        "over10": 2.234,
+        "over64": 0.515,
         "sparse": false,
-        "ssim": 0.987
+        "ssim": 0.9891
       },
       {
-        "coverage": 0.0292,
-        "histogram": 0.1195,
-        "mean_abs": 1.139,
-        "over10": 2.488,
-        "over64": 0.634,
+        "coverage": 0.028,
+        "histogram": 0.1373,
+        "loss": 7296.5,
+        "mean_abs": 0.974,
+        "over10": 2.28,
+        "over64": 0.534,
         "sparse": false,
-        "ssim": 0.7627
+        "ssim": 0.7877
       },
       {
-        "coverage": 0.1805,
-        "histogram": 0.9902,
-        "mean_abs": 11.879,
-        "over10": 9.848,
-        "over64": 6.72,
+        "coverage": 0.1762,
+        "histogram": 0.9979,
+        "loss": 129176.1,
+        "mean_abs": 10.799,
+        "over10": 9.281,
+        "over64": 5.773,
         "sparse": false,
-        "ssim": 0.3846
+        "ssim": 0.4034
       },
       {
-        "coverage": 0.5657,
-        "histogram": 0.9997,
-        "mean_abs": 1.824,
-        "over10": 2.884,
-        "over64": 1.208,
+        "coverage": 0.565,
+        "histogram": 0.9999,
+        "loss": 34374.9,
+        "mean_abs": 1.769,
+        "over10": 2.329,
+        "over64": 1.166,
         "sparse": false,
-        "ssim": 0.9528
+        "ssim": 0.9505
       },
       {
-        "coverage": 0.0473,
-        "histogram": 0.9611,
-        "mean_abs": 2.668,
-        "over10": 3.308,
-        "over64": 1.582,
+        "coverage": 0.0436,
+        "histogram": 0.9974,
+        "loss": 11165.1,
+        "mean_abs": 2.034,
+        "over10": 2.54,
+        "over64": 1.117,
         "sparse": false,
-        "ssim": 0.7372
+        "ssim": 0.7917
       },
       {
-        "coverage": 0.0745,
-        "histogram": 0.9715,
-        "mean_abs": 6.326,
-        "over10": 5.905,
-        "over64": 3.636,
+        "coverage": 0.0697,
+        "histogram": 0.9988,
+        "loss": 38999.5,
+        "mean_abs": 5.666,
+        "over10": 5.037,
+        "over64": 3.078,
         "sparse": false,
-        "ssim": 0.5112
+        "ssim": 0.5445
       },
       {
-        "coverage": 0.5786,
-        "histogram": 0.8365,
-        "mean_abs": 4.515,
-        "over10": 20.793,
-        "over64": 0.514,
+        "coverage": 0.5771,
+        "histogram": 0.8604,
+        "loss": 18657.0,
+        "mean_abs": 2.721,
+        "over10": 7.71,
+        "over64": 0.253,
         "sparse": false,
-        "ssim": 0.8869
+        "ssim": 0.9737
       },
       {
-        "coverage": 0.0062,
+        "coverage": 0.0059,
         "histogram": 1.0,
-        "mean_abs": 0.157,
-        "over10": 0.389,
-        "over64": 0.101,
+        "loss": 0.0,
+        "mean_abs": 0.143,
+        "over10": 0.375,
+        "over64": 0.082,
         "sparse": true,
         "ssim": 1.0
       }
     ],
-    "ssim": 0.8017
+    "slides_scored": 9,
+    "ssim": 0.826,
+    "truth": "svg"
   },
   "real-financial-report": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Arial",
@@ -473,48 +962,103 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9988,
+    "histogram": 0.9998,
+    "loss": 62065.4,
+    "pdfium": {
+      "histogram": 0.9988,
+      "loss": 65533.8,
+      "slides": [
+        {
+          "coverage": 0.9898,
+          "histogram": 1.0,
+          "loss": 13787.1,
+          "mean_abs": 0.942,
+          "over10": 2.086,
+          "over64": 0.479,
+          "sparse": false,
+          "ssim": 0.9849
+        },
+        {
+          "coverage": 0.1756,
+          "histogram": 0.9989,
+          "loss": 10484.4,
+          "mean_abs": 1.622,
+          "over10": 3.389,
+          "over64": 0.898,
+          "sparse": false,
+          "ssim": 0.9352
+        },
+        {
+          "coverage": 0.1695,
+          "histogram": 0.9971,
+          "loss": 18800.9,
+          "mean_abs": 2.025,
+          "over10": 3.643,
+          "over64": 1.281,
+          "sparse": false,
+          "ssim": 0.8796
+        },
+        {
+          "coverage": 0.1748,
+          "histogram": 0.9991,
+          "loss": 22461.4,
+          "mean_abs": 2.199,
+          "over10": 3.845,
+          "over64": 1.313,
+          "sparse": false,
+          "ssim": 0.8606
+        }
+      ],
+      "ssim": 0.9151
+    },
     "slides": [
       {
-        "coverage": 0.9898,
+        "coverage": 0.9893,
         "histogram": 1.0,
-        "mean_abs": 0.942,
-        "over10": 2.086,
-        "over64": 0.479,
+        "loss": 11116.1,
+        "mean_abs": 0.816,
+        "over10": 1.663,
+        "over64": 0.425,
         "sparse": false,
-        "ssim": 0.9849
+        "ssim": 0.9878
       },
       {
-        "coverage": 0.1756,
-        "histogram": 0.9989,
-        "mean_abs": 1.622,
-        "over10": 3.389,
-        "over64": 0.898,
+        "coverage": 0.1727,
+        "histogram": 0.9998,
+        "loss": 9808.6,
+        "mean_abs": 1.34,
+        "over10": 2.65,
+        "over64": 0.759,
         "sparse": false,
-        "ssim": 0.9352
+        "ssim": 0.9384
       },
       {
-        "coverage": 0.1695,
-        "histogram": 0.9971,
-        "mean_abs": 2.025,
-        "over10": 3.643,
-        "over64": 1.281,
+        "coverage": 0.167,
+        "histogram": 0.9995,
+        "loss": 17470.4,
+        "mean_abs": 1.809,
+        "over10": 3.199,
+        "over64": 1.124,
         "sparse": false,
-        "ssim": 0.8796
+        "ssim": 0.8865
       },
       {
-        "coverage": 0.1748,
-        "histogram": 0.9991,
-        "mean_abs": 2.199,
-        "over10": 3.845,
-        "over64": 1.313,
+        "coverage": 0.1719,
+        "histogram": 0.9998,
+        "loss": 23670.3,
+        "mean_abs": 2.177,
+        "over10": 3.355,
+        "over64": 1.331,
         "sparse": false,
-        "ssim": 0.8606
+        "ssim": 0.8506
       }
     ],
-    "ssim": 0.9151
+    "slides_scored": 4,
+    "ssim": 0.9158,
+    "truth": "svg"
   },
   "real-product-page": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Arial",
@@ -530,9 +1074,11 @@
       "uncovered": "\u26a1\ud83d\udcf1\ud83d\udd12"
     },
     "skipped": "no named face can draw \u26a1\ud83d\udcf1\ud83d\udd12; both renderers invented a fallback",
-    "slides": []
+    "slides": [],
+    "truth": "svg"
   },
   "sample": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Arial",
@@ -554,9 +1100,11 @@
       "uncovered": ""
     },
     "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
-    "slides": []
+    "slides": [],
+    "truth": "svg"
   },
   "sample-cjk": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Arial",
@@ -573,66 +1121,143 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9802,
+    "histogram": 0.9955,
+    "loss": 23675.3,
+    "pdfium": {
+      "histogram": 0.9802,
+      "loss": 27941.2,
+      "slides": [
+        {
+          "coverage": 0.0127,
+          "histogram": 1.0,
+          "loss": 0.0,
+          "mean_abs": 0.226,
+          "over10": 0.59,
+          "over64": 0.051,
+          "sparse": true,
+          "ssim": 1.0
+        },
+        {
+          "coverage": 0.0291,
+          "histogram": 0.986,
+          "loss": 5837.4,
+          "mean_abs": 1.457,
+          "over10": 1.738,
+          "over64": 0.78,
+          "sparse": false,
+          "ssim": 0.7825
+        },
+        {
+          "coverage": 0.0274,
+          "histogram": 0.9828,
+          "loss": 10422.6,
+          "mean_abs": 2.054,
+          "over10": 1.923,
+          "over64": 1.227,
+          "sparse": false,
+          "ssim": 0.5877
+        },
+        {
+          "coverage": 0.0273,
+          "histogram": 0.9703,
+          "loss": 8916.4,
+          "mean_abs": 1.859,
+          "over10": 1.832,
+          "over64": 1.015,
+          "sparse": false,
+          "ssim": 0.6456
+        },
+        {
+          "coverage": 0.0168,
+          "histogram": 0.9669,
+          "loss": 1525.1,
+          "mean_abs": 0.58,
+          "over10": 0.911,
+          "over64": 0.375,
+          "sparse": false,
+          "ssim": 0.9013
+        },
+        {
+          "coverage": 0.0178,
+          "histogram": 0.9753,
+          "loss": 1239.7,
+          "mean_abs": 0.369,
+          "over10": 0.856,
+          "over64": 0.161,
+          "sparse": false,
+          "ssim": 0.9243
+        }
+      ],
+      "ssim": 0.8069
+    },
     "slides": [
       {
-        "coverage": 0.0127,
+        "coverage": 0.0115,
         "histogram": 1.0,
-        "mean_abs": 0.226,
-        "over10": 0.59,
-        "over64": 0.051,
+        "loss": 0.0,
+        "mean_abs": 0.121,
+        "over10": 0.377,
+        "over64": 0.001,
         "sparse": true,
         "ssim": 1.0
       },
       {
-        "coverage": 0.0291,
-        "histogram": 0.986,
-        "mean_abs": 1.457,
-        "over10": 1.738,
-        "over64": 0.78,
+        "coverage": 0.0272,
+        "histogram": 0.9911,
+        "loss": 3993.2,
+        "mean_abs": 1.097,
+        "over10": 1.345,
+        "over64": 0.434,
         "sparse": false,
-        "ssim": 0.7825
+        "ssim": 0.8404
       },
       {
-        "coverage": 0.0274,
-        "histogram": 0.9828,
-        "mean_abs": 2.054,
-        "over10": 1.923,
-        "over64": 1.227,
+        "coverage": 0.0263,
+        "histogram": 0.9873,
+        "loss": 10361.2,
+        "mean_abs": 1.977,
+        "over10": 1.655,
+        "over64": 1.103,
         "sparse": false,
-        "ssim": 0.5877
+        "ssim": 0.5727
       },
       {
-        "coverage": 0.0273,
-        "histogram": 0.9703,
-        "mean_abs": 1.859,
-        "over10": 1.832,
-        "over64": 1.015,
+        "coverage": 0.0254,
+        "histogram": 0.9995,
+        "loss": 7366.9,
+        "mean_abs": 1.5,
+        "over10": 1.39,
+        "over64": 0.551,
         "sparse": false,
-        "ssim": 0.6456
+        "ssim": 0.6856
+      },
+      {
+        "coverage": 0.0157,
+        "histogram": 0.9997,
+        "loss": 1043.6,
+        "mean_abs": 0.356,
+        "over10": 0.543,
+        "over64": 0.099,
+        "sparse": false,
+        "ssim": 0.9278
       },
       {
         "coverage": 0.0168,
-        "histogram": 0.9669,
-        "mean_abs": 0.58,
-        "over10": 0.911,
-        "over64": 0.375,
+        "histogram": 0.9952,
+        "loss": 910.4,
+        "mean_abs": 0.31,
+        "over10": 0.692,
+        "over64": 0.096,
         "sparse": false,
-        "ssim": 0.9013
-      },
-      {
-        "coverage": 0.0178,
-        "histogram": 0.9753,
-        "mean_abs": 0.369,
-        "over10": 0.856,
-        "over64": 0.161,
-        "sparse": false,
-        "ssim": 0.9243
+        "ssim": 0.9411
       }
     ],
-    "ssim": 0.8069
+    "slides_scored": 6,
+    "ssim": 0.8279,
+    "truth": "svg"
   },
   "sample-issue-387": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Arial",
@@ -648,20 +1273,42 @@
       "uncovered": ""
     },
     "histogram": 1.0,
+    "loss": 8453.7,
+    "pdfium": {
+      "histogram": 1.0,
+      "loss": 8697.7,
+      "slides": [
+        {
+          "coverage": 1.0,
+          "histogram": 1.0,
+          "loss": 8697.7,
+          "mean_abs": 0.958,
+          "over10": 1.225,
+          "over64": 0.534,
+          "sparse": false,
+          "ssim": 0.9906
+        }
+      ],
+      "ssim": 0.9906
+    },
     "slides": [
       {
         "coverage": 1.0,
         "histogram": 1.0,
-        "mean_abs": 0.958,
-        "over10": 1.225,
-        "over64": 0.534,
+        "loss": 8453.7,
+        "mean_abs": 0.862,
+        "over10": 0.98,
+        "over64": 0.393,
         "sparse": false,
-        "ssim": 0.9906
+        "ssim": 0.9908
       }
     ],
-    "ssim": 0.9906
+    "slides_scored": 1,
+    "ssim": 0.9908,
+    "truth": "svg"
   },
   "table-test": {
+    "converter": "pymupdf-1.28.2-f3",
     "fonts": {
       "available": [
         "Aptos",
@@ -675,18 +1322,39 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9984,
+    "histogram": 0.9987,
+    "loss": 1659.4,
+    "pdfium": {
+      "histogram": 0.9984,
+      "loss": 2199.4,
+      "slides": [
+        {
+          "coverage": 0.2278,
+          "histogram": 0.9984,
+          "loss": 2199.4,
+          "mean_abs": 0.301,
+          "over10": 0.818,
+          "over64": 0.128,
+          "sparse": false,
+          "ssim": 0.9895
+        }
+      ],
+      "ssim": 0.9895
+    },
     "slides": [
       {
-        "coverage": 0.2278,
-        "histogram": 0.9984,
-        "mean_abs": 0.301,
-        "over10": 0.818,
-        "over64": 0.128,
+        "coverage": 0.2277,
+        "histogram": 0.9987,
+        "loss": 1659.4,
+        "mean_abs": 0.234,
+        "over10": 0.278,
+        "over64": 0.122,
         "sparse": false,
-        "ssim": 0.9895
+        "ssim": 0.9921
       }
     ],
-    "ssim": 0.9895
+    "slides_scored": 1,
+    "ssim": 0.9921,
+    "truth": "svg"
   }
 }

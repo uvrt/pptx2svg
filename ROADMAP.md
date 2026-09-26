@@ -98,6 +98,11 @@ pair `(id, path)` is unique, and a downstream consumer needs both to address a s
 Against real PowerPoint output, every slide of every fixture, produced by
 `tools/fidelity.py` and recorded in `tests/fidelity-baselines.json`.
 
+**The numbers in this section and in Phase 3's tables were taken with the old instrument**
+(PowerPoint's PDF through pdfium). The instrument is now one rasteriser for both sides,
+and the recorded scores were recalibrated once: see *0.5 The instrument* for the
+before/after table per deck and per slide, and what the sharper instrument shows.
+
 **These numbers mean something different from the ones they replace.** Every table that
 used to sit here was partly a measurement of font availability: PowerPoint drew with
 Microsoft's Calibri, Cambria and Aptos, our side drew with whatever resvg could find, and
@@ -1066,6 +1071,200 @@ precisely so the oracle scores it instead of skipping it. Generate a synthetic c
 family, each fill type, each bullet scheme, each table configuration). **[pptx-renderer]**
 does this with a case generator and a support catalogue; the generated-corpus idea ports
 directly even though their generator does not.
+
+### 0.5 The instrument: one rasteriser for both sides
+
+0.3 rasterised PowerPoint's PDF with pdfium and our SVG with resvg, so part of every
+score was pdfium against resvg. The sibling `docx2svg` measured how much (its ROADMAP
+5.13): on Word's own page, pdfium against MuPDF on the *same* PDF scores 0.890, MuPDF
+against resvg 0.996 -- pdfium grid-fits glyph outlines and widens axis-aligned fills to
+whole pixels. The instrument here is now the one it adopted: **PowerPoint's page is
+converted to SVG, and resvg rasterises both sides.** `tools/fidelity.py --truth svg` is
+the default; `--truth pdfium`, the old instrument, is kept, and its numbers re-recorded
+through the new code equal the committed ones exactly (every slide, every column).
+
+**The converter** is `tools/pdf_svg.py`, a copy of `docx2svg`'s (its commit `02822f8`)
+taking the oracle directory as an argument, as `fidelity.py` itself is copied per
+harness: PyMuPDF (`page.get_svg_image(text_as_path=True)`), development only, behind the
+`fidelity` extra, which is not part of `dev` (AGPL-3.0: fine for a local tool never
+distributed with the library; nothing under `src/` imports it; CI does not install it,
+and the tests that need it skip). It carries the sibling's two corrections -- every glyph
+redrawn **unhinted** from the embedded program (PowerPoint's Aptos moves 30-35 font units
+under MuPDF's hinting: measured here too, on every Aptos page) and the page sized in
+**device pixels** -- and three more that PowerPoint's pages needed, each found by the
+validation below:
+
+* **Stroked text.** PowerPoint draws a run it has no bold face for with the regular face,
+  filled and stroked, and sets the line width before the `cm` that scales the text
+  object (`1.166667 w 2 Tr q 0.24 0 0 0.24 … cm BT`: a stroke 0.28 pt wide). MuPDF's SVG
+  writer takes the width as though it were already in page space -- 1.17 pt, four times
+  too wide -- so `real-financial-report`'s bold Japanese came out as blots, 17,000 pixels
+  beyond anti-aliasing a page. `stroked_text_widths` recomputes each stroked glyph's
+  width from MuPDF's own device calls (the line width times the expansion of the
+  transform current when the text is painted). 192 glyphs on `real-financial-report`,
+  `sample` and `real-basic-theme`.
+* **ICC-tagged images.** `real-college-template`'s photograph is tagged Adobe RGB (1998).
+  Both PDF rasterisers honour the profile; the SVG carries the samples only and resvg
+  reads them as sRGB, 9-11 levels off. `srgb_images` converts such an image to sRGB with
+  its profile and rendering intent (little CMS, as MuPDF uses) and embeds it as a PNG.
+* **MuPDF's own SVG reader does not tile a `<pattern>`** (it scores 0.08 against its own
+  PDF raster on `feature-sweep`'s tile fills, where resvg's raster of the same SVG agrees
+  with MuPDF's PDF raster to anti-aliasing). As for `<mask>`, the same-engine route is
+  skipped on such a page and resvg's route decides.
+
+**Validated on every page the harness reads** (`python tools/pdf_svg.py --validate`):
+all 61 pages of the 11 exports in `~/pptx2svg-oracle`, the three skipped decks' included,
+at 300 dpi and at the scoring resolution (1280 px across: 128 dpi on the 720 pt slides,
+96 on the 960 pt ones). The sibling's criteria, per page: same engine by two routes
+(MuPDF's raster of the PDF against MuPDF's raster of the SVG); no more than 20 pixels
+beyond anti-aliasing (MuPDF's PDF raster against resvg's SVG raster, bitmaps included);
+no flat colour more than 2 levels apart; every glyph the embedded program's, no `<text>`
+in the SVG, and resvg drawing it with no font available. Two adjustments, both measured:
+
+* **At the scoring resolution the gate is taken on rasters drawn at 4x and averaged
+  down.** At 96-128 dpi MuPDF's glyph cache puts a glyph on a sub-pixel grid that is a
+  larger share of a stem, and it minifies an embedded bitmap with a filter of its own:
+  at 1x, 28-101 isolated pixels a page on `chart-gallery`, on its text and its 3-D
+  scenes, even between MuPDF's two routes, on pages that hold at 300 dpi. At 4x, none.
+  The supersampled gate must also score SSIM 0.98 or more (passing pages: 0.985-1.0).
+* **At 300 dpi, stroked text goes through MuPDF's glyph cache too**:
+  `real-financial-report` page 2 shows 222 isolated pixels at 1x, 3 with both rasters
+  drawn at 2x, 0 at 4x. Where the 1x gate fails, the 2x one decides (and the same-engine
+  route may still change no colour).
+
+**59 of 61 pages pass. Two fail, and are not scored:**
+
+| Page | What | Why it cannot be held |
+| --- | --- | --- |
+| `feature-sweep` 13 | `a:pattFill` presets: PowerPoint embeds each pattern as a 64 x 64 px tile at 576 dpi | resvg, MuPDF and pdfium each sample the tiling in their own phase: 0.39 even at 300 dpi supersampled; at 128 dpi 0.82. No rasteriser agrees with another here |
+| `feature-sweep` 10 | `a:tile` picture fills: tiled images | faithful at 300 dpi (resvg against MuPDF's PDF raster 0.98, nothing beyond); at 128 dpi the supersampled gate scores 0.89. pdfium places the tiles in another phase altogether: its old score on this slide, 0.18, was mostly that |
+
+`tools/fidelity.py` reads each page's verdict (cached as `validation-1280.json` beside the
+conversion, computed once per PDF and converter version) and **reports a failing slide
+rather than averaging it**: the deck mean is over the validated slides.
+
+**Bitmaps PowerPoint embedded** (`python tools/pdf_svg.py --bitmaps`): no rasteriser can
+un-rasterise these, so in these regions our vector drawing is scored against
+PowerPoint's raster, now drawn by resvg's filter instead of pdfium's:
+
+| Deck, page | Bitmap | What it is |
+| --- | --- | --- |
+| `chart-gallery` 12-16 | 1,289-2,011 px, 300 dpi, soft mask, one a page | the surface, `bar3D`, `line3D`, `pie3D` and `area3D` scenes |
+| `feature-sweep` 1 | 1,067 x 268, 300 dpi, soft mask | the `a:clrChange` picture, recoloured by PowerPoint and re-rasterised (the untouched one beside it is the deck's own 192 x 48) |
+| `feature-sweep` 6 | two 734 x 184, 300 dpi, soft mask | the `a:alphaModFix` 50% and 20% pictures (the opaque one is the deck's own) |
+| `feature-sweep` 9 | two 136 x 96 at **72 dpi**, two 567 x 401 at 300 dpi, soft mask | the four gradient fills: `lin` and `path=circle` rasterised at one pixel a point, `path=rect` and `path=shape` at 300 dpi |
+| `feature-sweep` 12 | 551 x 384 and 650 x 590 at 300 dpi, soft mask; 668 x 168 | the two `a:outerShdw` shadows and the `a:blur grow` picture |
+| `feature-sweep` 13 | six 64 x 64 at 576 dpi | the pattern tiles (above) |
+| `real-college-template` 2-9 | 1,525 x 300 and 514 x 101, 300 dpi, soft mask | the logo, an EMF PowerPoint rasterised (slide 3's CMYK one included) |
+| `real-product-page` 1 | three 1,231 x 788 and three 160 x 160, 300 / 640 dpi, soft mask | the cards' shadows and the icons (the deck is skipped) |
+| `real-basic-theme` 2 | 396 x 396, 300 dpi, soft mask | a picture with `a:alphaModFix` (the deck is skipped) |
+
+The rest are the decks' own pictures at their own resolution: `feature-sweep`'s swatches
+(2, 3), picture bullets (4, 32 x 32 with their alpha), tiles (10); `real-college-template`
+8's photograph (1,029 x 683, 118 dpi, the Adobe RGB one); `authoring-integration`'s
+4 x 4 px image. **The converted pages hold Microsoft's glyph outlines**: they are cached
+only in `~/pptx2svg-oracle/svg/`, `pdf_svg.py` refuses to write one inside this or any
+git checkout, and none is committed.
+
+**Cost.** Converting all 61 pages takes 4 seconds, and is cached. A scoring run costs
+about 70 s against the old instrument's 54 (both truths, rendering ours once: 98 s). The
+full validation is the expensive part -- about 70 CPU-seconds a page at both resolutions,
+18 minutes for the corpus on four cores -- and runs once per export and converter
+version; `tests/test_pdf_svg.py` holds a sample of three pages (about a minute) and a
+refusal (feature-sweep 13).
+
+#### Recalibrated
+
+The renderer did not change: our SVG output and the VRT snapshots are the same bytes.
+`tests/fidelity-baselines.json` now holds, per deck, the `svg` truth's entry (stamped
+`"truth"` and `"converter"`) with the `pdfium` truth's slides and means beside it, and
+every slide carries the unnormalised structural `loss` (the sum of `1 − SSIM` over the
+mask) that the harness docstring tells a reader to prefer when the mask changes:
+
+| Deck | pdfium: SSIM / hist | loss | **svg: SSIM / hist** | loss |
+| --- | --- | --- | --- | --- |
+| `table-test` | 0.9895 / 0.9984 | 2,199 | **0.9921 / 0.9987** | 1,659 |
+| `sample-issue-387` | 0.9906 / 1.0000 | 8,698 | **0.9908 / 1.0000** | 8,454 |
+| `authoring-integration` | 0.9309 / 0.9985 | 13,999 | **0.9352 / 0.9999** | 12,948 |
+| `real-financial-report` | 0.9151 / 0.9988 | 65,534 | **0.9158 / 0.9998** | 62,065 |
+| `sample-cjk` | 0.8069 / 0.9802 | 27,941 | **0.8279 / 0.9955** | 23,675 |
+| `real-college-template` (local) | 0.8017 / 0.8754 | 342,524 | **0.8260 / 0.8879** | 260,820 |
+| `feature-sweep`, 11 validated slides | 0.8132 / 0.8957 | 126,508 | **0.8281 / 0.9313** | 106,008 |
+| `feature-sweep`, all 13 (pdfium) | 0.7061 / 0.9061 | 466,679 | slides 10 and 13 not scored | |
+| `chart-gallery` | 0.7345 / 0.8443 | 510,403 | **0.7368 / 0.8600** | 492,936 |
+
+The same three decks are skipped, for the same reasons. **The spread did not compress,
+and that is the finding.** In `docx2svg` the pages went from 0.84-0.96 to 0.96-1.0,
+because what was left after pdfium was small. Here the median scored slide moves 0.8429 →
+0.8641 (median gain +0.0076) and the range stays 0.09-0.99: at 96-128 dpi pdfium's
+hinting costs less than at 300, and what spreads these slides is what our render draws
+differently. The loss falls on 45 of the 48 scored slides (it rises on `chart-gallery`
+14, `real-college-template` 5 and `real-financial-report` 4: 30%, 5% and 5%).
+
+**The thresholds stay.** `docx2svg` had an outlier drop tuned to pdfium's spread and
+scaled it (0.05 → 0.02) when the spread compressed. This harness has no outlier
+mechanism; its gates are `MIN_SSIM` 0.95 and `MIN_HISTOGRAM` 0.80 -- absolute pass marks
+from pptx-renderer, not fitted to pdfium's spread -- and `MAX_SSIM_DROP` 0.02, the
+regression allowance on a deck mean, which is about a rasteriser version moving both
+sides now and was never about the spread. With the spread unchanged, none of them was
+tuned to something that moved; the same two decks pass. Every deck's histogram rose or held
+(by up to 0.036): pdfium's anti-aliased edges and its image filtering put pixels in other
+bins than resvg's, which a 64-bin histogram cannot tell from a wrong colour.
+
+**Slides that moved notably:**
+
+| Slide | pdfium | svg | What the sharper instrument shows |
+| --- | --- | --- | --- |
+| `real-college-template` 8 | 0.8869, loss 80,420 | **0.9737**, loss 18,657 | 0.3's explanation -- "our resampling and colour differ slightly from pdfium's" -- was mostly pdfium: its resampling of the photograph. What is left is ours, see finding 2 |
+| `feature-sweep` 10 | 0.1806 | (0.9101, not scored) | pdfium tiles the picture fill in a different phase from MuPDF and resvg; the old 0.18 was that. Our tiling agrees with resvg's truth to 0.91, and would have been read as a failure |
+| `feature-sweep` 13 | 0.0535 | (0.4513, not scored) | the pattern tiles: no two rasterisers agree, so no score means anything here |
+| `feature-sweep` 4 | 0.8110 | 0.8728 | picture bullets (histogram 0.87 → 0.99): pdfium's drawing of the 32 x 32 px bullet images and of the thin text beside them |
+| `sample-cjk` 2, 4 | 0.7825, 0.6456 | 0.8404, 0.6856 | sparse Japanese text: 32% and 17% of the loss was the two rasterisers' glyph edges |
+| `real-college-template` 6, 7 | 0.7372, 0.5112 | 0.7917, 0.5445 | the text displacement recorded under *What the corpus says is wrong now* is real, but 27% and 13% of the loss was pdfium's |
+| `chart-gallery` 3, 5, 12 | 0.8251, 0.7843, 0.5694 | 0.8554, 0.8116, 0.5993 | sparse line art (3, 5) and the surface chart's scene bitmap (12): pdfium's edges and its minification |
+| `chart-gallery` 14 | 0.5812, loss 18,332 | **0.4609**, loss 23,788 | **fell**: the `line3D` scene is PowerPoint's 300 dpi bitmap. pdfium minified it by sampling, which kept its hairline gridlines dark and crisp -- like our vector gridlines. resvg filters it (against an 8x area-averaged ideal: resvg 0.979, pdfium 0.832), so PowerPoint's scene lines are lighter and softer than ours. That is raster against vector, not a defect of the ribbons |
+| `feature-sweep` 11, `sample-cjk` 3, `real-financial-report` 4 | 0.7068, 0.5877, 0.8606 | 0.6891, 0.5727, 0.8506 | fell with the mask: pdfium's wider ink was foreground in both images. `feature-sweep` 11's loss fell (10,552 → 9,884) and its histogram rose 0.73 → 0.998, `sample-cjk` 3's loss is level; `real-financial-report` 4's rose 5%, the filled radar of finding 4 |
+
+**The explained low scores, revisited:**
+
+* `real-college-template` 3 (0.7627 → 0.7877, histogram 0.1195 → 0.1373): still the
+  CMYK EMF logo. Our side rasterises the EMF's embedded PDF preview with pdfium; the
+  instrument change does not touch that, and PowerPoint's logo is its own 300 dpi
+  raster of the EMF. The explanation stands.
+* `real-college-template` 4 (0.3846 → 0.4034) and `chart-gallery` 11 (0.0900 → 0.0924):
+  unchanged in substance -- `c:userShapes` and the manual legend; the stock chart's axis
+  about a pixel off. The instrument did not move them, which is the confirmation.
+* `real-college-template` 8: see the table and finding 2.
+* `chart-gallery` 3, 5, 10 (sparse line art): up 0.003-0.03, still low. "SSIM is not a
+  percentage of correctness on sparse line art" is still true, but "half a pixel of
+  stroke displacement" was partly pdfium's grid-fitting; what is left is the plot
+  rectangle's.
+* `chart-gallery` 11's lesson (SSIM fell while the picture improved) is the mask, and
+  holds under either truth.
+
+**What the sharper instrument exposes**, recorded here and not fixed:
+
+1. **A shape's text sits in the shape's box, not in its preset's text rectangle.**
+   `authoring-integration` slide 1: the `roundRect`'s "Shape contract" is 6.5 px higher
+   and 6.0 px further left than PowerPoint's -- 3.5 pt, exactly the rounded corner's
+   inset (`0.29289 × adj × ss`, adj 16667, ss 900,000 EMU: 43,935 EMU). Nothing under
+   `src/` reads a preset's `a:rect`, so every preset whose text rectangle is not its
+   bounds (rounded rectangles, ellipses, arrows, callouts) places its text in the wrong
+   box. It is the three largest cells of that slide's loss.
+2. **A picture's embedded ICC profile is ignored.** `real-college-template` slide 8's
+   JPEG carries Adobe RGB (1998) (560 bytes); PowerPoint honours it, resvg draws the
+   samples as sRGB: mean |difference| 3.85 over the photograph, the blue channel 3 levels
+   low on average, histogram 0.86 on an otherwise 0.97 slide.
+3. **A 3-D line chart's legend key is a line where PowerPoint draws a square**
+   (`chart-gallery` 14): our keys are 3-D ribbon bars as wide as a line key, PowerPoint's
+   small squares.
+4. **A filled radar's spokes are drawn under its fill** (`real-financial-report` 4):
+   PowerPoint draws the category spokes over the filled series; ours are hidden by it.
+   The radar's known truncations and radius are beside it.
+5. **In a PowerPoint-rasterised scene, the truth is softer than our vector drawing**
+   (`chart-gallery` 12-16): the scene's hairlines lose contrast when the 300 dpi bitmap
+   is minified to 128 dpi. That bounds what a vector scene can score there; it is not
+   a rendering defect.
 
 ---
 

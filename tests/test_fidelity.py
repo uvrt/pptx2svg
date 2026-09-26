@@ -264,6 +264,30 @@ def test_baselines_file_is_readable_and_carries_font_provenance():
             continue
         assert "ssim" in entry, name
         assert "histogram" in entry, name
+        # Which instrument took the score, or it cannot be compared with a new run: the
+        # default truth's entry, with the old instrument's beside it.
+        assert entry["truth"] == fidelity.DEFAULT_TRUTH, name
+        assert entry["converter"].startswith("pymupdf-"), name
+        assert len(entry["pdfium"]["slides"]) == len(entry["slides"]), name
+
+
+def test_a_baseline_is_compared_only_under_the_truth_that_took_it():
+    """A score against the converted page and one against pdfium's raster are two
+    instruments' readings of one render; comparing across them would report the
+    instrument's change as the renderer's."""
+    fonts = {"hash": "abc"}
+    baselines = {
+        "deck": {"truth": "svg", "fonts": fonts, "ssim": 0.99, "slides": [{}],
+                 "pdfium": {"ssim": 0.93, "histogram": 0.98, "slides": [{}]}},
+        "old": {"fonts": fonts, "ssim": 0.9, "slides": [{}]},  # recorded before --truth existed
+    }
+    assert fidelity.baseline_for(baselines, "deck", "svg")["ssim"] == 0.99
+    pdfium = fidelity.baseline_for(baselines, "deck", "pdfium")
+    assert pdfium["ssim"] == 0.93 and pdfium["fonts"] is fonts
+    assert fidelity.baseline_for(baselines, "old", "pdfium")["ssim"] == 0.9
+    assert fidelity.baseline_for(baselines, "old", "svg") is None
+    assert fidelity.baseline_for(baselines, "missing", "svg") is None
+    assert fidelity.baseline_for(None, "deck", "svg") is None
 
 
 def test_the_metric_clones_carry_the_originals_kern_pairs():

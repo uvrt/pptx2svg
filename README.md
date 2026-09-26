@@ -206,13 +206,35 @@ between the two images is attributable to this library rather than to font avail
 
 ```bash
 python3 tools/fidelity.py --write-profile               # once, on a machine with Office
-python3 tools/fidelity.py --oracle ~/pptx2svg-oracle
+.venv/bin/python tools/fidelity.py --oracle ~/pptx2svg-oracle   # the .venv: see below
 ```
 
 The profile records paths and hashes only; no licensed font is ever copied into the
 repository, and `tests/font-profile.local.json` is gitignored. Without it the harness
 refuses to run, and a deck naming a face PowerPoint did not have either is skipped rather
 than scored against Microsoft's fallback.
+
+Both sides are rasterised by the **same engine**, resvg: PowerPoint's PDF page is first
+converted to SVG by `tools/pdf_svg.py` (glyphs redrawn unhinted from the fonts the PDF
+embeds, and validated against the PDF page by page), so a score measures layout and
+drawing rather than pdfium against resvg. `--truth pdfium`, the old instrument, stays
+available. The converter needs PyMuPDF, a development-only tool behind the `fidelity`
+extra, which is **not** part of `dev` and is not installed by CI; install it into a
+project virtual environment and run the harness from there:
+
+```bash
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -e '.[fidelity]'        # or just: .venv/bin/pip install pymupdf
+.venv/bin/python tools/fidelity.py            # --truth pdfium for the old instrument
+.venv/bin/python tools/pdf_svg.py --validate  # hold the converter to every export
+.venv/bin/python -m pytest                    # the converter's tests run here, and skip elsewhere
+```
+
+PyMuPDF is AGPL-3.0, acceptable for a local tool that is never distributed with the
+library; nothing under `src/` imports it, and without it the tests that need it skip.
+Converted pages carry the glyph outlines PowerPoint embedded (Microsoft's fonts), so they
+are cached only beside PowerPoint's exports, in `~/pptx2svg-oracle/svg/`, and
+`pdf_svg.py` refuses to write one inside a repository.
 
 If Microsoft PowerPoint is installed, `tools/powerpoint_export_pdf.applescript` exports a
 deck through PowerPoint itself, giving authoritative ground truth to compare against:
