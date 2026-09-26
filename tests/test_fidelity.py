@@ -264,6 +264,11 @@ def test_baselines_file_is_readable_and_carries_font_provenance():
             continue
         assert "ssim" in entry, name
         assert "histogram" in entry, name
+        # Which instrument took the score, or it cannot be compared with a new run: the
+        # default truth's entry, with the old instrument's beside it.
+        assert entry["truth"] == fidelity.DEFAULT_TRUTH, name
+        assert entry["converter"].startswith("pymupdf-"), name
+        assert len(entry["pdfium"]["slides"]) == len(entry["slides"]), name
 
 
 def test_a_baseline_is_compared_only_under_the_truth_that_took_it():
