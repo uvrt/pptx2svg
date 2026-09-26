@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -23,6 +24,59 @@ def pytest_addoption(parser) -> None:
             "a change in what a user sees. See tests/vrt/README.md."
         ),
     )
+
+
+#: The one xdist group every test that drives PowerPoint joins.  PowerPoint is a single
+#: instance per machine, and two exports through it at once interleave in its one window.
+POWERPOINT_GROUP = "powerpoint"
+#: How the controller is distributing tests, handed to its workers (which xdist starts
+#: with ``dist`` reset to ``"no"``) through the environment they inherit.
+_DIST_ENV = "PPTX2SVG_XDIST_DIST"
+
+
+def pytest_cmdline_main(config) -> None:
+    """Make ``-n`` mean ``--dist loadgroup`` unless another mode was asked for.
+
+    Runs after pytest-xdist's own (``tryfirst``) hook, which turns ``-n`` into ``load``.
+    ``loadgroup`` is ``load`` for every test without an ``xdist_group``, so this changes
+    nothing today; it is what keeps a future PowerPoint test on one worker without every
+    caller having to remember the flag."""
+    if not hasattr(config.option, "dist") or hasattr(config, "workerinput"):
+        return
+    if config.option.dist == "load":  # also an explicit --dist load: indistinguishable here
+        config.option.dist = "loadgroup"
+    os.environ[_DIST_ENV] = config.option.dist
+
+
+@pytest.hookimpl(tryfirst=True)  # before xdist's own, which reads the groups into node ids
+def pytest_collection_modifyitems(config, items) -> None:
+    """Keep tests that drive PowerPoint off concurrent workers.
+
+    Today no test does: the suite reads PowerPoint's *exports* (``~/pptx2svg-oracle``,
+    read-only and ``cache=False`` in ``test_pdf_svg.py``) and never launches it; exports
+    are made by hand with ``tools/powerpoint_export_pdf.applescript``.  This is the rail
+    for the first one that does.  Mark it ``@pytest.mark.powerpoint`` and it joins one
+    xdist group, which ``loadgroup`` (what ``-n`` means here: :func:`pytest_cmdline_main`)
+    runs on a single worker, one test at a time.  Any other distribution ignores groups,
+    so under one such a test fails rather than races.
+    """
+    marked = [item for item in items if item.get_closest_marker("powerpoint")]
+    if not marked or not hasattr(config, "workerinput"):
+        return
+    for item in marked:
+        item.add_marker(pytest.mark.xdist_group(POWERPOINT_GROUP))
+    if os.environ.get(_DIST_ENV) == "loadgroup":
+        # A worker re-parses the command line, so under a bare -n it does not know the
+        # controller is grouping, and would leave the group out of the node ids that
+        # xdist's scheduler reads it from.
+        config.option.loadgroup = True
+
+
+def pytest_runtest_setup(item) -> None:
+    if (hasattr(item.config, "workerinput") and item.get_closest_marker("powerpoint")
+            and os.environ.get(_DIST_ENV) != "loadgroup"):
+        pytest.fail("this test drives PowerPoint, which is one instance per machine: run it serially, "
+                    "or in parallel with --dist loadgroup")
 
 
 @pytest.fixture(scope="session")

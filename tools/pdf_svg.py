@@ -72,6 +72,7 @@ Usage::
 
     python tools/pdf_svg.py --validate                    # every export in the oracle directory
     python tools/pdf_svg.py --validate PDF...             # these PDFs
+    python tools/pdf_svg.py --validate --jobs 1           # serially (default: a page per core)
     python tools/pdf_svg.py PDF...                        # convert (cached); print the cache paths
     python tools/pdf_svg.py --bitmaps                     # list the bitmaps PowerPoint embedded
 """
@@ -161,6 +162,24 @@ def _refuse_repository(path: Path) -> None:
                                f"{path}")
 
 
+def _write_atomically(path: Path, text: str) -> None:
+    """Write ``path`` aside and rename it into place.
+
+    The cache is shared by every process of a parallel run (``--jobs``), and two of them
+    may convert or validate one PDF at once.  A rename is atomic, so a reader sees a whole
+    file or none -- never one another process is halfway through -- and since both write
+    the same page it does not matter which rename lands last.  (The same *page*, not
+    always the same bytes: a photograph :func:`srgb_images` re-encodes comes out as a
+    different PNG stream from one conversion to the next, serially too, with identical
+    pixels.)"""
+    partial = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        partial.write_text(text)
+        os.replace(partial, path)
+    finally:
+        partial.unlink(missing_ok=True)
+
+
 def convert(pdf: Path, cache: bool = True, oracle: Path | None = None) -> list[tuple[str, dict]]:
     """Every page of ``pdf`` as SVG -- glyphs as paths, redrawn from the embedded programs
     (:func:`unhinted_outlines`) -- with that function's report.  Cached under ``oracle``
@@ -188,9 +207,9 @@ def convert(pdf: Path, cache: bool = True, oracle: Path | None = None) -> list[t
         _refuse_repository(directory)
         directory.mkdir(parents=True, exist_ok=True)
         for index, (svg, report) in enumerate(out):
-            (directory / f"p{index + 1}.svg").write_text(svg)
-            (directory / f"p{index + 1}.json").write_text(json.dumps(report))
-        (directory / "done").write_text(str(len(out)))
+            _write_atomically(directory / f"p{index + 1}.svg", svg)
+            _write_atomically(directory / f"p{index + 1}.json", json.dumps(report))
+        _write_atomically(directory / "done", str(len(out)))  # last: it says the rest are there
     return out
 
 
@@ -721,6 +740,12 @@ def validate(pdf: Path, supersample: int = 0, pages: list[int] | None = None, ca
     return out
 
 
+def convert_task(task) -> None:
+    """:func:`convert` of one ``(pdf, oracle)``, into the cache: a pool task."""
+    pdf, oracle = task
+    convert(pdf, oracle=oracle)
+
+
 def validation_pdfs(oracle: Path | None = None) -> list[Path]:
     """Every export in the oracle directory that has its deck beside it -- the pages
     ``tools/fidelity.py`` scores, and those of the decks it skips."""
@@ -794,7 +819,7 @@ def record_verdicts(pdf: Path, rows: list[dict], oracle: Path | None, width: int
             entry["why"] = (entry["why"] + "; " if entry["why"] else "") + _why(row)
     convert(pdf, oracle=oracle)  # the cache directory exists
     _refuse_repository(path)
-    path.write_text(json.dumps(out, indent=1, sort_keys=True))
+    _write_atomically(path, json.dumps(out, indent=1, sort_keys=True))
     return out
 
 
@@ -851,6 +876,14 @@ def _print_bitmaps(pdf: Path) -> None:
                   f"{image['pixels'][1]} px  {image['dpi']} dpi" + ("  soft mask" if image["smask"] else ""))
 
 
+def validate_page(task) -> list[dict]:
+    """:func:`validate` of one page, ``(pdf, page index, supersample, cache, oracle, dpis,
+    width)``: a pool task.  Pages are validated independently of one another, so a PDF's
+    rows are its pages' rows concatenated in page order."""
+    pdf, page, supersample, cache, oracle, dpis, width = task
+    return validate(pdf, supersample, [page], cache=cache, oracle=oracle, dpis=dpis, width=width)
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pdf", nargs="*", type=Path)
@@ -865,10 +898,18 @@ def main(argv: list[str]) -> int:
                         help=f"validate at this resolution (repeatable; default {DPI} and the scoring width)")
     parser.add_argument("--max-pages", type=int, help="validate at most this many pages of each PDF")
     parser.add_argument("--no-cache", action="store_true", help="convert in memory only (nothing is written)")
+    parser.add_argument("--jobs", "-j", type=int, default=None,
+                        help="processes to validate pages in (default: every logical core, fewer if memory is "
+                        "short); 1 is the serial path.  Results and output are identical either way")
     args = parser.parse_args(argv[1:])
     if not available():
         print("PyMuPDF is not installed: see README.md, 'Checking fidelity against PowerPoint'")
         return 2
+    import fidelity
+
+    jobs = fidelity.default_jobs() if args.jobs is None else args.jobs
+    if jobs < 1:
+        parser.error("--jobs must be at least 1")
     oracle = Path(os.path.expanduser(str(args.oracle)))
     pdfs = args.pdf or validation_pdfs(oracle)
     if args.bitmaps:
@@ -880,18 +921,36 @@ def main(argv: list[str]) -> int:
             page_svgs(pdf, oracle=oracle)
             print(cache_dir(pdf, oracle))
         return 0
-    import fidelity
+    from parallel import pool_map
 
     dpis = tuple(args.dpi) if args.dpi else (DPI,)
     width = None if args.dpi else fidelity.WIDTH
+    cache = not args.no_cache
+    if jobs == 1:
+        # The serial path: a PDF validated, then printed, then the next.
+        results = (validate(pdf, args.supersample, list(range(args.max_pages)) if args.max_pages else None,
+                            cache=cache, oracle=oracle, dpis=dpis, width=width) for pdf in pdfs)
+    else:
+        # A page per task (a page is up to half a minute), every PDF converted first so
+        # that no two workers convert one at once; each PDF's rows are then its pages'
+        # rows in page order, which is what validate() returns for the whole PDF.
+        if cache:
+            pool_map(convert_task, [(pdf, oracle) for pdf in pdfs], jobs)
+        import pymupdf
+
+        counts = [pymupdf.open(str(pdf)).page_count for pdf in pdfs]
+        tasks = [(number, pdf, page) for number, (pdf, count) in enumerate(zip(pdfs, counts))
+                 for page in range(min(count, args.max_pages) if args.max_pages else count)]
+        found = pool_map(validate_page, [(pdf, page, args.supersample, cache, oracle, dpis, width)
+                                                   for _number, pdf, page in tasks], jobs)
+        results = [[] for _pdf in pdfs]
+        for (number, _pdf, _page), rows in zip(tasks, found):
+            results[number].extend(rows)
     failures = 0
-    for pdf in pdfs:
-        pages = list(range(args.max_pages)) if args.max_pages else None
-        rows = validate(pdf, args.supersample, pages, cache=not args.no_cache, oracle=oracle, dpis=dpis,
-                        width=width)
+    for pdf, rows in zip(pdfs, results):
         for row in rows:
             failures += not _print_row(pdf.stem, row, args.supersample)
-        if pages is None and width and dpis == (DPI,) and not args.no_cache:
+        if not args.max_pages and width and dpis == (DPI,) and cache:
             record_verdicts(pdf, rows, oracle, width)  # what tools/fidelity.py reads
     print(f"{failures} page(s) failed" if failures else "every page converted within anti-aliasing")
     return 1 if failures else 0
