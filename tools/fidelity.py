@@ -138,6 +138,14 @@ Usage::
     .venv/bin/python tools/fidelity.py --truth pdfium                # the old instrument
     .venv/bin/python tools/fidelity.py --slides                      # every slide's score
     .venv/bin/python tools/fidelity.py --update                      # rewrite baselines (both truths)
+    .venv/bin/python tools/fidelity.py --jobs 1                      # serially (default: every core)
+
+Slides are scored in parallel, a slide per task, over ``--jobs`` processes (every logical
+core by default, capped by memory: :func:`default_jobs`).  Each slide is computed whole in
+one process and the results are reassembled in deck and slide order, so every score,
+every baseline field and the printed table are the serial run's bit for bit; ``--jobs 1``
+is the serial path itself, with no pool.  PowerPoint is never involved: scoring reads its
+exports and nothing else.
 """
 
 from __future__ import annotations
@@ -155,6 +163,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+sys.path.insert(0, str(HERE))
+
+import parallel  # noqa: E402  (tools/parallel.py: standard library only)
+from parallel import pool_map  # noqa: E402
 BASELINE_PATH = ROOT / "tests" / "fidelity-baselines.json"
 
 #: Which checkout to import the library from.  ``--src`` repoints it at an older tree so
@@ -707,7 +719,11 @@ def addressable_font_files(profile: dict, names) -> list[str]:
                     for record in font["name"].names
                     if record.nameID not in (16, 17)
                 ]
-                font.save(str(target))
+                # Written aside and renamed into place: a worker that finds the target
+                # (--jobs) must never read half a font.
+                partial = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+                font.save(str(partial))
+                os.replace(partial, target)
             staged.append(str(target))
     return staged
 
@@ -1097,6 +1113,18 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
 # Running a corpus
 # --------------------------------------------------------------------------------------
 
+#: What one worker may hold at once, with headroom.  Measured: a scoring worker peaks at
+#: 0.25 GB, a validation worker at 1.48 GB (a 300 dpi page validated at 2x is the largest
+#: raster any of them draws), and four of them at 4.6 GB.  ``--jobs`` defaults to no more
+#: workers than the machine's memory holds at this size (:func:`default_jobs`).
+WORKER_MEMORY = 2_000_000_000
+
+
+def default_jobs() -> int:
+    """Every logical core, unless memory holds fewer workers of :data:`WORKER_MEMORY`."""
+    return parallel.default_jobs(WORKER_MEMORY)
+
+
 def _supported(target, **kwargs) -> dict:
     """Drop keyword arguments ``target`` does not accept."""
     import inspect
@@ -1286,7 +1314,63 @@ def truth_verdict(pdf: Path, slide_index: int, truth: str = DEFAULT_TRUTH) -> st
     return None if verdict["faithful"] else "converted page failed validation: " + verdict["why"]
 
 
-def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,)) -> dict:
+def score_slide(deck: Path, pdf: Path, index: int, profile: dict, truths) -> dict:
+    """Slide ``index``'s row under each of ``truths``, ours rendered once: ``{truth: row}``."""
+    ours = our_image(deck, index, profile)
+    rows = {}
+    for truth in truths:
+        reference = _matched(truth_image(pdf, index, truth), ours, truth, f"{deck.stem} slide {index + 1}")
+        row = score(ours, reference)
+        why = truth_verdict(pdf, index, truth)
+        if why:
+            row["unvalidated"] = why
+        rows[truth] = row
+    return rows
+
+
+#: A worker's copy of what every task shares, set once by :func:`_init_worker` rather than
+#: pickled into each task: the profile runs to a quarter of a megabyte.
+_WORKER: dict = {}
+
+
+def _init_worker(source_root: str, profile: dict) -> None:
+    global SOURCE_ROOT
+    SOURCE_ROOT = source_root  # --src, which a fresh interpreter has not parsed
+    _WORKER["profile"] = profile
+
+
+def _score_task(task) -> dict:
+    deck, pdf, index, truths = task
+    return score_slide(deck, pdf, index, _WORKER["profile"], truths)
+
+
+def _prepare_truths(pdfs: list[Path], jobs: int) -> None:
+    """Convert and validate, across the pool, every page of ``pdfs`` whose verdicts are
+    not cached yet, so that scoring only reads them.
+
+    Serially this happens lazily, a PDF at a time, the first time a slide of it is scored
+    (:func:`truth_verdict`).  In parallel that would have every worker holding a slide of
+    one deck validate the whole deck at once -- the same half a minute a page, done by
+    each of them -- so it is done here first, a page per task, and recorded exactly as
+    the lazy path records it (:func:`pdf_svg.record_verdicts`)."""
+    import pdf_svg
+
+    pending = [pdf for pdf in pdfs
+               if not (pdf_svg.cache_dir(pdf, pdf.parent) / f"validation-{WIDTH}.json").exists()]
+    if not pending:
+        return
+    pool_map(pdf_svg.convert_task, [(pdf, pdf.parent) for pdf in pending], jobs)
+    # Exactly what verdicts() validates: every page, at pdf_svg.DPI and at WIDTH px across.
+    tasks = [(pdf, page, 0, True, pdf.parent, (pdf_svg.DPI,), WIDTH)
+             for pdf in pending for page in range(len(pdf_svg.convert(pdf, oracle=pdf.parent)))]
+    by_pdf: dict[Path, list] = {pdf: [] for pdf in pending}
+    for task, rows in zip(tasks, pool_map(pdf_svg.validate_page, tasks, jobs)):
+        by_pdf[task[0]].extend(rows)  # page order, as validate() returns them
+    for pdf, rows in by_pdf.items():
+        pdf_svg.record_verdicts(pdf, rows, pdf.parent, WIDTH)
+
+
+def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,), jobs: int = 1) -> dict:
     """Score every deck in ``oracle_dir`` that has a matching exported PDF, against each
     of ``truths`` (:data:`TRUTHS`), rendering ours once: ``{truth: {deck: entry}}``.
 
@@ -1294,29 +1378,41 @@ def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,)) -> dict:
     scored.  Comparing it anyway would mean our render used substitute outlines while
     PowerPoint used Microsoft's, and every glyph would differ for a reason that has
     nothing to do with the renderer.
+
+    ``jobs`` processes score the slides (:func:`pool_map`); the results, and their order,
+    are the serial run's bit for bit.  Deciding what to skip stays in this process: it is
+    cheap, and it is what every task depends on.
     """
-    results: dict[str, dict] = {truth: {} for truth in truths}
+    decks = []
     for deck in sorted(oracle_dir.glob("*.pptx")):
         pdf = deck.with_suffix(".pdf")
         if not pdf.exists():
             continue
         fonts = font_profile(deck, profile, pdf)
+        decks.append((deck, pdf, fonts, skip_reason(fonts)))
+
+    scored = [(deck, pdf) for deck, pdf, _fonts, reason in decks if not reason]
+    tasks = [(deck, pdf, index, tuple(truths)) for deck, pdf in scored for index in range(slide_count(deck))]
+    if jobs > 1:
+        if "svg" in truths:
+            _prepare_truths([pdf for _deck, pdf in scored], jobs)
+        # Staged once here, not raced for by every worker (addressable_font_files).
+        for deck, _pdf in scored:
+            addressable_font_files(profile, requested_faces(deck) + list(script_faces(deck).values()))
+    rows = iter(pool_map(_score_task, tasks, jobs, _init_worker, (SOURCE_ROOT, profile)))
+
+    results: dict[str, dict] = {truth: {} for truth in truths}
+    for deck, pdf, fonts, reason in decks:
         entries = {truth: {"fonts": fonts, "slides": []} for truth in truths}
-        reason = skip_reason(fonts)
         if reason:
             for truth in truths:
                 entries[truth]["skipped"] = reason
                 results[truth][deck.stem] = entries[truth]
             continue
-        for index in range(slide_count(deck)):
-            ours = our_image(deck, index, profile)
+        for _index in range(slide_count(deck)):
+            row = next(rows)
             for truth in truths:
-                reference = _matched(truth_image(pdf, index, truth), ours, truth, f"{deck.stem} slide {index + 1}")
-                row = score(ours, reference)
-                why = truth_verdict(pdf, index, truth)
-                if why:
-                    row["unvalidated"] = why
-                entries[truth]["slides"].append(row)
+                entries[truth]["slides"].append(row[truth])
         for truth in truths:
             entries[truth].update(_means(entries[truth]["slides"]))
             results[truth][deck.stem] = entries[truth]
@@ -1430,7 +1526,12 @@ def main() -> int:
     parser.add_argument("--slides", action="store_true", help="also print every slide's score")
     parser.add_argument("--json", action="store_true", help="dump raw scores instead of a table")
     parser.add_argument("--src", help="import pptx2svg from this tree instead of ./src")
+    parser.add_argument("--jobs", "-j", type=int, default=default_jobs(),
+                        help="processes to score slides in (default: every logical core, %(default)s here, "
+                        "fewer if memory is short); 1 is the serial path.  Scores are identical either way")
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be at least 1")
 
     if args.write_profile:
         profile = write_profile()
@@ -1483,7 +1584,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
-    results = run(oracle_dir, profile, truths)
+    results = run(oracle_dir, profile, truths, args.jobs)
     if not results[truths[0]]:
         print(f"no deck.pptx/deck.pdf pairs in {oracle_dir}", file=sys.stderr)
         return 2

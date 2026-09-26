@@ -41,6 +41,7 @@ Usage::
 
     python3 tools/extract_font_metrics.py --check     # exit 1 if either file is stale
     python3 tools/extract_font_metrics.py --write     # rewrite both
+    python3 tools/extract_font_metrics.py --check -j1 # serially (default: every core)
 
 Needs fontTools (``pip install pptx2svg[measure]``).  Dev-only: the library itself never
 reads a font file at runtime.
@@ -941,14 +942,51 @@ def _line_gap_for(key: str, measured: dict[str, int]) -> int | None:
     return existing.line_gap if existing is not None else None
 
 
-def build_block() -> str:
+def _measure(task):
+    """``read_face`` or ``read_kern`` of one face: what :func:`measure_all` hands a worker."""
+    kind, args = task
+    return (read_face if kind == "face" else read_kern)(*args)
+
+
+def measure_all(jobs: int) -> dict:
+    """Every face's widths and kerning, read over ``jobs`` processes: ``{(kind, key): result}``.
+
+    Reading a face is independent of every other, and nearly all of this tool's time --
+    a minute and a quarter serially, most of it kerning -- so this is what runs in
+    parallel; assembling and emitting the tables stays in :func:`build_block` and
+    :func:`build_kern_block`, in their order.  Each face is read whole in one process,
+    so the tables are byte for byte the serial ones (``--check`` holds them to that)."""
+    from parallel import pool_map
+
+    tasks = []
+    for key, (regular, bold, weight) in source_faces().items():
+        for path in (regular, bold):
+            if not path.exists():
+                raise SystemExit(f"missing bundled font: {path}")
+        tasks += [(("kern", key), (regular, bold, weight)), (("face", key), (regular, bold, weight))]
+    for key, entry in measured_only_faces().items():
+        if entry[0].exists() and entry[1].exists():
+            tasks += [(("kern", key), entry), (("face", key), entry)]
+    results = pool_map(_measure, [(kind, args) for (kind, _key), args in tasks], jobs)
+    return {name: result for (name, _args), result in zip(tasks, results)}
+
+
+def _read(measured: dict | None, kind: str, key: str, args):
+    if measured is not None and (kind, key) in measured:
+        return measured[(kind, key)]
+    return (read_face if kind == "face" else read_kern)(*args)
+
+
+def build_block(measured: dict | None = None) -> str:
+    """The ``METRICS`` table; ``measured`` is :func:`measure_all`'s, or ``None`` to read
+    each face here, serially."""
     parts = ["METRICS: dict[str, FontMetrics] = {"]
     gaps = office_line_gaps()
     for key, (regular, bold, weight) in source_faces().items():
         for path in (regular, bold):
             if not path.exists():
                 raise SystemExit(f"missing bundled font: {path}")
-        face = read_face(regular, bold, weight)
+        face = _read(measured, "face", key, (regular, bold, weight))
         if key in LINE_GAP_SOURCES:
             face["line_gap"] = _line_gap_for(key, gaps)
         parts.append(render_entry(key, face, NOTES[key]))
@@ -956,7 +994,7 @@ def build_block() -> str:
     for key in MEASURED_ONLY:
         entry = local.get(key)
         if entry is not None and entry[0].exists() and entry[1].exists():
-            face = read_face(*entry)
+            face = _read(measured, "face", key, entry)
             if key in FIXED_PITCH:
                 face = prune_fixed_pitch(face)
                 verify_fixed_pitch(key, face)
@@ -972,7 +1010,7 @@ def build_block() -> str:
     return "\n".join(parts)
 
 
-def build_kern_block() -> str:
+def build_kern_block(measured: dict | None = None) -> str:
     """The ``KERNING`` table for ``src/pptx2svg/text/kerning.py``.
 
     Faces that do not kern are simply absent, which is what ``_KERN.get`` in the metrics
@@ -983,7 +1021,7 @@ def build_kern_block() -> str:
     parts = ["KERNING: dict[str, KernTable] = {"]
     tables: dict[str, dict] = {}
     for key, (regular, bold, weight) in source_faces().items():
-        kern = read_kern(regular, bold, weight)
+        kern = _read(measured, "kern", key, (regular, bold, weight))
         if kern:
             tables[key] = kern
             parts.append(render_kern_entry(key, kern))
@@ -991,7 +1029,7 @@ def build_kern_block() -> str:
     for key in MEASURED_ONLY:
         entry = local.get(key)
         if entry is not None and entry[0].exists() and entry[1].exists():
-            kern = read_kern(*entry)
+            kern = _read(measured, "kern", key, entry)
             if kern:
                 tables[key] = kern
                 parts.append(render_kern_entry(key, kern))
@@ -1092,14 +1130,20 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--write", action="store_true", help="rewrite the tables in place")
     group.add_argument("--check", action="store_true", help="exit 1 if a table is stale")
+    parser.add_argument("--jobs", "-j", type=int, default=os.cpu_count() or 1,
+                        help="processes to read the faces in (default: every logical core); 1 is the serial "
+                        "path.  The tables are identical either way")
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be at least 1")
+    measured = measure_all(args.jobs) if args.jobs > 1 else None
 
     # The kern block is built first: it is what ``_KERN.get`` in the metrics block reads,
     # so writing metrics.py against a stale kerning.py would key entries to tables that
     # are about to change.
     jobs = [
-        (KERN_TARGET, KERN_BEGIN, KERN_END, build_kern_block()),
-        (TARGET, BEGIN, END, build_block()),
+        (KERN_TARGET, KERN_BEGIN, KERN_END, build_kern_block(measured)),
+        (TARGET, BEGIN, END, build_block(measured)),
     ]
 
     stale = []

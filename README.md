@@ -230,6 +230,11 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pytest                    # the converter's tests run here, and skip elsewhere
 ```
 
+Both tools use every logical core (fewer if memory is short): the harness scores a slide
+per process and the validation takes a page per process, and both reassemble the results
+in order, so every score, baseline and printed line is the serial run's. `--jobs 1` is
+the serial path. Scoring never launches PowerPoint; it reads the exports.
+
 PyMuPDF is AGPL-3.0, acceptable for a local tool that is never distributed with the
 library; nothing under `src/` imports it, and without it the tests that need it skip.
 Converted pages carry the glyph outlines PowerPoint embedded (Microsoft's fonts), so they
@@ -480,6 +485,19 @@ pip install -e '.[dev]'
 pip install -e packages/pptx2svg-fonts
 pytest
 ```
+
+A bare `pytest` runs serially, as CI does. To use every core, pass `-n` (pytest-xdist, in
+the `dev` extra):
+
+```bash
+pytest -n auto
+```
+
+It collects, passes and skips exactly the tests the serial run does. Here `-n` means
+`--dist loadgroup` (`tests/conftest.py`), which is `load` for every test but one marked
+`@pytest.mark.powerpoint` -- one that drives PowerPoint, of which there are none today:
+those all run on one worker, one at a time. Under any other `--dist` such a test fails
+rather than races.
 
 The format-neutral half of this library -- the OPC reader, units, DrawingML guides, preset
 geometry and patterns, the font modules and the measured text metrics -- lives in

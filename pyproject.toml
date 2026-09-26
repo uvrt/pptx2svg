@@ -79,6 +79,9 @@ fidelity = [
 ]
 dev = [
   "pytest>=7",
+  # `pytest -n auto` (README.md, "Development").  Opt-in: a bare `pytest` stays serial,
+  # and so does CI.
+  "pytest-xdist>=3",
   "resvg-py>=0.5",
   "fonttools>=4.40",
   "numpy>=1.24",
@@ -112,3 +115,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "powerpoint: drives Microsoft PowerPoint, which is one instance per machine; such a test runs only serially or in the one xdist group `--dist loadgroup` keeps on a single worker (tests/conftest.py)",
+]
