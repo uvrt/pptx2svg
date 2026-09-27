@@ -24,6 +24,16 @@ def pytest_addoption(parser) -> None:
             "a change in what a user sees. See tests/vrt/README.md."
         ),
     )
+    parser.addoption(
+        "--pdfium",
+        action="store_true",
+        default=False,
+        help=(
+            "also run the tests marked pdfium, which score against the fidelity harness's old "
+            "instrument (PowerPoint's PDF drawn by pdfium).  Scores default to the svg truth, "
+            "as tools/fidelity.py does; this is the suite's `--truth both`."
+        ),
+    )
 
 
 #: The one xdist group every test that drives PowerPoint joins.  PowerPoint is a single
@@ -73,6 +83,8 @@ def pytest_collection_modifyitems(config, items) -> None:
 
 
 def pytest_runtest_setup(item) -> None:
+    if item.get_closest_marker("pdfium") and not item.config.getoption("--pdfium"):
+        pytest.skip("scores against the old pdfium instrument: run with `pytest --pdfium`")
     if (hasattr(item.config, "workerinput") and item.get_closest_marker("powerpoint")
             and os.environ.get(_DIST_ENV) != "loadgroup"):
         pytest.fail("this test drives PowerPoint, which is one instance per machine: run it serially, "
