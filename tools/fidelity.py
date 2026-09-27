@@ -57,9 +57,13 @@ rasterised by resvg like ours, so a pixel that differs is a layout or drawing di
 Where PowerPoint embedded a *bitmap* -- a 3-D chart's scene, an effect it rasterised --
 the truth is still that bitmap, and our vector drawing is scored against it; ``pdf_svg.py
 --bitmaps`` lists those regions.  ``--truth pdfium`` is the old instrument, kept for
-comparison, and the baselines record both (ROADMAP.md, "0.5 The instrument: one
-rasteriser for both sides").  The converted pages hold Microsoft's glyph outlines, so they
-are cached only in the oracle directory's ``svg/``, never in the repository.
+comparison (ROADMAP.md, "0.5 The instrument: one rasteriser for both sides").  **It runs
+only when asked for** -- ``--truth pdfium``, or ``--truth both`` -- and so do its
+baselines: ``tests/fidelity-baselines.json`` keeps a ``pdfium`` entry inside each deck's,
+a default run neither compares nor changes them (``--update`` carries every one over as
+it is: :func:`baselines_payload`), and ``--update --truth both`` re-records them.  The
+converted pages hold Microsoft's glyph outlines, so they are cached only in the oracle
+directory's ``svg/``, never in the repository.
 
 Foreground IoU was considered and deliberately left out: the upstream project dropped it
 because thin-stroke shapes lose about half their IoU to one pixel of anti-aliasing even
@@ -134,18 +138,40 @@ wonder why a Japanese deck is skipped will be reading that page.
 Usage::
 
     python3 tools/fidelity.py --write-profile                        # once per machine
-    .venv/bin/python tools/fidelity.py --oracle ~/pptx2svg-oracle    # score and compare
+    .venv/bin/python tools/fidelity.py --oracle ~/pptx2svg-oracle    # score and compare (svg truth)
     .venv/bin/python tools/fidelity.py --truth pdfium                # the old instrument
+    .venv/bin/python tools/fidelity.py --truth both                  # both instruments
     .venv/bin/python tools/fidelity.py --slides                      # every slide's score
-    .venv/bin/python tools/fidelity.py --update                      # rewrite baselines (both truths)
+    .venv/bin/python tools/fidelity.py --update                      # rewrite the svg baselines
+    .venv/bin/python tools/fidelity.py --update --truth both         # ... and the pdfium ones
     .venv/bin/python tools/fidelity.py --jobs 1                      # serially (default: every core)
+    .venv/bin/python tools/fidelity.py --verify-cache                # re-draw everything, hold the cache
+    .venv/bin/python tools/fidelity.py --no-cache                    # draw everything, cache nothing
 
 Slides are scored in parallel, a slide per task, over ``--jobs`` processes (every logical
 core by default, capped by memory: :func:`default_jobs`).  Each slide is computed whole in
 one process and the results are reassembled in deck and slide order, so every score,
 every baseline field and the printed table are the serial run's bit for bit; ``--jobs 1``
 is the serial path itself, with no pool.  PowerPoint is never involved: scoring reads its
-exports and nothing else.
+exports and nothing else.  Each deck is converted once (a deck per task), not once per
+slide: every slide's SVG is the same bytes either way.
+
+**Rasters are cached, and the cache is checked on every run** (``tools/raster_cache.py``).
+Our raster and PowerPoint's are kept in ``ORACLE/svg/rasters/`` -- outside the repository,
+since a raster of PowerPoint's page holds Microsoft's glyph shapes -- under a key of every
+input that moves their pixels (:func:`our_components`, :func:`truth_components`: the SVG's
+and the PDF's bytes, the *contents* of every font file resvg is handed, the converter, the
+rasteriser and decoder versions, the resolution and options, :data:`HARNESS_VERSION`),
+stored beside each raster and compared on every read.  A key is only as complete as what
+its author knew moves pixels, so every run also re-draws :data:`VERIFY_SAMPLE` slides,
+spread across the decks and rotated by date, and holds them to the cache byte for byte:
+**any difference discards the whole cache and stops the run** without scoring.
+``--verify-cache`` re-draws every slide; ``--no-cache`` bypasses the cache.
+
+**SSIM is computed over the content only** (:func:`content_box`): the bounding box of the
+union of both images' foreground, grown by the SSIM window's radius.  That is exact, not
+an approximation -- the same floats in the same order -- and the same sampled slides are
+scored both ways on every run and held equal, bit for bit.
 """
 
 from __future__ import annotations
@@ -203,7 +229,13 @@ DEFAULT_TRUTH = "svg"
 # Metrics
 # --------------------------------------------------------------------------------------
 
-def _gaussian_kernel(sigma: float = 1.5, radius: int = 5):
+#: The SSIM window's radius: an 11-tap Gaussian.  A pixel's SSIM depends on the pixels
+#: within this many rows and columns of it and on nothing else, which is what makes
+#: cropping to the content exact (:func:`content_box`).
+SSIM_RADIUS = 5
+
+
+def _gaussian_kernel(sigma: float = 1.5, radius: int = SSIM_RADIUS):
     import numpy as np
 
     x = np.arange(-radius, radius + 1, dtype=np.float64)
@@ -292,9 +324,39 @@ def histogram_correlation(a_rgb, b_rgb, mask) -> float:
     return float((first * second).sum() / denominator)
 
 
-def score(ours_rgb, truth_rgb) -> dict:
+def content_box(mask, margin: int = SSIM_RADIUS) -> tuple[slice, slice]:
+    """The rows and columns SSIM has to be computed over for the pixels of ``mask``: the
+    bounding box of ``mask`` grown by ``margin`` on every side, clamped to the page.
+
+    ``mask`` is :func:`foreground_mask` -- the **union** of both images' ink, never one
+    side's -- and it is the only place the score reads SSIM from.  Exact, not approximate:
+    :func:`_blur` is separable, so a pixel's blurred value is a fixed-order sum over the
+    pixels within :data:`SSIM_RADIUS` of it, and with ``margin`` at least that, every one
+    of them lies inside the box -- or, at a clamped edge, is the page's own edge row,
+    which the blur's edge padding replicates identically either way.  Every masked pixel's
+    SSIM is therefore the same float cropped or not, and the masked values come out in the
+    same order, so the mean and the loss are the same sums.  ``tests/test_fidelity.py``
+    holds that on every scored slide, and every run re-checks a sample (:func:`run`).
+
+    A page whose foreground reaches every edge -- a background picture, a page colour, a
+    full-bleed image -- gets the whole page back: no speed-up, and nothing cut."""
+    import numpy as np
+
+    rows = np.flatnonzero(mask.any(axis=1))
+    cols = np.flatnonzero(mask.any(axis=0))
+    if not len(rows):
+        return slice(0, mask.shape[0]), slice(0, mask.shape[1])
+    return (slice(max(int(rows[0]) - margin, 0), min(int(rows[-1]) + margin + 1, mask.shape[0])),
+            slice(max(int(cols[0]) - margin, 0), min(int(cols[-1]) + margin + 1, mask.shape[1])))
+
+
+def score(ours_rgb, truth_rgb, crop: bool = True) -> dict:
     """SSIM, histogram correlation, the unnormalised structural loss and the legacy pixel
-    percentages for one slide."""
+    percentages for one slide.
+
+    ``crop`` computes SSIM over :func:`content_box` only, which gives the full page's
+    numbers bit for bit (see there); ``crop=False`` is the full-page computation, kept for
+    the checks that hold the two equal."""
     import numpy as np
 
     mask, _ = foreground_mask(ours_rgb, truth_rgb)
@@ -319,7 +381,8 @@ def score(ours_rgb, truth_rgb) -> dict:
         result["sparse"] = True
         return result
 
-    ssim = ssim_map(ours_gray, truth_gray)[mask]
+    box = content_box(mask) if crop else (slice(None), slice(None))
+    ssim = ssim_map(ours_gray[box], truth_gray[box])[mask[box]]
     result["ssim"] = round(float(ssim.mean()), 4)
     # The unnormalised structural loss: what SSIM's mean hides when the mask changes (see
     # the module docstring).
@@ -1136,25 +1199,33 @@ def _supported(target, **kwargs) -> dict:
 _TRUTH_CACHE: dict = {}
 
 
+def truth_svg(pdf: Path, slide_index: int) -> str:
+    """PowerPoint's page ``slide_index`` converted by ``tools/pdf_svg.py`` (cached in the
+    oracle directory's ``svg/``, the PDF's own directory)."""
+    import pdf_svg
+
+    if not pdf_svg.available():
+        raise RuntimeError("the svg truth needs PyMuPDF (the fidelity extra): see README.md, "
+                           "'Checking fidelity against PowerPoint', or pass --truth pdfium")
+    key = (str(Path(pdf).resolve()), Path(pdf).stat().st_mtime_ns)
+    if key not in _TRUTH_CACHE:
+        _TRUTH_CACHE.clear()  # one deck at a time: run() walks them in order
+        _TRUTH_CACHE[key] = pdf_svg.page_svgs(Path(pdf), oracle=Path(pdf).parent)
+    return _TRUTH_CACHE[key][slide_index]
+
+
 def truth_image(pdf: Path, slide_index: int, truth: str = DEFAULT_TRUTH):
     """PowerPoint's page ``slide_index`` as an RGB array :data:`WIDTH` px across.
 
-    ``svg``: converted by ``tools/pdf_svg.py`` (cached in the oracle directory's ``svg/``,
-    the PDF's own directory) and drawn by resvg on the device grid, as ours is.
-    ``pdfium``: the PDF drawn by pdfium at the scale that makes it :data:`WIDTH` wide."""
+    ``svg``: converted by ``tools/pdf_svg.py`` (:func:`truth_svg`) and drawn by resvg on
+    the device grid, as ours is.  ``pdfium``: the PDF drawn by pdfium at the scale that
+    makes it :data:`WIDTH` wide."""
     import numpy as np
 
     if truth == "svg":
         import pdf_svg
 
-        if not pdf_svg.available():
-            raise RuntimeError("the svg truth needs PyMuPDF (the fidelity extra): see README.md, "
-                               "'Checking fidelity against PowerPoint', or pass --truth pdfium")
-        key = (str(Path(pdf).resolve()), Path(pdf).stat().st_mtime_ns)
-        if key not in _TRUTH_CACHE:
-            _TRUTH_CACHE.clear()  # one deck at a time: run() walks them in order
-            _TRUTH_CACHE[key] = pdf_svg.page_svgs(Path(pdf), oracle=Path(pdf).parent)
-        svg = _TRUTH_CACHE[key][slide_index]
+        svg = truth_svg(pdf, slide_index)
         return pdf_svg.rasterise(svg, pdf_svg.dpi_for_width(svg, WIDTH))
     if truth != "pdfium":
         raise ValueError(f"unknown truth {truth!r}: one of {TRUTHS}")
@@ -1164,21 +1235,27 @@ def truth_image(pdf: Path, slide_index: int, truth: str = DEFAULT_TRUTH):
     return np.asarray(page.render(scale=WIDTH / page.get_size()[0]).to_pil().convert("RGB"))
 
 
-def our_image(deck: Path, slide_index: int, profile: dict):
-    """Our PNG of slide ``slide_index``, :data:`WIDTH` px across, drawn with the profile's
-    faces (see :func:`render_pair`)."""
-    import numpy as np
-    from PIL import Image
-
+def our_svgs(deck: Path) -> list[str]:
+    """Every slide of ``deck`` as our SVG, :data:`WIDTH` px across, from one conversion of
+    the whole deck.  (The harness used to convert the whole deck once *per slide* and keep
+    one slide of each result; every slide's SVG is the same bytes either way.)"""
     sys.path.insert(0, SOURCE_ROOT)
     from pptx2svg import ConvertOptions, convert_pptx_to_svg
-    from pptx2svg.png import svg_to_png
 
     # --src can point this at an older checkout for a before/after table, and older
     # checkouts do not have these keywords.  Filtering by signature keeps the comparison
     # possible instead of making it a TypeError.
     convert_kwargs = _supported(ConvertOptions, warn_on_font_substitution=False)
-    raster_kwargs = _supported(
+    return list(convert_pptx_to_svg(str(deck), ConvertOptions(width=WIDTH, **convert_kwargs)))
+
+
+def our_raster_options(deck: Path, profile: dict) -> dict:
+    """What our SVG is rasterised with: the profile's directories, the staged superfamily
+    faces, and nothing else (see :func:`render_pair`)."""
+    sys.path.insert(0, SOURCE_ROOT)
+    from pptx2svg.png import svg_to_png
+
+    return _supported(
         svg_to_png,
         font_dirs=profile["directories"],
         # Superfamily members -- Aptos Display, Calibri Light -- are installed but not
@@ -1190,13 +1267,148 @@ def our_image(deck: Path, slide_index: int, profile: dict):
         use_bundled_fonts=False,
     )
 
-    svg = convert_pptx_to_svg(str(deck), ConvertOptions(width=WIDTH, **convert_kwargs))[
-        slide_index
-    ]
-    ours = Image.open(
-        io.BytesIO(svg_to_png(svg, backend="resvg", **raster_kwargs))
-    ).convert("RGB")
-    return np.asarray(ours)
+
+def rasterise_ours(svg: str, options: dict):
+    """Our SVG drawn by resvg with ``options`` (:func:`our_raster_options`), as RGB."""
+    import numpy as np
+    from PIL import Image
+
+    sys.path.insert(0, SOURCE_ROOT)
+    from pptx2svg.png import svg_to_png
+
+    return np.asarray(Image.open(io.BytesIO(svg_to_png(svg, backend="resvg", **options))).convert("RGB"))
+
+
+def our_image(deck: Path, slide_index: int, profile: dict):
+    """Our PNG of slide ``slide_index``, :data:`WIDTH` px across, drawn with the profile's
+    faces (see :func:`render_pair`)."""
+    return rasterise_ours(our_svgs(deck)[slide_index], our_raster_options(deck, profile))
+
+
+# --------------------------------------------------------------------------------------
+# The raster cache's keys (tools/raster_cache.py)
+# --------------------------------------------------------------------------------------
+
+#: Bump when anything this file does to a raster changes in a way no other component of
+#: the key records.  Part of every cache key.
+HARNESS_VERSION = 1
+
+#: Slides a run re-draws to hold the raster cache to what drawing gives today, and to
+#: hold the cropped SSIM to the full page's (:func:`run`): spread through the corpus and
+#: rotated by date, so that every slide is re-drawn within ``ceil(slides /
+#: VERIFY_SAMPLE)`` days -- nine, at the 52 slides scored today.
+VERIFY_SAMPLE = 6
+
+#: Font files as resvg's font database loads them from a directory: recursively, by
+#: these extensions (it takes them in lower or upper case; every case is hashed here).
+_FONT_SUFFIXES = (".ttf", ".ttc", ".otf", ".otc")
+
+
+def raster_cache_root(oracle_dir: Path) -> Path:
+    """Where rasters are cached: beside the converted pages, outside any repository --
+    PowerPoint's rasters hold Microsoft's glyph shapes, and ours are drawn with its fonts."""
+    return Path(oracle_dir) / "svg" / "rasters"
+
+
+def font_digests(profile: dict, font_files) -> dict:
+    """The *content* digests of every font resvg is handed: each file under the profile's
+    directories that resvg would load, summarised as one digest, and each staged file.
+
+    Content, not path or date: an Office update can change a face in place."""
+    import raster_cache
+
+    found = []
+    for directory in profile["directories"]:
+        for root, _dirs, files in os.walk(directory, followlinks=True):
+            found += [os.path.join(root, name) for name in files if name.lower().endswith(_FONT_SUFFIXES)]
+    font_files = [str(path) for path in font_files]
+    digests = raster_cache.digest_files(found + font_files)
+    summary = hashlib.sha256()
+    for path in sorted(found):
+        summary.update(f"{path}\0{digests[path]}\n".encode())
+    return {"dirs": summary.hexdigest(), "dir_files": len(found),
+            "files": {path: digests[path] for path in font_files}}
+
+
+_VERSIONS: dict = {}
+
+
+def _rasteriser_versions() -> dict:
+    """resvg-py's version and the digest of its compiled module; Pillow's version (it
+    decodes resvg's PNG into the array that is cached)."""
+    if not _VERSIONS:
+        import importlib.metadata
+
+        import PIL
+        import raster_cache
+        import resvg_py
+
+        binaries = sorted(path for path in Path(resvg_py.__file__).parent.iterdir()
+                          if path.suffix in (".so", ".pyd", ".dylib"))
+        _VERSIONS.update(resvg=importlib.metadata.version("resvg-py"),
+                         resvg_binary=[raster_cache.digest_file(path) for path in binaries],
+                         pillow=PIL.__version__)
+    return dict(_VERSIONS)
+
+
+_SOURCE_DIGESTS: dict = {}
+
+
+def _source_digest(path) -> str:
+    import raster_cache
+
+    path = str(path)
+    if path not in _SOURCE_DIGESTS:
+        _SOURCE_DIGESTS[path] = raster_cache.digest_file(path)
+    return _SOURCE_DIGESTS[path]
+
+
+def our_components(svg: str, options: dict, fonts: dict) -> dict:
+    """Every input that decides our raster's pixels: the SVG's bytes, the fonts' contents
+    (:func:`font_digests`), the options, the code that turns them into resvg's call
+    (``pptx2svg/png.py``), resvg and Pillow, the width and :data:`HARNESS_VERSION`."""
+    import raster_cache
+
+    sys.path.insert(0, SOURCE_ROOT)
+    import pptx2svg.png
+
+    return {
+        "side": "ours", "harness": HARNESS_VERSION, "width": WIDTH,
+        "svg": raster_cache.digest_bytes(svg.encode("utf-8")),
+        "options": {name: value for name, value in sorted(options.items())
+                    if name not in ("font_dirs", "font_files")} | {"backend": "resvg"},
+        "font_dirs": list(options.get("font_dirs") or ()),
+        "font_dirs_content": fonts["dirs"],
+        "font_files": [[str(path), fonts["files"][str(path)]] for path in options.get("font_files") or ()],
+        "png_py": _source_digest(pptx2svg.png.__file__),
+        **_rasteriser_versions(),
+    }
+
+
+_PDF_DIGESTS: dict = {}
+
+
+def truth_components(pdf: Path, slide_index: int, svg: str) -> dict:
+    """Every input that decides PowerPoint's raster under the ``svg`` truth: the PDF's
+    bytes, the converted page's bytes, the converter's version and source, PyMuPDF's
+    version, the resolution and options, resvg and Pillow, and :data:`HARNESS_VERSION`."""
+    import pdf_svg
+    import pymupdf
+    import raster_cache
+
+    if str(pdf) not in _PDF_DIGESTS:
+        _PDF_DIGESTS[str(pdf)] = raster_cache.digest_file(pdf)
+    return {
+        "side": "truth", "harness": HARNESS_VERSION, "width": WIDTH,
+        "pdf": _PDF_DIGESTS[str(pdf)], "page": slide_index,
+        "svg": raster_cache.digest_bytes(svg.encode("utf-8")),
+        "converter": pdf_svg.converter_version(),
+        "pdf_svg_py": _source_digest(pdf_svg.__file__),
+        "pymupdf": pymupdf.VersionBind,
+        "dpi": repr(pdf_svg.dpi_for_width(svg, WIDTH)),
+        "options": {"device_grid": True, "zoom": 1.0, "background": "white", "skip_system_fonts": True},
+        **_rasteriser_versions(),
+    }
 
 
 def _same_size(truth, ours, name: str):
@@ -1314,13 +1526,74 @@ def truth_verdict(pdf: Path, slide_index: int, truth: str = DEFAULT_TRUTH) -> st
     return None if verdict["faithful"] else "converted page failed validation: " + verdict["why"]
 
 
-def score_slide(deck: Path, pdf: Path, index: int, profile: dict, truths) -> dict:
-    """Slide ``index``'s row under each of ``truths``, ours rendered once: ``{truth: row}``."""
-    ours = our_image(deck, index, profile)
+class CropMismatch(Exception):
+    """A slide whose SSIM cropped to the content is not the full page's, bit for bit."""
+
+
+#: How a run uses the raster cache (``--no-cache``, ``--verify-cache``): ``use`` reads and
+#: fills it, and re-draws :data:`VERIFY_SAMPLE` slides to hold it to what drawing gives;
+#: ``verify`` re-draws every slide and holds every cached raster so; ``read`` reads it and
+#: writes nothing (the tests); ``off`` neither reads nor writes it.
+CACHE_MODES = ("use", "verify", "read", "off")
+
+
+def _raster(kind: str, components_of, draw, verify: bool, checks: list, label: str):
+    """A raster from the worker's cache (:data:`_WORKER`), or drawn -- and, when
+    ``verify``, drawn *and* compared byte for byte with what the cache holds."""
+    cache, mode = _WORKER.get("cache"), _WORKER.get("cache_mode", "off")
+    if cache is None or mode == "off":
+        return draw()
+    components = components_of()
+    if verify:
+        fresh = draw()
+        status = cache.verify(kind, components, fresh, store=mode != "read", label=label)
+        checks.append({"slide": label, "kind": kind, "cache": status})
+        return fresh
+    cached = cache.get(kind, components)
+    if cached is not None:
+        checks.append({"slide": label, "kind": kind, "cache": "hit"})
+        return cached
+    fresh = draw()
+    if mode != "read":
+        cache.put(kind, components, fresh, label)
+    checks.append({"slide": label, "kind": kind, "cache": "drawn"})
+    return fresh
+
+
+def score_slide(deck: Path, pdf: Path, index: int, profile: dict, truths, svg: str | None = None,
+                recheck: bool = False, crop_check: bool = False, checks: list | None = None) -> dict:
+    """Slide ``index``'s row under each of ``truths``, ours rendered once: ``{truth: row}``.
+
+    ``svg`` is our SVG of the slide (:func:`our_svgs`; converted here when not given).
+    The spot-checks, each recorded in ``checks`` and raised on a mismatch: ``recheck``
+    re-draws the slide's rasters and holds them to the cache byte for byte
+    (:func:`_raster`); ``crop_check`` computes its SSIM cropped and over the full page and
+    holds the two rows equal, bit for bit (:func:`content_box`)."""
+    checks = [] if checks is None else checks
+    label = f"{deck.stem} slide {index + 1}"
+    if svg is None:
+        svg = our_svgs(deck)[index]
+    options = our_raster_options(deck, profile)
+    ours = _raster("ours", lambda: our_components(svg, options, _WORKER["fonts"]),
+                   lambda: rasterise_ours(svg, options), recheck, checks, label)
     rows = {}
     for truth in truths:
-        reference = _matched(truth_image(pdf, index, truth), ours, truth, f"{deck.stem} slide {index + 1}")
+        if truth == "svg":
+            import pdf_svg
+
+            page = truth_svg(pdf, index)
+            reference = _raster("truth", lambda: truth_components(pdf, index, page),
+                                lambda: pdf_svg.rasterise(page, pdf_svg.dpi_for_width(page, WIDTH)),
+                                recheck, checks, label)
+        else:
+            reference = truth_image(pdf, index, truth)
+        reference = _matched(reference, ours, truth, label)
         row = score(ours, reference)
+        if crop_check:
+            full = score(ours, reference, crop=False)
+            if full != row:
+                raise CropMismatch(f"{label} ({truth} truth): cropped {row} but full page {full}")
+            checks.append({"slide": label, "kind": f"crop-{truth}", "crop": "equal"})
         why = truth_verdict(pdf, index, truth)
         if why:
             row["unvalidated"] = why
@@ -1333,15 +1606,39 @@ def score_slide(deck: Path, pdf: Path, index: int, profile: dict, truths) -> dic
 _WORKER: dict = {}
 
 
-def _init_worker(source_root: str, profile: dict) -> None:
+def _init_worker(source_root: str, profile: dict, cache_root: str | None = None, cache_mode: str = "off",
+                 fonts: dict | None = None) -> None:
     global SOURCE_ROOT
     SOURCE_ROOT = source_root  # --src, which a fresh interpreter has not parsed
     _WORKER["profile"] = profile
+    _WORKER["cache_mode"] = cache_mode
+    _WORKER["fonts"] = fonts
+    if cache_root is not None and cache_mode != "off":
+        import raster_cache
+
+        _WORKER["cache"] = raster_cache.RasterCache(Path(cache_root), ROOT)
+    else:
+        _WORKER.pop("cache", None)
+
+
+def _convert_task(deck: Path) -> list[str]:
+    return our_svgs(deck)
 
 
 def _score_task(task) -> dict:
-    deck, pdf, index, truths = task
-    return score_slide(deck, pdf, index, _WORKER["profile"], truths)
+    """One slide, as a pool task: its rows, and what its checks found.  A mismatch is
+    returned rather than raised, so that :func:`run` can name every one of them."""
+    import raster_cache
+
+    deck, pdf, index, truths, svg, recheck, crop_check = task
+    checks: list = []
+    try:
+        rows = score_slide(deck, pdf, index, _WORKER["profile"], truths, svg, recheck, crop_check, checks)
+    except raster_cache.CacheMismatch as mismatch:
+        return {"rows": None, "checks": checks, "cache_mismatch": f"{deck.stem} slide {index + 1}: {mismatch}"}
+    except CropMismatch as mismatch:
+        return {"rows": None, "checks": checks, "crop_mismatch": str(mismatch)}
+    return {"rows": rows, "checks": checks}
 
 
 def _prepare_truths(pdfs: list[Path], jobs: int) -> None:
@@ -1370,7 +1667,8 @@ def _prepare_truths(pdfs: list[Path], jobs: int) -> None:
         pdf_svg.record_verdicts(pdf, rows, pdf.parent, WIDTH)
 
 
-def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,), jobs: int = 1) -> dict:
+def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,), jobs: int = 1, cache_mode: str = "use",
+        stats: dict | None = None, day: int | None = None, crop_all: bool = False) -> dict:
     """Score every deck in ``oracle_dir`` that has a matching exported PDF, against each
     of ``truths`` (:data:`TRUTHS`), rendering ours once: ``{truth: {deck: entry}}``.
 
@@ -1379,10 +1677,26 @@ def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,), jobs: int = 1)
     PowerPoint used Microsoft's, and every glyph would differ for a reason that has
     nothing to do with the renderer.
 
-    ``jobs`` processes score the slides (:func:`pool_map`); the results, and their order,
-    are the serial run's bit for bit.  Deciding what to skip stays in this process: it is
-    cheap, and it is what every task depends on.
-    """
+    ``jobs`` processes convert the decks, a deck per task, then score the slides, a slide
+    per task (:func:`pool_map`); the results, and their order, are the serial run's bit
+    for bit.  Deciding what to skip stays in this process: it is cheap, and it is what
+    every task depends on.
+
+    Rasters come from the cache under ``oracle_dir`` as ``cache_mode`` says
+    (:data:`CACHE_MODES`, ``tools/raster_cache.py``).  Every run spot-checks
+    :data:`VERIFY_SAMPLE` slides, chosen by :func:`raster_cache.rotating_sample` for
+    ``day`` (today): each is re-drawn and held to the cache byte for byte, and scored
+    cropped and full-page and held equal.  ``verify`` re-draws every slide, and
+    ``crop_all`` holds every slide's crop.  **Any cache
+    mismatch discards the whole cache and raises** :class:`raster_cache.CacheMismatch`;
+    a crop mismatch raises :class:`CropMismatch`.  Neither is a warning: nothing is scored.
+    ``stats``, when given, receives what the checks found."""
+    import threading
+
+    import raster_cache
+
+    if cache_mode not in CACHE_MODES:
+        raise ValueError(f"unknown cache mode {cache_mode!r}: one of {CACHE_MODES}")
     decks = []
     for deck in sorted(oracle_dir.glob("*.pptx")):
         pdf = deck.with_suffix(".pdf")
@@ -1392,15 +1706,61 @@ def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,), jobs: int = 1)
         decks.append((deck, pdf, fonts, skip_reason(fonts)))
 
     scored = [(deck, pdf) for deck, pdf, _fonts, reason in decks if not reason]
-    tasks = [(deck, pdf, index, tuple(truths)) for deck, pdf in scored for index in range(slide_count(deck))]
-    if jobs > 1:
-        if "svg" in truths:
-            _prepare_truths([pdf for _deck, pdf in scored], jobs)
-        # Staged once here, not raced for by every worker (addressable_font_files).
-        for deck, _pdf in scored:
-            addressable_font_files(profile, requested_faces(deck) + list(script_faces(deck).values()))
-    rows = iter(pool_map(_score_task, tasks, jobs, _init_worker, (SOURCE_ROOT, profile)))
+    if jobs > 1 and "svg" in truths:
+        _prepare_truths([pdf for _deck, pdf in scored], jobs)
+    # Staged once here, not raced for by every worker (addressable_font_files).
+    staged = sorted({path for deck, _pdf in scored
+                     for path in addressable_font_files(profile, requested_faces(deck)
+                                                        + list(script_faces(deck).values()))})
+    cache = None
+    digests: dict = {}
+    hashing = None
+    if cache_mode != "off":
+        cache = raster_cache.RasterCache(raster_cache_root(oracle_dir), ROOT)
+        # Hundreds of megabytes of fonts, read while the decks convert.
+        hashing = threading.Thread(target=lambda: digests.update(font_digests(profile, staged)))
+        hashing.start()
+    try:
+        svgs = pool_map(_convert_task, [deck for deck, _pdf in scored], jobs, _init_worker, (SOURCE_ROOT, profile))
+    finally:
+        if hashing is not None:
+            hashing.join()
 
+    tasks = [(deck, pdf, index, tuple(truths), deck_svgs[index])
+             for (deck, pdf), deck_svgs in zip(scored, svgs) for index in range(len(deck_svgs))]
+    for (deck, _pdf), deck_svgs in zip(scored, svgs):
+        if len(deck_svgs) != slide_count(deck):
+            raise RuntimeError(f"{deck.name}: {len(deck_svgs)} slides converted, {slide_count(deck)} in the package")
+    everything = set(range(len(tasks)))
+    sampled = set(raster_cache.rotating_sample(list(range(len(tasks))), VERIFY_SAMPLE, day))
+    recheck = everything if cache_mode == "verify" else sampled
+    cropped = everything if crop_all or cache_mode == "verify" else sampled
+    outcomes = pool_map(_score_task, [task + (number in recheck, number in cropped)
+                                      for number, task in enumerate(tasks)], jobs,
+                        _init_worker, (SOURCE_ROOT, profile, str(cache.root) if cache else None, cache_mode,
+                                       digests or None))
+
+    checks = [check for outcome in outcomes for check in outcome["checks"]]
+    if stats is not None:
+        stats.update(slides=len(tasks), sampled=[f"{t[0].stem} slide {t[2] + 1}" for n, t in enumerate(tasks)
+                                                 if n in recheck | cropped],
+                     checks=checks, font_files=digests.get("dir_files", 0) + len(staged))
+    cache_mismatches = [outcome["cache_mismatch"] for outcome in outcomes if "cache_mismatch" in outcome]
+    if cache_mismatches:
+        cache.discard()
+        raise raster_cache.CacheMismatch(
+            f"the raster cache under {cache.root} does not hold what drawing gives today:\n  "
+            + "\n  ".join(cache_mismatches)
+            + "\nSome input that moves pixels is missing from the cache key (tools/fidelity.py, "
+            "our_components / truth_components), or the cache was corrupted.  The whole cache has been "
+            "discarded and nothing was scored.  Find the input before trusting a cached run again; "
+            "--verify-cache re-draws every slide and compares.")
+    crop_mismatches = [outcome["crop_mismatch"] for outcome in outcomes if "crop_mismatch" in outcome]
+    if crop_mismatches:
+        raise CropMismatch("SSIM cropped to the content is not the full page's:\n  " + "\n  ".join(crop_mismatches)
+                           + "\nNothing was scored.  content_box() must never cut a pixel the score depends on.")
+
+    rows = iter(outcome["rows"] for outcome in outcomes)
     results: dict[str, dict] = {truth: {} for truth in truths}
     for deck, pdf, fonts, reason in decks:
         entries = {truth: {"fonts": fonts, "slides": []} for truth in truths}
@@ -1434,19 +1794,50 @@ def baseline_for(baselines: dict | None, name: str, truth: str) -> dict | None:
     return {**other, "fonts": entry["fonts"]}
 
 
-def baselines_payload(results: dict) -> dict:
+class KeptBaselineMismatch(Exception):
+    """A recorded ``pdfium`` entry that a run without pdfium cannot keep honestly."""
+
+
+def baselines_payload(results: dict, previous: dict | None = None) -> dict:
     """What ``--update`` writes: per deck, the default truth's entry, stamped with the
     truth and the converter's version, holding the ``pdfium`` truth's slides and means
-    beside it when both were scored."""
+    beside it.
+
+    **The pdfium entries are recorded only when pdfium was scored** (``--truth both``).
+    A run without it -- the default -- carries every deck's recorded ``pdfium`` entry
+    from ``previous`` over *as it is*: never deleted, never changed.  It refuses
+    (:class:`KeptBaselineMismatch`) where keeping one would misdescribe it: the deck's
+    font profile changed (the entry shares the deck's ``fonts``), its slide count
+    changed, it is now skipped, or it is gone from the oracle.  Re-record those with
+    ``--truth both``."""
     import pdf_svg
 
     out = {}
     for name, entry in results[DEFAULT_TRUTH].items():
         record = dict(entry, truth=DEFAULT_TRUTH, converter=pdf_svg.converter_version())
-        if "pdfium" in results and not entry.get("skipped"):
-            old = results["pdfium"][name]
-            record["pdfium"] = {k: old[k] for k in ("slides", "ssim", "histogram", "loss")}
+        if "pdfium" in results:
+            if not entry.get("skipped"):
+                old = results["pdfium"][name]
+                record["pdfium"] = {k: old[k] for k in ("slides", "ssim", "histogram", "loss")}
+        else:
+            prior = (previous or {}).get(name) or {}
+            kept = prior.get("pdfium")
+            if kept is not None:
+                why = ("it is skipped now" if entry.get("skipped")
+                       else "its font profile changed" if prior["fonts"]["hash"] != entry["fonts"]["hash"]
+                       else "its slide count changed" if len(kept["slides"]) != len(entry["slides"]) else None)
+                if why:
+                    raise KeptBaselineMismatch(
+                        f"{name}: its recorded pdfium baseline cannot be kept as it is, because {why}.  "
+                        "Re-record both truths: --update --truth both")
+                record["pdfium"] = kept
         out[name] = record
+    if "pdfium" not in results:
+        gone = sorted(name for name, entry in (previous or {}).items() if "pdfium" in entry and name not in out)
+        if gone:
+            raise KeptBaselineMismatch(
+                f"{', '.join(gone)}: recorded with a pdfium baseline but not in this run; a run without pdfium "
+                "does not delete one.  Re-record both truths: --update --truth both")
     return out
 
 
@@ -1503,6 +1894,34 @@ def report(results: dict, baselines: dict | None = None, truth: str = DEFAULT_TR
     return failures
 
 
+def _truths(choice: str) -> tuple[str, ...]:
+    """``--truth``: one instrument, or ``both`` (the default truth first)."""
+    return TRUTHS if choice == "both" else (choice,)
+
+
+def _describe_checks(stats: dict, cache_mode: str, root: Path) -> str:
+    """One line on what the run's spot-checks found, for stderr."""
+    import raster_cache
+
+    checks = stats.get("checks", [])
+    count = {}
+    for check in checks:
+        if "cache" in check:
+            count[check["cache"]] = count.get(check["cache"], 0) + 1
+    crops = sum(1 for check in checks if "crop" in check)
+    entries, size = raster_cache.RasterCache(root, ROOT).size() if cache_mode != "off" else (0, 0)
+    parts = [f"{len(stats.get('sampled', []))} of {stats.get('slides', 0)} slides spot-checked"
+             + (" (" + ", ".join(stats["sampled"]) + ")" if cache_mode != "verify" else ""),
+             f"rasters re-drawn and identical to the cache: {count.get('match', 0)}",
+             f"crop equal to full page: {crops}"]
+    if cache_mode != "off":
+        parts.append(f"cache: {count.get('hit', 0)} hits, {count.get('drawn', 0) + count.get('stored', 0)} drawn; "
+                     f"{entries} rasters, {size / 1e6:.1f} MB in {root}")
+    else:
+        parts.append("cache: off")
+    return "; ".join(parts)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1510,7 +1929,9 @@ def main() -> int:
         default="~/pptx2svg-oracle",
         help="directory of deck.pptx / deck.pdf pairs exported through PowerPoint",
     )
-    parser.add_argument("--update", action="store_true", help="rewrite the stored baselines")
+    parser.add_argument("--update", action="store_true",
+                        help="rewrite the stored baselines of the truths scored: by default svg only, and every "
+                        "recorded pdfium entry is kept exactly as it is; --truth both re-records those too")
     parser.add_argument(
         "--write-profile",
         action="store_true",
@@ -1518,10 +1939,10 @@ def main() -> int:
     )
     parser.add_argument(
         "--truth",
-        choices=TRUTHS,
+        choices=TRUTHS + ("both",),
         default=DEFAULT_TRUTH,
         help="how PowerPoint's page is rasterised (default svg: converted by tools/pdf_svg.py, "
-        "then resvg like ours; pdfium: the old instrument).  --update records both",
+        "then resvg like ours; pdfium: the old instrument, scored only when asked for; both)",
     )
     parser.add_argument("--slides", action="store_true", help="also print every slide's score")
     parser.add_argument("--json", action="store_true", help="dump raw scores instead of a table")
@@ -1529,9 +1950,19 @@ def main() -> int:
     parser.add_argument("--jobs", "-j", type=int, default=default_jobs(),
                         help="processes to score slides in (default: every logical core, %(default)s here, "
                         "fewer if memory is short); 1 is the serial path.  Scores are identical either way")
+    caching = parser.add_mutually_exclusive_group()
+    caching.add_argument("--no-cache", action="store_true",
+                         help="draw every raster; neither read nor write the raster cache")
+    caching.add_argument("--verify-cache", action="store_true",
+                         help="re-draw every raster and compare it with the cache byte for byte (and every "
+                         "slide's cropped SSIM with the full page's); any difference discards the cache and fails")
     args = parser.parse_args()
     if args.jobs < 1:
         parser.error("--jobs must be at least 1")
+    truths = _truths(args.truth)
+    if args.update and "svg" not in truths:
+        parser.error("--update --truth pdfium: the pdfium entries sit inside the svg entries and share their "
+                     "fonts; re-record them with --update --truth both")
 
     if args.write_profile:
         profile = write_profile()
@@ -1572,7 +2003,6 @@ def main() -> int:
         print(f"no such directory: {oracle_dir}", file=sys.stderr)
         return 2
 
-    truths = TRUTHS if args.update else (args.truth,)
     if "svg" in truths:
         import pdf_svg
 
@@ -1584,27 +2014,40 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 2
-    results = run(oracle_dir, profile, truths, args.jobs)
+    import raster_cache
+
+    cache_mode = "off" if args.no_cache else "verify" if args.verify_cache else "use"
+    stats: dict = {}
+    try:
+        results = run(oracle_dir, profile, truths, args.jobs, cache_mode, stats)
+    except (raster_cache.CacheMismatch, CropMismatch) as mismatch:
+        print(f"FIDELITY RUN ABORTED: {mismatch}", file=sys.stderr)
+        return 3
+    print(_describe_checks(stats, cache_mode, raster_cache_root(oracle_dir)), file=sys.stderr)
     if not results[truths[0]]:
         print(f"no deck.pptx/deck.pdf pairs in {oracle_dir}", file=sys.stderr)
         return 2
 
     if args.json:
-        print(json.dumps(results if args.update else results[args.truth], indent=2, sort_keys=True))
+        print(json.dumps(results if len(truths) > 1 else results[truths[0]], indent=2, sort_keys=True))
         return 0
 
     baselines = None
-    if BASELINE_PATH.exists() and not args.update:
+    if BASELINE_PATH.exists():
         baselines = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     failures = 0
     for truth in truths:
-        failures += report(results[truth], baselines, truth, args.slides)
+        failures += report(results[truth], None if args.update else baselines, truth, args.slides)
 
     if args.update:
-        BASELINE_PATH.write_text(
-            json.dumps(baselines_payload(results), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        print(f"\nwrote {BASELINE_PATH.relative_to(ROOT)}")
+        try:
+            payload = baselines_payload(results, baselines)
+        except KeptBaselineMismatch as refused:
+            print(f"\nnot written: {refused}", file=sys.stderr)
+            return 2
+        BASELINE_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        kept = "" if "pdfium" in truths else "; every pdfium entry kept as recorded (--truth both re-records them)"
+        print(f"\nwrote {BASELINE_PATH.relative_to(ROOT)}{kept}")
         return 0
     return 1 if failures else 0
 

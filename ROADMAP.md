@@ -1173,6 +1173,61 @@ full validation is the expensive part -- about 70 CPU-seconds a page at both res
 version; `tests/test_pdf_svg.py` holds a sample of three pages (about a minute) and a
 refusal (feature-sweep 13).
 
+#### Faster, without hiding anything
+
+Four changes, each held to the same bar: every recorded svg-truth score is the same bits,
+and nothing the harness used to see can now go unseen. `--update` writes the committed
+`tests/fidelity-baselines.json` byte for byte, at `--jobs 1` and `--jobs 4`, cold cache
+and warm, with and without `--no-cache`, and with `--truth both`.
+
+* **pdfium runs only when asked for** (`--truth pdfium`, `--truth both`). The default run
+  scores the svg truth alone. The recorded pdfium entries stay in the baselines file: a
+  default `--update` carries each one over *as it is* and refuses, rather than keep one
+  dishonestly, where its deck's font profile or slide count changed, the deck is now
+  skipped, or it left the oracle (`baselines_payload`; "re-record with `--update
+  --truth both`"). In the suite, score comparisons default to svg; the pdfium variant is
+  marked `pdfium` and runs under `pytest --pdfium`.
+* **Each deck is converted once**, a deck per task, not once per slide. Every slide's SVG
+  of all 11 decks (61 slides) is the same bytes both ways, in one process and in a fresh
+  process per deck.
+* **Rasters are cached** (`tools/raster_cache.py`, in `~/pptx2svg-oracle/svg/rasters/`,
+  never in a repository: a raster of PowerPoint's page holds Microsoft's glyph shapes).
+  The key is every input that moves the pixels -- ours: the SVG's bytes, the *content*
+  digest of every font file resvg is handed (588 files under the profile's directories,
+  1.5-2 s a run, read while the decks convert, plus the staged superfamily copies),
+  `pptx2svg/png.py`, resvg-py's version and binary, Pillow's version, the options, the
+  width and `HARNESS_VERSION`; PowerPoint's: the PDF's and the converted page's bytes,
+  the converter's version and `pdf_svg.py` itself, PyMuPDF's version, the resolution and
+  options, resvg and Pillow. The components are stored beside each raster with a digest
+  of its pixels, and both are compared on every read. **Detection:** every run re-draws
+  six slides, spread across the decks and rotating by date (every one of the 52 within
+  nine days), and compares them with the cache byte for byte; any difference, or a stored
+  entry that is not what was written, discards the whole cache and stops the run with
+  exit 3, printing nothing and writing no baseline. Tried both ways on the real cache: a
+  self-consistent stale entry in the sample, and a corrupted one outside it, each
+  stopped the run; a stale one outside the sample was found by `--verify-cache`, which
+  re-draws every slide. `--no-cache` bypasses the cache. 104 rasters, 11.0 MB.
+* **SSIM is computed over the content only**: the bounding box of the union of both
+  images' foreground (never one side's), grown by the window's radius, 5, clamped to the
+  page. It is exact: a pixel's SSIM reads only pixels within the radius, so every masked
+  value is the same float in the same order. `tests/test_fidelity.py` holds cropped
+  equal to full-page on every scored slide (and on synthetic pages with no margin, ink
+  at the edges, a page colour); every run holds six slides so; a page whose ink reaches
+  every edge is computed whole.
+
+Measured on a four-core machine shared with other work (load 5-12, so wall times are
+inflated and noisy; CPU time is steadier), default `--update`:
+
+| | main (both truths) | now, warm cache | now, cold cache | now, `--no-cache` |
+| --- | --- | --- | --- | --- |
+| `--jobs 4`, wall | 51-70 s | 21-30 s | 31-50 s | 40 s |
+| `--jobs 4`, CPU | 124-132 s | 48-50 s | 80-83 s | |
+| `--jobs 1`, wall | 106-155 s | 39-51 s | 73-93 s | 70 s |
+
+The spot-checks cost 9-10 s serially and 6-11 s at four jobs (a warm run with the sample
+against one without); `--verify-cache` takes a little longer than a cold run (58 s at four jobs), since it also
+scores every slide twice.
+
 #### Recalibrated
 
 The renderer did not change: our SVG output and the VRT snapshots are the same bytes.

@@ -117,4 +117,5 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
   "powerpoint: drives Microsoft PowerPoint, which is one instance per machine; such a test runs only serially or in the one xdist group `--dist loadgroup` keeps on a single worker (tests/conftest.py)",
+  "pdfium: scores against the fidelity harness's old instrument (tools/fidelity.py --truth pdfium); skipped unless `pytest --pdfium`, since the default truth is svg",
 ]
