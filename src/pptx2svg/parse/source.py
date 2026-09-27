@@ -34,41 +34,16 @@ from ..model import (
 # Colour
 # --------------------------------------------------------------------------------------
 
-ColorTransformKind = Literal["lumMod", "lumOff", "tint", "shade", "alpha", "satMod", "satOff"]
-
-
-@dataclass(frozen=True)
-class ColorTransform:
-    kind: ColorTransformKind
-    #: OOXML 1/1000-percent
-    value: float
-
-
-@dataclass
-class SrgbColor:
-    hex: str
-    transforms: list[ColorTransform] = field(default_factory=list)
-    kind: Literal["srgb"] = "srgb"
-
-
-@dataclass
-class SchemeColor:
-    """A ``a:schemeClr`` reference; ``scheme`` is a colour-map slot such as ``tx1``."""
-
-    scheme: str
-    transforms: list[ColorTransform] = field(default_factory=list)
-    kind: Literal["scheme"] = "scheme"
-
-
-@dataclass
-class SystemColor:
-    value: str
-    last_color: str | None = None
-    transforms: list[ColorTransform] = field(default_factory=list)
-    kind: Literal["system"] = "system"
-
-
-SourceColor = Union[SrgbColor, SchemeColor, SystemColor]
+# The unresolved colour choices moved to ooxml-common with the rest of DrawingML's value
+# types; they are the same classes here.
+from ooxml_common.drawingml.model import (  # noqa: E402,F401
+    ColorTransform,
+    ColorTransformKind,
+    SchemeColor,
+    SourceColor,
+    SrgbColor,
+    SystemColor,
+)
 
 
 # --------------------------------------------------------------------------------------

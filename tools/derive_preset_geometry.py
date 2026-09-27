@@ -9,7 +9,9 @@ drawing commands written in terms of those guides -- exactly the vocabulary
 
 So the geometry does not have to be re-derived by hand.  This script transcribes the
 definitions we use into :mod:`pptx2svg.render.preset_specs`, a pure-data module the
-renderer evaluates at draw time.  Hand-written generators still exist for the shapes
+renderer evaluates at draw time, and **every other preset** into
+``ooxml_common.drawingml.presets``, whose ``PRESETS`` is the whole table: docx2svg draws
+from it, and so does ``ooxml_common.drawingml.geometry.preset_path_data``.  Hand-written generators still exist for the shapes
 where an approximation is the better trade -- a ``rect`` should emit ``<rect>``, not a
 four-command path -- and :data:`SPEC_DRIVEN` below is the list of the ones that should
 come from the specification instead.
@@ -63,6 +65,10 @@ def _shared_source(module: str) -> Path:
 
 
 TARGET = _shared_source("ooxml_common.drawingml.preset_specs")
+
+#: The rest of the specification's presets -- those :data:`SPEC_DRIVEN` does not name --
+#: beside it, so that ``PRESETS`` there is every preset without a second copy of any.
+REST_TARGET = TARGET.with_name("presets.py")
 
 DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
@@ -223,6 +229,41 @@ SPEC_DRIVEN = [
     "wedgeRoundRectCallout",
 ]
 
+#: Presets ``ST_ShapeType`` names (ECMA-376 Part 1, 20.1.10.56; ``dml-main.xsd``) that
+#: the 5th edition's ``presetShapeDefinitions.xml`` does not define.  There is one:
+#: **``upArrow``**.  The file holds 187 entries for the schema's 187 names, but
+#: ``upDownArrow`` twice (identical) and no ``upArrow`` at all.  It is written here as
+#: the file's own ``downArrow`` mirrored top to bottom -- the relation the file keeps
+#: between ``leftArrow`` and ``rightArrow`` -- guide for guide.  In the file's own XML
+#: form, so it goes through exactly the path every other entry does.
+SUPPLEMENTS = {
+    "upArrow": f"""<upArrow xmlns:a="{DRAWINGML_NS}">
+      <a:avLst><a:gd name="adj1" fmla="val 50000"/><a:gd name="adj2" fmla="val 50000"/></a:avLst>
+      <a:gdLst>
+        <a:gd name="maxAdj2" fmla="*/ 100000 h ss"/>
+        <a:gd name="a1" fmla="pin 0 adj1 100000"/>
+        <a:gd name="a2" fmla="pin 0 adj2 maxAdj2"/>
+        <a:gd name="dy2" fmla="*/ ss a2 100000"/>
+        <a:gd name="y2" fmla="+- t dy2 0"/>
+        <a:gd name="dx1" fmla="*/ w a1 200000"/>
+        <a:gd name="x1" fmla="+- hc 0 dx1"/>
+        <a:gd name="x2" fmla="+- hc dx1 0"/>
+        <a:gd name="dy1" fmla="*/ x1 dy2 wd2"/>
+        <a:gd name="y1" fmla="+- y2 0 dy1"/>
+      </a:gdLst>
+      <a:pathLst><a:path>
+        <a:moveTo><a:pt x="l" y="y2"/></a:moveTo>
+        <a:lnTo><a:pt x="hc" y="t"/></a:lnTo>
+        <a:lnTo><a:pt x="r" y="y2"/></a:lnTo>
+        <a:lnTo><a:pt x="x2" y="y2"/></a:lnTo>
+        <a:lnTo><a:pt x="x2" y="b"/></a:lnTo>
+        <a:lnTo><a:pt x="x1" y="b"/></a:lnTo>
+        <a:lnTo><a:pt x="x1" y="y2"/></a:lnTo>
+        <a:close/>
+      </a:path></a:pathLst>
+    </upArrow>""",
+}
+
 HEADER = '''"""Preset shape geometry, compiled from ECMA-376's ``presetShapeDefinitions.xml``.
 
 **Generated file -- do not edit.**  Regenerate with::
@@ -260,6 +301,41 @@ PRESET_SPECS: dict = {{
 '''
 
 FOOTER = "}\n"
+
+REST_HEADER = '''"""Every ECMA-376 preset geometry: the ones pptx2svg draws by hand, and the whole table.
+
+**Generated file -- do not edit.**  Regenerate with pptx2svg's::
+
+    python3 tools/derive_preset_geometry.py --source presetShapeDefinitions.xml
+
+which writes :mod:`~ooxml_common.drawingml.preset_specs` and this file together, and whose
+``--check`` fails when either has drifted from what the source compiles to.
+
+Source: ECMA-376 Part 1, 5th edition (December 2016), electronic addendum
+``OfficeOpenXML-DrawingMLGeometries.zip`` -> ``presetShapeDefinitions.xml``
+SHA-256 ``{sha}``, plus ``upArrow``, which that file does not define (it holds
+``upDownArrow`` twice instead): ``SUPPLEMENTS`` in the tool says how it was written.
+
+:data:`~ooxml_common.drawingml.preset_specs.PRESET_SPECS` holds the presets pptx2svg
+draws *from the specification*; the others it draws with hand-written generators (a
+``rect`` as ``<rect>``), which is its renderer's choice and stays so.  A consumer that
+wants the specification's geometry for every name -- docx2svg, which had to write five
+of these itself -- reads :data:`PRESETS`: both tables, every name ``ST_ShapeType`` allows,
+in the same ``name -> (adjustments, guides, paths)`` form.
+"""
+
+from .preset_specs import PRESET_SPECS
+
+# fmt: off
+OTHER_PRESET_SPECS: dict = {{
+'''
+
+REST_FOOTER = '''}
+
+#: Every preset ``ST_ShapeType`` names, from the specification: :data:`PRESET_SPECS` and
+#: :data:`OTHER_PRESET_SPECS`, which share no name.
+PRESETS: dict = {**PRESET_SPECS, **OTHER_PRESET_SPECS}
+'''
 
 LINE_LIMIT = 96
 
@@ -425,6 +501,19 @@ def build(xml: bytes, digest: str) -> str:
     return HEADER.format(sha=digest) + body + "\n" + FOOTER
 
 
+def build_rest(xml: bytes, digest: str) -> tuple[str, int]:
+    """The presets :data:`SPEC_DRIVEN` leaves out, in the file's order, then the
+    supplements; and how many."""
+    shapes = parse(xml)
+    for name, text in SUPPLEMENTS.items():
+        if name in shapes:
+            raise SystemExit(f"{name} is in the specification now; drop it from SUPPLEMENTS")
+        shapes[name] = ET.fromstring(text)
+    names = [name for name in shapes if name not in SPEC_DRIVEN]
+    body = "\n".join(render_shape(name, shapes[name]) for name in names)
+    return REST_HEADER.format(sha=digest) + body + "\n" + REST_FOOTER, len(names)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -437,25 +526,31 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help=f"exit 1 if {TARGET.name} differs from what the source compiles to",
+        help=f"exit 1 if {TARGET.name} or {REST_TARGET.name} differs from what the source "
+        "compiles to",
     )
     args = parser.parse_args()
 
     xml, digest = load_source(args.source)
-    generated = build(xml, digest)
+    rest, rest_count = build_rest(xml, digest)
+    outputs = [(TARGET, build(xml, digest), len(SPEC_DRIVEN)), (REST_TARGET, rest, rest_count)]
 
     if args.check:
-        if not TARGET.exists():
-            print(f"{TARGET} does not exist", file=sys.stderr)
-            return 1
-        if TARGET.read_text(encoding="utf-8") != generated:
-            print(f"{TARGET} is stale; re-run without --check", file=sys.stderr)
-            return 1
-        print(f"{TARGET.name} is up to date ({len(SPEC_DRIVEN)} presets)")
-        return 0
+        stale = False
+        for target, generated, count in outputs:
+            if not target.exists():
+                print(f"{target} does not exist", file=sys.stderr)
+                stale = True
+            elif target.read_text(encoding="utf-8") != generated:
+                print(f"{target} is stale; re-run without --check", file=sys.stderr)
+                stale = True
+            else:
+                print(f"{target.name} is up to date ({count} presets)")
+        return 1 if stale else 0
 
-    TARGET.write_text(generated, encoding="utf-8")
-    print(f"wrote {TARGET} ({len(SPEC_DRIVEN)} presets)")
+    for target, generated, count in outputs:
+        target.write_text(generated, encoding="utf-8")
+        print(f"wrote {target} ({count} presets)")
     return 0
 
 

@@ -512,13 +512,16 @@ It collects, passes and skips exactly the tests the serial run does. Here `-n` m
 those all run on one worker, one at a time. Under any other `--dist` such a test fails
 rather than races.
 
-The format-neutral half of this library -- the OPC reader, units, DrawingML guides, preset
-geometry and patterns, the font modules and the measured text metrics -- lives in
+The format-neutral half of this library -- the OPC reader, units, the font modules and
+the measured text metrics, and DrawingML: its value types, colour resolution, guides,
+preset geometry, patterns, and the fill, outline, effect and geometry renderers -- lives in
 [ooxml-common](https://github.com/uvrt/ooxml-common), extracted with its history so that
-docx2svg can measure text with the same tables. It is a runtime dependency with no
-dependencies of its own, and not on PyPI yet, so it is installed first. Every old import
-path (`pptx2svg.opc`, `pptx2svg.text.metrics`, `pptx2svg.fonts`, ...) still works and
-returns the same module object.
+docx2svg can measure text with the same tables and draw DrawingML with the same code. It
+is a runtime dependency with no dependencies of its own, and not on PyPI yet, so it is
+installed first. Every old import path (`pptx2svg.opc`, `pptx2svg.text.metrics`,
+`pptx2svg.fonts`, `pptx2svg.render.fill`, `pptx2svg.resolve.color`, ...) still works and
+returns the same module object, and every DrawingML type in `pptx2svg.model` is the shared
+class.
 
 `pptx2svg-fonts` is a sibling distribution in this repository and is not on PyPI yet, so
 it is installed from the checkout rather than named as a dependency.
@@ -552,8 +555,8 @@ python3 tools/extract_font_metrics.py --write    # regenerate
 
 A test runs `--check`, so a font update that is not accompanied by a regenerated table
 fails the suite rather than silently making layout wrong. The same idea applies to the
-two other generated tables: ooxml-common's `drawingml/preset_specs.py` comes from
-`tools/derive_preset_geometry.py`, and `parse/table_styles_builtin.py` from
+two other generated tables: ooxml-common's `drawingml/preset_specs.py` and
+`drawingml/presets.py` come from `tools/derive_preset_geometry.py`, and `parse/table_styles_builtin.py` from
 `tools/derive_table_styles.py`, which measures the styles by rendering them through
 PowerPoint. Edit the tool, not the table.
 

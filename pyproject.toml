@@ -34,7 +34,11 @@ classifiers = [
 # first -- from a sibling checkout (`pip install -e ../ooxml-common`) or, as CI does,
 # from its repository URL.  A direct URL cannot go here instead: PyPI refuses to publish
 # a distribution whose dependencies name one.
-dependencies = ["ooxml-common>=0.1"]
+#
+# 0.2 is the first ooxml-common that carries DrawingML's value types and renderers
+# (ROADMAP.md, "The shared package"), which pptx2svg now imports: an older one fails at
+# import, so the requirement says so first.
+dependencies = ["ooxml-common>=0.2"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

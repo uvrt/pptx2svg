@@ -28,6 +28,10 @@ jobs:
         # ooxml-common is a runtime dependency that is not on PyPI yet either, so it is
         # installed from its repository first and `pip install -e .` then finds the
         # requirement already satisfied.  Once it is published, delete that line.
+        #
+        # It is @main, so an ooxml-common change this repository depends on lands there
+        # first.  To test such a pair before it has, point this at the other branch
+        # (`@<branch>`) on the pull request, and back at @main before merging.
         run: |
           python -m pip install --upgrade pip
           python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@main"
