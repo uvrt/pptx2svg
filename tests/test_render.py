@@ -814,11 +814,23 @@ def test_the_renderer_reads_every_field_the_model_carries():
 
     from pptx2svg import model
 
+    import ooxml_common.drawingml
+
     root = Path(__file__).resolve().parent.parent / "src/pptx2svg"
+    # The fill, outline, effect and geometry renderers moved to ooxml-common with the
+    # DrawingML value types they read; `render/{fill,effect,geometry}.py` here are now
+    # aliases of those modules, so their reads are read where the code is.
+    shared = Path(ooxml_common.drawingml.__file__).resolve().parent
     sources = "".join(
         path.read_text(encoding="utf-8")
-        for directory in ("render", "text")
-        for path in sorted((root / directory).glob("*.py"))
+        for path in [
+            *(
+                path
+                for directory in ("render", "text")
+                for path in sorted((root / directory).glob("*.py"))
+            ),
+            *(shared / f"{name}.py" for name in ("fill", "effect", "geometry")),
+        ]
     )
 
     unread = []

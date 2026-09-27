@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from ooxml_common.drawingml.svg import num  # noqa: F401  (moved; re-exported)
+
 from ..text.fontmap import DEFAULT_FONT_MAPPING
 from ..text.measure import DefaultTextMeasurer, TextMeasurer
 
@@ -96,10 +98,3 @@ def escape_xml_attr(value: str) -> str:
         .replace(">", "&gt;")
     )
 
-
-def num(value: float) -> str:
-    """Compact number formatting for SVG attribute values."""
-    rounded = round(value, 3)
-    if rounded == int(rounded):
-        return str(int(rounded))
-    return f"{rounded:g}"

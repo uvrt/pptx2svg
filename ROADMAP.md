@@ -649,6 +649,51 @@ is still standard-library only — `ooxml-common` has no dependencies.
 relabelled `pptx2svg embedded: …`, both in shared code now: changing either changes this
 library's output, which this move was not allowed to do.
 
+### Second step: DrawingML's value types and renderers — **moved, on branch `drawingml-rendering`**
+
+docx2svg draws a Word document's floating shapes, which are DrawingML, and had begun to
+write a second copy of this library's renderers to do it (its ROADMAP.md, "Floating
+drawings — measured", F.10, which proposed this step). So the step the first extraction
+deferred is done:
+
+* **The value types** — colour choices (`SrgbColor`, `SchemeColor`, `SystemColor`,
+  `ColorTransform`) and `ResolvedColor`, every fill, `Outline` and its arrowheads, the
+  effects, `Transform`, preset and custom geometry, picture tiling, `ColorScheme` — moved
+  from `model.py` and `parse/source.py` to `ooxml_common.drawingml.model`. Both modules
+  re-export them, and each *is* the shared class.
+* **The renderers**, whole files with their history: `render/fill.py`, `render/geometry.py`,
+  `render/effect.py`, `resolve/color.py` and `imagemeta.py` are now
+  `ooxml_common.drawingml.{fill,geometry,effect,color}` and `ooxml_common.imagemeta`, and
+  each old path is the shared module, as before. `num` moved beside them; the renderers
+  take any object with `new_id` / `add_def` (`SvgDefs`), which `RenderContext` is.
+* **The complete preset table.** `tools/derive_preset_geometry.py` now also writes
+  `drawingml/presets.py`, every preset `SPEC_DRIVEN` leaves out, so `PRESETS` holds all
+  187 names `ST_ShapeType` allows. The 5th edition's `presetShapeDefinitions.xml` has
+  `upDownArrow` twice and **no `upArrow`**; the tool writes it as the file's `downArrow`
+  mirrored. `PRESET_SPECS` and this renderer's hand-written generators are unchanged: which
+  presets are drawn from the specification is still this renderer's measured policy.
+* **Geometry as path data** (`geometry_path_data`, `preset_path_data`, `spec_path_data`):
+  each `a:path` over a box with its fill mode and stroke flag, through the evaluator and
+  path builder the specification-driven presets already use — what docx2svg paints with.
+* **Colour rules.** Where Word and PowerPoint were measured to differ, the resolver takes
+  the application as `ColorRules`: `POWERPOINT` (the default, this library's rounding, half
+  to even) or `WORD` (docx2svg's measurement: a half down, `7F7F7F` for black at
+  `lumMod 50000 lumOff 50000`). The HLS `lumMod` that is 23 levels off PowerPoint's chart
+  accent cycle (3.2, `ofPie`) moved **as it is**: fixing it moves every deck.
+
+**Nothing changed from the outside**, checked against `main` (6a7de7f): every SVG of 32
+decks (197 slides: the fixtures, `scratch/`, the oracle's), 3,474 direct renderer outputs
+(every preset at four sizes and three adjustment sets, every fill, pattern, dash, cap,
+join, marker, effect, and 752 colour resolutions), every VRT snapshot, the fidelity scores
+under both truths, and the suite's counts are byte-identical. One test changed:
+`test_the_renderer_reads_every_field_the_model_carries` now also reads the moved
+renderers' source, where the fields are read.
+
+**What stayed**: `parse/drawing.py`, which reads DrawingML XML into these types (the
+colour parser, `_hsl_to_hex` and `PRESET_COLOR_HEX` with it); `render/shape.py` and
+`render/svg.py`, which place elements on a slide; the chart ramp's own linear-light
+conversion.
+
 ---
 
 ## Fonts — **done**
