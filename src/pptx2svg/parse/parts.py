@@ -19,7 +19,17 @@ from ..opc import (
     REL_THEME,
 )
 from ..xmlutil import attr, child, children, is_true, ns_attr, num_attr
-from .drawing import parse_color, parse_effect_list, parse_fill, parse_line, parse_style_reference
+from .drawing import (  # noqa: F401 -- the theme readers moved there and are re-exported
+    COLOR_SCHEME_KEYS,
+    parse_color,
+    parse_color_scheme,
+    parse_effect_list,
+    parse_fill,
+    parse_fill_style,
+    parse_format_scheme,
+    parse_line,
+    parse_style_reference,
+)
 from .shapes import parse_shape_tree
 from .source import (
     SourceBackground,
@@ -56,21 +66,6 @@ COLOR_MAP_SLOTS = (
     "folHlink",
 )
 
-#: ``a:clrScheme`` children, in schema order.
-COLOR_SCHEME_KEYS = (
-    "dk1",
-    "lt1",
-    "dk2",
-    "lt2",
-    "accent1",
-    "accent2",
-    "accent3",
-    "accent4",
-    "accent5",
-    "accent6",
-    "hlink",
-    "folHlink",
-)
 
 
 def read_presentation(package: OpcPackage) -> SourcePresentation:
@@ -421,17 +416,6 @@ def read_theme(package: OpcPackage, part_path: str) -> SourceTheme | None:
     )
 
 
-def parse_color_scheme(clr_scheme: Element | None) -> dict:
-    if clr_scheme is None:
-        return {}
-    scheme = {}
-    for key in COLOR_SCHEME_KEYS:
-        color = parse_color(child(clr_scheme, key))
-        if color is not None:
-            scheme[key] = color
-    return scheme
-
-
 def parse_font_scheme(font_scheme: Element | None) -> SourceFontScheme:
     if font_scheme is None:
         return SourceFontScheme()
@@ -483,40 +467,3 @@ def _east_asian_script_typeface(font: Element | None) -> str | None:
         if found:
             return found
     return None
-
-
-def parse_format_scheme(fmt_scheme: Element | None) -> SourceFormatScheme:
-    if fmt_scheme is None:
-        return SourceFormatScheme()
-    return SourceFormatScheme(
-        fill_styles=[
-            fill
-            for fill in (parse_fill_style(node) for node in children(child(fmt_scheme, "fillStyleLst")))
-            if fill is not None
-        ],
-        line_styles=[
-            line
-            for line in (parse_line(node) for node in children(child(fmt_scheme, "lnStyleLst"), "ln"))
-            if line is not None
-        ],
-        effect_styles=[
-            parse_effect_list(child(node, "effectLst"))
-            for node in children(child(fmt_scheme, "effectStyleLst"), "effectStyle")
-        ],
-        bg_fill_styles=[
-            fill
-            for fill in (
-                parse_fill_style(node) for node in children(child(fmt_scheme, "bgFillStyleLst"))
-            )
-            if fill is not None
-        ],
-    )
-
-
-def parse_fill_style(node: Element | None):
-    """A fill style list holds bare fill elements; wrap each so ``parse_fill`` can read it."""
-    if node is None:
-        return None
-    wrapper = Element("wrapper")
-    wrapper.append(node)
-    return parse_fill(wrapper)

@@ -31,11 +31,12 @@ from ..model import (
 )
 
 # --------------------------------------------------------------------------------------
-# Colour
+# DrawingML
 # --------------------------------------------------------------------------------------
 
-# The unresolved colour choices moved to ooxml-common with the rest of DrawingML's value
-# types; they are the same classes here.
+# The unresolved DrawingML types -- colour choices, fills, outlines, shape styles,
+# effects, transforms and geometry -- moved to ooxml-common with the reader that makes
+# them; they are the same classes here.
 from ooxml_common.drawingml.model import (  # noqa: E402,F401
     ColorTransform,
     ColorTransformKind,
@@ -44,202 +45,31 @@ from ooxml_common.drawingml.model import (  # noqa: E402,F401
     SrgbColor,
     SystemColor,
 )
-
-
-# --------------------------------------------------------------------------------------
-# Fill and line
-# --------------------------------------------------------------------------------------
-
-
-@dataclass
-class SourceSolidFill:
-    color: SourceColor
-    kind: Literal["solid"] = "solid"
-
-
-@dataclass
-class SourceNoFill:
-    kind: Literal["none"] = "none"
-
-
-@dataclass
-class SourceGradientStop:
-    position: float
-    color: SourceColor
-
-
-@dataclass
-class SourceGradientFill:
-    stops: list[SourceGradientStop]
-    gradient_type: Literal["linear", "radial"] = "linear"
-    #: OOXML 1/60000 degrees
-    angle: float = 0.0
-    center_x: float | None = None
-    center_y: float | None = None
-    kind: Literal["gradient"] = "gradient"
-
-
-@dataclass
-class SourceImageFillTile:
-    tx: float = 0.0
-    ty: float = 0.0
-    sx: float = 1.0
-    sy: float = 1.0
-    flip: Literal["none", "x", "y", "xy"] = "none"
-    align: RectangleAlignment = "tl"
-
-
-@dataclass
-class SourceImageFill:
-    blip_relationship_id: str
-    #: ``asvg:svgBlip@r:embed`` -- the vector original, when the blip carries one.
-    svg_relationship_id: str | None = None
-    tile: SourceImageFillTile | None = None
-    src_rect: tuple[float, float, float, float] | None = None
-    stretch: tuple[float, float, float, float] | None = None
-    kind: Literal["image"] = "image"
-
-
-@dataclass
-class SourcePatternFill:
-    preset: str
-    foreground_color: SourceColor
-    background_color: SourceColor
-    kind: Literal["pattern"] = "pattern"
-
-
-@dataclass
-class SourceGroupFill:
-    """``a:grpFill`` -- inherit the enclosing group's fill."""
-
-    kind: Literal["group"] = "group"
-
-
-SourceFill = Union[
-    SourceSolidFill,
-    SourceNoFill,
+from ooxml_common.drawingml.source import (  # noqa: E402,F401
+    SourceBlipEffects,
+    SourceCustomGeometry,
+    SourceEffectList,
+    SourceFill,
+    SourceFormatScheme,
+    SourceGeometry,
+    SourceGlow,
     SourceGradientFill,
-    SourceImageFill,
-    SourcePatternFill,
+    SourceGradientStop,
     SourceGroupFill,
-]
-
-
-@dataclass
-class SourceOutline:
-    width: float | None = None
-    fill: SourceFill | None = None
-    dash_style: DashStyle | None = None
-    custom_dash: list[float] | None = None
-    line_cap: LineCap | None = None
-    line_join: LineJoin | None = None
-    head_end: ArrowEndpoint | None = None
-    tail_end: ArrowEndpoint | None = None
-    #: ``a:ln@cmpd`` -- ``sng`` (the default) or one of the multi-stroke spellings.
-    compound: CompoundLineType | None = None
-
-
-@dataclass
-class SourceStyleReference:
-    """``a:fillRef`` / ``a:lnRef`` / ``a:effectRef`` -- an index into the theme's fmtScheme."""
-
-    idx: int
-    color: SourceColor | None = None
-
-
-@dataclass
-class SourceShapeStyle:
-    fill_ref: SourceStyleReference | None = None
-    line_ref: SourceStyleReference | None = None
-    effect_ref: SourceStyleReference | None = None
-    font_ref: SourceStyleReference | None = None
-
-
-# --------------------------------------------------------------------------------------
-# Effects
-# --------------------------------------------------------------------------------------
-
-
-@dataclass
-class SourceOuterShadow:
-    blur_radius: float
-    distance: float
-    direction: float
-    color: SourceColor
-    alignment: RectangleAlignment = "b"
-    rotate_with_shape: bool = True
-
-
-@dataclass
-class SourceInnerShadow:
-    blur_radius: float
-    distance: float
-    direction: float
-    color: SourceColor
-
-
-@dataclass
-class SourceGlow:
-    radius: float
-    color: SourceColor
-
-
-@dataclass
-class SourceSoftEdge:
-    radius: float
-
-
-@dataclass
-class SourceEffectList:
-    outer_shadow: SourceOuterShadow | None = None
-    inner_shadow: SourceInnerShadow | None = None
-    glow: SourceGlow | None = None
-    soft_edge: SourceSoftEdge | None = None
-
-
-@dataclass
-class SourceBlipEffects:
-    grayscale: bool = False
-    bi_level: float | None = None
-    blur: tuple[float, bool] | None = None
-    lum: tuple[float, float] | None = None
-    duotone: tuple[SourceColor, SourceColor] | None = None
-    clr_change: tuple[SourceColor, SourceColor] | None = None
-    #: ``a:alphaModFix@amt`` -- 0..1 opacity applied to the whole picture.
-    alpha: float | None = None
-
-
-# --------------------------------------------------------------------------------------
-# Geometry and transform
-# --------------------------------------------------------------------------------------
-
-
-@dataclass
-class SourceTransform:
-    offset_x: float
-    offset_y: float
-    width: float
-    height: float
-    #: OOXML 1/60000 degrees
-    rotation: float = 0.0
-    flip_horizontal: bool = False
-    flip_vertical: bool = False
-
-
-@dataclass
-class SourcePresetGeometry:
-    preset: str
-    adjust_values: dict[str, float] = field(default_factory=dict)
-    kind: Literal["preset"] = "preset"
-
-
-@dataclass
-class SourceCustomGeometry:
-    paths: list[CustomGeometryPath] = field(default_factory=list)
-    kind: Literal["custom"] = "custom"
-
-
-SourceGeometry = Union[SourcePresetGeometry, SourceCustomGeometry]
+    SourceImageFill,
+    SourceImageFillTile,
+    SourceInnerShadow,
+    SourceNoFill,
+    SourceOuterShadow,
+    SourceOutline,
+    SourcePatternFill,
+    SourcePresetGeometry,
+    SourceShapeStyle,
+    SourceSoftEdge,
+    SourceSolidFill,
+    SourceStyleReference,
+    SourceTransform,
+)
 
 
 # --------------------------------------------------------------------------------------
@@ -591,14 +421,6 @@ class SourceColorMap:
     """``p:clrMap`` / ``p:clrMapOvr`` -- slot name -> colour-scheme key."""
 
     mapping: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class SourceFormatScheme:
-    fill_styles: list[SourceFill] = field(default_factory=list)
-    line_styles: list[SourceOutline] = field(default_factory=list)
-    effect_styles: list[SourceEffectList | None] = field(default_factory=list)
-    bg_fill_styles: list[SourceFill] = field(default_factory=list)
 
 
 @dataclass

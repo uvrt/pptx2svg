@@ -37,8 +37,9 @@ classifiers = [
 #
 # 0.2 is the first ooxml-common that carries DrawingML's value types and renderers
 # (ROADMAP.md, "The shared package"), which pptx2svg now imports: an older one fails at
-# import, so the requirement says so first.
-dependencies = ["ooxml-common>=0.2"]
+# import, so the requirement says so first.  0.3 carries the DrawingML reader too
+# (parse/drawing.py and the DrawingML half of parse/source.py moved there).
+dependencies = ["ooxml-common>=0.3"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

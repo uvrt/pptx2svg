@@ -694,6 +694,21 @@ colour parser, `_hsl_to_hex` and `PRESET_COLOR_HEX` with it); `render/shape.py` 
 `render/svg.py`, which place elements on a slide; the chart ramp's own linear-light
 conversion.
 
+**Then the reader**: `parse/drawing.py` followed, with its history, to
+`ooxml_common.drawingml.read` (ooxml-common 0.3), and the DrawingML half of
+`parse/source.py` -- the unresolved fills, outlines, shape styles, effects, transforms,
+geometry and the theme's format scheme -- to `ooxml_common.drawingml.source`, because
+docx2svg reads a Word shape's `spPr` into the same types. `parse/drawing.py` is the shared
+module under its old name, `parse/source.py` re-exports the moved classes, and
+`parse/parts.py` imports the theme readers that moved beside them. docx2svg also measured
+where Word draws the same DrawingML differently (dash caps, gradient geometry, colour
+composition, arrowheads, the pattern's phase...: ooxml-common's README), and those
+differences are parameters there (`drawingml.rules`), so pptx2svg's output does not move:
+the reader now carries what Word's rules use beside what pptx2svg reads, and reads two
+things it read as nothing before -- every `a:prstClr` name (it knew 27) and `sysDashDot` /
+`sysDashDotDot` -- which no deck here uses. Checked against `main` (d0e9044): the suite's
+counts, every VRT snapshot, the fidelity scores and every deck's SVG byte-identical.
+
 ---
 
 ## Fonts — **done**
