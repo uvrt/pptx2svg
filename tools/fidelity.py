@@ -1366,10 +1366,15 @@ def _source_digest(path) -> str:
 def our_components(svg: str, options: dict, fonts: dict) -> dict:
     """Every input that decides our raster's pixels: the SVG's bytes, the fonts' contents
     (:func:`font_digests`), the options, the code that turns them into resvg's call
-    (``pptx2svg/png.py``), resvg and Pillow, the width and :data:`HARNESS_VERSION`."""
+    (``pptx2svg/png.py``, and the pictures' colour conversion it runs first:
+    ``pptx2svg/iccimages.py`` with ``ooxml_common``'s ``icc.py`` and ``imagemeta.py``),
+    resvg and Pillow, the width and :data:`HARNESS_VERSION`."""
     import raster_cache
 
     sys.path.insert(0, SOURCE_ROOT)
+    import ooxml_common.icc
+    import ooxml_common.imagemeta
+    import pptx2svg.iccimages
     import pptx2svg.png
 
     return {
@@ -1381,6 +1386,8 @@ def our_components(svg: str, options: dict, fonts: dict) -> dict:
         "font_dirs_content": fonts["dirs"],
         "font_files": [[str(path), fonts["files"][str(path)]] for path in options.get("font_files") or ()],
         "png_py": _source_digest(pptx2svg.png.__file__),
+        "icc_py": [_source_digest(module.__file__) for module in
+                   (pptx2svg.iccimages, ooxml_common.icc, ooxml_common.imagemeta)],
         **_rasteriser_versions(),
     }
 

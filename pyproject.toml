@@ -40,7 +40,8 @@ classifiers = [
 # import, so the requirement says so first.  0.3 carries the DrawingML reader too
 # (parse/drawing.py and the DrawingML half of parse/source.py moved there).  0.3.2 carries
 # `geometry.text_area` and `DrawingRules.text_outline_inset`, which lay a shape's text out
-# in its geometry's text rectangle.
+# in its geometry's text rectangle, and `icc` with `imagemeta.icc_profile`, which convert a
+# profiled picture to sRGB before it is rasterised.
 dependencies = ["ooxml-common>=0.3.2"]
 
 [project.optional-dependencies]

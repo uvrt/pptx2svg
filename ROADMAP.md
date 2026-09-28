@@ -1458,6 +1458,37 @@ spokes" -- fitted the corpus and the earlier probes, none of which stated either
 series: `real-financial-report` slide 4 0.8506 → 0.8537, loss 23,670 → 23,169, the
 spokes back over the fill as PowerPoint draws them.
 
+**2. A picture's embedded ICC profile: PowerPoint converts it to sRGB, and now so does our
+rasteriser.** The probe's pictures are flat patches under two synthetic matrix/TRC
+profiles -- Adobe RGB's primaries at gamma 563/256, Display P3's at 1.8 -- as a PNG with
+an `iCCP` chunk and as a JPEG with an `APP2` one (the second deck repeats the JPEGs each
+distinct in a pixel: the first deck's three, identical but for their profiles, came back
+as one image object drawn three times). **PowerPoint wrote every one converted to sRGB and
+tagged sRGB**: (200, 100, 50) under the Adobe profile became (227, 100, 42), the exact
+conversion to the level; every patch lands within a level of the arithmetic except the
+Adobe profile's near-black 12, which PowerPoint wrote as 10 where the arithmetic and
+little CMS give 4 (one reading; a 1/16 slope limit on the source curve would explain it;
+not modelled). `real-college-template`'s photograph is the other case: PowerPoint passed
+that JPEG through with its Adobe RGB profile, and the PDF's reader converts it -- which is
+little CMS's arithmetic.
+
+**What we do.** The SVG keeps embedding the picture's own bytes, profile included: SVG
+says an embedded profile is honoured (SVG 1.1 `color-profile: auto`), a browser converts
+it as a PDF reader does, and no standard-library code can decode a JPEG to convert it
+in the SVG anyway. The rasteriser is where it went wrong -- resvg (and cairosvg) read the
+samples as sRGB -- so `svg_to_png` now hands it every picture whose profile is a non-sRGB
+matrix/TRC one **converted exactly** (`pptx2svg/iccimages.py`): `ooxml_common.icc` reads
+the profile (three curves in any of `curv`'s and `para`'s forms, three D50 colorants) and
+converts through D50 to sRGB, clipped -- relative colorimetric, no black-point
+compensation, little CMS's default -- 0.03 of a level from little CMS on the photograph,
+at most 1. PNGs are decoded with the standard library (8-bit truecolour with or without
+alpha, and palettes, of which only the palette is converted); JPEGs when Pillow is
+importable. A profile whose conversion is a lookup table (`A2B0`-`A2B2`), or that is not
+RGB, is left alone rather than approximated: no corpus picture carries one.
+`real-college-template` slide 8 goes **0.9737 → 0.9889**, histogram **0.8604 → 0.9984**,
+loss 18,657 → 7,895. No SVG, and so no snapshot, changes; the fidelity harness's raster
+cache now keys our side on the conversion's code as well as `png.py`'s.
+
 **3. A `line3DChart` legends with the bar's swatch, on the bar's cell.** The series were
 already keyed with a swatch (`line_keyed` is off for a `line3DChart`), but the legend's
 layout still asked `_is_line_keyed`, which counted every `_is_line` group, so each swatch

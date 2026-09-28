@@ -24,6 +24,11 @@ When it is not installed there is nothing to be deterministic with, so rendering
 back to the host's fonts.  That is a real downgrade and it is announced rather than
 inferred: :func:`pptx2svg.convert_pptx_to_svg` puts a ``font-bundle-missing`` warning in
 ``ConvertOptions.warnings``, and ``pptx2svg fonts`` says so at the top of its report.
+
+**Pictures are drawn in the colours their profile says.**  Neither rasteriser honours a
+picture's embedded ICC profile, and PowerPoint does, so a picture carrying one other than
+sRGB is converted before it is handed over (:mod:`pptx2svg.iccimages`); the SVG itself
+keeps the picture as it came, profile and all, for a colour-managed reader to convert.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from __future__ import annotations
 from typing import Iterable, Literal, Sequence
 
 from .fonts import GENERIC_FAMILY_DEFAULTS, font_dirs as bundled_font_dirs
+from .iccimages import srgb_images
 
 Backend = Literal["resvg", "cairosvg", "auto"]
 
@@ -116,6 +122,10 @@ def svg_to_png(
     Only the resvg backend takes any of this; cairosvg reads the host's fontconfig and
     cannot be pointed at a directory, so it cannot render reproducibly.
     """
+    # resvg and cairosvg both read a picture's samples as sRGB whatever profile it carries;
+    # PowerPoint converts it.  See :mod:`pptx2svg.iccimages`.
+    svg = srgb_images(svg)
+
     chosen = backend
     if chosen == "auto":
         preferred = _preferred_backend()
