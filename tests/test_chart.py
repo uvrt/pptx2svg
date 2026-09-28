@@ -3179,10 +3179,13 @@ def radar_chart_xml(
     delete_val=False,
     gridlines=True,
     cat_axis_line=False,
+    val_axis_line=False,
     series_line=None,
     dlbl_show=(),
 ):
-    """One radar probe, in the same shape the exported decks used."""
+    """One radar probe, in the same shape the exported decks used.
+
+    ``val_axis_line``: ``True`` for a #00B050 1.5 pt line, ``"none"`` for ``a:noFill``."""
     body = ""
     for index, row in enumerate(values):
         points = "".join(
@@ -3239,6 +3242,12 @@ def radar_chart_xml(
         if cat_axis_line
         else ""
     )
+    val_line = {
+        True: "<c:spPr><a:ln w='19050'><a:solidFill><a:srgbClr val='00B050'/></a:solidFill>"
+              "</a:ln></c:spPr>",
+        "none": "<c:spPr><a:ln><a:noFill/></a:ln></c:spPr>",
+        False: "",
+    }[val_axis_line]
     grid = "<c:majorGridlines/>" if gridlines else ""
     return (
         "<c:chart><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
@@ -3257,7 +3266,7 @@ def radar_chart_xml(
         f"<c:delete val='{1 if delete_val else 0}'/><c:axPos val='l'/>{grid}"
         "<c:numFmt formatCode='General' sourceLinked='1'/>"
         "<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"
-        "<c:tickLblPos val='nextTo'/><c:crossAx val='100002'/>"
+        f"<c:tickLblPos val='nextTo'/>{val_line}<c:crossAx val='100002'/>"
         "<c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
         f"</c:plotArea>{legend_xml}<c:plotVisOnly val='1'/>"
         f"<c:dispBlanksAs val='gap'/></c:chart>{tx_pr}"
@@ -3457,12 +3466,45 @@ def test_the_web_is_drawn_without_major_gridlines_and_with_the_value_axis_delete
     assert len(rings()) == len(rings(gridlines=False)) == len(rings(delete_val=True))
 
 
-def test_spokes_are_drawn_only_when_the_category_axis_states_a_line():
-    """No probe without a `c:spPr` drew any; the corpus radar's #888888 line drew six."""
-    assert [c for c in _radar() if isinstance(c, m.ConnectorElement)] == []
-    spokes = [c for c in _radar(cat_axis_line=True) if isinstance(c, m.ConnectorElement)]
-    assert len(spokes) == 5
-    assert all(spoke.outline.width == 12700 for spoke in spokes)
+def _spokes(children):
+    return [c for c in children if isinstance(c, m.ConnectorElement)]
+
+
+def test_spokes_are_the_value_axis_line_and_drawn_only_when_it_states_one():
+    """``tools/make_exposed_probe.py``: with the category axis' line red and the value
+    axis' green, PowerPoint drew the spokes green and nothing red; with the value axis'
+    line alone it drew them, with the category axis' alone, neither, the value axis'
+    ``a:noFill`` or the value axis deleted it drew none."""
+    assert _spokes(_radar()) == []
+    assert _spokes(_radar(cat_axis_line=True)) == []
+    assert _spokes(_radar(val_axis_line="none", cat_axis_line=True)) == []
+    assert _spokes(_radar(val_axis_line=True, delete_val=True)) == []
+    for kwargs in ({"val_axis_line": True}, {"val_axis_line": True, "cat_axis_line": True}):
+        spokes = _spokes(_radar(**kwargs))
+        assert len(spokes) == 5
+        assert all(spoke.outline.width == 19050 for spoke in spokes)
+        assert all(spoke.outline.fill.color.hex.upper() == "#00B050" for spoke in spokes)
+
+
+@pytest.mark.parametrize("style, over", [("filled", True), ("standard", False), ("marker", False)])
+def test_spokes_go_over_a_filled_radar_and_under_every_other(style, over):
+    """The probe's paint order: rings, then the spokes, the series and their markers --
+    except ``filled``, whose spokes come after its series (``real-financial-report``
+    slide 4's filled radar showed its spokes over the fill, and ours hid them)."""
+    children = _radar(style=style, val_axis_line=True, series_line=25400)
+    order = [
+        "spoke" if isinstance(c, m.ConnectorElement)
+        else "series" if isinstance(c, m.ShapeElement) and isinstance(c.geometry, m.CustomGeometry)
+        and c.outline is not None and c.outline.width == 25400
+        else None
+        for c in children
+    ]
+    order = [kind for kind in order if kind]
+    spokes = [index for index, kind in enumerate(order) if kind == "spoke"]
+    series = [index for index, kind in enumerate(order) if kind == "series"]
+    assert spokes and series
+    assert (min(spokes) > max(series)) is over
+    assert (max(spokes) < min(series)) is (not over)
 
 
 def test_the_value_labels_are_right_aligned_two_digits_left_of_the_spoke():
@@ -3646,7 +3688,7 @@ def test_the_real_radar_matches_powerpoints_geometry():
     assert abs(radius - 45.56) < abs(52.39 - 45.56)
 
     # Two filled series, both stroked because the file states `a:ln w="25400"`, and six
-    # spokes because its category axis states a #888888 line.
+    # spokes because its value axis states a #888888 line.
     filled = [
         shape for shape, _ in _paths(chart.children)
         if isinstance(shape.fill, m.SolidFill)

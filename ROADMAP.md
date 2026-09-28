@@ -1357,7 +1357,8 @@ bins than resvg's, which a 64-bin histogram cannot tell from a wrong colour.
 * `chart-gallery` 11's lesson (SSIM fell while the picture improved) is the mask, and
   holds under either truth.
 
-**What the sharper instrument exposes**, recorded here and not fixed:
+**What the sharper instrument exposes**, recorded here when it was found; each was then
+measured against PowerPoint and fixed, see *What it exposed, measured and fixed* below:
 
 1. **A shape's text sits in the shape's box, not in its preset's text rectangle.**
    `authoring-integration` slide 1: the `roundRect`'s "Shape contract" is 6.5 px higher
@@ -1380,6 +1381,33 @@ bins than resvg's, which a 64-bin histogram cannot tell from a wrong colour.
    (`chart-gallery` 12-16): the scene's hairlines lose contrast when the 300 dpi bitmap
    is minified to 128 dpi. That bounds what a vector scene can score there; it is not
    a rendering defect.
+
+#### What it exposed, measured and fixed
+
+One probe deck asks PowerPoint all five questions (`tools/make_exposed_probe.py`, read
+back by `tools/read_exposed_probe.py`; a second deck, `two`, asks the follow-ups the first
+export raised). Both are throwaway: built into `~/pptx2svg-oracle`, exported, moved out
+and deleted.
+
+**4. A radar's spokes are the value axis' line, and go over a `filled` radar's series.**
+With every part in its own colour -- the category axis' line red, the rings blue, the
+value axis' line green, the series 4 pt wide -- PowerPoint drew, in this order, the rings,
+then **six spokes and the value axis up the twelve o'clock spoke, all green**, then the
+series and their markers, for `standard` and `marker`; for `filled`, the rings, the
+series, and *then* the green spokes. **Nothing red, at any style.** The follow-ups
+settle the source: the value axis' line alone draws the spokes; the category axis' alone,
+neither, the value axis' `a:noFill`, or the value axis deleted draw none (the rings are
+drawn in every case, as measured before). `real-financial-report`'s radar states the same
+#888888 line on both axes, which is why the old reading -- "the category axis draws the
+spokes" -- fitted the corpus and the earlier probes, none of which stated either line.
+`_draw_radar_spokes` now takes the value axis' line, and `filled` draws them after its
+series: `real-financial-report` slide 4 0.8506 → 0.8537, loss 23,670 → 23,169, the
+spokes back over the fill as PowerPoint draws them.
+
+Not fixed, seen on the same pages: PowerPoint's radar **markers** took the automatic
+accent colours (#4472C4, #ED7D31) where the series stated `F2A33A`/`7030A0` in its
+`c:spPr`, and ours take the series' colour -- a marker's own colour source, not measured
+further here.
 
 ---
 
@@ -1809,9 +1837,10 @@ reading:
   asks for it**. A probe with no `c:majorGridlines` at all still drew every ring, and so
   did one with `<c:delete val="1"/>` on the value axis. Only the *styling* comes from
   `c:majorGridlines`.
-* **The spokes do not.** No probe without a `c:spPr` on its category axis drew any; the
-  corpus radar, whose category axis states `<a:ln w="12700">` in #888888, drew six in
-  exactly that. So the radial lines are the category axis' own line and **its default is
+* **The spokes do not.** No probe without a `c:spPr` on its axes drew any; the corpus
+  radar, whose axes both state `<a:ln w="12700">` in #888888, drew six in exactly that.
+  **Corrected** (*0.5, What it exposed*): the radial lines are the **value** axis' own
+  line, not the category axis', and go over a `filled` radar's series; **their default is
   none** — the opposite of a bar chart, whose default axis line is black at 0.5 pt.
 * **`standard` and `marker` draw an identical picture**, markers included, though
   ECMA-376 says a `standard` radar has none. Two probes, byte-identical output.
