@@ -1517,3 +1517,28 @@ def test_powerpoint_does_not_draw_the_text_in_by_the_outline(outline_emu):
                      m.PresetGeometry(preset="ellipse")):
         assert _text_offset(_text_shape(geometry, outline_emu=outline_emu)) == _text_offset(
             _text_shape(geometry))
+
+
+#: The ``three`` deck: three 14 pt Arial lines in a 2,400,000 x 762,000 EMU ellipse, whose
+#: 35 pt of text rectangle cannot hold them.  PowerPoint's first baseline, from the box's
+#: top, in points: ``t`` spills down, ``ctr`` both ways about the centre, ``b`` upwards.
+OVERFLOW_FIRST_BASELINE = {"t": 26.375, "ctr": 18.695, "b": 11.255}
+
+
+@pytest.mark.parametrize("anchor", list(OVERFLOW_FIRST_BASELINE))
+def test_text_taller_than_its_rectangle_spills_the_way_it_is_anchored(anchor):
+    from pptx2svg.render.shape import render_shape
+
+    shape = _text_shape(m.PresetGeometry(preset="ellipse"), anchor=anchor)
+    shape.transform = m.Transform(extent_width=2400000, extent_height=762000)
+    shape.text_body.paragraphs = [
+        m.Paragraph(runs=[m.TextRun(f"V00{tag}", m.RunProperties(font_size=14.0, font_family="Arial"))])
+        for tag in "ABC"
+    ]
+    svg = render_shape(shape, RenderContext())
+    left_top = re.search(r'<g transform="translate\(([-\d.]+), ([-\d.]+)\)"><text x="0" y="([-\d.]+)"', svg)
+    baseline = (float(left_top.group(2)) + float(left_top.group(3))) * 0.75
+    # Our Arial line box is not PowerPoint's to the tenth of a point (``t`` holds within
+    # 0.1), so a line's worth of spill is what separates the rules: held at the top inset,
+    # as it used to be, ``ctr`` and ``b`` came out 7.7 and 15.1 pt low.
+    assert baseline == pytest.approx(OVERFLOW_FIRST_BASELINE[anchor], abs=1.0)

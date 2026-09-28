@@ -1430,6 +1430,19 @@ now wrap in the inscribed rectangle as PowerPoint wraps them -- and overflow it,
 below) and `real-product-page` slide 1 (three `ellipse`s and two `roundRect`s holding
 text; the deck is not scored).
 
+**Text taller than its text rectangle spills the way it is anchored.** Laid out in the
+ellipse's inscribed rectangle, `real-financial-report`'s two-letter badges wrap to two
+lines as PowerPoint's do, and those lines no longer fit; ours were held at the top inset,
+a rule nothing had measured. The `three` deck puts three 14 pt lines in `rect`, `ellipse`
+and `roundRect` boxes 60 pt high at each anchor: where the rectangle holds them the three
+anchors differ by the slack (a `rect`'s first baseline at 17.638, 18.838 and 20.038 pt),
+and where it does not -- the ellipse's 35 pt -- **`t` spills down (26.375), `ctr` both ways
+about the centre (18.695, the `rect`'s centre to 0.14 pt) and `b` upwards (11.255, above
+the rectangle's top)**. The clamp is gone: the probe's two slides go 0.925 → 0.964 and
+0.892 → 0.972, `real-financial-report` slide 4 **0.8537 → 0.8692** (loss 23,167 →
+20,630) with the badges' letters centred in their circles as PowerPoint draws them, and
+the same two snapshots move again (`real-product-page` slide 1's `ellipse`s overflow too).
+
 **4. A radar's spokes are the value axis' line, and go over a `filled` radar's series.**
 With every part in its own colour -- the category axis' line red, the rings blue, the
 value axis' line green, the series 4 pt wide -- PowerPoint drew, in this order, the rings,

@@ -32,7 +32,9 @@ them, so one export answers them, and ``tools/read_exposed_probe.py`` reads it b
 
 A second deck, ``two``, asks what the first export raised: the JPEGs again, each distinct
 in a pixel (the first deck's three identical ones came back as one image object); where a
-radar's spokes take their line from; and a 3-D scene's category tick marks.
+radar's spokes take their line from; and a 3-D scene's category tick marks.  A third,
+``three``, sets text taller than its text rectangle at each anchor, to see which way it
+spills.
 
 Usage::
 
@@ -542,11 +544,58 @@ def slide_xml(body: str) -> str:
     )
 
 
+#: The third deck: text taller than its text rectangle, at each anchor.  Three lines of
+#: 14 pt in a box 60 pt high, so every one overflows; which way it spills is the reading.
+OVERFLOW_BOX = (2400000, 762000)
+OVERFLOW_GEOMETRIES = ["rect", "ellipse", "roundRect"]
+
+
+def overflow_probes() -> list[dict]:
+    geometry = dict(GEOMETRIES)
+    out = []
+    for name in OVERFLOW_GEOMETRIES:
+        for anchor in ("t", "ctr", "b"):
+            out.append(dict(key=f"{name}/{anchor}", geometry=geometry[name], anchor=anchor))
+    for index, probe in enumerate(out):
+        probe["lines"] = [f"V{index:02d}{tag}" for tag in "ABC"]
+    return out
+
+
+def overflow_slides() -> list[dict]:
+    probes = overflow_probes()
+    slides = []
+    per = len(COLUMNS) * len(ROWS)
+    width, height = OVERFLOW_BOX
+    for start in range(0, len(probes), per):
+        shapes = []
+        for offset, probe in enumerate(probes[start:start + per]):
+            x = COLUMNS[offset % len(COLUMNS)]
+            y = ROWS[offset // len(COLUMNS)] + 600000
+            paragraphs = "".join(
+                '<a:p><a:pPr algn="l"><a:buNone/></a:pPr>'
+                f'<a:r><a:rPr lang="en-US" sz="{TEXT_SIZE}" dirty="0"><a:solidFill><a:srgbClr val="000000"/>'
+                f'</a:solidFill><a:latin typeface="Arial"/></a:rPr><a:t>{line}</a:t></a:r></a:p>'
+                for line in probe["lines"]
+            )
+            shapes.append(
+                f'<p:sp><p:nvSpPr><p:cNvPr id="{10 + offset}" name="{probe["key"]}"/><p:cNvSpPr/><p:nvPr/>'
+                f'</p:nvSpPr><p:spPr><a:xfrm><a:off x="{x}" y="{y}"/><a:ext cx="{width}" cy="{height}"/>'
+                f"</a:xfrm>{probe['geometry']}"
+                '<a:solidFill><a:srgbClr val="E8EEF8"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>'
+                f'<p:txBody><a:bodyPr wrap="square" anchor="{probe["anchor"]}"/><a:lstStyle/>{paragraphs}'
+                "</p:txBody></p:sp>"
+            )
+        slides.append(dict(body="".join(shapes), parts=[], overflow=[p["key"] for p in probes[start:start + per]]))
+    return slides
+
+
 def all_slides(deck: str = "one") -> list[dict]:
     """``one``: text, pictures and the first charts.  ``two``: the follow-ups the first
     export asked for -- distinct JPEGs, and the radar's and the 3-D axis' line sources."""
     if deck == "two":
         return picture_slides(PICTURES_TWO, per=1) + chart_slides(1, CHARTS_TWO)
+    if deck == "three":
+        return overflow_slides()
     slides = text_slides()
     slides += picture_slides()
     slides += chart_slides(1)

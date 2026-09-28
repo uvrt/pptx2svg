@@ -566,10 +566,17 @@ def _render_column(
         font_scale,
         context,
     )
+    # Text taller than its box spills the way it is anchored: a centred body both ways
+    # about the centre, a bottom-anchored one upwards.  Measured on
+    # ``tools/make_exposed_probe.py``'s ``three`` deck: three 14 pt lines in an ellipse's
+    # 35 pt of text rectangle put the first baseline 26.375 pt down at ``t``, 18.695 at
+    # ``ctr`` -- the same centre as a rect whose rectangle holds them -- and 11.255 at ``b``,
+    # above the rectangle's top.  Holding it at the top inset, as this used to, drew
+    # ``real-financial-report``'s wrapped ellipse badges a line low.
     if body.anchor == "ctr":
-        y_start = max(dims.margin_top, (dims.height - total_height) / 2)
+        y_start = (dims.height - total_height) / 2
     elif body.anchor == "b":
-        y_start = max(dims.margin_top, dims.height - total_height - dims.margin_bottom)
+        y_start = dims.height - total_height - dims.margin_bottom
 
     # `y` on <text> is the baseline, not the top of the line box.
     first_font_size = _paragraph_font_size(paragraphs[0], default_font_size) * font_scale

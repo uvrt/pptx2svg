@@ -129,8 +129,28 @@ def print_text(document) -> None:
               f"{diff[0]:12.3f} {diff[1]:12.3f}")
 
 
+def _deck(document) -> str:
+    stem = Path(document.name).stem
+    return "two" if stem.endswith("-2") else "three" if stem.endswith("-3") else "one"
+
+
 def _slides(document) -> list[dict]:
-    return probe.all_slides("two" if Path(document.name).stem.endswith("-2") else "one")
+    return probe.all_slides(_deck(document))
+
+
+def print_overflow(document) -> None:
+    """Each overflow probe's three baselines, from the top of its box, and where the box's
+    centre and bottom are."""
+    probes = {item["key"]: item for item in probe.overflow_probes()}
+    height = probe.OVERFLOW_BOX[1] / EMU_PER_PT
+    for page_index, slide in enumerate(_slides(document)):
+        spans = _spans(document[page_index])
+        for offset, key in enumerate(slide.get("overflow", [])):
+            top = (probe.ROWS[offset // len(probe.COLUMNS)] + 600000) / EMU_PER_PT
+            baselines = [spans[line]["chars"][0]["origin"][1] - top if line in spans else None
+                         for line in probes[key]["lines"]]
+            shown = " ".join(f"{b:8.3f}" if b is not None else "  (none)" for b in baselines)
+            print(f"{key:16s} baselines from the box's top: {shown}   (box {height:.1f} pt)")
 
 
 def print_icc(document) -> None:
@@ -245,8 +265,10 @@ def main() -> int:
     what = sys.argv[2] if len(sys.argv) > 2 else "all"
     shows = (("text", print_text), ("icc", print_icc), ("radar", print_radar), ("legend", print_legend),
              ("scene", print_scene), ("axis3d", print_axis3d))
-    if Path(document.name).stem.endswith("-2"):
+    if _deck(document) == "two":
         shows = tuple(pair for pair in shows if pair[0] not in ("text", "legend"))
+    if _deck(document) == "three":
+        shows = (("overflow", print_overflow),)
     for name, show in shows:
         if what in (name, "all"):
             print(f"== {name}")
