@@ -1380,7 +1380,8 @@ measured against PowerPoint and fixed, see *What it exposed, measured and fixed*
 5. **In a PowerPoint-rasterised scene, the truth is softer than our vector drawing**
    (`chart-gallery` 12-16): the scene's hairlines lose contrast when the 300 dpi bitmap
    is minified to 128 dpi. That bounds what a vector scene can score there; it is not
-   a rendering defect.
+   a rendering defect. (**Refuted** by measurement below: the raster is not capped, and
+   the truth's scene is the sharper and darker of the two.)
 
 #### What it exposed, measured and fixed
 
@@ -1443,21 +1444,6 @@ the rectangle's top)**. The clamp is gone: the probe's two slides go 0.925 → 0
 20,630) with the badges' letters centred in their circles as PowerPoint draws them, and
 the same two snapshots move again (`real-product-page` slide 1's `ellipse`s overflow too).
 
-**4. A radar's spokes are the value axis' line, and go over a `filled` radar's series.**
-With every part in its own colour -- the category axis' line red, the rings blue, the
-value axis' line green, the series 4 pt wide -- PowerPoint drew, in this order, the rings,
-then **six spokes and the value axis up the twelve o'clock spoke, all green**, then the
-series and their markers, for `standard` and `marker`; for `filled`, the rings, the
-series, and *then* the green spokes. **Nothing red, at any style.** The follow-ups
-settle the source: the value axis' line alone draws the spokes; the category axis' alone,
-neither, the value axis' `a:noFill`, or the value axis deleted draw none (the rings are
-drawn in every case, as measured before). `real-financial-report`'s radar states the same
-#888888 line on both axes, which is why the old reading -- "the category axis draws the
-spokes" -- fitted the corpus and the earlier probes, none of which stated either line.
-`_draw_radar_spokes` now takes the value axis' line, and `filled` draws them after its
-series: `real-financial-report` slide 4 0.8506 → 0.8537, loss 23,670 → 23,169, the
-spokes back over the fill as PowerPoint draws them.
-
 **2. A picture's embedded ICC profile: PowerPoint converts it to sRGB, and now so does our
 rasteriser.** The probe's pictures are flat patches under two synthetic matrix/TRC
 profiles -- Adobe RGB's primaries at gamma 563/256, Display P3's at 1.8 -- as a PNG with
@@ -1502,11 +1488,55 @@ error 3.96 → 3.84, pixels over 10% 3.19% → 3.10%. Its histogram falls 0.8533
 the two wide blue and orange keys were coloured ink the truth does not have, and the
 foreground mask lost them with it (the harness docstring's documented effect).
 
+**4. A radar's spokes are the value axis' line, and go over a `filled` radar's series.**
+With every part in its own colour -- the category axis' line red, the rings blue, the
+value axis' line green, the series 4 pt wide -- PowerPoint drew, in this order, the rings,
+then **six spokes and the value axis up the twelve o'clock spoke, all green**, then the
+series and their markers, for `standard` and `marker`; for `filled`, the rings, the
+series, and *then* the green spokes. **Nothing red, at any style.** The follow-ups
+settle the source: the value axis' line alone draws the spokes; the category axis' alone,
+neither, the value axis' `a:noFill`, or the value axis deleted draw none (the rings are
+drawn in every case, as measured before). `real-financial-report`'s radar states the same
+#888888 line on both axes, which is why the old reading -- "the category axis draws the
+spokes" -- fitted the corpus and the earlier probes, none of which stated either line.
+`_draw_radar_spokes` now takes the value axis' line, and `filled` draws them after its
+series: `real-financial-report` slide 4 0.8506 → 0.8537, loss 23,670 → 23,169, the
+spokes back over the fill as PowerPoint draws them.
+
 Not fixed, seen on the same pages: PowerPoint's radar **markers** took the automatic
 accent colours (#4472C4, #ED7D31) where the series stated `F2A33A`/`7030A0` in its
 `c:spPr`, and ours take the series' colour -- a marker's own colour source, not measured
 further here.
 
+
+**5. The 3-D scene's raster caps nothing, and the truth is not softer than our drawing.
+Measured; no renderer change.** Finding 5 said the truth's scene -- PowerPoint's bitmap,
+minified to 128 dpi -- is softer and lighter than our vector scene, which bounds what a
+vector scene can score. Three measurements say otherwise:
+
+* **PowerPoint does not cap the scene's raster.** The probe's `line3DChart` and
+  `bar3DChart` frames from 150 x 110 pt to the whole slide (712 x 397 pt) all came back at
+  **300.0 dpi**: 470 x 206 px up to 2,812 x 1,282 and 2,713 x 1,405. Nothing drops the
+  resolution for a large scene.
+* **The raster route by itself costs little, and not always in the truth's disfavour.**
+  Drawing *our own* scene as a 300 dpi bitmap and letting resvg minify it, against
+  drawing it as vectors, scores 0.960, 0.938, 0.980 and 0.992 over the scene's rectangle
+  on gallery slides 12, 13, 14 and 16. Scored against the truth's scene, our minified
+  bitmap does better than our vectors on 12, 13 and 16 (+0.008, +0.030, +0.008) and worse
+  on 14 (-0.05): the route moves a score by a few hundredths, and in both directions.
+* **The truth's scene has more ink and sharper edges than ours, not less.** Over each
+  scene's rectangle our ink is 0.97, 0.99, 0.91 and 1.07 of PowerPoint's and our summed
+  gradient 0.84, 0.78, 0.94 and 0.40 of it. At 300 dpi a PowerPoint gridline covers 3.5
+  pixels (0.84 pt) where ours is 0.75 pt: darker, not lighter.
+
+So what separates these slides from PowerPoint is geometry, and it is visible: slide 13's
+whole chart -- title, tick labels and scene -- sits about 4 pt above PowerPoint's; each
+scene's lines land 0.3-0.6 px off; the stacked `area3DChart` (16) and the `pie3DChart`
+(15) are still drawn flat; and **PowerPoint draws tick marks** -- as vector paths outside
+the raster, 3.13 pt long in the axis' line (black 0.5 pt by default, red 2.25 pt when the
+category axis states it; none at `majorTickMark="none"`), measured on the second deck's
+`bar3d-` charts -- on every chart axis, 2-D and 3-D, and we draw none anywhere. Those are
+the next fixes for these slides; none of them is the raster's.
 ---
 
 ## Phase 1 — Parsed but not rendered — **done**
