@@ -1404,6 +1404,19 @@ spokes" -- fitted the corpus and the earlier probes, none of which stated either
 series: `real-financial-report` slide 4 0.8506 → 0.8537, loss 23,670 → 23,169, the
 spokes back over the fill as PowerPoint draws them.
 
+**3. A `line3DChart` legends with the bar's swatch, on the bar's cell.** The series were
+already keyed with a swatch (`line_keyed` is off for a `line3DChart`), but the legend's
+layout still asked `_is_line_keyed`, which counted every `_is_line` group, so each swatch
+was drawn 19.2 pt wide -- the line key's rule -- and the entries were spaced on the line
+key's 24 pt cell. The `legend3d-` charts (bottom, right, top at 14 pt, and with a
+`c:marker`) put PowerPoint's keys at a **5.492 pt square** (7.691 at 14 pt) with 2.371 pt
+to the text, the marker making no difference; our keys now land within 0.01 pt of every
+one of them, and the bottom row's pitch is 40.75 pt against PowerPoint's 40.76.
+`chart-gallery` slide 14: SSIM 0.4609 → 0.4767, loss 23,788 → 22,748, mean absolute
+error 3.96 → 3.84, pixels over 10% 3.19% → 3.10%. Its histogram falls 0.8533 → 0.8387:
+the two wide blue and orange keys were coloured ink the truth does not have, and the
+foreground mask lost them with it (the harness docstring's documented effect).
+
 Not fixed, seen on the same pages: PowerPoint's radar **markers** took the automatic
 accent colours (#4472C4, #ED7D31) where the series stated `F2A33A`/`7030A0` in its
 `c:spPr`, and ours take the series' colour -- a marker's own colour source, not measured

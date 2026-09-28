@@ -5028,11 +5028,16 @@ class ChartBuilder:
         """Whether *this* group's series take a line key rather than a swatch.
 
         A group whose shape asks for a rule but which has **no rule to draw** does not
-        count: see :meth:`_draws_a_rule`.
+        count: see :meth:`_draws_a_rule`.  Nor does a ``line3DChart``: its series key
+        with the swatch (:meth:`_series`), and its legend lays out on the swatch's cell,
+        measured on ``tools/make_exposed_probe.py``'s ``legend3d-`` charts -- a 5.492 pt
+        square and 2.371 pt of gap at 10 pt, 7.691 pt at 14, at the bottom, the right
+        and the top, with or without a ``c:marker`` -- exactly the bar's.  Keyed with
+        the rule's 19.2 pt instead, every entry drew a ribbon of swatch that wide.
         """
         return bool(
             (
-                self._is_line
+                (self._is_line and self.plot.kind != "line3DChart")
                 or (self._is_scatter and not self._is_bubble)
                 or (self._is_radar and self._radar_style != "filled")
             )

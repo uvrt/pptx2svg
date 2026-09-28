@@ -4451,6 +4451,11 @@ class _FakeLine:
     #: Set by a combo whose groups disagree; this one answers for itself.
     line_legend_keys = False
     _is_line = True
+
+    class plot:  # noqa: N801 - stands in for the builder's `plot` attribute
+        #: A flat line chart: a `line3DChart` legends with the swatch.
+        kind = "lineChart"
+
     _is_scatter = False
     _is_bubble = False
     _is_radar = False
@@ -8651,3 +8656,76 @@ def test_a_solid_that_is_not_a_box_keeps_the_flat_rectangle():
     assert _faces(children) == []
     # The flat rectangle it keeps is still the camera's front face, which is measured.
     assert any(isinstance(child, m.ShapeElement) for child in children)
+
+
+# -- A line3DChart's legend key -----------------------------------------------------------
+
+
+EMU_PER_POINT = 12700
+
+
+def _line3d_legend_body(position: str, marker: bool = False) -> str:
+    rows = (("North", (14, 21, 19, 27)), ("South", (9, 13, 22, 18)), ("East", (5, 8, 12, 9)))
+    cats = "".join(f"<c:pt idx='{i}'><c:v>Q{i + 1}</c:v></c:pt>" for i in range(4))
+    series = "".join(
+        f"<c:ser><c:idx val='{i}'/><c:order val='{i}'/>"
+        f"<c:tx><c:strRef><c:strCache><c:ptCount val='1'/><c:pt idx='0'><c:v>{name}</c:v></c:pt>"
+        "</c:strCache></c:strRef></c:tx>"
+        + ("<c:marker><c:symbol val='circle'/><c:size val='7'/></c:marker>" if marker else "")
+        + f"<c:cat><c:strRef><c:strCache><c:ptCount val='4'/>{cats}</c:strCache></c:strRef></c:cat>"
+        "<c:val><c:numRef><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val='4'/>"
+        + "".join(f"<c:pt idx='{j}'><c:v>{v}</c:v></c:pt>" for j, v in enumerate(row))
+        + "</c:numCache></c:numRef></c:val><c:smooth val='0'/></c:ser>"
+        for i, (name, row) in enumerate(rows)
+    )
+    axis = ("<c:scaling><c:orientation val='minMax'/></c:scaling><c:delete val='{d}'/>"
+            "<c:axPos val='{p}'/>{g}<c:numFmt formatCode='General' sourceLinked='1'/>"
+            "<c:majorTickMark val='out'/><c:minorTickMark val='none'/><c:tickLblPos val='nextTo'/>")
+    return (
+        "<c:chart><c:view3D><c:rotX val='15'/><c:rotY val='20'/><c:depthPercent val='100'/>"
+        "<c:rAngAx val='1'/></c:view3D><c:autoTitleDeleted val='1'/><c:plotArea><c:layout/>"
+        "<c:line3DChart><c:grouping val='standard'/><c:varyColors val='0'/>" + series
+        + "<c:gapDepth val='150'/><c:axId val='1'/><c:axId val='2'/><c:axId val='3'/></c:line3DChart>"
+        "<c:catAx><c:axId val='1'/>" + axis.format(d=0, p="b", g="")
+        + "<c:crossAx val='2'/><c:crosses val='autoZero'/><c:auto val='1'/><c:lblAlgn val='ctr'/>"
+        "<c:lblOffset val='100'/></c:catAx>"
+        "<c:valAx><c:axId val='2'/>" + axis.format(d=0, p="l", g="<c:majorGridlines/>")
+        + "<c:crossAx val='1'/><c:crosses val='autoZero'/><c:crossBetween val='between'/></c:valAx>"
+        "<c:serAx><c:axId val='3'/>" + axis.format(d=1, p="b", g="")
+        + "<c:crossAx val='2'/><c:crosses val='autoZero'/></c:serAx>"
+        f"</c:plotArea><c:legend><c:legendPos val='{position}'/><c:overlay val='0'/></c:legend>"
+        "<c:plotVisOnly val='1'/><c:dispBlanksAs val='gap'/></c:chart>"
+    )
+
+
+#: ``tools/make_exposed_probe.py``'s ``legend3d-`` charts, 520 x 336 pt, 10 pt Aptos: each
+#: key's left and top edge in the frame, read off PowerPoint's PDF.  A 5.492 pt square
+#: every time, with or without a ``c:marker``.
+LINE3D_LEGEND_KEYS = {
+    ("b", False): ((207.342, 318.212), (248.101, 318.212), (289.701, 318.212)),
+    ("b", True): ((207.342, 318.212), (248.101, 318.212), (289.701, 318.212)),
+    ("r", False): ((476.502, 147.171), (476.502, 165.254), (476.502, 183.337)),
+}
+
+
+@pytest.mark.parametrize("position, marker", list(LINE3D_LEGEND_KEYS))
+def test_a_line3d_chart_keys_its_legend_with_the_swatch(position, marker):
+    """PowerPoint draws a ``line3DChart``'s legend key as the bar's 5.492 pt square on the
+    bar's cell, not as a line key's 19.2 pt rule -- which is what our keys used to be as
+    wide as, a ribbon of swatch (``chart-gallery`` slide 14)."""
+    children, _ = _build(_line3d_legend_body(position, marker), width=520, height=336)
+    keys = [
+        child for child in children
+        if isinstance(child, m.ShapeElement) and isinstance(child.fill, m.SolidFill)
+        and isinstance(child.geometry, m.PresetGeometry)
+        and child.transform.extent_width < 20 * EMU_PER_POINT
+        and child.transform.extent_height < 20 * EMU_PER_POINT
+    ]
+    got = [(k.transform.offset_x / EMU_PER_POINT, k.transform.offset_y / EMU_PER_POINT) for k in keys]
+    assert len(got) == 3
+    for (x, y), (want_x, want_y) in zip(got, LINE3D_LEGEND_KEYS[(position, marker)]):
+        assert x == pytest.approx(want_x, abs=0.1)
+        assert y == pytest.approx(want_y, abs=0.1)
+    for key in keys:
+        assert key.transform.extent_width / EMU_PER_POINT == pytest.approx(5.492, abs=0.01)
+        assert key.transform.extent_height / EMU_PER_POINT == pytest.approx(5.492, abs=0.01)
