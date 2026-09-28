@@ -22,6 +22,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from ooxml_common.drawingml.geometry import text_area
+from ooxml_common.drawingml.rules import POWERPOINT
+
 from .. import model as m
 from ..text.fontmap import font_family_value, synthesises_italic
 from ..text.measure import is_cjk
@@ -149,16 +152,67 @@ def _unscaled_text_frame(
     return frame, f"scale({num(1 / scale_x)}, {num(1 / scale_y)})"
 
 
+def _text_area(
+    frame: m.Transform, geometry: tuple | None, outline_width: float = 0.0
+) -> tuple[m.Transform, float, float]:
+    """The frame shrunk to its geometry's text rectangle, and how far in that puts it.
+
+    Every preset lays its text out in its ``a:rect`` -- a ``roundRect``'s clear of its
+    corners, an ``ellipse``'s the inscribed rectangle, a ``triangle``'s its lower middle
+    -- and a custom geometry in its own.  Measured on ``tools/make_exposed_probe.py``'s
+    thirteen geometries, each set top-left, bottom-right and centred against a plain
+    ``rect``: every reading within 0.2 pt of ECMA-376's rectangle, on all four sides
+    (ROADMAP.md 0.5, *What it exposed*).  **PowerPoint does not draw it in by the
+    outline**, which Word does: :data:`~ooxml_common.drawingml.rules.POWERPOINT`'s
+    ``text_outline_inset`` is 0, so ``outline_width`` is carried for the rule's sake and
+    moves nothing here.
+
+    ``geometry`` is :func:`~ooxml_common.drawingml.geometry.text_rect`'s ``(spec, rect)``:
+    a preset's spec, or a custom geometry's spec and its ``a:rect``; ``None`` is the whole
+    frame.  The rectangle is taken over the frame in *slide* units -- a group's shapes
+    are drawn at their on-slide size -- which is what :func:`_unscaled_text_frame` hands
+    over.
+    """
+    if geometry is None:
+        return frame, 0.0, 0.0
+    spec, rect = geometry
+    left, top, right, bottom = text_area(
+        spec, frame.extent_width, frame.extent_height, rect=rect,
+        outline_width=outline_width, rules=POWERPOINT,
+    )
+    if (left, top, right, bottom) == (0, 0, frame.extent_width, frame.extent_height):
+        return frame, 0.0, 0.0
+    area = replace(
+        frame,
+        extent_width=max(0.0, right - left),
+        extent_height=max(0.0, bottom - top),
+    )
+    return area, left, top
+
+
 def render_text_body(
-    text_body: m.TextBody, transform: m.Transform, context: RenderContext
+    text_body: m.TextBody,
+    transform: m.Transform,
+    context: RenderContext,
+    *,
+    geometry: tuple | None = None,
+    outline_width: float = 0.0,
 ) -> str:
-    """Render a text body, flowing it into columns when ``a:bodyPr@numCol`` asks for them."""
+    """Render a text body, flowing it into columns when ``a:bodyPr@numCol`` asks for them.
+
+    ``geometry`` puts the text in the shape's text rectangle (:func:`_text_area`)."""
     body = text_body.body_properties
     frame, undo_group_scale = _unscaled_text_frame(transform, context)
+    frame, left, top = _text_area(frame, geometry, outline_width)
     if body.num_col > 1 and body.vert == "horz":
         rendered = _render_columns(text_body, frame, context)
     else:
         rendered = _render_column(text_body, frame, context)
+    if rendered and (left or top):
+        rendered = (
+            f'<g transform="translate({num(emu_to_px(left))}, {num(emu_to_px(top))})">'
+            f"{rendered}</g>"
+        )
     if rendered and undo_group_scale:
         rendered = f'<g transform="{undo_group_scale}">{rendered}</g>'
     return rendered
@@ -512,10 +566,17 @@ def _render_column(
         font_scale,
         context,
     )
+    # Text taller than its box spills the way it is anchored: a centred body both ways
+    # about the centre, a bottom-anchored one upwards.  Measured on
+    # ``tools/make_exposed_probe.py``'s ``three`` deck: three 14 pt lines in an ellipse's
+    # 35 pt of text rectangle put the first baseline 26.375 pt down at ``t``, 18.695 at
+    # ``ctr`` -- the same centre as a rect whose rectangle holds them -- and 11.255 at ``b``,
+    # above the rectangle's top.  Holding it at the top inset, as this used to, drew
+    # ``real-financial-report``'s wrapped ellipse badges a line low.
     if body.anchor == "ctr":
-        y_start = max(dims.margin_top, (dims.height - total_height) / 2)
+        y_start = (dims.height - total_height) / 2
     elif body.anchor == "b":
-        y_start = max(dims.margin_top, dims.height - total_height - dims.margin_bottom)
+        y_start = dims.height - total_height - dims.margin_bottom
 
     # `y` on <text> is the baseline, not the top of the line box.
     first_font_size = _paragraph_font_size(paragraphs[0], default_font_size) * font_scale
@@ -1588,13 +1649,24 @@ def _shrink_to_fit_scale(
 
 
 def compute_sp_autofit_height(
-    text_body: m.TextBody, transform: m.Transform, context: RenderContext
+    text_body: m.TextBody,
+    transform: m.Transform,
+    context: RenderContext,
+    *,
+    geometry: tuple | None = None,
+    outline_width: float = 0.0,
 ) -> float | None:
     """``spAutofit``: grow the shape to fit its text.  ``None`` when it already fits.
 
     The answer is in the caller's coordinate space, which inside a group is the group's
     child space -- so the text is measured in slide units against the grown frame and the
     height divided back down, the same round trip :func:`_unscaled_text_frame` does.
+
+    With ``geometry`` the text fits the shape's text rectangle (:func:`_text_area`), and
+    the shape grows by what the text rectangle needs plus what the geometry keeps outside
+    it at the current size -- exact for a rectangle whose top and bottom insets do not
+    scale with the height (a ``roundRect``'s, whose corner follows the shorter side while
+    that is the width), and the first step of the fit otherwise.
     """
     body = text_body.body_properties
     paragraphs = text_body.paragraphs
@@ -1603,6 +1675,9 @@ def compute_sp_autofit_height(
         return None
 
     frame, _ = _unscaled_text_frame(transform, context)
+    whole = frame.extent_height
+    frame, _, _ = _text_area(frame, geometry, outline_width)
+    outside = whole - frame.extent_height
     _, scale_y = context.group_scale
     dims = _resolve_dimensions(
         body, emu_to_px(frame.extent_width), emu_to_px(frame.extent_height)
@@ -1627,4 +1702,4 @@ def compute_sp_autofit_height(
     required = height + dims.margin_top + dims.margin_bottom
     if required <= dims.height:
         return None
-    return px_to_emu(required) / (scale_y or 1.0)
+    return (px_to_emu(required) + outside) / (scale_y or 1.0)

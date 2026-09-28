@@ -1357,7 +1357,9 @@ bins than resvg's, which a 64-bin histogram cannot tell from a wrong colour.
 * `chart-gallery` 11's lesson (SSIM fell while the picture improved) is the mask, and
   holds under either truth.
 
-**What the sharper instrument exposes**, recorded here and not fixed:
+**What the sharper instrument exposes**, recorded here when it was found; each was then
+measured against PowerPoint -- four fixed, the fifth refuted -- see *What it exposed,
+measured* below:
 
 1. **A shape's text sits in the shape's box, not in its preset's text rectangle.**
    `authoring-integration` slide 1: the `roundRect`'s "Shape contract" is 6.5 px higher
@@ -1379,8 +1381,180 @@ bins than resvg's, which a 64-bin histogram cannot tell from a wrong colour.
 5. **In a PowerPoint-rasterised scene, the truth is softer than our vector drawing**
    (`chart-gallery` 12-16): the scene's hairlines lose contrast when the 300 dpi bitmap
    is minified to 128 dpi. That bounds what a vector scene can score there; it is not
-   a rendering defect.
+   a rendering defect. (**Refuted** by measurement below: the raster is not capped, and
+   the truth's scene is the sharper and darker of the two.)
 
+#### What it exposed, measured
+
+One probe deck asks PowerPoint all five questions (`tools/make_exposed_probe.py`, read
+back by `tools/read_exposed_probe.py`; a second deck, `two`, asks the follow-ups the first
+export raised, and a third, `three`, how overflowing text spills). All three are
+throwaway: built into `~/pptx2svg-oracle`, exported, moved out and deleted.
+
+| Deck | svg truth: SSIM / hist, loss | after | pdfium truth: SSIM / hist | after |
+| --- | --- | --- | --- | --- |
+| `authoring-integration` | 0.9352 / 0.9999, 12,948 | **0.9659** / 0.9999, 6,812 | 0.9309 / 0.9985 | **0.9619** / 0.9985 |
+| `real-financial-report` | 0.9158 / 0.9998, 62,065 | **0.9205** / 0.9998, 59,025 | 0.9151 / 0.9988 | **0.9196** / 0.9988 |
+| `real-college-template` (local) | 0.8260 / 0.8879, 260,820 | **0.8277** / **0.9033**, 250,058 | 0.8017 / 0.8754 | **0.8033** / **0.8930** |
+| `chart-gallery` | 0.7368 / 0.8600, 492,936 | **0.7378** / 0.8592, 491,895 | 0.7345 / 0.8443 | **0.7355** / 0.8421 |
+| the other four scored decks | | unchanged to the bit | | unchanged |
+
+Five slides move, every one of them up in SSIM and down in loss under both truths:
+`authoring-integration` 1 (the text rectangle), `real-financial-report` 4 (the radar's
+spokes, then the ellipse badges' text rectangle and their overflow: 0.8506 → 0.8692),
+`real-college-template` 8 (the ICC profile), `chart-gallery` 14 (the legend key). The one
+column that falls is `chart-gallery`'s histogram, by 0.0008 (slide 14's 0.8533 → 0.8387,
+pdfium 0.6027 → 0.5645): the coloured ink of the wide keys went, and the mask with it --
+mean absolute error and pixels over 10% fall on that slide under both. Both truths'
+baselines are re-recorded (`--update --truth both`) for exactly those slides.
+
+**1. A shape lays its text out in its geometry's text rectangle, and PowerPoint does not
+draw it in by the outline.** Thirteen geometries -- `rect` (the control), `roundRect` at
+the default and at 40000, `ellipse`, `octagon`, `triangle`, `rtTriangle`, `diamond`,
+`hexagon`, `rightArrow`, `wedgeRectCallout`, `cloud` and a custom geometry stating
+`<a:rect l="w/4" t="h/4" r="r" b="b"/>` -- each holding one 14 pt Arial run set top-left,
+bottom-right and centred, every reading taken against the plain `rect` set the same way.
+**Every one lands on ECMA-376's text rectangle** (`ooxml_common.drawingml.geometry.text_rect`),
+all four sides and the centre, within 0.2 pt -- the `roundRect`'s 5.381 pt of corner, the
+`ellipse`'s 27.675 / 16.144, the `triangle`'s lower middle (47.244 in, 55.1 down), the
+`rtTriangle`'s 15.748 / 64.3 and 78.740 / 9.2, the `rightArrow`'s asymmetric shaft, the
+`cloud`'s four different insets, the custom geometry's own rectangle; the
+`wedgeRectCallout`, whose rectangle is its box, does not move. The residuals are the
+baseline's own 0.1 pt grid (the controls show the same).
+
+**The outline moves nothing** -- where Word draws the text in by half of it (docx2svg's
+F.13). A `rect`, a `roundRect` and an `ellipse` under a 1, 4 and 8 pt line, an 8 pt
+`a:noFill` line with its width, the theme's 1.5 pt line through `a:lnRef idx="3"` with no
+`a:ln` at all, and an 8 pt line under zero insets: every run started where the same shape
+with no outline started it, to 0.1 pt. That is a PowerPoint-vs-Word difference, so it is
+a rule in `ooxml-common`: `DrawingRules.text_outline_inset`, 0 for PowerPoint and 0.5 for
+Word, applied by `geometry.text_area` (ooxml-common 0.3.2). **Flipped shapes**: the
+rectangle flips with the geometry (`rtTriangle` and `rightArrow` under `flipH` put their
+runs at the mirrored rectangle, 78.740 pt in), but PowerPoint does not mirror the glyphs
+-- `flipH` leaves them upright, `flipV` turns them 180 degrees -- where we mirror them with
+the shape. No corpus deck flips a shape with text in it; recorded, not fixed.
+
+`render/text.py`'s `_text_area` shrinks the frame to the text rectangle (in slide units,
+inside a group's scale) and translates the text into it; a custom geometry's rectangle
+travels from `parse/shapes.py` on `ShapeElement.text_rect` with the geometry it belongs
+to; `spAutofit` grows the shape by what the rectangle needs plus what the geometry keeps
+outside it. SmartArt's `dsp:txXfrm`, already the text's own box, is left alone. Against
+MuPDF's raster of PowerPoint's PDF, the probe's thirteen unflipped slides go from
+0.940-0.998 to 0.989-0.998; the flipped slide falls 0.926 → 0.907, its mirrored glyphs now
+sitting in the mirrored rectangle.
+`authoring-integration` slide 1 -- the `roundRect`'s "Shape contract", 6 px up and left
+-- goes **0.9352 → 0.9659** (loss 12,948 → 6,812). Three snapshots move: that slide,
+`real-financial-report` slide 4 (three 30 pt `ellipse` badges, whose two-letter labels
+now wrap in the inscribed rectangle as PowerPoint wraps them -- and overflow it, see
+below) and `real-product-page` slide 1 (three `ellipse`s and two `roundRect`s holding
+text; the deck is not scored).
+
+**Text taller than its text rectangle spills the way it is anchored.** Laid out in the
+ellipse's inscribed rectangle, `real-financial-report`'s two-letter badges wrap to two
+lines as PowerPoint's do, and those lines no longer fit; ours were held at the top inset,
+a rule nothing had measured. The `three` deck puts three 14 pt lines in `rect`, `ellipse`
+and `roundRect` boxes 60 pt high at each anchor: where the rectangle holds them the three
+anchors differ by the slack (a `rect`'s first baseline at 17.638, 18.838 and 20.038 pt),
+and where it does not -- the ellipse's 35 pt -- **`t` spills down (26.375), `ctr` both ways
+about the centre (18.695, the `rect`'s centre to 0.14 pt) and `b` upwards (11.255, above
+the rectangle's top)**. The clamp is gone: the probe's two slides go 0.925 → 0.964 and
+0.892 → 0.972, `real-financial-report` slide 4 **0.8537 → 0.8692** (loss 23,167 →
+20,630) with the badges' letters centred in their circles as PowerPoint draws them, and
+the same two snapshots move again (`real-product-page` slide 1's `ellipse`s overflow too).
+
+**2. A picture's embedded ICC profile: PowerPoint converts it to sRGB, and now so does our
+rasteriser.** The probe's pictures are flat patches under two synthetic matrix/TRC
+profiles -- Adobe RGB's primaries at gamma 563/256, Display P3's at 1.8 -- as a PNG with
+an `iCCP` chunk and as a JPEG with an `APP2` one (the second deck repeats the JPEGs each
+distinct in a pixel: the first deck's three, identical but for their profiles, came back
+as one image object drawn three times). **PowerPoint wrote every one converted to sRGB and
+tagged sRGB**: (200, 100, 50) under the Adobe profile became (227, 100, 42), the exact
+conversion to the level; every patch lands within a level of the arithmetic except the
+Adobe profile's near-black 12, which PowerPoint wrote as 10 where the arithmetic and
+little CMS give 4 (one reading; a 1/16 slope limit on the source curve would explain it;
+not modelled). `real-college-template`'s photograph is the other case: PowerPoint passed
+that JPEG through with its Adobe RGB profile, and the PDF's reader converts it -- which is
+little CMS's arithmetic.
+
+**What we do.** The SVG keeps embedding the picture's own bytes, profile included: SVG
+says an embedded profile is honoured (SVG 1.1 `color-profile: auto`), a browser converts
+it as a PDF reader does, and no standard-library code can decode a JPEG to convert it
+in the SVG anyway. The rasteriser is where it went wrong -- resvg (and cairosvg) read the
+samples as sRGB -- so `svg_to_png` now hands it every picture whose profile is a non-sRGB
+matrix/TRC one **converted exactly** (`pptx2svg/iccimages.py`): `ooxml_common.icc` reads
+the profile (three curves in any of `curv`'s and `para`'s forms, three D50 colorants) and
+converts through D50 to sRGB, clipped -- relative colorimetric, no black-point
+compensation, little CMS's default -- 0.03 of a level from little CMS on the photograph,
+at most 1. PNGs are decoded with the standard library (8-bit truecolour with or without
+alpha, and palettes, of which only the palette is converted); JPEGs when Pillow is
+importable. A profile whose conversion is a lookup table (`A2B0`-`A2B2`), or that is not
+RGB, is left alone rather than approximated: no corpus picture carries one.
+`real-college-template` slide 8 goes **0.9737 → 0.9889**, histogram **0.8604 → 0.9984**,
+loss 18,657 → 7,895. No SVG, and so no snapshot, changes; the fidelity harness's raster
+cache now keys our side on the conversion's code as well as `png.py`'s.
+
+**3. A `line3DChart` legends with the bar's swatch, on the bar's cell.** The series were
+already keyed with a swatch (`line_keyed` is off for a `line3DChart`), but the legend's
+layout still asked `_is_line_keyed`, which counted every `_is_line` group, so each swatch
+was drawn 19.2 pt wide -- the line key's rule -- and the entries were spaced on the line
+key's 24 pt cell. The `legend3d-` charts (bottom, right, top at 14 pt, and with a
+`c:marker`) put PowerPoint's keys at a **5.492 pt square** (7.691 at 14 pt) with 2.371 pt
+to the text, the marker making no difference; our keys now land within 0.01 pt of every
+one of them, and the bottom row's pitch is 40.75 pt against PowerPoint's 40.76.
+`chart-gallery` slide 14: SSIM 0.4609 → 0.4767, loss 23,788 → 22,748, mean absolute
+error 3.96 → 3.84, pixels over 10% 3.19% → 3.10%. Its histogram falls 0.8533 → 0.8387:
+the two wide blue and orange keys were coloured ink the truth does not have, and the
+foreground mask lost them with it (the harness docstring's documented effect).
+
+**4. A radar's spokes are the value axis' line, and go over a `filled` radar's series.**
+With every part in its own colour -- the category axis' line red, the rings blue, the
+value axis' line green, the series 4 pt wide -- PowerPoint drew, in this order, the rings,
+then **six spokes and the value axis up the twelve o'clock spoke, all green**, then the
+series and their markers, for `standard` and `marker`; for `filled`, the rings, the
+series, and *then* the green spokes. **Nothing red, at any style.** The follow-ups
+settle the source: the value axis' line alone draws the spokes; the category axis' alone,
+neither, the value axis' `a:noFill`, or the value axis deleted draw none (the rings are
+drawn in every case, as measured before). `real-financial-report`'s radar states the same
+#888888 line on both axes, which is why the old reading -- "the category axis draws the
+spokes" -- fitted the corpus and the earlier probes, none of which stated either line.
+`_draw_radar_spokes` now takes the value axis' line, and `filled` draws them after its
+series: `real-financial-report` slide 4 0.8506 → 0.8537, loss 23,670 → 23,169, the
+spokes back over the fill as PowerPoint draws them.
+
+Not fixed, seen on the same pages: PowerPoint's radar **markers** took the automatic
+accent colours (#4472C4, #ED7D31) where the series stated `F2A33A`/`7030A0` in its
+`c:spPr`, and ours take the series' colour -- a marker's own colour source, not measured
+further here.
+
+
+**5. The 3-D scene's raster caps nothing, and the truth is not softer than our drawing.
+Measured; no renderer change.** Finding 5 said the truth's scene -- PowerPoint's bitmap,
+minified to 128 dpi -- is softer and lighter than our vector scene, which bounds what a
+vector scene can score. Three measurements say otherwise:
+
+* **PowerPoint does not cap the scene's raster.** The probe's `line3DChart` and
+  `bar3DChart` frames from 150 x 110 pt to the whole slide (712 x 397 pt) all came back at
+  **300.0 dpi**: 470 x 206 px up to 2,812 x 1,282 and 2,713 x 1,405. Nothing drops the
+  resolution for a large scene.
+* **The raster route by itself costs little, and not always in the truth's disfavour.**
+  Drawing *our own* scene as a 300 dpi bitmap and letting resvg minify it, against
+  drawing it as vectors, scores 0.960, 0.938, 0.980 and 0.992 over the scene's rectangle
+  on gallery slides 12, 13, 14 and 16. Scored against the truth's scene, our minified
+  bitmap does better than our vectors on 12, 13 and 16 (+0.008, +0.030, +0.008) and worse
+  on 14 (-0.05): the route moves a score by a few hundredths, and in both directions.
+* **The truth's scene has more ink and sharper edges than ours, not less.** Over each
+  scene's rectangle our ink is 0.97, 0.99, 0.91 and 1.07 of PowerPoint's and our summed
+  gradient 0.84, 0.78, 0.94 and 0.40 of it. At 300 dpi a PowerPoint gridline covers 3.5
+  pixels (0.84 pt) where ours is 0.75 pt: darker, not lighter.
+
+So what separates these slides from PowerPoint is geometry, and it is visible: slide 13's
+whole chart -- title, tick labels and scene -- sits about 4 pt above PowerPoint's; each
+scene's lines land 0.3-0.6 px off; the stacked `area3DChart` (16) and the `pie3DChart`
+(15) are still drawn flat; and **PowerPoint draws tick marks** -- as vector paths outside
+the raster, 3.13 pt long in the axis' line (black 0.5 pt by default, red 2.25 pt when the
+category axis states it; none at `majorTickMark="none"`), measured on the second deck's
+`bar3d-` charts -- on every chart axis, 2-D and 3-D, and we draw none anywhere. Those are
+the next fixes for these slides; none of them is the raster's.
 ---
 
 ## Phase 1 — Parsed but not rendered — **done**
@@ -1809,9 +1983,10 @@ reading:
   asks for it**. A probe with no `c:majorGridlines` at all still drew every ring, and so
   did one with `<c:delete val="1"/>` on the value axis. Only the *styling* comes from
   `c:majorGridlines`.
-* **The spokes do not.** No probe without a `c:spPr` on its category axis drew any; the
-  corpus radar, whose category axis states `<a:ln w="12700">` in #888888, drew six in
-  exactly that. So the radial lines are the category axis' own line and **its default is
+* **The spokes do not.** No probe without a `c:spPr` on its axes drew any; the corpus
+  radar, whose axes both state `<a:ln w="12700">` in #888888, drew six in exactly that.
+  **Corrected** (*0.5, What it exposed*): the radial lines are the **value** axis' own
+  line, not the category axis', and go over a `filled` radar's series; **their default is
   none** — the opposite of a bar chart, whose default axis line is black at 0.5 pt.
 * **`standard` and `marker` draw an identical picture**, markers included, though
   ECMA-376 says a `standard` radar has none. Two probes, byte-identical output.

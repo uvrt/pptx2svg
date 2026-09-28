@@ -3405,11 +3405,19 @@ class ChartBuilder:
           triangles, pentagons, hexagons and octagons; a probe with no ``c:majorGridlines``
           at all still drew every ring, and so did one with ``<c:delete val="1"/>`` on the
           value axis.  Only the *styling* comes from ``c:majorGridlines``.
-        * **The spokes do not.**  No probe without a ``c:spPr`` on its category axis drew
-          any; the corpus radar, whose category axis states ``<a:ln w="12700">`` in
-          #888888, drew six in exactly that.  So the radial lines are the category axis'
-          own line, and its default is none -- the opposite of a bar chart, whose default
-          axis line is black at 0.5 pt.
+        * **The spokes do not, and they are the *value* axis' line.**  With every part in
+          its own colour (``tools/make_exposed_probe.py``: the category axis' line red,
+          the rings blue, the value axis' green) PowerPoint drew six spokes and the value
+          axis up the twelve o'clock one, all green, and nothing red -- at every
+          ``radarStyle``.  With the value axis' line alone they are drawn; with the
+          category axis' alone, with neither, with the value axis' ``a:noFill`` or with
+          the value axis deleted, none are.  So the default is none -- the opposite of a
+          bar chart, whose default axis line is black at 0.5 pt -- and the category
+          axis' own line is never drawn.  (The corpus radar states the same #888888
+          line on both axes, which is why reading it as the category axis' fitted it.)
+        * **The spokes go over a ``filled`` radar's series and under every other's.**  The
+          order is the rings, then for ``standard`` and ``marker`` the spokes, the series
+          and their markers; for ``filled`` the series and *then* the spokes.
         * **``standard`` and ``marker`` draw the same picture**, markers included, though
           ECMA-376 says a ``standard`` radar has none.
         * **``filled`` draws only the fill.**  No markers, and no outline unless the
@@ -3438,8 +3446,13 @@ class ChartBuilder:
 
         self._draw_background(region)
         self._draw_title()
-        self._draw_radar_web(centre, radius, scale, len(categories), value_axis, category_axis)
+        self._draw_radar_web(centre, radius, scale, len(categories), value_axis)
+        filled = self._radar_style == "filled"
+        if not filled:
+            self._draw_radar_spokes(centre, radius, len(categories), value_axis)
         self._draw_radar_series(centre, radius, series, categories, scale)
+        if filled:
+            self._draw_radar_spokes(centre, radius, len(categories), value_axis)
         if _labels_shown(value_axis):
             self._draw_radar_value_labels(centre, radius, scale, value_axis, value_font)
         self._draw_radar_category_labels(centre, radius, labels, category_font)
@@ -3569,7 +3582,6 @@ class ChartBuilder:
         scale: tuple[float, float, float],
         count: int,
         value_axis: c.SourceChartAxis | None,
-        category_axis: c.SourceChartAxis | None,
     ) -> None:
         if count <= 0:
             return
@@ -3587,12 +3599,20 @@ class ChartBuilder:
             if len(points) > 1:
                 self._polyline(points + [points[0]], ring_outline, smooth=False)
 
-        # The category axis draws the spokes, and only when it states a line of its own.
-        spoke = (
-            self._resolve_outline(category_axis.outline)
-            if category_axis is not None and category_axis.outline is not None
-            else None
-        )
+
+    def _draw_radar_spokes(
+        self,
+        centre: tuple[float, float],
+        radius: float,
+        count: int,
+        value_axis: c.SourceChartAxis | None,
+    ) -> None:
+        """The spokes, in the value axis' own line, and only when it states one and is not
+        deleted (see :meth:`_build_radar`).  The value axis itself runs up the twelve
+        o'clock spoke in the same line, so drawing the spokes draws it too."""
+        if count <= 0 or value_axis is None or value_axis.delete or value_axis.outline is None:
+            return
+        spoke = self._resolve_outline(value_axis.outline)
         if spoke is None or spoke.fill is None or isinstance(spoke.fill, m.NoFill):
             return
         for index in range(count):
@@ -5008,11 +5028,16 @@ class ChartBuilder:
         """Whether *this* group's series take a line key rather than a swatch.
 
         A group whose shape asks for a rule but which has **no rule to draw** does not
-        count: see :meth:`_draws_a_rule`.
+        count: see :meth:`_draws_a_rule`.  Nor does a ``line3DChart``: its series key
+        with the swatch (:meth:`_series`), and its legend lays out on the swatch's cell,
+        measured on ``tools/make_exposed_probe.py``'s ``legend3d-`` charts -- a 5.492 pt
+        square and 2.371 pt of gap at 10 pt, 7.691 pt at 14, at the bottom, the right
+        and the top, with or without a ``c:marker`` -- exactly the bar's.  Keyed with
+        the rule's 19.2 pt instead, every entry drew a ribbon of swatch that wide.
         """
         return bool(
             (
-                self._is_line
+                (self._is_line and self.plot.kind != "line3DChart")
                 or (self._is_scatter and not self._is_bubble)
                 or (self._is_radar and self._radar_style != "filled")
             )

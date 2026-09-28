@@ -211,6 +211,9 @@ class SourceShape:
     text_body: SourceTextBody | None = None
     #: ``dsp:txXfrm`` -- SmartArt places a shape's text box separately from the shape.
     text_transform: SourceTransform | None = None
+    #: A custom geometry's ``a:rect`` with the geometry it is evaluated in:
+    #: ``(parse_geometry_spec, parse_text_rect)``, or ``None``.
+    text_rect: tuple | None = None
     #: ``p:cNvPr@hidden`` -- the shape exists but is not drawn.
     hidden: bool = False
     hyperlink_rel_id: str | None = None
