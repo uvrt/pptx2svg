@@ -1358,7 +1358,8 @@ bins than resvg's, which a 64-bin histogram cannot tell from a wrong colour.
   holds under either truth.
 
 **What the sharper instrument exposes**, recorded here when it was found; each was then
-measured against PowerPoint and fixed, see *What it exposed, measured and fixed* below:
+measured against PowerPoint -- four fixed, the fifth refuted -- see *What it exposed,
+measured* below:
 
 1. **A shape's text sits in the shape's box, not in its preset's text rectangle.**
    `authoring-integration` slide 1: the `roundRect`'s "Shape contract" is 6.5 px higher
@@ -1383,12 +1384,29 @@ measured against PowerPoint and fixed, see *What it exposed, measured and fixed*
    a rendering defect. (**Refuted** by measurement below: the raster is not capped, and
    the truth's scene is the sharper and darker of the two.)
 
-#### What it exposed, measured and fixed
+#### What it exposed, measured
 
 One probe deck asks PowerPoint all five questions (`tools/make_exposed_probe.py`, read
 back by `tools/read_exposed_probe.py`; a second deck, `two`, asks the follow-ups the first
-export raised). Both are throwaway: built into `~/pptx2svg-oracle`, exported, moved out
-and deleted.
+export raised, and a third, `three`, how overflowing text spills). All three are
+throwaway: built into `~/pptx2svg-oracle`, exported, moved out and deleted.
+
+| Deck | svg truth: SSIM / hist, loss | after | pdfium truth: SSIM / hist | after |
+| --- | --- | --- | --- | --- |
+| `authoring-integration` | 0.9352 / 0.9999, 12,948 | **0.9659** / 0.9999, 6,812 | 0.9309 / 0.9985 | **0.9619** / 0.9985 |
+| `real-financial-report` | 0.9158 / 0.9998, 62,065 | **0.9205** / 0.9998, 59,025 | 0.9151 / 0.9988 | **0.9196** / 0.9988 |
+| `real-college-template` (local) | 0.8260 / 0.8879, 260,820 | **0.8277** / **0.9033**, 250,058 | 0.8017 / 0.8754 | **0.8033** / **0.8930** |
+| `chart-gallery` | 0.7368 / 0.8600, 492,936 | **0.7378** / 0.8592, 491,895 | 0.7345 / 0.8443 | **0.7355** / 0.8421 |
+| the other four scored decks | | unchanged to the bit | | unchanged |
+
+Five slides move, every one of them up in SSIM and down in loss under both truths:
+`authoring-integration` 1 (the text rectangle), `real-financial-report` 4 (the radar's
+spokes, then the ellipse badges' text rectangle and their overflow: 0.8506 → 0.8692),
+`real-college-template` 8 (the ICC profile), `chart-gallery` 14 (the legend key). The one
+column that falls is `chart-gallery`'s histogram, by 0.0008 (slide 14's 0.8533 → 0.8387,
+pdfium 0.6027 → 0.5645): the coloured ink of the wide keys went, and the mask with it --
+mean absolute error and pixels over 10% fall on that slide under both. Both truths'
+baselines are re-recorded (`--update --truth both`) for exactly those slides.
 
 **1. A shape lays its text out in its geometry's text rectangle, and PowerPoint does not
 draw it in by the outline.** Thirteen geometries -- `rect` (the control), `roundRect` at
