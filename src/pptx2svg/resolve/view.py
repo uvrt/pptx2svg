@@ -411,6 +411,15 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
         layout_shape.geometry if layout_shape else None,
         master_shape.geometry if master_shape else None,
     )
+    # A custom geometry's text rectangle travels with the geometry it belongs to.
+    text_rect = next(
+        (
+            node.text_rect
+            for node in (shape, layout_shape, master_shape)
+            if node is not None and node.geometry is not None
+        ),
+        None,
+    )
 
     placeholder_type = (
         (shape.placeholder.type or "obj") if shape.placeholder is not None else None
@@ -439,6 +448,7 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
             if shape.text_transform is not None
             else None
         ),
+        text_rect=text_rect if isinstance(geometry, s.SourceCustomGeometry) else None,
         effects=_resolve_shape_effects(context, shape.effects, shape.style),
         placeholder_type=placeholder_type,
         placeholder_idx=shape.placeholder.idx if shape.placeholder else None,

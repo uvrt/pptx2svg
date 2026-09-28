@@ -1389,6 +1389,47 @@ back by `tools/read_exposed_probe.py`; a second deck, `two`, asks the follow-ups
 export raised). Both are throwaway: built into `~/pptx2svg-oracle`, exported, moved out
 and deleted.
 
+**1. A shape lays its text out in its geometry's text rectangle, and PowerPoint does not
+draw it in by the outline.** Thirteen geometries -- `rect` (the control), `roundRect` at
+the default and at 40000, `ellipse`, `octagon`, `triangle`, `rtTriangle`, `diamond`,
+`hexagon`, `rightArrow`, `wedgeRectCallout`, `cloud` and a custom geometry stating
+`<a:rect l="w/4" t="h/4" r="r" b="b"/>` -- each holding one 14 pt Arial run set top-left,
+bottom-right and centred, every reading taken against the plain `rect` set the same way.
+**Every one lands on ECMA-376's text rectangle** (`ooxml_common.drawingml.geometry.text_rect`),
+all four sides and the centre, within 0.2 pt -- the `roundRect`'s 5.381 pt of corner, the
+`ellipse`'s 27.675 / 16.144, the `triangle`'s lower middle (47.244 in, 55.1 down), the
+`rtTriangle`'s 15.748 / 64.3 and 78.740 / 9.2, the `rightArrow`'s asymmetric shaft, the
+`cloud`'s four different insets, the custom geometry's own rectangle; the
+`wedgeRectCallout`, whose rectangle is its box, does not move. The residuals are the
+baseline's own 0.1 pt grid (the controls show the same).
+
+**The outline moves nothing** -- where Word draws the text in by half of it (docx2svg's
+F.13). A `rect`, a `roundRect` and an `ellipse` under a 1, 4 and 8 pt line, an 8 pt
+`a:noFill` line with its width, the theme's 1.5 pt line through `a:lnRef idx="3"` with no
+`a:ln` at all, and an 8 pt line under zero insets: every run started where the same shape
+with no outline started it, to 0.1 pt. That is a PowerPoint-vs-Word difference, so it is
+a rule in `ooxml-common`: `DrawingRules.text_outline_inset`, 0 for PowerPoint and 0.5 for
+Word, applied by `geometry.text_area` (ooxml-common 0.3.2). **Flipped shapes**: the
+rectangle flips with the geometry (`rtTriangle` and `rightArrow` under `flipH` put their
+runs at the mirrored rectangle, 78.740 pt in), but PowerPoint does not mirror the glyphs
+-- `flipH` leaves them upright, `flipV` turns them 180 degrees -- where we mirror them with
+the shape. No corpus deck flips a shape with text in it; recorded, not fixed.
+
+`render/text.py`'s `_text_area` shrinks the frame to the text rectangle (in slide units,
+inside a group's scale) and translates the text into it; a custom geometry's rectangle
+travels from `parse/shapes.py` on `ShapeElement.text_rect` with the geometry it belongs
+to; `spAutofit` grows the shape by what the rectangle needs plus what the geometry keeps
+outside it. SmartArt's `dsp:txXfrm`, already the text's own box, is left alone. Against
+MuPDF's raster of PowerPoint's PDF, the probe's thirteen unflipped slides go from
+0.940-0.998 to 0.989-0.998; the flipped slide falls 0.926 → 0.907, its mirrored glyphs now
+sitting in the mirrored rectangle.
+`authoring-integration` slide 1 -- the `roundRect`'s "Shape contract", 6 px up and left
+-- goes **0.9352 → 0.9659** (loss 12,948 → 6,812). Three snapshots move: that slide,
+`real-financial-report` slide 4 (three 30 pt `ellipse` badges, whose two-letter labels
+now wrap in the inscribed rectangle as PowerPoint wraps them -- and overflow it, see
+below) and `real-product-page` slide 1 (three `ellipse`s and two `roundRect`s holding
+text; the deck is not scored).
+
 **4. A radar's spokes are the value axis' line, and go over a `filled` radar's series.**
 With every part in its own colour -- the category axis' line red, the rings blue, the
 value axis' line green, the series 4 pt wide -- PowerPoint drew, in this order, the rings,

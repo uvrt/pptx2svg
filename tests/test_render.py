@@ -1434,3 +1434,86 @@ def test_a_measurer_without_kern_between_still_wraps():
     assert ["".join(s.text for s in line.segments) for line in lines] == [
         "one two", "three four"
     ]
+
+
+# -- A preset's text rectangle ----------------------------------------------------------
+
+
+def _text_shape(geometry: m.Geometry, *, anchor: str = "t", text_rect=None, outline_emu=None,
+                auto_fit=None) -> m.ShapeElement:
+    """A 2,400,000 x 1,400,000 EMU shape holding one 14 pt Arial run, as the probe's."""
+    body = m.TextBody(
+        body_properties=m.BodyProperties(anchor=anchor, auto_fit=auto_fit),
+        paragraphs=[m.Paragraph(
+            runs=[m.TextRun("H000", m.RunProperties(font_size=14.0, font_family="Arial"))],
+        )],
+    )
+    outline = None
+    if outline_emu:
+        outline = m.Outline(width=outline_emu, fill=m.SolidFill(color=m.ResolvedColor(hex="#7F7F7F")))
+    return m.ShapeElement(
+        transform=m.Transform(extent_width=2400000, extent_height=1400000),
+        geometry=geometry, text_body=body, text_rect=text_rect, outline=outline,
+    )
+
+
+def _text_offset(shape: m.ShapeElement) -> tuple[float, float]:
+    """Where the shape's text group is translated to, in points (0, 0 for none)."""
+    from pptx2svg.render.shape import render_shape
+
+    svg = render_shape(shape, RenderContext())
+    found = re.search(r'<g transform="translate\(([-\d.]+), ([-\d.]+)\)"><text', svg)
+    if found is None:
+        assert "<text" in svg
+        return (0.0, 0.0)
+    return (float(found.group(1)) * 0.75, float(found.group(2)) * 0.75)
+
+
+#: ``tools/make_exposed_probe.py``: how much further in than a plain ``rect`` PowerPoint
+#: put a top-left run's first glyph, in points, on a 2,400,000 x 1,400,000 EMU box --
+#: which is each preset's text rectangle, to 0.1 pt.
+PROBE_TEXT_INSETS = [
+    (m.PresetGeometry(preset="roundRect"), (5.381, 5.378)),
+    (m.PresetGeometry(preset="roundRect", adjust_values={"adj": 40000}), (12.915, 12.960)),
+    (m.PresetGeometry(preset="ellipse"), (27.675, 16.178)),
+    (m.PresetGeometry(preset="octagon"), (16.144, 16.080)),
+    (m.PresetGeometry(preset="triangle"), (47.244, 55.058)),
+    (m.PresetGeometry(preset="rtTriangle"), (15.748, 64.320)),
+    (m.PresetGeometry(preset="diamond"), (47.244, 27.458)),
+    (m.PresetGeometry(preset="hexagon"), (24.934, 14.640)),
+    (m.PresetGeometry(preset="rightArrow"), (0.000, 27.458)),
+    (m.PresetGeometry(preset="wedgeRectCallout"), (0.000, 0.000)),
+    (m.PresetGeometry(preset="cloud"), (26.046, 16.658)),
+    (m.PresetGeometry(preset="rect"), (0.000, 0.000)),
+]
+
+
+@pytest.mark.parametrize("geometry, measured", PROBE_TEXT_INSETS)
+def test_a_shape_lays_its_text_out_in_its_geometry_text_rectangle(geometry, measured):
+    """ROADMAP.md 0.5 finding 1: ``authoring-integration``'s ``roundRect`` drew its text
+    3.5 pt up and left of PowerPoint's, the corner's inset; every preset whose text
+    rectangle is not its box did the same."""
+    x, y = _text_offset(_text_shape(geometry))
+    assert x == pytest.approx(measured[0], abs=0.2)
+    assert y == pytest.approx(measured[1], abs=0.2)
+
+
+def test_a_custom_geometry_lays_its_text_out_in_its_own_rectangle():
+    """The probe's custom geometry states ``<a:rect l="q" t="v" r="r" b="b"/>`` with
+    ``q = w/4`` and ``v = h/4``: PowerPoint put the run 47.244 pt right and 27.600 down."""
+    spec = ("custom", ((), (("q", "*/ w 1 4"), ("v", "*/ h 1 4")), ()))
+    shape = _text_shape(m.CustomGeometry(paths=[]), text_rect=(spec, ("q", "v", "r", "b")))
+    x, y = _text_offset(shape)
+    assert (x, y) == (pytest.approx(47.244, abs=0.2), pytest.approx(27.559, abs=0.2))
+    assert _text_offset(_text_shape(m.CustomGeometry(paths=[]))) == (0.0, 0.0)
+
+
+@pytest.mark.parametrize("outline_emu", [12700, 50800, 101600])
+def test_powerpoint_does_not_draw_the_text_in_by_the_outline(outline_emu):
+    """Word lays text out half the outline inside the text rectangle; PowerPoint does not
+    move it at all -- 1, 4 and 8 pt lines on a rect, a roundRect and an ellipse, drawn or
+    ``a:noFill``, all started their run where the unoutlined shape did, to 0.1 pt."""
+    for geometry in (m.PresetGeometry(preset="rect"), m.PresetGeometry(preset="roundRect"),
+                     m.PresetGeometry(preset="ellipse")):
+        assert _text_offset(_text_shape(geometry, outline_emu=outline_emu)) == _text_offset(
+            _text_shape(geometry))

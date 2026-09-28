@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from xml.etree.ElementTree import Element
 
+from ooxml_common.drawingml.read import parse_geometry_spec, parse_text_rect
+
 from ..xmlutil import (
     attr,
     child,
@@ -165,9 +167,18 @@ def parse_shape(sp: Element) -> SourceShape:
         style=parse_shape_style(child(sp, "style")),
         text_body=parse_text_body(child(sp, "txBody")),
         text_transform=parse_text_transform(sp),
+        text_rect=_custom_text_rect(sp_pr),
         hyperlink_rel_id=_hyperlink_rel_id(c_nv_pr),
         hidden=_hidden(c_nv_pr),
     )
+
+
+def _custom_text_rect(sp_pr: Element | None) -> tuple | None:
+    """A custom geometry's ``a:rect``, with the geometry its guides are evaluated in."""
+    rect = parse_text_rect(sp_pr)
+    if rect is None:
+        return None
+    return (parse_geometry_spec(sp_pr), rect)
 
 
 def parse_connector(cxn_sp: Element) -> SourceConnector:

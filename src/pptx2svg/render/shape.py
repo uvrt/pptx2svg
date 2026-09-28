@@ -64,7 +64,12 @@ def _render_shape_text(
     translation of the difference between the two -- both are absolute in the same space.
     """
     box = shape.text_transform or transform
-    text_svg = render_text_body(shape.text_body, box, context)
+    # A SmartArt text box is its own rectangle already; every other shape lays its text
+    # out in its geometry's text rectangle.
+    geometry = text_geometry(shape) if shape.text_transform is None else None
+    text_svg = render_text_body(
+        shape.text_body, box, context, geometry=geometry, outline_width=_outline_width(shape)
+    )
     if not text_svg or shape.text_transform is None:
         return text_svg
 
@@ -75,12 +80,36 @@ def _render_shape_text(
     return f'<g transform="translate({num(dx)}, {num(dy)})">{text_svg}</g>'
 
 
+def text_geometry(shape: m.ShapeElement) -> tuple | None:
+    """The shape's geometry as :func:`~ooxml_common.drawingml.geometry.text_rect` takes it,
+    ``(spec, rect)``: a preset's name and adjustments, or a custom geometry's own
+    ``a:rect`` (:attr:`~pptx2svg.model.ShapeElement.text_rect`).  ``None`` -- the whole
+    box -- for a plain ``rect`` and a custom geometry stating no rectangle."""
+    geometry = shape.geometry
+    if isinstance(geometry, m.PresetGeometry):
+        if geometry.preset == "rect":
+            return None
+        return ("preset", geometry.preset, dict(geometry.adjust_values)), None
+    return shape.text_rect
+
+
+def _outline_width(shape: m.ShapeElement) -> float:
+    outline = shape.outline
+    if outline is None or outline.width is None:
+        return 0.0
+    return float(outline.width)
+
+
 def render_shape(shape: m.ShapeElement, context: RenderContext) -> str:
     transform = shape.transform
 
     # spAutofit grows the shape box to fit its text before anything is positioned.
     if shape.text_body is not None and shape.text_body.body_properties.auto_fit == "spAutofit":
-        required = compute_sp_autofit_height(shape.text_body, transform, context)
+        required = compute_sp_autofit_height(
+            shape.text_body, transform, context,
+            geometry=text_geometry(shape) if shape.text_transform is None else None,
+            outline_width=_outline_width(shape),
+        )
         if required is not None:
             transform = replace(transform, extent_height=required)
 

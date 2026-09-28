@@ -249,6 +249,12 @@ class ShapeElement:
     #: shape.  Absolute, in the same space as :attr:`transform`; ``None`` means the text
     #: fills the shape, which is what every non-diagram shape does.
     text_transform: Transform | None = None
+    #: A custom geometry's own text rectangle, as
+    #: :func:`ooxml_common.drawingml.geometry.text_rect` takes it: ``(spec, (l, t, r, b))``,
+    #: the geometry's guides and the ``a:rect``'s four guide names or literals.  ``None``
+    #: for a preset, whose rectangle comes from the specification, and for a custom
+    #: geometry that states none (its whole box).
+    text_rect: tuple | None = None
     effects: EffectList | None = None
     placeholder_type: str | None = None
     placeholder_idx: int | None = None
