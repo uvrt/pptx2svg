@@ -1553,8 +1553,9 @@ scene's lines land 0.3-0.6 px off; the stacked `area3DChart` (16) and the `pie3D
 (15) are still drawn flat; and **PowerPoint draws tick marks** -- as vector paths outside
 the raster, 3.13 pt long in the axis' line (black 0.5 pt by default, red 2.25 pt when the
 category axis states it; none at `majorTickMark="none"`), measured on the second deck's
-`bar3d-` charts -- on every chart axis, 2-D and 3-D, and we draw none anywhere. Those are
-the next fixes for these slides; none of them is the raster's.
+`bar3d-` charts -- on every chart axis, 2-D and 3-D, and we drew none anywhere. Those are
+the next fixes for these slides; none of them is the raster's. (The 2-D ticks are drawn
+now -- see *Axis tick marks, measured* -- and the 3-D ones are still not.)
 ---
 
 ## Phase 1 — Parsed but not rendered — **done**
@@ -3119,6 +3120,79 @@ section below called the case that exposes the problem. The other three corpus a
 (0..6 by 1, 0..5000 by 1000, 0..2000 by 500) and the radar's two rings all come out
 unchanged, from the new rule rather than from the old one.
 
+#### Axis tick marks, measured
+
+Nothing drew a tick mark until `tools/make_tick_probe.py`. Its decks strip every other
+stroke off the page -- no gridlines, filled and unstroked series -- so what is left is the
+axis lines and their ticks, read back as exact segments by `tools/read_tick_probe.py`
+(`--compare` scores ours against them). Every rule lives in `resolve/chart.py` with its
+readings; in short:
+
+* **Length is the axis label's ascent**: a third of it for a major tick, a quarter for a
+  minor one. Aptos 3.130 pt at 10 pt through 8.763 at 28; Arial 3.019, Times New Roman
+  2.970, Courier New 2.775 at 10 pt -- an ascent rule, not an em one. The text is the
+  axis' own, and `tickLblPos="none"` does not change it.
+* **`out` points away from the plot and stays there**: left of a value axis, below a
+  category axis, even when a negative minimum floats the category axis to the zero line.
+  Only `c:crosses="max"` turns it. `in` is the other side, `cross` both, full length each.
+* **Where**: every major and minor unit on a value axis, both ends included (a minor
+  unit is a fifth of the major when unstated); every band edge on a category axis, and a
+  minor half a step past each major one with the last pulled back onto the far end.
+  `c:tickMarkSkip` thins both.
+* **Stroke** is the axis line's, dash included; a deleted or `a:noFill` axis has none.
+* **Radar**: the value axis' ticks on every spoke, turned with it, and none of the
+  category axis'. `c:majorGridlines` takes the major ticks away -- which is why
+  `chart-gallery`'s radar draws none -- and leaves the minor ones.
+* **A missing element is `cross`, unless PowerPoint 2007 wrote the deck.** Then it is
+  `out` for the major and `none` for the minor, and a default stroke is `#898989`, not
+  black. `real-college-template`'s chart copied into a probe deck drew what the deck
+  does not; its workbook changed nothing, and rewriting `docProps/app.xml` to say
+  `AppVersion` 12.0000 changed everything. 14.0000, 15.0000 and 16.0000 read as a deck
+  naming no version does.
+* **`tickLblPos="low"` moves the labels, not the line**: the category axis and its
+  ticks stay on the zero line (`col-neg-low`, and `real-college-template`'s own axis).
+
+Not drawn: the **3-D** charts' ticks, which PowerPoint draws in its projection (this
+library draws none on any 3-D spelling rather than flat ones in the wrong place).
+
+Found on the way and fixed: **a chart line rising to the right was drawn as its mirror
+image.** The `line` preset runs from its box's top-left to its bottom-right, and the
+chart's connectors never set `flipV`, so a radar's spokes up and to the right of the
+centre came out down and to the right. Nothing else in a chart is diagonal, which is why
+`real-financial-report` slide 4 -- the radar -- is the one slide it moves.
+
+Found on the way and **not** changed here:
+
+* **A missing `c:delete` deletes the axis** in any deck not written by PowerPoint 2007 --
+  no line, no ticks, no labels. We draw it, which is the 2007 reading.
+* **A radar with no `c:majorGridlines` draws no web** on these probes, against the
+  earlier reading that the rings are always drawn.
+* The probes' own layout disagreements, which the ticks only make visible: a 14 pt
+  title's band (`chart-gallery` slides 4 and 17, whose plot top is 3 pt off -- the reason
+  those two slides lose a few points of loss to correctly drawn ticks), a stated
+  `c:majorUnit` whose maximum is not a multiple of it, `crossBetween="midCat"` on a
+  column chart, `c:crosses="max"` on a value axis, and `tickLblPos="high"`.
+
+| Slide (svg truth) | SSIM | loss |
+| --- | --- | --- |
+| `chart-gallery` 1 | 0.6885 → **0.6889** | 21,922 → 21,913 |
+| `chart-gallery` 2 | 0.9332 → **0.9339** | 8,420 → 8,330 |
+| `chart-gallery` 3 | 0.8554 → **0.8588** | 4,740 → 4,630 |
+| `chart-gallery` 5 | 0.8116 → **0.8171** | 5,208 → 5,060 |
+| `chart-gallery` 6 | 0.5840 → **0.5845** | 33,860 → 33,838 |
+| `chart-gallery` 11 | 0.0924 → **0.0938** | 34,799 → 34,788 |
+| `real-financial-report` 3 | 0.8865 → **0.8866** | 17,470 → 17,452 |
+| `real-financial-report` 2 | 0.9384 → **0.9392** | 9,809 → 9,679 |
+| `real-financial-report` 4 (the spokes) | 0.8692 → **0.8745** | 20,630 → 19,790 |
+| `real-college-template` 4 (the low axis line) | 0.4034 → 0.4034 | 129,176 → 128,668 |
+| `chart-gallery` 4 | 0.8842 → 0.8842 | 41,894 → 41,931 |
+| `chart-gallery` 17 | 0.7634 → 0.7632 | 46,045 → 46,123 |
+
+The pdfium truth moves the same slides the same way. Two histograms fall with the new ink
+while every other column rises -- `chart-gallery` 3 (0.6206 → 0.6126) and 5 (0.5433 →
+0.5358), a line and a scatter whose histograms are low for their series colours -- and
+the ticks on those slides land within 0.12 pt of PowerPoint's.
+
 #### Not done for the ten types that draw
 
 Each of these is known-missing rather than merely absent:
@@ -3163,11 +3237,11 @@ Each of these is known-missing rather than merely absent:
   three measurements do not fit; it stops wrapping past six lines and lets the label
   overflow; and an explicit orientation on `a:bodyPr` makes it drop every other label
   rather than turn them, which nothing here implements.
-* **Axis titles**, **minor gridlines and minor ticks**, **`c:dTable`**, and manual
+* **Axis titles**, **minor gridlines**, **`c:dTable`**, and manual
   `c:layout` for the plot area or the legend.
 * **Secondary axes.** A `c:barChart` group is tied to its axes through its own `c:axId`
   list, which is the hard part and is done; a second value axis is then mostly drawing.
-* **Log scales** and `c:tickLblSkip` / `c:tickMarkSkip`. `c:crosses` and `c:crossesAt`
+* **Log scales** and `c:tickLblSkip` (`c:tickMarkSkip` is drawn). `c:crosses` and `c:crossesAt`
   move the category axis but have only been measured at zero — except on a scatter, where
   the negative-x and negative-y probes measure both crossings at the other axis' own zero.
   `c:crossBetween="midCat"` **is** measured now, on an area chart; the same placement is

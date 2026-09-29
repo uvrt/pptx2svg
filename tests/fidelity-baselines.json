@@ -62,71 +62,71 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.8592,
-    "loss": 491895.2,
+    "histogram": 0.8582,
+    "loss": 491618.7,
     "pdfium": {
-      "histogram": 0.8421,
-      "loss": 509423.0,
+      "histogram": 0.8418,
+      "loss": 509110.8,
       "slides": [
         {
           "coverage": 0.0778,
-          "histogram": 0.9954,
-          "loss": 23359.7,
-          "mean_abs": 2.983,
-          "over10": 2.883,
+          "histogram": 0.9955,
+          "loss": 23345.4,
+          "mean_abs": 2.982,
+          "over10": 2.888,
           "over64": 1.724,
           "sparse": false,
-          "ssim": 0.674
+          "ssim": 0.6745
         },
         {
           "coverage": 0.1377,
           "histogram": 0.9988,
-          "loss": 8939.4,
-          "mean_abs": 1.379,
-          "over10": 2.121,
-          "over64": 0.705,
+          "loss": 8840.1,
+          "mean_abs": 1.366,
+          "over10": 2.118,
+          "over64": 0.697,
           "sparse": false,
-          "ssim": 0.9295
+          "ssim": 0.9303
         },
         {
           "coverage": 0.0375,
-          "histogram": 0.5247,
-          "loss": 6039.9,
-          "mean_abs": 1.342,
-          "over10": 2.64,
-          "over64": 0.789,
+          "histogram": 0.5216,
+          "loss": 5923.8,
+          "mean_abs": 1.328,
+          "over10": 2.635,
+          "over64": 0.78,
           "sparse": false,
-          "ssim": 0.8251
+          "ssim": 0.8285
         },
         {
-          "coverage": 0.3935,
-          "histogram": 0.9998,
-          "loss": 42314.2,
-          "mean_abs": 4.065,
-          "over10": 4.152,
-          "over64": 2.803,
+          "coverage": 0.3936,
+          "histogram": 0.9997,
+          "loss": 42346.0,
+          "mean_abs": 4.07,
+          "over10": 4.158,
+          "over64": 2.807,
           "sparse": false,
           "ssim": 0.8833
         },
         {
           "coverage": 0.03,
-          "histogram": 0.5809,
-          "loss": 5959.3,
-          "mean_abs": 1.209,
-          "over10": 2.246,
-          "over64": 0.66,
+          "histogram": 0.5787,
+          "loss": 5810.5,
+          "mean_abs": 1.19,
+          "over10": 2.242,
+          "over64": 0.649,
           "sparse": false,
-          "ssim": 0.7843
+          "ssim": 0.7898
         },
         {
-          "coverage": 0.0891,
-          "histogram": 0.9929,
-          "loss": 34896.9,
-          "mean_abs": 3.887,
-          "over10": 3.687,
-          "over64": 2.54,
+          "coverage": 0.0892,
+          "histogram": 0.993,
+          "loss": 34870.9,
+          "mean_abs": 3.883,
+          "over10": 3.688,
+          "over64": 2.535,
           "sparse": false,
-          "ssim": 0.5751
+          "ssim": 0.5757
         },
         {
           "coverage": 0.2379,
@@ -170,13 +170,13 @@
         },
         {
           "coverage": 0.0424,
-          "histogram": 0.9481,
-          "loss": 35555.5,
-          "mean_abs": 4.82,
-          "over10": 4.185,
-          "over64": 2.874,
+          "histogram": 0.948,
+          "loss": 35542.6,
+          "mean_abs": 4.819,
+          "over10": 4.188,
+          "over64": 2.873,
           "sparse": false,
-          "ssim": 0.09
+          "ssim": 0.0915
         },
         {
           "coverage": 0.1505,
@@ -229,78 +229,78 @@
           "ssim": 0.7551
         },
         {
-          "coverage": 0.2123,
+          "coverage": 0.2124,
           "histogram": 0.9993,
-          "loss": 47698.0,
-          "mean_abs": 5.624,
-          "over10": 5.393,
-          "over64": 3.561,
+          "loss": 47771.4,
+          "mean_abs": 5.632,
+          "over10": 5.404,
+          "over64": 3.566,
           "sparse": false,
-          "ssim": 0.7562
+          "ssim": 0.756
         }
       ],
-      "ssim": 0.7355
+      "ssim": 0.7362
     },
     "slides": [
       {
         "coverage": 0.0764,
-        "histogram": 0.9972,
-        "loss": 21922.2,
+        "histogram": 0.9971,
+        "loss": 21913.3,
         "mean_abs": 2.877,
-        "over10": 2.661,
-        "over64": 1.585,
+        "over10": 2.665,
+        "over64": 1.583,
         "sparse": false,
-        "ssim": 0.6885
+        "ssim": 0.6889
       },
       {
         "coverage": 0.1368,
         "histogram": 0.9996,
-        "loss": 8419.8,
-        "mean_abs": 1.284,
-        "over10": 1.68,
-        "over64": 0.587,
+        "loss": 8330.1,
+        "mean_abs": 1.272,
+        "over10": 1.673,
+        "over64": 0.578,
         "sparse": false,
-        "ssim": 0.9332
+        "ssim": 0.9339
       },
       {
         "coverage": 0.0356,
-        "histogram": 0.6206,
-        "loss": 4740.1,
-        "mean_abs": 1.062,
-        "over10": 2.099,
-        "over64": 0.585,
+        "histogram": 0.6126,
+        "loss": 4629.7,
+        "mean_abs": 1.049,
+        "over10": 2.092,
+        "over64": 0.576,
         "sparse": false,
-        "ssim": 0.8554
+        "ssim": 0.8588
       },
       {
-        "coverage": 0.3927,
+        "coverage": 0.3928,
         "histogram": 0.9997,
-        "loss": 41894.3,
-        "mean_abs": 3.929,
-        "over10": 4.001,
-        "over64": 2.783,
+        "loss": 41931.1,
+        "mean_abs": 3.934,
+        "over10": 4.007,
+        "over64": 2.786,
         "sparse": false,
         "ssim": 0.8842
       },
       {
         "coverage": 0.03,
-        "histogram": 0.5433,
-        "loss": 5208.4,
-        "mean_abs": 1.051,
-        "over10": 1.968,
-        "over64": 0.529,
+        "histogram": 0.5358,
+        "loss": 5059.5,
+        "mean_abs": 1.034,
+        "over10": 1.962,
+        "over64": 0.519,
         "sparse": false,
-        "ssim": 0.8116
+        "ssim": 0.8171
       },
       {
-        "coverage": 0.0883,
-        "histogram": 0.9952,
-        "loss": 33860.0,
-        "mean_abs": 3.651,
-        "over10": 3.376,
-        "over64": 2.462,
+        "coverage": 0.0884,
+        "histogram": 0.995,
+        "loss": 33837.5,
+        "mean_abs": 3.648,
+        "over10": 3.375,
+        "over64": 2.458,
         "sparse": false,
-        "ssim": 0.584
+        "ssim": 0.5845
       },
       {
         "coverage": 0.2372,
@@ -343,14 +343,14 @@
         "ssim": 0.7828
       },
       {
-        "coverage": 0.0416,
-        "histogram": 0.9604,
-        "loss": 34798.6,
+        "coverage": 0.0417,
+        "histogram": 0.9603,
+        "loss": 34788.0,
         "mean_abs": 4.46,
-        "over10": 3.782,
-        "over64": 2.664,
+        "over10": 3.783,
+        "over64": 2.663,
         "sparse": false,
-        "ssim": 0.0924
+        "ssim": 0.0938
       },
       {
         "coverage": 0.1458,
@@ -403,18 +403,18 @@
         "ssim": 0.763
       },
       {
-        "coverage": 0.2112,
+        "coverage": 0.2113,
         "histogram": 0.9996,
-        "loss": 46044.8,
-        "mean_abs": 5.273,
-        "over10": 4.982,
-        "over64": 3.454,
+        "loss": 46122.5,
+        "mean_abs": 5.283,
+        "over10": 4.991,
+        "over64": 3.459,
         "sparse": false,
-        "ssim": 0.7634
+        "ssim": 0.7632
       }
     ],
     "slides_scored": 17,
-    "ssim": 0.7378,
+    "ssim": 0.7385,
     "truth": "svg"
   },
   "feature-sweep": {
@@ -749,11 +749,11 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9033,
-    "loss": 250057.7,
+    "histogram": 0.9032,
+    "loss": 249549.1,
     "pdfium": {
-      "histogram": 0.893,
-      "loss": 332207.0,
+      "histogram": 0.8929,
+      "loss": 331704.2,
       "slides": [
         {
           "coverage": 0.9828,
@@ -786,14 +786,14 @@
           "ssim": 0.7627
         },
         {
-          "coverage": 0.1805,
-          "histogram": 0.9902,
-          "loss": 136486.1,
-          "mean_abs": 11.879,
-          "over10": 9.848,
-          "over64": 6.72,
+          "coverage": 0.1798,
+          "histogram": 0.9898,
+          "loss": 135983.3,
+          "mean_abs": 11.671,
+          "over10": 9.816,
+          "over64": 6.59,
           "sparse": false,
-          "ssim": 0.3846
+          "ssim": 0.3845
         },
         {
           "coverage": 0.5657,
@@ -880,12 +880,12 @@
         "ssim": 0.7877
       },
       {
-        "coverage": 0.1762,
-        "histogram": 0.9979,
-        "loss": 129176.1,
-        "mean_abs": 10.799,
-        "over10": 9.281,
-        "over64": 5.773,
+        "coverage": 0.1755,
+        "histogram": 0.9976,
+        "loss": 128667.5,
+        "mean_abs": 10.592,
+        "over10": 9.248,
+        "over64": 5.642,
         "sparse": false,
         "ssim": 0.4034
       },
@@ -963,10 +963,10 @@
       "uncovered": ""
     },
     "histogram": 0.9998,
-    "loss": 59024.9,
+    "loss": 58037.3,
     "pdfium": {
       "histogram": 0.9988,
-      "loss": 62566.7,
+      "loss": 61565.3,
       "slides": [
         {
           "coverage": 0.9898,
@@ -981,35 +981,35 @@
         {
           "coverage": 0.1756,
           "histogram": 0.9989,
-          "loss": 10484.4,
-          "mean_abs": 1.622,
-          "over10": 3.389,
-          "over64": 0.898,
+          "loss": 10349.3,
+          "mean_abs": 1.612,
+          "over10": 3.379,
+          "over64": 0.889,
           "sparse": false,
-          "ssim": 0.9352
+          "ssim": 0.9361
         },
         {
           "coverage": 0.1695,
-          "histogram": 0.9971,
-          "loss": 18800.9,
-          "mean_abs": 2.025,
+          "histogram": 0.9972,
+          "loss": 18774.0,
+          "mean_abs": 2.024,
           "over10": 3.643,
-          "over64": 1.281,
+          "over64": 1.279,
           "sparse": false,
-          "ssim": 0.8796
+          "ssim": 0.8798
         },
         {
           "coverage": 0.1742,
           "histogram": 0.9991,
-          "loss": 19494.3,
-          "mean_abs": 2.084,
-          "over10": 3.728,
+          "loss": 18654.9,
+          "mean_abs": 2.074,
+          "over10": 3.682,
           "over64": 1.199,
           "sparse": false,
-          "ssim": 0.8786
+          "ssim": 0.8838
         }
       ],
-      "ssim": 0.9196
+      "ssim": 0.9212
     },
     "slides": [
       {
@@ -1024,37 +1024,37 @@
       },
       {
         "coverage": 0.1727,
-        "histogram": 0.9998,
-        "loss": 9808.6,
-        "mean_abs": 1.34,
-        "over10": 2.65,
-        "over64": 0.759,
+        "histogram": 0.9999,
+        "loss": 9679.4,
+        "mean_abs": 1.33,
+        "over10": 2.639,
+        "over64": 0.751,
         "sparse": false,
-        "ssim": 0.9384
+        "ssim": 0.9392
       },
       {
         "coverage": 0.167,
         "histogram": 0.9995,
-        "loss": 17470.4,
-        "mean_abs": 1.809,
-        "over10": 3.199,
-        "over64": 1.124,
+        "loss": 17452.0,
+        "mean_abs": 1.807,
+        "over10": 3.2,
+        "over64": 1.122,
         "sparse": false,
-        "ssim": 0.8865
+        "ssim": 0.8866
       },
       {
         "coverage": 0.1711,
         "histogram": 0.9999,
-        "loss": 20629.8,
-        "mean_abs": 2.045,
-        "over10": 3.213,
-        "over64": 1.206,
+        "loss": 19789.8,
+        "mean_abs": 2.036,
+        "over10": 3.166,
+        "over64": 1.205,
         "sparse": false,
-        "ssim": 0.8692
+        "ssim": 0.8745
       }
     ],
     "slides_scored": 4,
-    "ssim": 0.9205,
+    "ssim": 0.922,
     "truth": "svg"
   },
   "real-product-page": {
