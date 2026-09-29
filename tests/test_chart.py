@@ -2053,6 +2053,20 @@ def _lines(children):
     return [c for c in children if isinstance(c, m.ConnectorElement)]
 
 
+def _rules(children):
+    """The axis lines and gridlines, without the tick marks standing on them.
+
+    An unstated ``c:majorTickMark`` or ``c:minorTickMark`` is ``cross``, so a bare
+    fixture draws both sets of ticks; they are a few points long and every rule in these
+    frames is tens of points long.
+    """
+    return [
+        line
+        for line in _lines(children)
+        if max(line.transform.extent_width, line.transform.extent_height) > 20 * 12700
+    ]
+
+
 def test_a_horizontal_charts_gridlines_are_vertical():
     """The value axis runs along the bottom, so its gridlines run up the plot.
 
@@ -2069,7 +2083,7 @@ def test_a_horizontal_charts_gridlines_are_vertical():
         "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
         "<c:valAx><c:axId val='2'/><c:majorGridlines/></c:valAx></c:plotArea></c:chart>"
     )
-    lines = _lines(children)
+    lines = _rules(children)
     gridlines = [line for line in lines if line.transform.extent_width == 0]
     # Three gridlines plus the category axis, all vertical; one horizontal value axis.
     assert len(gridlines) == 4
@@ -2086,11 +2100,11 @@ def test_barDir_decides_which_axis_line_is_which():
         "</c:barChart><c:catAx><c:axId val='1'/></c:catAx>"
         "<c:valAx><c:axId val='2'/>{deleted}</c:valAx></c:plotArea></c:chart>"
     )
-    both = _lines(_build(body.format(deleted=""))[0])
+    both = _rules(_build(body.format(deleted=""))[0])
     assert {line.transform.extent_height == 0 for line in both} == {True, False}
 
     # Deleting the *value* axis must drop the horizontal line, not the vertical one.
-    remaining = _lines(_build(body.format(deleted="<c:delete val='1'/>"))[0])
+    remaining = _rules(_build(body.format(deleted="<c:delete val='1'/>"))[0])
     assert len(remaining) == 1
     assert remaining[0].transform.extent_width == 0
 
@@ -2113,10 +2127,10 @@ def test_an_axis_whose_spPr_says_noFill_draws_no_line():
         "<c:catAx><c:axId val='1'/></c:catAx>"
         "<c:valAx><c:axId val='2'/>{spPr}</c:valAx></c:plotArea></c:chart>"
     )
-    both = _lines(_build(body.format(spPr=""))[0])
+    both = _rules(_build(body.format(spPr=""))[0])
     assert len(both) == 2
 
-    quiet = _lines(_build(body.format(spPr="<c:spPr><a:ln w='25400'><a:noFill/></a:ln></c:spPr>"))[0])
+    quiet = _rules(_build(body.format(spPr="<c:spPr><a:ln w='25400'><a:noFill/></a:ln></c:spPr>"))[0])
     # Only the category axis is left, and a column chart draws that one horizontally.
     assert len(quiet) == 1
     assert quiet[0].transform.extent_height == 0
@@ -8729,3 +8743,429 @@ def test_a_line3d_chart_keys_its_legend_with_the_swatch(position, marker):
     for key in keys:
         assert key.transform.extent_width / EMU_PER_POINT == pytest.approx(5.492, abs=0.01)
         assert key.transform.extent_height / EMU_PER_POINT == pytest.approx(5.492, abs=0.01)
+
+
+
+# -- Tick marks ------------------------------------------------------------------------
+#
+# Every rule below was measured on the ``tick-marks``, ``tick-length``, ``tick-check`` and
+# ``tick-radar`` probe decks (``tools/make_tick_probe.py``); see
+# ``ChartBuilder._draw_axis_ticks`` for the readings.
+
+
+def _tick_values(count: int = 5) -> str:
+    points = "".join(
+        f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>"
+        for i, v in enumerate((3, 9, 5, 7, 4, 6, 8, 2)[:count])
+    )
+    return (
+        "<c:ser><c:idx val='0'/><c:order val='0'/><c:val><c:numRef><c:numCache>"
+        f"<c:ptCount val='{count}'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+    )
+
+
+def _ticked(
+    cat: str = "",
+    val: str = "",
+    *,
+    direction: str = "col",
+    count: int = 5,
+    kind: str = "barChart",
+):
+    """A chart whose two axes carry ``cat`` and ``val`` in the schema's tick slot."""
+    head = f"<c:barDir val='{direction}'/>" if kind in ("barChart", "bar3DChart") else ""
+    return _build(
+        f"<c:chart><c:plotArea><c:{kind}>{head}{_tick_values(count)}"
+        f"<c:axId val='1'/><c:axId val='2'/></c:{kind}>"
+        f"<c:catAx><c:axId val='1'/>{cat}</c:catAx>"
+        f"<c:valAx><c:axId val='2'/>{val}</c:valAx></c:plotArea></c:chart>",
+        width=400.0,
+        height=250.0,
+    )[0]
+
+
+def _ticks(children, *, across: str):
+    """Tick segments as ``(position along the axis, low, high)`` in points.
+
+    ``across="x"`` reads ticks standing across a *vertical* axis -- horizontal strokes --
+    and ``"y"`` those across a horizontal one.
+    """
+    out = []
+    for line in _lines(children):
+        t = line.transform
+        w, h = t.extent_width / 12700, t.extent_height / 12700
+        x, y = t.offset_x / 12700, t.offset_y / 12700
+        if max(w, h) > 20:
+            continue
+        if across == "x" and h == 0:
+            out.append((round(y, 3), round(x, 3), round(x + w, 3)))
+        elif across == "y" and w == 0:
+            out.append((round(x, 3), round(y, 3), round(y + h, 3)))
+    return sorted(out)
+
+
+def _axis_at(children, *, vertical: bool) -> float:
+    for line in _rules(children):
+        t = line.transform
+        if vertical and t.extent_width == 0:
+            return t.offset_x / 12700
+        if not vertical and t.extent_height == 0:
+            return t.offset_y / 12700
+    raise AssertionError("no axis line")
+
+
+NO_TICKS = "<c:majorTickMark val='none'/><c:minorTickMark val='none'/>"
+
+
+def test_an_absent_tick_mark_is_cross_as_is_one_with_no_val():
+    from pptx2svg.resolve.chart import tick_marks
+
+    absent = chart(bar(_tick_values(), "<c:valAx><c:axId val='2'/></c:valAx>")).axes[0]
+    assert tick_marks(absent) == ("cross", "cross")
+    bare = chart(
+        bar(_tick_values(), "<c:valAx><c:axId val='2'/><c:majorTickMark/><c:minorTickMark/></c:valAx>")
+    ).axes[0]
+    assert tick_marks(bare) == ("cross", "cross")
+    odd = chart(
+        bar(
+            _tick_values(),
+            "<c:valAx><c:axId val='2'/><c:majorTickMark val='sideways'/>"
+            "<c:minorTickMark val='in'/></c:valAx>",
+        )
+    ).axes[0]
+    assert tick_marks(odd) == ("none", "in")
+
+
+def test_out_points_away_from_the_plot_and_in_into_it():
+    out = _ticked(NO_TICKS, "<c:majorTickMark val='out'/><c:minorTickMark val='none'/>")
+    axis = _axis_at(out, vertical=True)
+    ticks = _ticks(out, across="x")
+    assert ticks and all(high == pytest.approx(axis, abs=1e-3) for _, _, high in ticks)
+    assert all(low < axis for _, low, _ in ticks)
+
+    inward = _ticked(NO_TICKS, "<c:majorTickMark val='in'/><c:minorTickMark val='none'/>")
+    assert all(low == pytest.approx(axis, abs=1e-3) for _, low, _ in _ticks(inward, across="x"))
+
+    down = _ticked("<c:majorTickMark val='out'/><c:minorTickMark val='none'/>", NO_TICKS)
+    axis_y = _axis_at(down, vertical=False)
+    assert all(low == pytest.approx(axis_y, abs=1e-3) for _, low, _ in _ticks(down, across="y"))
+
+
+def test_a_major_tick_is_a_third_of_the_label_ascent_and_a_minor_one_a_quarter():
+    """3.130 and 2.347 pt at 10 pt Aptos, whose ascent is 0.939 em."""
+    crossing = _ticked(NO_TICKS, "<c:majorTickMark val='cross'/><c:minorTickMark val='none'/>")
+    lengths = [high - low for _, low, high in _ticks(crossing, across="x")]
+    assert lengths and all(length == pytest.approx(2 * 3.130, abs=0.01) for length in lengths)
+    minor = _ticked(NO_TICKS, "<c:majorTickMark val='none'/><c:minorTickMark val='out'/>")
+    lengths = [high - low for _, low, high in _ticks(minor, across="x")]
+    assert lengths and all(length == pytest.approx(2.347, abs=0.01) for length in lengths)
+
+
+def test_the_tick_follows_its_own_axis_text_size():
+    big = (
+        "<c:majorTickMark val='out'/><c:minorTickMark val='none'/><c:txPr><a:bodyPr/>"
+        "<a:lstStyle/><a:p><a:pPr><a:defRPr sz='2000'/></a:pPr></a:p></c:txPr>"
+    )
+    children = _ticked(big, "<c:majorTickMark val='out'/><c:minorTickMark val='none'/>")
+    category = [high - low for _, low, high in _ticks(children, across="y")]
+    value = [high - low for _, low, high in _ticks(children, across="x")]
+    assert category and all(length == pytest.approx(6.26, abs=0.01) for length in category)
+    assert value and all(length == pytest.approx(3.13, abs=0.01) for length in value)
+
+
+def test_a_value_axis_ticks_every_major_and_a_fifth_of_it_for_the_minors():
+    children = _ticked(NO_TICKS, "<c:majorTickMark val='out'/><c:minorTickMark val='out'/>")
+    ticks = _ticks(children, across="x")
+    majors = [t for t in ticks if t[2] - t[1] > 3.0]
+    minors = [t for t in ticks if t[2] - t[1] < 3.0]
+    # 0..10 by 1: eleven majors and fifty-one minors, both ends included.
+    assert (len(majors), len(minors)) == (11, 51)
+
+
+def test_a_category_axis_ticks_the_band_edges_and_puts_its_last_minor_on_the_end():
+    children = _ticked("<c:majorTickMark val='out'/><c:minorTickMark val='out'/>", NO_TICKS)
+    ticks = _ticks(children, across="y")
+    majors = [x for x, low, high in ticks if high - low > 3.0]
+    minors = [x for x, low, high in ticks if high - low < 3.0]
+    assert len(majors) == 6
+    step = majors[1] - majors[0]
+    assert minors[:5] == pytest.approx([x + step / 2 for x in majors[:5]], abs=1e-2)
+    # The sixth minor would be half a band past the plot; PowerPoint puts it on the end.
+    assert minors[5] == pytest.approx(majors[5], abs=1e-3)
+
+
+def test_tick_mark_skip_thins_the_majors_and_the_minors_with_them():
+    children = _ticked(
+        "<c:majorTickMark val='out'/><c:minorTickMark val='out'/><c:tickMarkSkip val='2'/>",
+        NO_TICKS,
+    )
+    ticks = _ticks(children, across="y")
+    majors = [x for x, low, high in ticks if high - low > 3.0]
+    minors = [x for x, low, high in ticks if high - low < 3.0]
+    assert len(majors) == 3 and len(minors) == 3
+    band = (majors[1] - majors[0]) / 2
+    # Band edges 0, 2 and 4 for the majors, 1, 3 and 5 for the minors.
+    assert minors == pytest.approx([x + band for x in majors], abs=1e-2)
+
+
+def test_an_axis_moved_to_the_far_side_turns_its_ticks_round():
+    children = _ticked(
+        "<c:majorTickMark val='out'/><c:minorTickMark val='none'/><c:crosses val='max'/>",
+        NO_TICKS,
+    )
+    axis_y = min(line.transform.offset_y for line in _rules(children)) / 12700
+    ticks = _ticks(children, across="y")
+    assert ticks and all(high == pytest.approx(axis_y, abs=1e-3) for _, _, high in ticks)
+
+
+def test_a_bar_chart_ticks_its_categories_up_the_side_from_the_bottom():
+    children = _ticked(
+        "<c:majorTickMark val='out'/><c:minorTickMark val='out'/>", NO_TICKS, direction="bar"
+    )
+    ticks = _ticks(children, across="x")
+    minors = [y for y, low, high in ticks if high - low < 3.0]
+    majors = [y for y, low, high in ticks if high - low > 3.0]
+    # The clamped minor is at the *top* end: the categories run upwards.
+    assert min(minors) == pytest.approx(min(majors), abs=1e-3)
+    axis = _axis_at(children, vertical=True)
+    assert all(high == pytest.approx(axis, abs=1e-3) for _, _, high in ticks)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "<c:delete val='1'/><c:majorTickMark val='out'/>",
+        "<c:majorTickMark val='out'/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>",
+    ],
+)
+def test_a_deleted_or_unlined_axis_draws_no_ticks(spec):
+    assert _ticks(_ticked(NO_TICKS, spec), across="x") == []
+
+
+def test_ticks_take_the_axis_lines_stroke():
+    red = (
+        "<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"
+        "<c:spPr><a:ln w='38100'><a:solidFill><a:srgbClr val='FF0000'/></a:solidFill>"
+        "</a:ln></c:spPr>"
+    )
+    children = _ticked(NO_TICKS, red)
+    strokes = {
+        (line.outline.width, line.outline.fill.color.hex)
+        for line in _lines(children)
+        if line.transform.extent_height == 0 and line.transform.extent_width < 20 * 12700
+    }
+    assert strokes == {(38100, "#FF0000")}
+
+
+def test_low_labels_leave_the_category_axis_line_on_the_zero_line():
+    """``col-neg-low``: the line and its ticks stay at zero, only the labels go down."""
+    points = "".join(
+        f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate((3, -4, 5, -2, 6))
+    )
+    series = (
+        "<c:ser><c:idx val='0'/><c:order val='0'/><c:val><c:numRef><c:numCache>"
+        f"<c:ptCount val='5'/>{points}</c:numCache></c:numRef></c:val></c:ser>"
+    )
+    children = _build(
+        f"<c:chart><c:plotArea><c:barChart><c:barDir val='col'/>{series}"
+        "<c:axId val='1'/><c:axId val='2'/></c:barChart>"
+        "<c:catAx><c:axId val='1'/><c:majorTickMark val='out'/><c:minorTickMark val='none'/>"
+        "<c:tickLblPos val='low'/></c:catAx>"
+        f"<c:valAx><c:axId val='2'/>{NO_TICKS}</c:valAx></c:plotArea></c:chart>",
+        width=400.0,
+        height=250.0,
+    )[0]
+    axis_y = _axis_at(children, vertical=False)
+    plot_bottom = max(
+        (line.transform.offset_y + line.transform.extent_height) / 12700
+        for line in _rules(children)
+    )
+    assert axis_y < plot_bottom - 20
+    ticks = _ticks(children, across="y")
+    assert ticks and all(low == pytest.approx(axis_y, abs=1e-3) for _, low, _ in ticks)
+
+
+def test_a_three_d_chart_draws_no_ticks():
+    children = _ticked(
+        "<c:majorTickMark val='out'/>", "<c:majorTickMark val='out'/>", kind="bar3DChart"
+    )
+    assert _ticks(children, across="x") == [] and _ticks(children, across="y") == []
+
+
+def _ticked_radar(val: str, cat: str = NO_TICKS):
+    return _build(
+        "<c:chart><c:plotArea><c:radarChart><c:radarStyle val='marker'/>"
+        f"{_tick_values(5)}<c:axId val='1'/><c:axId val='2'/></c:radarChart>"
+        f"<c:catAx><c:axId val='1'/>{cat}</c:catAx>"
+        f"<c:valAx><c:axId val='2'/>{val}</c:valAx></c:plotArea></c:chart>",
+        width=400.0,
+        height=250.0,
+    )[0]
+
+
+def _tick_strokes(children):
+    return [
+        line
+        for line in _lines(children)
+        if math.hypot(line.transform.extent_width, line.transform.extent_height) < 10 * 12700
+    ]
+
+
+def test_a_radar_ticks_its_value_axis_on_every_spoke():
+    ticks = _tick_strokes(_ticked_radar("<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"))
+    assert ticks and len(ticks) % 5 == 0
+    assert _tick_strokes(_ticked_radar(NO_TICKS)) == []
+    # The category axis' own ticks are never drawn.
+    assert _tick_strokes(_ticked_radar(NO_TICKS, "<c:majorTickMark val='out'/>")) == []
+
+
+def test_a_radar_ticks_to_the_left_of_each_spoke_turned_with_it():
+    """72 degrees round, the ``out`` tick runs up and to the left, as measured."""
+    ticks = _tick_strokes(_ticked_radar("<c:majorTickMark val='out'/><c:minorTickMark val='none'/>"))
+    slanted = [
+        line
+        for line in ticks
+        if line.transform.extent_width > 0 and line.transform.extent_height > 0
+    ]
+    rising = [line for line in slanted if line.transform.flip_v]
+    # Five spokes: the vertical one's ticks are level, and of the four slanted spokes'
+    # ticks two sets rise to the right and two fall -- which only comes out as itself if
+    # the rising ones are flipped.
+    assert slanted and len(rising) * 2 == len(slanted)
+
+
+def test_a_radar_web_takes_the_place_of_its_major_ticks_but_not_its_minor_ones():
+    majors = _tick_strokes(
+        _ticked_radar("<c:majorGridlines/><c:majorTickMark val='out'/><c:minorTickMark val='none'/>")
+    )
+    assert majors == []
+    minors = _tick_strokes(
+        _ticked_radar("<c:majorGridlines/><c:majorTickMark val='out'/><c:minorTickMark val='out'/>")
+    )
+    assert minors
+
+
+def test_a_scatter_ticks_both_value_axes():
+    points = "".join(f"<c:pt idx='{i}'><c:v>{v}</c:v></c:pt>" for i, v in enumerate((1, 2, 3)))
+    cache = f"<c:numRef><c:numCache><c:ptCount val='3'/>{points}</c:numCache></c:numRef>"
+    children = _build(
+        "<c:chart><c:plotArea><c:scatterChart><c:ser><c:idx val='0'/><c:order val='0'/>"
+        f"<c:xVal>{cache}</c:xVal><c:yVal>{cache}</c:yVal></c:ser>"
+        "<c:axId val='1'/><c:axId val='2'/></c:scatterChart>"
+        "<c:valAx><c:axId val='1'/><c:axPos val='b'/><c:majorTickMark val='out'/>"
+        "<c:minorTickMark val='none'/></c:valAx>"
+        "<c:valAx><c:axId val='2'/><c:axPos val='l'/><c:majorTickMark val='out'/>"
+        "<c:minorTickMark val='none'/><c:crosses val='max'/></c:valAx>"
+        "</c:plotArea></c:chart>",
+        width=400.0,
+        height=250.0,
+    )[0]
+    across_x = _ticks(children, across="x")
+    assert across_x and _ticks(children, across="y")
+    # The y axis crosses at the maximum, so it stands at the right and ticks rightwards.
+    axis = max(
+        line.transform.offset_x for line in _rules(children) if line.transform.extent_width == 0
+    )
+    assert all(low == pytest.approx(axis / 12700, abs=1e-3) for _, low, _ in across_x)
+
+
+def test_a_tick_mark_element_with_no_val_is_cross_and_an_absent_one_is_nothing_yet():
+    """The parser keeps "absent" apart, because what it means depends on the producer."""
+    axis = chart(
+        bar(
+            _tick_values(),
+            "<c:catAx><c:axId val='1'/><c:majorTickMark/></c:catAx>",
+        )
+    ).axes[0]
+    assert (axis.major_tick_mark, axis.minor_tick_mark) == ("cross", None)
+
+
+@pytest.mark.parametrize(
+    "version,expected",
+    [
+        ("12.0000", True),
+        (" 12.0000 ", True),
+        ("14.0000", False),
+        ("16.0000", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_only_a_2007_app_version_is_read_as_office_2007(version, expected):
+    from pptx2svg.resolve.chart import written_by_office_2007
+
+    assert written_by_office_2007(version) is expected
+
+
+def test_office_2007_reads_a_missing_major_as_out_and_a_missing_minor_as_none():
+    from pptx2svg.resolve.chart import tick_marks
+
+    absent = chart(bar(_tick_values(), "<c:valAx><c:axId val='2'/></c:valAx>")).axes[0]
+    assert tick_marks(absent, office_2007=True) == ("out", "none")
+    assert tick_marks(absent, office_2007=False) == ("cross", "cross")
+    stated = chart(
+        bar(
+            _tick_values(),
+            "<c:valAx><c:axId val='2'/><c:majorTickMark val='in'/>"
+            "<c:minorTickMark val='cross'/></c:valAx>",
+        )
+    ).axes[0]
+    assert tick_marks(stated, office_2007=True) == ("in", "cross")
+
+
+def _office_2007_deck(authoring, *, version: str) -> bytes:
+    """``authoring-integration.pptx`` with its chart's tick marks taken out, written by
+    the PowerPoint that ``version`` names."""
+    from deckbuilder import derive_deck
+
+    source = zipfile.ZipFile(authoring)
+    chart_xml = source.read("ppt/charts/chart1.xml").decode()
+    chart_xml = re.sub(r"<c:(major|minor)TickMark val=\"none\"/>", "", chart_xml)
+    app = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/'
+        'extended-properties"><Application>Microsoft Office PowerPoint</Application>'
+        f"<AppVersion>{version}</AppVersion></Properties>"
+    )
+    return derive_deck(
+        authoring,
+        parts={"docProps/app.xml": app.encode(), "ppt/charts/chart1.xml": chart_xml.encode()},
+    )
+
+
+def _chart_strokes(presentation):
+    found = []
+
+    def walk(elements, inside):
+        for element in elements:
+            if isinstance(element, m.ChartElement):
+                walk(element.children, True)
+            elif isinstance(element, m.GroupElement):
+                walk(element.children, inside)
+            elif inside and isinstance(element, m.ConnectorElement):
+                found.append(element)
+
+    walk(presentation.slides[0].elements, False)
+    return found
+
+
+def _extent(line) -> float:
+    return max(line.transform.extent_width, line.transform.extent_height) / 12700
+
+
+def test_a_2007_deck_draws_out_ticks_and_grey_default_strokes(authoring):
+    """``tick-app-12``: a lone ``out`` tick, and every default stroke ``#898989``."""
+    deck = _office_2007_deck(authoring, version="12.0000")
+    strokes = _chart_strokes(convert_pptx_to_model(deck, ConvertOptions()))
+    assert {line.outline.fill.color.hex for line in strokes} == {"#898989"}
+    ticks = [line for line in strokes if _extent(line) < 20]
+    # `out` and nothing else: no tick is longer than a third of the ascent.
+    assert ticks and max(_extent(line) for line in ticks) < 4.0
+
+    deck = _office_2007_deck(authoring, version="16.0000")
+    new = convert_pptx_to_model(deck, ConvertOptions())
+    strokes = _chart_strokes(new)
+    assert {line.outline.fill.color.hex for line in strokes} == {"#000000"}
+    crossing = [line for line in strokes if _extent(line) < 20]
+    # Both sets, across the axis: the majors are twice the outside length.
+    assert len(crossing) > len(ticks)

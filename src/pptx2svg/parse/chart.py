@@ -261,6 +261,8 @@ class SourceChartAxis:
     log_base: float | None = None
     number_format: str | None = None
     number_format_source_linked: bool | None = None
+    #: ``c:majorTickMark`` / ``c:minorTickMark``: ``None`` when the element is absent, which
+    #: is not the same as an element with no ``val`` -- that one is the schema's ``cross``.
     major_tick_mark: str | None = None
     minor_tick_mark: str | None = None
     tick_label_position: str | None = None
@@ -695,8 +697,8 @@ def _axis(node: Element) -> SourceChartAxis:
         log_base=num_attr(child(scaling, "logBase"), "val"),
         number_format=attr(num_fmt, "formatCode"),
         number_format_source_linked=_bool_attr(num_fmt, "sourceLinked"),
-        major_tick_mark=attr(child(node, "majorTickMark"), "val"),
-        minor_tick_mark=attr(child(node, "minorTickMark"), "val"),
+        major_tick_mark=_tick_mark(child(node, "majorTickMark")),
+        minor_tick_mark=_tick_mark(child(node, "minorTickMark")),
         tick_label_position=attr(child(node, "tickLblPos"), "val"),
         major_gridlines=major_gridlines is not None,
         major_gridline_outline=parse_outline(child(major_gridlines, "spPr")),
@@ -936,6 +938,18 @@ def _cached_string(node: Element) -> str | None:
     if literal is not None:
         return "".join(literal.itertext())
     return None
+
+
+def _tick_mark(node: Element | None) -> str | None:
+    """A ``CT_TickMark``: its ``val``, the schema's ``cross`` when it has none, or ``None``.
+
+    ``None`` is kept for the *absent* element because what PowerPoint draws for that
+    depends on the application that wrote the deck, which the chart part cannot know;
+    see :data:`pptx2svg.resolve.chart.OFFICE_2007_TICK_MARKS`.
+    """
+    if node is None:
+        return None
+    return attr(node, "val") or "cross"
 
 
 # --------------------------------------------------------------------------------------

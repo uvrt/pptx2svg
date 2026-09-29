@@ -51,6 +51,7 @@ from .chart import (
     accent_colors,
     default_font_size,
     three_d_camera,
+    written_by_office_2007,
 )
 from .color import ColorContext, build_effective_color_map, resolve_color
 
@@ -1096,6 +1097,7 @@ def _chart_style(context: ResolveContext, source) -> ChartStyle:
         color=text_color,
         accents=accents,
         font_family_ea=minor_ea,
+        office_2007=written_by_office_2007(context.presentation.app_version),
     )
 
 

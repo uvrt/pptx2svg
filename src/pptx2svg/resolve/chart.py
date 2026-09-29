@@ -30,7 +30,8 @@ Three things that look like bugs and are not:
 
 * **The tick-mark allowance is reserved whether or not tick marks are drawn.**  A probe
   with ``majorTickMark="none"`` and one with ``"out"`` produced *byte-identical* plot
-  rectangles, so the space is part of the layout rather than part of the tick.
+  rectangles, so the space is part of the layout rather than part of the tick.  The
+  ticks themselves are drawn on top of that layout: see :meth:`ChartBuilder._draw_axis_ticks`.
 * **The default axis and gridline colour is black, not grey**, and the default width is
   0.5 pt.  Every probe drew ``0 0 0 SC`` at ``6350 w``.  Charts written by modern
   PowerPoint carry a ``c:style`` or a chart-style part that overrides this to grey; none
@@ -329,6 +330,57 @@ DEFAULT_CHART_FONT_PT = 10.0
 #: Axis, tick and gridline defaults when no ``c:spPr`` says otherwise.
 DEFAULT_AXIS_LINE_EMU = 6350.0
 DEFAULT_AXIS_COLOR = "#000000"
+
+#: **A major tick is a third of its axis label's ascent long, and a minor one a quarter.**
+#:
+#: Not a fixed length, and not a fraction of the em: measured on ``tick-length``, whose
+#: charts differ only in the label face and size, with every other stroke taken off the
+#: page so the ticks are the only short ones left.  Aptos gave 1.878, 2.503, 3.130,
+#: 4.382, 6.260 and 8.763 pt at 6, 8, 10, 14, 20 and 28 pt -- 0.3130 em at every size,
+#: which is Aptos' 0.939 em ascent over three -- and the faces then separate an ascent
+#: rule from an em one: Arial 3.019 pt at 10 pt (ascent 0.9053 / 3 = 3.018), Times New
+#: Roman 2.970 (0.8911 / 3 = 2.970), Courier New 2.775 (0.8325 / 3 = 2.775).  A lone
+#: minor tick measured 2.347 pt in 10 pt Aptos, three quarters of the major's 3.130.
+#:
+#: The text is the **axis' own**: giving the category axis 20 pt labels and the value
+#: axis 10 pt ones doubled the category ticks and left the value ones alone, and with
+#: ``tickLblPos="none"`` the ticks still follow the size the labels would have had.
+TICK_MAJOR_ASCENT = 1.0 / 3.0
+TICK_MINOR_ASCENT = 1.0 / 4.0
+
+#: What a missing ``c:majorTickMark`` or ``c:minorTickMark`` means -- or one with no
+#: ``val``.  ECMA-376's attribute default is ``cross`` and PowerPoint agrees for the
+#: element's absence as well: both spellings drew every major *and* every minor tick
+#: across the axis, where a stated ``none`` draws nothing.
+DEFAULT_TICK_MARK = "cross"
+
+#: **Unless the deck was written by PowerPoint 2007**, and then a missing
+#: ``c:majorTickMark`` is ``out`` and a missing ``c:minorTickMark`` is ``none``.
+#:
+#: ``real-college-template.pptx`` states ``majorTickMark="none"`` on its category axis and
+#: no ``c:minorTickMark``, and PowerPoint drew no tick there.  Its chart part copied into
+#: a probe deck drew the minor ticks across the axis, like every probe missing the
+#: element; carrying the deck's embedded workbook across changed nothing, and rewriting
+#: the probe deck's ``docProps/app.xml`` to say ``AppVersion`` 12.0000 changed
+#: everything.  ``tools/make_tick_probe.py``'s ``tick-app-*`` decks read the same eight
+#: charts under six producers: 12.0000, as ``Microsoft Office PowerPoint`` and as
+#: ``Microsoft Macintosh PowerPoint``, drew a lone ``out`` for a missing major and nothing
+#: for a missing minor; 14.0000 (both spellings), 15.0000, 16.0000 and a deck naming no
+#: version at all drew both across.
+OFFICE_2007_TICK_MARKS = ("out", "none")
+
+#: The axis, tick and gridline colour a 2007 deck gets where no ``c:spPr`` says -- grey,
+#: where every other producer's is :data:`DEFAULT_AXIS_COLOR`.  Read off the same
+#: ``tick-app-12`` probes: every default stroke on those pages came back ``#898989``, and
+#: the same pages under 14.0000 and later came back black.
+OFFICE_2007_AXIS_COLOR = "#898989"
+
+#: Minor ticks per major interval when ``c:minorUnit`` is not stated.  Measured: a 0..10
+#: axis by ones drew 51 minor ticks, one by threes (a 0..12 axis) drew 21.
+MINOR_TICKS_PER_MAJOR = 5
+
+#: The same guard as :data:`MAX_MAJOR_TICKS`, for a ``c:minorUnit`` a file can make tiny.
+MAX_MINOR_TICKS = 5000
 
 #: What a 3-D scene's **floor** is outlined with, where no black line covers it.
 #:
@@ -2197,6 +2249,9 @@ class ChartStyle:
     #: ``<a:font script="Jpan"/>`` beside it.  A chart's ``c:txPr`` almost never names an
     #: ``<a:ea>`` of its own, so this is what its Japanese text is drawn in.
     font_family_ea: str | None = None
+    #: Whether the deck was written by PowerPoint 2007, whose missing chart elements
+    #: PowerPoint reads with that version's defaults; see :func:`written_by_office_2007`.
+    office_2007: bool = False
 
 
 @dataclass
@@ -3450,9 +3505,15 @@ class ChartBuilder:
         filled = self._radar_style == "filled"
         if not filled:
             self._draw_radar_spokes(centre, radius, len(categories), value_axis)
+            self._draw_radar_ticks(
+                centre, radius, scale, len(categories), value_axis, value_font
+            )
         self._draw_radar_series(centre, radius, series, categories, scale)
         if filled:
             self._draw_radar_spokes(centre, radius, len(categories), value_axis)
+            self._draw_radar_ticks(
+                centre, radius, scale, len(categories), value_axis, value_font
+            )
         if _labels_shown(value_axis):
             self._draw_radar_value_labels(centre, radius, scale, value_axis, value_font)
         self._draw_radar_category_labels(centre, radius, labels, category_font)
@@ -3618,6 +3679,68 @@ class ChartBuilder:
         for index in range(count):
             x, y = self._radar_point(centre, index, count, radius)
             self._line(centre[0], centre[1], x, y, spoke)
+
+    def _draw_radar_ticks(
+        self,
+        centre: tuple[float, float],
+        radius: float,
+        scale: tuple[float, float, float],
+        count: int,
+        value_axis: c.SourceChartAxis | None,
+        font: ChartFont,
+    ) -> None:
+        """The value axis' ticks, repeated on **every spoke**, and the category axis' none.
+
+        Measured on ``tick-length``'s radars, each with one axis' ticks turned on: the
+        value axis' five ticks came back on all five spokes -- 25 strokes, at every major
+        value except the centre, which is the minimum -- and the category axis' ``out``
+        drew nothing at all.  Each tick stands across its spoke, and ``out`` is the side
+        the twelve o'clock spoke has on its left, turned with the spoke: 72 degrees round,
+        the tick ran up and to the left, 0.95 of it up.
+
+        **They do not need the spokes.**  A value axis with no ``c:spPr`` draws no spokes
+        (:meth:`_draw_radar_spokes`), and its ticks are still drawn, in the black 0.5 pt a
+        bar chart's axis gets; a deleted value axis draws none.  The length is the
+        straight axes' (:data:`TICK_MAJOR_ASCENT`).
+
+        **The web takes the major ticks' place.**  ``chart-gallery``'s radar says ``out``
+        and drew no tick, and ``tick-radar`` found why by taking its differences away one
+        at a time: six categories, a second series and the category axis' own ticks
+        changed nothing, and ``c:majorGridlines`` on the value axis removed every major
+        tick -- with or without a line of the axis' own -- while leaving the minor ones.
+        A Cartesian chart keeps its major ticks under gridlines (``chart-gallery`` slide
+        1), so this is the radar's alone.
+        """
+        if count <= 0 or value_axis is None or value_axis.delete:
+            return
+        outline = self._axis_outline(value_axis.outline)
+        if outline is None:
+            return
+        major, minor = tick_marks(value_axis, office_2007=self.style.office_2007)
+        if value_axis.major_gridlines:
+            major = "none"
+        ascent = font.box.ascent
+        for kind, length, values in (
+            (minor, ascent * TICK_MINOR_ASCENT, self._minor_tick_values(scale, value_axis)),
+            (major, ascent * TICK_MAJOR_ASCENT, self._tick_values(scale)),
+        ):
+            span = tick_span(kind, length, 1.0)
+            if span is None:
+                continue
+            low, high = span
+            for index in range(count):
+                dx, dy = self._radar_direction(index, count)
+                # The spoke's left-hand normal: (-1, 0) on the twelve o'clock spoke.
+                nx, ny = dy, -dx
+                for value in values:
+                    distance = self._radar_radius(radius, value, scale)
+                    if distance <= 1e-9:
+                        continue
+                    x = centre[0] + dx * distance
+                    y = centre[1] + dy * distance
+                    self._line(
+                        x + nx * low, y + ny * low, x + nx * high, y + ny * high, outline
+                    )
 
     def _draw_radar_series(
         self,
@@ -3899,8 +4022,31 @@ class ChartBuilder:
         for group, items in drawn:
             group._draw_marks(plot_rect, items, categories, scale_for(group))
         self._draw_axis_lines(plot_rect, scale, value_axis, category_axis)
+        self._draw_axis_ticks(
+            plot_rect,
+            scale,
+            value_axis,
+            category_axis,
+            len(categories),
+            value_font,
+            category_font,
+        )
         if secondary:
             self._draw_second_axis_line(plot_rect, second_axis)
+            if second_scale is not None and not self._is_three_d:
+                # Up the right edge, so `out` points right: measured on ``sec-out``.
+                majors, minors = self._value_tick_positions(
+                    plot_rect, second_scale, second_axis, False
+                )
+                self._draw_ticks(
+                    second_axis,
+                    self._label_font(second_axis),
+                    vertical=True,
+                    at=plot_rect.right,
+                    majors=majors,
+                    minors=minors,
+                    outward=1.0,
+                )
         self._draw_labels(
             plot_rect,
             scale,
@@ -4172,6 +4318,31 @@ class ChartBuilder:
         if x_axis is not None and not x_axis.delete:
             outline = self._axis_outline(x_axis.outline)
             self._line(rect.left, cross_y, rect.right, cross_y, outline)
+        # The ticks are a value axis' twice over, and `out` follows the axis rather than
+        # its labels: ``scat-neg`` drew both axes through the middle of the plot and still
+        # ticked left and down.  See :meth:`_draw_axis_ticks`.
+        if y_axis is not None:
+            majors, minors = self._value_tick_positions(rect, y_scale, y_axis, False)
+            self._draw_ticks(
+                y_axis,
+                y_font,
+                vertical=True,
+                at=cross_x,
+                majors=majors,
+                minors=minors,
+                outward=1.0 if y_axis.crosses == "max" else -1.0,
+            )
+        if x_axis is not None:
+            majors, minors = self._value_tick_positions(rect, x_scale, x_axis, True)
+            self._draw_ticks(
+                x_axis,
+                x_font,
+                vertical=False,
+                at=cross_y,
+                majors=majors,
+                minors=minors,
+                outward=-1.0 if x_axis.crosses == "max" else 1.0,
+            )
 
         if _labels_shown(y_axis):
             placed = [
@@ -7362,21 +7533,27 @@ class ChartBuilder:
         rect: _Rect,
         scale: tuple[float, float, float],
         axis: c.SourceChartAxis | None,
+        *,
+        labels: bool = True,
     ) -> float:
         """Where the category axis crosses the value axis, in frame coordinates.
 
         A ``y`` for a column chart and an ``x`` for a bar one -- it is a position *along*
         the value axis either way.  ``c:crosses="autoZero"`` -- the default and what every
         chart in the corpus says -- puts it at value zero, which is the plot's low edge
-        only while nothing is negative.  ``tickLblPos="low"`` pins it to the low end
-        regardless; that spelling appears in ``real-financial-report.pptx`` but only over
-        positive data, so its behaviour under a negative minimum is **implemented from the
-        schema and not measured**.
+        only while nothing is negative.
+
+        ``tickLblPos="low"`` moves the **labels** to the low end and leaves the **line**
+        where it was: ``tick-marks``' ``col-neg-low`` drew its category axis, and its
+        ticks, along the zero line of a -6..8 axis while the labels stood under the plot.
+        So the low end is the answer only for the labels, and ``labels=False`` asks for
+        the line.  That spelling appears in ``real-financial-report.pptx`` too, but only
+        over positive data, where the two are the same place.
         """
         horizontal = (self.plot.bar_direction or "col") == "bar"
         low, high = (rect.left, rect.right) if horizontal else (rect.bottom, rect.top)
 
-        if axis is not None and axis.tick_label_position == "low":
+        if labels and axis is not None and axis.tick_label_position == "low":
             return low
         crosses = axis.crosses if axis is not None else None
         if crosses == "max":
@@ -7405,7 +7582,7 @@ class ChartBuilder:
         # Measured on the horizontal probe: the value axis is the line along the bottom
         # and the category axis the one up the left.
         horizontal = (self.plot.bar_direction or "col") == "bar"
-        crossing = self._category_axis_position(rect, scale, category_axis)
+        crossing = self._category_axis_position(rect, scale, category_axis, labels=False)
 
         if value_axis is not None and not value_axis.delete:
             outline = self._axis_outline(value_axis.outline)
@@ -7421,6 +7598,191 @@ class ChartBuilder:
                 self._line(crossing, rect.top, crossing, rect.bottom, outline)
             else:
                 self._line(rect.left, crossing, rect.right, crossing, outline)
+
+    # -- tick marks ---------------------------------------------------------------------
+
+    def _draw_axis_ticks(
+        self,
+        rect: _Rect,
+        scale: tuple[float, float, float],
+        value_axis: c.SourceChartAxis | None,
+        category_axis: c.SourceChartAxis | None,
+        count: int,
+        value_font: ChartFont,
+        category_font: ChartFont,
+    ) -> None:
+        """Both primary axes' tick marks, on the lines :meth:`_draw_axis_lines` drew.
+
+        **``out`` is the side away from the plot, and a crossing axis keeps it.**  Measured
+        on ``tick-marks``: the value axis up the left edge ticks leftwards and the category
+        axis along the bottom ticks downwards; a category axis that has floated up to the
+        zero line of a chart with negative values still ticks *downwards*, and so does one
+        whose labels ``tickLblPos="low"`` sent to the plot's bottom edge; a horizontal bar
+        chart's category axis at zero still ticks to the left.  Only an axis moved to the
+        far side with ``c:crosses="max"`` turns round -- ``pos-catmax`` put the category
+        axis along the top and its ``out`` ticks pointed up, ``pos-bar-max`` the category
+        axis of a bar chart down the right and its ticks pointed right.
+
+        **Where they stand.**  A value axis ticks at every major unit, both ends included,
+        and at every minor unit from the minimum -- :meth:`_minor_tick_values`.  A
+        category axis ticks at every band edge, ``n + 1`` of them (or at the ``n``
+        category positions when the points sit on the ticks, ``crossBetween="midCat"`` on
+        a line or an area), and puts a minor tick half a step past each major one -- so
+        ``n + 1`` minor ticks too, the last pulled back onto the axis' far end.  That last
+        one is PowerPoint's: every ``between`` probe drew five band centres and a sixth
+        minor tick on the plot's right edge.  ``c:tickMarkSkip`` keeps every k-th major
+        tick counted from the first, and does not add the far end back: ``col-skip2``
+        ticked the edges of bands 0, 2 and 4 of five.  It thins the minor ticks with them
+        -- one per kept major, half the *skipped* interval past it, so ``skip-minor``
+        drew three, at band edges 1, 3 and 5.
+
+        **The stroke is the axis line's**: colour, width and dash (``col-color``,
+        ``col-dash``), and an axis whose line is ``a:noFill`` or ``c:delete``d draws no
+        ticks at all (``col-noline``, ``col-delval``).
+        """
+        if self._is_three_d:
+            # PowerPoint draws a 3-D chart's ticks in its own projection, and nothing
+            # here has measured them -- ``chart-gallery`` slide 16 is an ``area3DChart``
+            # this library draws flat, where flat ticks only added ink PowerPoint put
+            # elsewhere.  So a 3-D spelling draws none, scene or not.
+            return
+        horizontal = (self.plot.bar_direction or "col") == "bar"
+        crossing = self._category_axis_position(rect, scale, category_axis, labels=False)
+        if value_axis is not None:
+            majors, minors = self._value_tick_positions(rect, scale, value_axis, horizontal)
+            if horizontal:
+                at, outward = rect.bottom, 1.0
+            else:
+                at, outward = rect.left, -1.0
+            self._draw_ticks(
+                value_axis,
+                value_font,
+                vertical=not horizontal,
+                at=at,
+                majors=majors,
+                minors=minors,
+                outward=outward,
+            )
+        if category_axis is not None:
+            far = category_axis.crosses == "max"
+            if horizontal:
+                majors, minors = self._category_tick_positions(
+                    rect.bottom, rect.height, -1.0, count, category_axis
+                )
+                outward = 1.0 if far else -1.0
+            else:
+                majors, minors = self._category_tick_positions(
+                    rect.left, rect.width, 1.0, count, category_axis
+                )
+                outward = -1.0 if far else 1.0
+            self._draw_ticks(
+                category_axis,
+                category_font,
+                vertical=horizontal,
+                at=crossing,
+                majors=majors,
+                minors=minors,
+                outward=outward,
+            )
+
+    def _value_tick_positions(
+        self,
+        rect: _Rect,
+        scale: tuple[float, float, float],
+        axis: c.SourceChartAxis | None,
+        horizontal: bool,
+    ) -> tuple[list[float], list[float]]:
+        """Frame positions of one value axis' major and minor ticks, along the axis."""
+        to_position = self._value_to_x if horizontal else self._value_to_y
+        return (
+            [to_position(rect, value, scale) for value in self._tick_values(scale)],
+            [to_position(rect, value, scale) for value in self._minor_tick_values(scale, axis)],
+        )
+
+    def _minor_tick_values(
+        self, scale: tuple[float, float, float], axis: c.SourceChartAxis | None
+    ) -> list[float]:
+        """Every minor tick on a value axis, from the minimum up.
+
+        ``c:minorUnit`` when it is stated -- ``col-units`` asked for halves on an axis by
+        twos and got 21 ticks over 0..10 -- and a fifth of the major unit when it is not
+        (:data:`MINOR_TICKS_PER_MAJOR`).  Capped like the major list, for the same reason.
+        """
+        minimum, maximum, unit = scale
+        stated = axis.minor_unit if axis is not None else None
+        minor = stated if stated is not None and stated > 0 else unit / MINOR_TICKS_PER_MAJOR
+        span = maximum - minimum
+        if minor <= 0 or not math.isfinite(span) or not math.isfinite(minor):
+            return []
+        steps = span / minor
+        if not math.isfinite(steps) or steps <= 0 or steps > MAX_MINOR_TICKS:
+            return []
+        return [minimum + index * minor for index in range(int(math.floor(steps + 1e-9)) + 1)]
+
+    def _category_tick_positions(
+        self,
+        origin: float,
+        length: float,
+        sign: float,
+        count: int,
+        axis: c.SourceChartAxis | None,
+    ) -> tuple[list[float], list[float]]:
+        """Frame positions of a category axis' major and minor ticks.
+
+        ``origin`` is where category 0 starts and ``sign`` the way the categories run from
+        there: rightwards along a column chart's bottom, upwards along a bar chart's side.
+        See :meth:`_draw_axis_ticks` for the rule and its measurements.
+        """
+        if count <= 0 or length <= 0:
+            return [], []
+        if self._points_on_ticks:
+            step, ticks = length / max(count - 1, 1), count
+        else:
+            step, ticks = length / count, count + 1
+        skip = axis.tick_mark_skip if axis is not None and axis.tick_mark_skip else 1
+        skip = max(skip, 1)
+        kept = range(0, ticks, skip)
+        majors = [origin + sign * index * step for index in kept]
+        minors = [origin + sign * min((index + skip / 2) * step, length) for index in kept]
+        return majors, minors
+
+    def _draw_ticks(
+        self,
+        axis: c.SourceChartAxis | None,
+        font: ChartFont,
+        *,
+        vertical: bool,
+        at: float,
+        majors: list[float],
+        minors: list[float],
+        outward: float,
+    ) -> None:
+        """One straight axis' ticks: ``vertical`` for an axis running up the plot.
+
+        ``at`` is the axis line's own coordinate across it, the positions run along it,
+        and ``outward`` is the direction ``out`` points (see :func:`tick_span`).  The minor
+        ticks go down first, so a major tick at the same place is drawn over its minor one.
+        """
+        if axis is None or axis.delete:
+            return
+        outline = self._axis_outline(axis.outline)
+        if outline is None:
+            return
+        major, minor = tick_marks(axis, office_2007=self.style.office_2007)
+        ascent = font.box.ascent
+        for kind, length, positions in (
+            (minor, ascent * TICK_MINOR_ASCENT, minors),
+            (major, ascent * TICK_MAJOR_ASCENT, majors),
+        ):
+            span = tick_span(kind, length, outward)
+            if span is None:
+                continue
+            low, high = span
+            for position in positions:
+                if vertical:
+                    self._line(at + low, position, at + high, position, outline)
+                else:
+                    self._line(position, at + low, position, at + high, outline)
 
     def _draw_labels(
         self,
@@ -8381,9 +8743,10 @@ class ChartBuilder:
         resolved = self._resolve_outline(outline) if outline is not None else None
         if resolved is not None and resolved.fill is not None:
             return resolved
+        color = OFFICE_2007_AXIS_COLOR if self.style.office_2007 else DEFAULT_AXIS_COLOR
         return m.Outline(
             width=DEFAULT_AXIS_LINE_EMU,
-            fill=m.SolidFill(color=m.ResolvedColor(hex=DEFAULT_AXIS_COLOR)),
+            fill=m.SolidFill(color=m.ResolvedColor(hex=color)),
         )
 
     def _rect(
@@ -8619,6 +8982,58 @@ def _labels_shown(axis: c.SourceChartAxis | None) -> bool:
     if axis.delete:
         return False
     return (axis.tick_label_position or "nextTo") != "none"
+
+
+def written_by_office_2007(app_version: str | None) -> bool:
+    """Whether ``docProps/app.xml``'s ``AppVersion`` names PowerPoint 2007 (12.x).
+
+    Only the major version is asked: 12.0000 is what the corpus' 2007 deck says, and the
+    probes found the same behaviour under the Windows and the Mac application name.
+    """
+    if not app_version:
+        return False
+    return app_version.strip().split(".", 1)[0] == "12"
+
+
+def tick_marks(
+    axis: c.SourceChartAxis | None, *, office_2007: bool = False
+) -> tuple[str, str]:
+    """``(major, minor)`` tick marks for ``axis``: ``out``, ``in``, ``cross`` or ``none``.
+
+    An absent element means :data:`DEFAULT_TICK_MARK`, or the matching half of
+    :data:`OFFICE_2007_TICK_MARKS` for a 2007 deck; an element with no ``val`` has been
+    read as the schema's ``cross`` already, and anything outside the schema's four values
+    draws nothing.
+    """
+    defaults = OFFICE_2007_TICK_MARKS if office_2007 else (DEFAULT_TICK_MARK,) * 2
+    if axis is None:
+        return defaults
+
+    def kind(value: str | None, default: str) -> str:
+        if value is None:
+            return default
+        return value if value in ("out", "in", "cross") else "none"
+
+    return (
+        kind(axis.major_tick_mark, defaults[0]),
+        kind(axis.minor_tick_mark, defaults[1]),
+    )
+
+
+def tick_span(kind: str, length: float, outward: float) -> tuple[float, float] | None:
+    """Where one tick runs across its axis, as offsets from the axis line.
+
+    ``outward`` is +1 or -1: the direction, in frame coordinates, that ``out`` points.
+    ``in`` is the opposite side and ``cross`` both, a full ``length`` each way -- a
+    crossing tick is twice as long as an outside one, measured on every chart kind here.
+    """
+    if kind == "out":
+        return (0.0, outward * length)
+    if kind == "in":
+        return (0.0, -outward * length)
+    if kind == "cross":
+        return (-length, length)
+    return None
 
 
 #: ``c:symbol`` -> the preset geometry that draws it.  PowerPoint's marker shapes are
