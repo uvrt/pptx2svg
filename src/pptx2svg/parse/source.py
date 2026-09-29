@@ -523,3 +523,8 @@ class SourcePresentation:
     themes: dict[str, SourceTheme] = field(default_factory=dict)
     #: ``<p:embeddedFontLst>``, in document order.  Empty for the great majority of decks.
     embedded_fonts: list[SourceEmbeddedFont] = field(default_factory=list)
+    #: ``docProps/app.xml``'s ``AppVersion`` -- the version of the application that wrote
+    #: the deck, ``12.0000`` for Office 2007 -- or ``None`` when the deck does not say.
+    #: PowerPoint reads a chart's missing elements differently for a 2007 file; see
+    #: :data:`pptx2svg.resolve.chart.OFFICE_2007_TICK_MARKS`.
+    app_version: str | None = None

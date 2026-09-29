@@ -86,6 +86,7 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         default_text_style=parse_text_style(child(root, "defaultTextStyle")),
         table_styles=read_table_styles(package, presentation_path),
         embedded_fonts=read_embedded_fonts(root, presentation_path),
+        app_version=read_app_version(package),
     )
 
     entries = _slide_paths(package, presentation_path, root)
@@ -97,6 +98,31 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         _ensure_ancestry(package, presentation, slide)
 
     return presentation
+
+
+#: The package relationship that names ``docProps/app.xml``.
+REL_EXTENDED_PROPERTIES = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties"
+)
+
+
+def read_app_version(package: OpcPackage) -> str | None:
+    """``AppVersion`` from the deck's extended properties, or ``None``.
+
+    Found through the package's own relationship rather than by path, the way the
+    presentation part is; a missing, unreadable or silent part is simply no answer.
+    """
+    for rel in package.relationships("").values():
+        if rel.type != REL_EXTENDED_PROPERTIES or rel.target_part is None:
+            continue
+        try:
+            root = package.read_xml(rel.target_part)
+        except Exception:
+            return None
+        node = child(root, "AppVersion")
+        text = (node.text or "").strip() if node is not None else ""
+        return text or None
+    return None
 
 
 #: ``<p:embeddedFont>`` children -> the field on :class:`SourceEmbeddedFont` they fill.
