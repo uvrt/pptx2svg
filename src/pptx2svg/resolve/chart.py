@@ -8496,6 +8496,10 @@ class ChartBuilder:
                     offset_y=min(y0, y1) * EMU_PER_POINT,
                     extent_width=abs(x1 - x0) * EMU_PER_POINT,
                     extent_height=abs(y1 - y0) * EMU_PER_POINT,
+                    # The `line` preset runs top-left to bottom-right of its box, so a
+                    # segment rising to the right -- a radar spoke or tick -- needs the
+                    # box flipped to come out as itself rather than as its mirror image.
+                    flip_v=(x1 - x0) * (y1 - y0) < 0,
                 ),
                 geometry=m.PresetGeometry(preset="line"),
                 outline=outline,
