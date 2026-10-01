@@ -709,6 +709,42 @@ things it read as nothing before -- every `a:prstClr` name (it knew 27) and `sys
 `sysDashDotDot` -- which no deck here uses. Checked against `main` (d0e9044): the suite's
 counts, every VRT snapshot, the fidelity scores and every deck's SVG byte-identical.
 
+### Third step: charts, the shape tree and the text body renderer — **moved, on branch `chart-smartart`**
+
+docx2svg skipped every chart and SmartArt diagram in a Word document, and both are what
+this library already draws: a Word chart is the same `c:chartSpace` part, and a Word
+SmartArt frame names the same data part, whose cached `dsp:drawing` is the same shape tree.
+So what draws them moved to ooxml-common 0.4, whole files with their history:
+
+* **Charts**: `parse/chart.py` and `resolve/chart.py` are `ooxml_common.chart.{read,layout}`.
+  `DRAWABLE_CHART_KINDS` and `drawable_plots` moved from `resolve/view.py` beside the
+  layout. What the layout cannot know stays a parameter, as it was: `ChartStyle` (the
+  theme's faces, text colour and accent cycle) and `ChartBuilder`'s `resolve_fill`,
+  `resolve_outline`, `resolve_text` and `resolve_typeface`, which here are this library's
+  inheritance and in docx2svg are Word's.
+* **What a chart and a diagram are drawn with**: `render/{context,shape,text}.py` and
+  `text/wrap.py` are `ooxml_common.drawingml.{context,shape,textbody,wrap}`; `render/svg.py`'s
+  element and group drawing is `drawingml.elements`, and the slide -- its background and
+  size -- stays here. The scene types (`model.py`'s text, element, table and chart types)
+  are `drawingml.scene`, and the shape tree and text body source types with their readers
+  (`parse/{shapes,text}.py`) are `drawingml.{source_tree,read_tree,read_text}`.
+* **SmartArt's lookup**: the cached drawing keyed from the data part through the owner's
+  relationships, and its child transform, are `drawingml.diagram`, taking a package and
+  the owning part. Resolving the diagram's shapes stays here: it is this library's shape
+  resolver, with the placeholder and list-style inheritance a Word document does not have.
+* **Rules**: `RenderContext.rules` is the `DrawingRules` the shape and text renderers draw
+  under, and `ChartBuilder` takes `ChartRules`; `POWERPOINT` is both defaults, and no
+  Word field is assumed before it is measured.
+
+Each old path is the shared module (`pptx2svg.resolve.chart is ooxml_common.chart.layout`),
+`model.py` and `parse/source.py` re-export the moved classes, `render/svg.py` re-exports
+`render_element`, `render_group` and `swaps_group_axes`, and `resolve/view.py` still has
+`DRAWABLE_CHART_KINDS`. **Nothing changed from the outside**, checked against `main`
+(c2dbb2c): every SVG of 26 decks (182 slides), the suite's counts (2,605 passed, 44
+skipped) with every VRT snapshot, and `tools/fidelity.py --json`, byte-identical. One test
+changed, as last time: `test_the_renderer_reads_every_field_the_model_carries` reads the
+moved renderers' source.
+
 ---
 
 ## Fonts — **done**

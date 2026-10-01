@@ -30,26 +30,34 @@ import base64
 from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable, Sequence
 
+from ooxml_common.drawingml.diagram import (  # noqa: F401  (moved; re-exported)
+    DIAGRAM_DRAWING_REL_TYPES,
+    NO_CACHED_DRAWING,
+    diagram_child_transform,
+    diagram_drawing_part,
+)
+
 from .. import model as m
 from ..fonts.embedded import NO_EMBEDDED_FONTS, EmbeddedFonts
 from ..metafile import extract_metafile_preview
 from ..metafile.pdf import PdfRasterizerNotAvailable, rasterise_pdf
 from ..opc import OpcPackage
 from ..parse import source as s
-from ..parse.chart import flat_chart_kind, is_three_d_kind, parse_chart_space
-from ..parse.drawing import parse_group_transforms
+from ..parse.chart import is_three_d_kind, parse_chart_space
 from ..parse.shapes import parse_shape_tree
 from ..parse.table_styles_builtin import builtin_table_style
 from ..text.fontmap import east_asian_family
 from ..units import ROTATION_UNIT
-from ..xmlutil import attr, child, descendants
+from ..xmlutil import child
 from .chart import (
     CHART_TEXT_BODY,
+    DRAWABLE_CHART_KINDS,  # noqa: F401  (moved; re-exported)
     EMU_PER_POINT,
     ChartBuilder,
     ChartStyle,
     accent_colors,
     default_font_size,
+    drawable_plots,
     three_d_camera,
     written_by_office_2007,
 )
@@ -91,48 +99,6 @@ SUPPORTED_IMAGE_MIME_TYPES = frozenset(
 )
 
 METAFILE_MIME_TYPES = frozenset({"image/emf", "image/wmf", "image/x-emf", "image/x-wmf"})
-
-#: Relationship type from a SmartArt data-model part to its cached DrawingML rendering.
-#: Two spellings exist for the same relationship -- Microsoft's own and the ISO/IEC
-#: transitional one that ``purl.oclc.org`` hosts -- and which one appears depends on
-#: which Office version and which save format wrote the file, so both are accepted.
-#: Chart groups the renderer can draw.  Everything else warns and draws an empty frame
-#: rather than a wrong picture.
-DRAWABLE_CHART_KINDS = frozenset(
-    {
-        "barChart",
-        "lineChart",
-        "areaChart",
-        "scatterChart",
-        "bubbleChart",
-        "pieChart",
-        "doughnutChart",
-        "ofPieChart",
-        "radarChart",
-        "stockChart",
-        # Both spellings of the surface land here: `flat_chart_kind` maps
-        # `surface3DChart` to this one, and the two draw the identical picture.
-        "surfaceChart",
-    }
-)
-
-DIAGRAM_DRAWING_REL_TYPES = (
-    "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing",
-    "http://purl.oclc.org/ooxml/officeDocument/relationships/diagramDrawing",
-)
-
-#: Why a SmartArt frame can come out blank through no fault of the file.  PowerPoint
-#: caches a laid-out DrawingML copy of every diagram, and reading that cache is the whole
-#: of our SmartArt support: the layout algorithms in ``dgm:layoutDef`` are a diagram
-#: engine and a project in their own right.  Office 2007 did not always write the cache,
-#: and later versions sometimes write an empty one, so a perfectly valid deck can carry a
-#: diagram nothing here can draw.
-NO_CACHED_DRAWING = (
-    "has no cached DrawingML rendering.  PowerPoint caches a laid-out copy of every "
-    "diagram and that copy is what we draw; Office 2007 did not always write one.  "
-    "Laying the diagram out from its layout definition is not implemented, so the frame "
-    "is left empty"
-)
 
 #: A user-supplied EMF/WMF converter: ``(bytes, mime_type) -> (bytes, mime_type) | None``.
 #: Returning ``None`` means "I cannot convert this", and resolution falls through to the
@@ -935,7 +901,7 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
     if source is None:
         return give_up("chart-unreadable", f"has a chart part ({part}) with no c:chart in it")
 
-    plots = _drawable_plots(source)
+    plots = drawable_plots(source)
     if not plots:
         kinds = ", ".join(sorted({p.kind for p in source.plots})) or "nothing"
         return give_up(
@@ -1022,20 +988,6 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         children=children,
         alt_text=node.alt_text or node.name,
     )
-
-
-def _drawable_plots(source) -> list:
-    """Every plot group this renderer knows how to draw, in document order.
-
-    ``barChart``, ``lineChart``, ``areaChart``, ``pieChart``, ``doughnutChart``,
-    ``radarChart`` and the rest (and their 3-D spellings, drawn flat).  A chart holding
-    several of them is a **combo**, and whether they can be drawn together is
-    :meth:`~pptx2svg.resolve.chart.ChartBuilder._drawn_plots`' decision rather than this
-    one -- it needs the axes, which are the chart's and not the group's.  What this
-    guarantees is only that the *first* entry is drawable, so a chart whose first group
-    is one we do not draw still draws the second.
-    """
-    return [plot for plot in source.plots if flat_chart_kind(plot.kind) in DRAWABLE_CHART_KINDS]
 
 
 def _chart_context(context: ResolveContext, source, part: str) -> ResolveContext:
@@ -1150,7 +1102,8 @@ def _resolve_diagram(
     part is plain DrawingML, the same vocabulary as a slide's own shape tree, which is
     why this is forty lines and not a diagram engine.
 
-    Finding that part is the fiddly bit; see :func:`_diagram_drawing_part`.
+    Finding that part is the fiddly bit; see
+    :func:`~ooxml_common.drawingml.diagram.diagram_drawing_part`.
 
     Children are resolved with ``part_path`` pointed at the *drawing* part, because the
     pictures inside a diagram are related to it and not to the slide; resolving them
@@ -1171,7 +1124,7 @@ def _resolve_diagram(
             "diagram-unreadable", "points at a data-model part that is not in the package"
         )
 
-    drawing_part = _diagram_drawing_part(context, data_part)
+    drawing_part = diagram_drawing_part(context.package, context.part_path, data_part)
     if drawing_part is None:
         return give_up("diagram-no-cached-drawing", NO_CACHED_DRAWING)
 
@@ -1195,7 +1148,7 @@ def _resolve_diagram(
         )
 
     frame_transform = _resolve_transform(context, node.transform)
-    child_transform = _diagram_child_transform(sp_tree, frame_transform)
+    child_transform = diagram_child_transform(sp_tree, frame_transform)
 
     # PowerPoint writes `id="0" name=""` on *every* shape in a cached diagram drawing --
     # identity there is carried by `modelId`, not by the DrawingML id.  So the ids are
@@ -1229,96 +1182,6 @@ def _resolve_diagram(
         child_transform=child_transform,
         children=children,
         alt_text=node.alt_text or node.name,
-    )
-
-
-def _diagram_drawing_part(context: ResolveContext, data_part: str) -> str | None:
-    """Find the cached DrawingML rendering that belongs to one diagram.
-
-    This is not where the obvious reading of the schema puts it.  ``dgm:relIds`` on the
-    graphic frame names four parts -- data model, layout, quick style, colours -- and
-    conspicuously not the drawing, because the cached drawing was added to the format
-    after ``relIds`` was specified.  Microsoft keyed it through an extension instead::
-
-        slide rels --r:dm--------------> ppt/diagrams/data1.xml
-            data1.xml dgm:extLst/dsp:dataModelExt@relId = "rId6"
-                                                 |
-        slide rels --rId6 (diagramDrawing)-------+--> ppt/diagrams/drawing1.xml
-
-    So the relationship id is written in the *data* part but resolved against the
-    *slide's* relationships.  Every one of the 46 real PowerPoint decks checked that has
-    a cached drawing at all does it this way, and none of them has a
-    ``ppt/diagrams/_rels/data1.xml.rels`` for it to hang off.
-
-    Two fallbacks follow, in decreasing confidence:
-
-    * the data part's own relationships, which is what the ISO/transitional layout would
-      imply and what an independent producer might reasonably write;
-    * failing that, a diagram-drawing relationship on the owning part -- but only when
-      there is exactly one, since a slide with two SmartArt frames offers no way to tell
-      which drawing belongs to which frame without the ``relId`` above.
-    """
-    owner = context.part_path
-
-    relationship_id = _data_model_drawing_rel_id(context, data_part)
-    if relationship_id is not None:
-        target = context.package.related_part(owner, relationship_id)
-        if target is not None and context.package.has_part(target):
-            return target
-
-    for rel_type in DIAGRAM_DRAWING_REL_TYPES:
-        target = context.package.first_related_part(data_part, rel_type)
-        if target is not None and context.package.has_part(target):
-            return target
-
-    candidates = [
-        target
-        for rel_type in DIAGRAM_DRAWING_REL_TYPES
-        for target in context.package.related_parts_of_type(owner, rel_type)
-        if context.package.has_part(target)
-    ]
-    return candidates[0] if len(candidates) == 1 else None
-
-
-def _data_model_drawing_rel_id(context: ResolveContext, data_part: str) -> str | None:
-    """``dsp:dataModelExt@relId`` out of the data model part, if it carries one."""
-    try:
-        data_model = context.package.read_xml(data_part)
-    except Exception:
-        return None
-    if data_model is None:
-        return None
-    for node in descendants(data_model, "dataModelExt"):
-        relationship_id = attr(node, "relId")
-        if relationship_id:
-            return relationship_id
-    return None
-
-
-def _diagram_child_transform(sp_tree, frame: m.Transform) -> m.Transform:
-    """The coordinate space the cached diagram shapes were laid out in.
-
-    PowerPoint writes ``dsp:spTree/dsp:grpSpPr/a:xfrm`` with ``chOff``/``chExt`` matching
-    the graphic frame, so the normal group mapping scales the diagram into the frame.
-    When the ``xfrm`` is absent -- some writers omit it -- the shapes are in a space whose
-    origin is the frame's top-left and whose extent is the frame's, which is what this
-    falls back to.  Note that it is *not* ``replace(frame)``: a group with no ``chOff``
-    has children in absolute slide coordinates, whereas a diagram's are always relative
-    to its own origin.
-    """
-    _, inner = parse_group_transforms(child(sp_tree, "grpSpPr"))
-    if inner is None or not inner.width or not inner.height:
-        return m.Transform(
-            offset_x=0,
-            offset_y=0,
-            extent_width=frame.extent_width,
-            extent_height=frame.extent_height,
-        )
-    return m.Transform(
-        offset_x=inner.offset_x,
-        offset_y=inner.offset_y,
-        extent_width=inner.width,
-        extent_height=inner.height,
     )
 
 

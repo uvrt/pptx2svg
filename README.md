@@ -514,14 +514,17 @@ rather than races.
 
 The format-neutral half of this library -- the OPC reader, units, the font modules and
 the measured text metrics, and DrawingML: its value types, colour resolution, guides,
-preset geometry, patterns, and the fill, outline, effect and geometry renderers -- lives in
+preset geometry, patterns, and the fill, outline, effect and geometry renderers; the
+shape tree and text body readers, the shape, text body and group renderers, and the
+charts, read and laid out -- lives in
 [ooxml-common](https://github.com/uvrt/ooxml-common), extracted with its history so that
-docx2svg can measure text with the same tables and draw DrawingML with the same code. It
-is a runtime dependency with no dependencies of its own, and not on PyPI yet, so it is
-installed first. Every old import path (`pptx2svg.opc`, `pptx2svg.text.metrics`,
-`pptx2svg.fonts`, `pptx2svg.render.fill`, `pptx2svg.resolve.color`, ...) still works and
-returns the same module object, and every DrawingML type in `pptx2svg.model` is the shared
-class.
+docx2svg can measure text with the same tables and draw DrawingML, charts and SmartArt
+with the same code. It is a runtime dependency with no dependencies of its own, and not on
+PyPI yet, so it is installed first. Every old import path (`pptx2svg.opc`,
+`pptx2svg.text.metrics`, `pptx2svg.fonts`, `pptx2svg.render.fill`,
+`pptx2svg.resolve.color`, `pptx2svg.resolve.chart`, `pptx2svg.render.text`, ...) still
+works and returns the same module object, and every type in `pptx2svg.model` and
+`pptx2svg.parse.source` that moved is the shared class.
 
 `pptx2svg-fonts` is a sibling distribution in this repository and is not on PyPI yet, so
 it is installed from the checkout rather than named as a dependency.
