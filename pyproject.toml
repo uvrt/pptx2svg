@@ -41,8 +41,11 @@ classifiers = [
 # (parse/drawing.py and the DrawingML half of parse/source.py moved there).  0.3.2 carries
 # `geometry.text_area` and `DrawingRules.text_outline_inset`, which lay a shape's text out
 # in its geometry's text rectangle, and `icc` with `imagemeta.icc_profile`, which convert a
-# profiled picture to sRGB before it is rasterised.
-dependencies = ["ooxml-common>=0.3.2"]
+# profiled picture to sRGB before it is rasterised.  0.4 carries the chart reader and layout,
+# the shape tree and text body readers, and the shape, text body and group renderers
+# (parse/{chart,shapes,text}.py, resolve/chart.py, render/{context,shape,text}.py,
+# text/wrap.py and most of render/svg.py moved there).
+dependencies = ["ooxml-common>=0.4.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler
