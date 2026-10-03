@@ -34,13 +34,14 @@ Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the
 | **SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact (0.5 em Latin, 1.0 em ideographic); Noto Sans JP lacks about 8,200 of each face's ideographs and its Latin is proportional |
 | **BatangChe, GulimChe, DotumChe, GungsuhChe** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact, but **Noto Sans JP draws no Hangul at all** — supply a Korean face yourself — [escape hatches](#the-escape-hatches-and-their-trap) |
 | **Lucida Console, Lucida Sans Typewriter** | Measured at 0.602539 em, drawn with Cousine at 0.600098 | `approximate` | Nothing worth doing; each drawn line is 0.41% narrow |
+| **Consolas** | Measured at 0.549805 em, drawn with Cousine at 0.600098 | `approximate` | Install real Consolas; each drawn line is 9.1% wide. Measured because PowerPoint lays the line out at Consolas's pitch |
 | **Book Antiqua, Palatino Linotype, Century, Century Schoolbook, Century Gothic, Bookman Old Style, Monotype Corsiva, Arial Narrow, Symbol, Monotype Sorts, Comic Sans MS** | Widths guessed; drawn with the generic family | `missing` | A measured open clone exists but pptx2svg does not ship or map it — [tier 4](#4-a-clone-exists-but-is-not-bundled) |
 | **Anything else** — Gill Sans MT, Verdana, Segoe UI, Georgia, Garamond, Tahoma, Trebuchet MS, Wingdings, the Indic and Thai faces… | Widths guessed; drawn with the generic family | `missing` | [Embed the font in the deck](#1-the-deck-carries-it-best), or supply it yourself — [escape hatches](#the-escape-hatches-and-their-trap) |
 
 `exact` and `compatible` are faithful. `approximate` and `missing` are not, and
 `pptx2svg fonts --check` exits non-zero on them.
 
-Run `pptx2svg fonts` for the full table — 69 names, of which 20 grade faithful.
+Run `pptx2svg fonts` for the full table — 70 names, of which 20 grade faithful.
 
 ## The five ways a font gets drawn
 

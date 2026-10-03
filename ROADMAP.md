@@ -5193,14 +5193,13 @@ under a transform. All of them match PowerPoint already.
 
   The fixtures' 7 `p:bgRef` backgrounds now resolve rather than falling back to white;
   all are `bg1` on white, so nothing is drawn differently, and no fidelity score moved.
-  **What still differs is the colour engine, not the reference:** `ColorRules.POWERPOINT`
-  composes `tint` with `satMod` and clamps the saturation, and PowerPoint does neither --
-  `tint 95000 satMod 170000` on `#ED7D31` is `#FF7718` drawn against our `#FF833E`, and
-  `satMod 200000` on `#4472C4` is `#0460FF` against `#0961FF`. `ColorRules.WORD`'s
-  sequential, unbounded composition gives `#FF7818` and `#0460FF`, so PowerPoint looks
-  like it composes as Word does; changing that moves every deck and wants its own swatch
-  probe first. The 2007 theme's background path gradients (`fillToRect` outside the
-  shape) and its third effect style's bevel are drawn as approximations, as before.
+  **What still differed was the colour engine, not the reference:** `ColorRules.POWERPOINT`
+  composed `tint` with `satMod` and clamped the saturation, and PowerPoint does neither --
+  `satMod 200000` on `#4472C4` is `#0460FF` against our `#0961FF`, and `tint 95000 satMod
+  170000` on `#ED7D31` was read here as `#FF7718` against our `#FF833E` (a raster
+  reading: the swatch probe's exact one is `#FF7818`). **Measured and fixed in 5.6.** The
+  2007 theme's background path gradients (`fillToRect` outside the shape) and its third
+  effect style's bevel are drawn as approximations, as before.
 - **Bidi / RTL text** (L) — Arabic and Hebrew need reordering and shaping. Depends on 5.2's
   complex-script fonts. Large, and only matters for those scripts.
 
@@ -5355,6 +5354,119 @@ separate piece of work.
 `flipH` text probe drew unmirrored at its authored +45°; we emit `scale(-1, 1)` around the
 `<text>` and draw it at −135°. This is independent of groups — any flipped text box does it
 — and predates this work.
+
+### 5.6 Colour transforms, measured — **fixed** (ooxml-common 0.4.3)
+
+`ColorRules.POWERPOINT` was what pptx2svg had always done -- `lumMod` and `lumOff` paired
+in one pass wherever they stood, a level rounded after every transform, the saturation
+clamped at 1, and `satOff`, `hueMod`, `hueOff`, `comp`, `inv`, `gray`, `gamma`,
+`invGamma`, `alphaMod` and `alphaOff` not applied at all -- and none of it had been
+measured beyond the table-style swatches of Phase 1. `tools/make_color_probe.py` writes a
+deck of **3,108 swatches**: scheme and sRGB bases (and `a:scrgbClr`, `a:hslClr`,
+`a:prstClr`, `a:sysClr`) under every transform alone at ordinary and extreme values,
+chains in both orders where order could matter, the Office themes' own gradient stops,
+greys and the ends of the range, and 2,400 chains drawn at random from the values decks
+use. **PowerPoint writes a solid fill as a vector path with its colour as three numbers**,
+each a whole level over 255, and its opacity in the graphics state, so
+`tools/read_color_probe.py` reads the level drawn exactly -- no rasteriser, no
+antialiasing -- and resolves the same colour element through ooxml-common's reader.
+
+Under the old rules 1,507 of the 3,108 agreed to the level; under `ColorRules.WORD`'s
+composition, 2,902. What PowerPoint does, which `POWERPOINT` now does and draws **3,102**
+of them by:
+
+* **The transforms apply in document order**, each on the channels the last one left,
+  clamped to 0-1 between steps -- as Word does. `lumOff 40000` before `lumMod 60000` on
+  accent1 is `#517CC8`; paired it was `#8FAADC`.
+* **The colour is kept as linear-light channels in 1/100000** -- an `a:scrgbClr`'s
+  percentages -- from the base colour on and after every step, **except inside a run of
+  HLS transforms** (`lumMod`, `lumOff`, `satMod`, `satOff`, `hueMod`, `hueOff`, `comp`),
+  which stays on sRGB channels, each step still clamped, and is kept where the run ends.
+  That quantum and no other puts the half levels where PowerPoint puts them: 3,102
+  swatches agree, against 2,997 kept in 1/1000000, 2,990 in 1/65535, 2,899 in 1/10000 and
+  2,960 unrounded; keeping a level between two HLS steps as well costs 28. Black at
+  `lumOff 50000` is `#7F7F7F` this way -- 127.4997 levels -- and not by rounding a half
+  down, which is how Word's rules reach it.
+* **The saturation is unbounded above and below.** `satMod 200000` on `#4472C4` is
+  `#0460FF` (the HLS formula with a saturation over 1, each channel clamped; clamping the
+  saturation gave `#0961FF`), twice over is `#003EFF`, and `satOff -50000` on `#70AD47`
+  turns the hue over to `#7C7084` rather than stopping at the grey `#7A7A7A`.
+* **A grey given a saturation is red at hue 0, its blue channel extrapolated**: `satOff
+  25000` on `#808080` is `#A06000` -- red at the high level, green at the low one, blue at
+  `3 * low - 2 * high`, the HLS ramp evaluated a third of a turn back without wrapping.
+  The 42 swatches whose level depends on it all agree.
+* **`gray` weighs the sRGB channels by Rec. 709** (`#ED7D31` is `#8F8F8F`; Rec. 601 gives
+  `#969696`). Word's one `gray` swatch, `#4472C4`, is `#6E6E6E` under either weighting,
+  so `WORD` keeps the 601 it was written with.
+* **`gamma`** reads the channels as linear light and encodes them as sRGB (`#4472C4` is
+  `#8DB2E3`), **`invGamma`** the reverse (`#0F2B8D`); **`alphaMod`** multiplies the
+  opacity and **`alphaOff`** adds to it (drawn at 64/255 and 191/255). The reader now
+  keeps all four; `WORD`, whose probe had none of them, passes over them as before.
+* `a:scrgbClr` is linear light, `a:hslClr`, `a:prstClr` and `a:sysClr` resolve as before,
+  and `tint` / `shade` blend in linear light, as they already did.
+
+Six swatches are not reproduced. Two land within a few thousandths of a half level and are
+drawn a level the other way. Four are one base under one chain: `lumMod 200000` then
+`lumOff` on `#FFE699` is `#FFDFDF` (`#00FFFF` for `lumOff -50000`), where the seven other
+bases measured under it go white and then grey as the clamp says.
+
+**No corpus slide moved** -- not one byte of the SVG of any fixture, and so no fidelity
+score and no snapshot: every transform the corpus uses resolves to the same level under
+both rules. It is the theme style references of 5.3 (`satMod` over 1 on a gradient stop)
+and decks with `satOff`, hue, `gray` or `inv` transforms that draw differently now. `tests/test_color_transforms.py`
+holds 23 of the swatches through pptx2svg's own reader and resolver.
+
+### 5.7 A run after a change of face — **measured, and fixed** (ooxml-common 0.4.3)
+
+pptx-agent's outline drafting (its E6) drew `Revenue grew **12%** to *4,285*` and
+`- Operating margin `11.9%`` with the second run over the end of the first. The slide
+XML was right. Reproduced on its new-deck template (Aptos over 游ゴシック): both runs that
+overlapped were put at an **absolute `x`**, and both for a reason that did not hold.
+
+`tools/make_run_probe.py` puts two runs on a line in 43 ways -- Calibri then Calibri
+Italic, Bold, Consolas, Cambria; Arial and Aptos then Consolas; Consolas then Calibri;
+each with the space closing the first run, opening the second, absent, and tripled; at 12
+to 36 pt; in a bulleted and a centred paragraph -- and `tools/read_run_probe.py` reads the
+origin of the second run's first glyph off PowerPoint's PDF. **PowerPoint puts a run at
+the advance of the one before it, a trailing space included, in that run's own face, and a
+space that opens a run in the run's face.** Our measurer agreed to 0.2 pt on every face
+it has a table for. It had none for Consolas: a Consolas space was guessed at 7.2 pt at
+24 pt where PowerPoint advances 13.25, a Consolas run ending in three spaces came out
+21 pt short, and twelve Consolas letters 6.6 pt long.
+
+So the trailing space was measured in the right face; what went wrong is where the second
+run was *drawn*:
+
+1. **A Latin italic was sheared and lifted out of the line because its East Asian face
+   has no italic.** `_segment_tspans` asked whether *any* face in the run's chain lacked
+   an italic, and the Office theme's 游ゴシック does, so `*4,285*` in Aptos was drawn
+   upright under a `skewX` in a `<text>` of its own, at the `x` our tables end `to `
+   at. The face that draws a Latin run is its Latin face, which has an italic: it is now
+   asked for with `font-style`, in the flow, as PowerPoint draws it.
+2. **A change of face started a new text chunk at an absolute `x`.** That rule exists for
+   resvg, which redraws a whole chunk in its default face when a character in it is one
+   the requested family cannot cover -- a kana in a Calibri chunk. A Latin run in another
+   face is not that: every stack ends in a generic family that draws Latin, and a chunk
+   of Calibri then Consolas draws each run in its own face. Starting a chunk there put
+   the next run where our tables end the last one, and a rasteriser drawing that one in a
+   wider face -- pptx-agent renders without the font bundle, so Aptos fell back to a
+   system face -- drew it into the next. Now only a run that is not plain Latin (East
+   Asian text, anything outside Latin, punctuation and currency) opens a chunk; Latin runs
+   flow on in whatever face draws them, which is PowerPoint's rule in that face.
+3. **Consolas is measured**, at its own 1126/2048 em on every character (a fixed-pitch
+   table of two constants, like the Lucidas'), and drawn with Cousine where Consolas is
+   not installed -- 9.1% wide there, and graded `approximate`.
+
+With the three, 39 of the 43 probes agree to 0.5 pt; the four that do not are Consolas
+first runs, which PowerPoint advances at 13.25 pt a character at 24 pt where the face
+says 13.195 -- 0.7 pt over thirteen. Holding every chunk to its measured width with
+`textLength` was tried first and rejected: it stops the overlap whatever face draws the
+text, but it overrides the real advances inside a chunk with our tables, and
+`sample-issue-387` slide 1 fell from SSIM 0.9908 to 0.9767 under it.
+
+**No corpus slide moved**: no fixture changes face inside Latin text, and every run the
+corpus shears is in a face with no italic of its own. `tests/test_render.py` holds the probe's
+advances, the flowing chunk and the italic in its own face.
 
 ---
 

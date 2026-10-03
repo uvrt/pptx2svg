@@ -45,8 +45,10 @@ classifiers = [
 # the shape tree and text body readers, and the shape, text body and group renderers
 # (parse/{chart,shapes,text}.py, resolve/chart.py, render/{context,shape,text}.py,
 # text/wrap.py and most of render/svg.py moved there).  0.4.2 keeps the font collection
-# an `a:fontRef` names, which a shape's text takes its face from.
-dependencies = ["ooxml-common>=0.4.2"]
+# an `a:fontRef` names, which a shape's text takes its face from.  0.4.3 composes colour
+# transforms as PowerPoint does, flows a Latin run on across a change of face, and
+# measures Consolas (ROADMAP.md, 5.6 and 5.7).
+dependencies = ["ooxml-common>=0.4.3"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

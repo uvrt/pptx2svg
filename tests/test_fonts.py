@@ -301,6 +301,9 @@ def test_a_deck_naming_a_bundled_face_lays_out_from_its_own_widths(authoring):
 #: exists, but that none is *needed*.  Their advance table is two constants -- half an em
 #: and a full em -- so measuring them properly costs nothing at all, while what we draw
 #: them with stays a compromise (Noto Sans JP for the CJK ones, Cousine for the Lucidas).
+#: Consolas joined them the same way, when PowerPoint was measured laying a line out with
+#: its 0.549805 em pitch (pptx2svg's ``tools/make_run_probe.py``); Cousine draws it 9.1%
+#: wide.
 DIVERGENT = {
     "Aptos", "Aptos Display", "Aptos Narrow", "Cambria",
     "MS Gothic", "MS ゴシック", "MS PGothic", "MS Pゴシック",
@@ -310,7 +313,7 @@ DIVERGENT = {
     "MingLiU", "細明體", "MingLiU_HKSCS", "細明體_HKSCS",
     "BatangChe", "바탕체", "GulimChe", "굴림체",
     "DotumChe", "돋움체", "GungsuhChe", "궁서체",
-    "Lucida Console", "Lucida Sans Typewriter",
+    "Lucida Console", "Lucida Sans Typewriter", "Consolas",
 }
 
 #: Tables with no font behind them.  See the note on :data:`DIVERGENT`.
@@ -320,7 +323,7 @@ MEASURED_ONLY = {
     "SimSun", "NSimSun", "SimHei", "KaiTi", "FangSong",
     "MingLiU", "MingLiU_HKSCS",
     "BatangChe", "GulimChe", "DotumChe", "GungsuhChe",
-    "Lucida Console", "Lucida Sans Typewriter",
+    "Lucida Console", "Lucida Sans Typewriter", "Consolas",
 }
 
 
@@ -399,8 +402,8 @@ def test_an_unmeasured_line_gap_lays_out_exactly_as_no_gap():
 
 #: The thirteen tables that cost the wheel nothing: ``(key, units_per_em, half, full)``.
 #: Measured from the faces Office installs; ``tools/extract_font_metrics.py`` re-derives
-#: and re-verifies them, and this is the shape of the result.  The two Lucidas are
-#: Latin-only, so their "full" column is the ``units_per_em`` non-answer the extractor
+#: and re-verifies them, and this is the shape of the result.  The two Lucidas and
+#: Consolas are Latin-only, so their "full" column is the ``units_per_em`` non-answer the extractor
 #: writes for a face with no glyph for its probe kanji.
 FIXED_PITCH = {
     "ＭＳ ゴシック": (256, 128, 256),
@@ -418,6 +421,7 @@ FIXED_PITCH = {
     "GungsuhChe": (1024, 512, 1024),
     "Lucida Console": (2048, 1234, 2048),
     "Lucida Sans Typewriter": (2048, 1234, 2048),
+    "Consolas": (2048, 1126, 2048),
 }
 
 
@@ -477,6 +481,15 @@ def test_the_lucidas_are_measured_at_their_own_pitch_and_drawn_at_cousines():
         drawn = measurer.measure_text_width("MMMMM", 100.0, font_family="Cousine")
         assert measured / (5 * 100.0 * PX_PER_PT) == pytest.approx(0.602539, abs=1e-5)
         assert measured / drawn == pytest.approx(1.0041, abs=1e-4), family
+
+
+def test_consolas_is_measured_at_its_own_pitch_and_drawn_at_cousines():
+    """0.549805 em measured, as PowerPoint lays it out; 0.600098 em drawn by Cousine."""
+    measurer = DefaultTextMeasurer()
+    measured = measurer.measure_text_width("MMMMM", 100.0, font_family="Consolas")
+    drawn = measurer.measure_text_width("MMMMM", 100.0, font_family="Cousine")
+    assert measured / (5 * 100.0 * PX_PER_PT) == pytest.approx(0.549805, abs=1e-5)
+    assert drawn / measured == pytest.approx(1.0915, abs=1e-4)
 
 
 def test_the_fixed_pitch_families_grade_approximate_and_say_why():

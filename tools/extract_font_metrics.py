@@ -597,8 +597,9 @@ LINE_GAP_SOURCES = {
 #:     BatangChe, GulimChe, DotumChe, GungsuhChe       (1024, 512, 1024)
 #:     ＭＳ ゴシック, ＭＳ 明朝                         (256, 128, 256)
 #:     Lucida Console, Lucida Sans Typewriter          (2048, 1234, --)
+#:     Consolas                                        (2048, 1126, --)
 #:
-#: The two Lucidas are Latin-only -- no kana, no ideographs -- so their ``cjk_width`` is
+#: The two Lucidas and Consolas are Latin-only -- no kana, no ideographs -- so their ``cjk_width`` is
 #: the ``units_per_em`` non-answer :func:`_widths` writes for a face with no glyph for the
 #: probe kanji, and only their half-width column means anything.
 #:
@@ -611,6 +612,7 @@ FIXED_PITCH = frozenset(
         "MingLiU", "MingLiU_HKSCS",
         "BatangChe", "GulimChe", "DotumChe", "GungsuhChe",
         "Lucida Console", "Lucida Sans Typewriter",
+        "Consolas",
     }
 )
 
@@ -671,11 +673,14 @@ def verify_fixed_pitch(key: str, face: dict) -> None:
 #: MS PGothic and MS Mincho (they are embedded in its PDF export), and we to the same
 #: family, which Office installs.  We drew the right outlines and measured them with
 #: Noto Sans JP's widths, because the table had no entry for the face we were drawing.
-#: The thirteen after the Japanese four are the cheapest entries on this page: their
-#: advance table is two constants, so they add thirteen family names to what we can
+#: The fourteen after the Japanese four are the cheapest entries on this page: their
+#: advance table is two constants, so they add fourteen family names to what we can
 #: measure without adding a byte to any wheel.  Eleven are the fixed-pitch CJK faces --
 #: the ``Che`` suffix on the Korean ones and the ``N`` on ``NSimSun`` *mean* fixed-pitch,
-#: and MingLiU and SimSun are fixed-pitch outright -- and two are Latin monospace.  See
+#: and MingLiU and SimSun are fixed-pitch outright -- and three are Latin monospace:
+#: Consolas, Office's code face, joined them when ``tools/make_run_probe.py`` found
+#: PowerPoint putting the run after a Consolas space 13.25 pt on at 24 pt, where the
+#: heuristic for a face with no table gave 7.2.  See
 #: :data:`FIXED_PITCH` for the measurements and ``text/fontmap.py`` for what each is drawn
 #: with, which is a separate and less happy question.
 MEASURED_ONLY = (
@@ -699,6 +704,7 @@ MEASURED_ONLY = (
     "GungsuhChe",
     "Lucida Console",
     "Lucida Sans Typewriter",
+    "Consolas",
 )
 
 
@@ -895,6 +901,7 @@ NOTES = {
     "GungsuhChe": "MEASURED ONLY -- fixed pitch 512/1024 of 1024; 65 full-width Latin rows",
     "Lucida Console": "MEASURED ONLY -- monospace 1234/2048 = 0.6025 em; no CJK at all",
     "Lucida Sans Typewriter": "MEASURED ONLY -- monospace 1234/2048, the same pitch",
+    "Consolas": "MEASURED ONLY -- monospace 1126/2048 = 0.5498 em; no CJK at all",
 }
 
 
@@ -1125,6 +1132,15 @@ def splice(text: str, block: str, begin: str = BEGIN, end: str = END) -> str:
     return text[:start] + "\n\n" + block + "\n\n" + text[stop:]
 
 
+def _shown(target: Path) -> Path:
+    """``target`` relative to this checkout where it is inside it: the tables live in
+    ooxml-common, which is usually a sibling checkout or a worktree elsewhere."""
+    try:
+        return target.relative_to(ROOT)
+    except ValueError:
+        return target
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
@@ -1154,9 +1170,9 @@ def main() -> int:
             continue
         if args.write:
             target.write_text(updated, encoding="utf-8")
-            print(f"wrote {target.relative_to(ROOT)}")
+            print(f"wrote {_shown(target)}")
         else:
-            stale.append(target.relative_to(ROOT))
+            stale.append(_shown(target))
 
     if args.write:
         return 0

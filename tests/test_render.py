@@ -1229,6 +1229,86 @@ def test_italic_is_left_to_the_font_when_the_font_has_one():
     assert "skewX" not in svg
 
 
+def test_a_change_of_face_in_latin_text_flows_on():
+    """``- Operating margin `11.9%```, the code run in Consolas: one chunk, no ``x``.
+
+    PowerPoint puts a run at the advance of the run before it, its trailing space
+    included, in that run's own face (``tools/make_run_probe.py``).  An absolute ``x``
+    put it where *our* tables end the run before, and a rasteriser drawing that run in a
+    wider face -- a substitute, or a host without the font -- drew it into the next one.
+    Flowing, the next run starts wherever the face that drew the last one ends it.
+    """
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun("Operating margin ", m.RunProperties(font_size=18, font_family="Aptos")),
+                    m.TextRun("11.9%", m.RunProperties(font_size=18, font_family="Consolas")),
+                    m.TextRun(" and more", m.RunProperties(font_size=18, font_family="Aptos")),
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body)
+    tspans = re.findall(r"<tspan([^>]*)>([^<]*)</tspan>", svg)
+    assert [text for _attrs, text in tspans] == ["Operating margin ", "11.9%", " and more"]
+    assert [attrs.count('x="') for attrs, _text in tspans] == [1, 0, 0]
+    assert "Consolas" in tspans[1][0]
+
+
+def test_a_latin_italic_is_drawn_in_its_own_face_whatever_the_east_asian_face_lacks():
+    """``Revenue grew **12%** to *4,285*`` under the Office theme, whose East Asian face
+    (游ゴシック) has no italic: the Latin run is drawn in Aptos's italic, in the line.
+
+    It used to be sheared upright and lifted out into a ``<text>`` of its own at our
+    measured ``x`` -- because *some* face in its chain had no italic, not the face that
+    draws it -- and drawn over the end of ``to `` wherever that came out wider.
+    """
+    body = m.TextBody(
+        paragraphs=[
+            m.Paragraph(
+                runs=[
+                    m.TextRun("Revenue grew to ", m.RunProperties(
+                        font_size=18, font_family="Aptos", font_family_ea="游ゴシック")),
+                    m.TextRun("4,285", m.RunProperties(
+                        font_size=18, italic=True, font_family="Aptos",
+                        font_family_ea="游ゴシック")),
+                ]
+            )
+        ]
+    )
+    svg = text_svg(body)
+    assert "skewX" not in svg
+    tspans = re.findall(r"<tspan([^>]*)>([^<]*)</tspan>", svg)
+    assert tspans[-1][1] == "4,285"
+    assert 'font-style="italic"' in tspans[-1][0]
+    assert 'x="' not in tspans[-1][0]
+
+
+#: (first run and its face, second run and its face, the second run's start in pt from
+#: the first's, as PowerPoint 16 drew it at 24 pt): ``tools/make_run_probe.py``'s
+#: ``pair-*``, ``lead-*`` and ``spaces-*`` probes, read by ``tools/read_run_probe.py``.
+RUN_ADVANCES = [
+    (("Revenue grew ", "Calibri"), ("12%", "Consolas"), 143.43),
+    (("Revenue grew", "Calibri"), (" 12%", "Consolas"), 151.30),
+    (("Revenue grew ", "Aptos"), ("12%", "Consolas"), 148.51),
+    (("Operating margin   ", "Arial"), ("11.9%", "Consolas"), 205.50),
+    (("Revenue grew", "Calibri"), (" 12%", "Cambria"), 143.30),
+]
+
+
+@pytest.mark.parametrize("first, second, drawn", RUN_ADVANCES)
+def test_a_run_starts_at_the_advance_of_the_run_before_it(first, second, drawn):
+    """The space between two runs is measured in the face of the run it belongs to: a
+    trailing one in the first run's, a leading one in the second's -- 13.25 pt in
+    Consolas at 24 pt, which had no table and was guessed at 7.2."""
+    measurer = DefaultTextMeasurer()
+    advance = measurer.measure_text_width(first[0], 24, False, first[1], None)
+    if second[0].startswith(" "):
+        advance += measurer.measure_text_width(" ", 24, False, second[1], None)
+    assert advance * 72 / 96 == pytest.approx(drawn, abs=0.5)
+
+
 def _line_dys(svg: str) -> list[float]:
     """Every ``dy`` in the main ``<text>``, in document order."""
     body = re.search(r"<text [^>]*>(.*?)</text>", svg, re.S).group(1)
