@@ -402,6 +402,9 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
                 master_shape.text_body if master_shape else None,
             ],
             placeholder_type=placeholder_type,
+            extra_defaults=(
+                _font_reference_defaults(shape.style) if placeholder_type is None else None
+            ),
         )
 
     return m.ShapeElement(
@@ -422,6 +425,30 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
         alt_text=shape.alt_text or shape.name,
         hyperlink=_resolve_hyperlink(context, shape.hyperlink_rel_id),
     )
+
+
+def _font_reference_defaults(style: s.SourceShapeStyle | None) -> s.SourceRunProperties | None:
+    """A shape's ``a:fontRef`` as the run defaults it stands for: its colour and the face
+    of the theme font collection it names.
+
+    Measured (``tools/make_style_probe.py``, ``font-*``): they sit where a table style's
+    ``a:tcTxStyle`` does -- over the master's ``p:otherStyle``, which says ``tx1`` and
+    ``+mn-lt``, and under the shape's own ``a:lstStyle`` and its runs.  So a default shape's
+    ``fontRef idx="minor"`` over ``lt1`` inks its text white, ``idx="major"`` draws it in
+    the theme's heading face (Calibri Light, where ``otherStyle`` alone gives Calibri),
+    ``idx="none"`` keeps the face and still gives the colour, and a reference with no
+    colour leaves the colour to ``otherStyle``.
+
+    Only for a shape that is not a placeholder: where a placeholder's ``fontRef`` would sit
+    against its ``titleStyle`` or ``bodyStyle`` has not been measured.
+    """
+    ref = style.font_ref if style is not None else None
+    if ref is None:
+        return None
+    typeface = {"major": "+mj-lt", "minor": "+mn-lt"}.get(ref.collection or "")
+    if ref.color is None and typeface is None:
+        return None
+    return s.SourceRunProperties(color=ref.color, typeface=typeface)
 
 
 def _resolve_connector(context: ResolveContext, connector: s.SourceConnector) -> m.ConnectorElement:

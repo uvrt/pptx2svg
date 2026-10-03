@@ -88,6 +88,7 @@ def test_a_default_shape_is_filled_and_inked_from_its_style():
     )["default"]
     assert isinstance(shape.fill, m.SolidFill)
     assert shape.fill.color.hex == "#4472c4"
+    assert run_of(shape).color.hex == "#ffffff"
     assert shape.outline.width == 12700
     assert near(shape.outline.fill.color.hex, "#172b51")
     assert shape.effects is None
@@ -184,3 +185,31 @@ def test_effect_references_count_from_one(source, shadowed):
         and shapes[f"e{idx}"].effects.outer_shadow is not None
     }
     assert drawn == shadowed
+
+
+def test_the_font_reference_sits_over_the_masters_other_style():
+    """``font-*``: the reference's colour and collection beat ``p:otherStyle`` (``tx1``,
+    ``+mn-lt``); the shape's ``lstStyle`` and its runs beat the reference."""
+    shapes = resolve_shapes(
+        THEME_2013,
+        major=styled(fill=(0, clr("accent1")), font=("major", clr("accent2"))),
+        no_colour=styled(fill=(0, clr("accent1")), font=("minor", "")),
+        no_face=styled(fill=(0, clr("accent1")), font=("none", clr("accent2"))),
+        modified=styled(fill=(0, clr("accent1")), font=("minor", clr("accent1", lumMod=50000))),
+        run=styled(font=("minor", clr("accent2")),
+                   run="<a:solidFill><a:srgbClr val='00B050'/></a:solidFill>"),
+        list_style=styled(
+            font=("minor", clr("accent2")),
+            list_style="<a:lstStyle><a:lvl1pPr><a:defRPr><a:solidFill>"
+            "<a:srgbClr val='7030A0'/></a:solidFill></a:defRPr></a:lvl1pPr></a:lstStyle>",
+        ),
+    )
+    assert run_of(shapes["major"]).color.hex == "#ed7d31"
+    assert run_of(shapes["major"]).font_family == "Calibri Light"
+    assert run_of(shapes["no_colour"]).color.hex == "#000000"
+    assert run_of(shapes["no_colour"]).font_family == "Calibri"
+    assert run_of(shapes["no_face"]).color.hex == "#ed7d31"
+    assert run_of(shapes["no_face"]).font_family == "Calibri"
+    assert near(run_of(shapes["modified"]).color.hex, "#203864")
+    assert run_of(shapes["run"]).color.hex == "#00b050"
+    assert run_of(shapes["list_style"]).color.hex == "#7030a0"
