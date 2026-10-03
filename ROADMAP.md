@@ -5159,10 +5159,48 @@ under a transform. All of them match PowerPoint already.
   opacity gradient. **[pptx-renderer]** does not attempt these either.
 - **Text-to-path** (M) — glyphs as `<path>` via fontTools, making output font-independent.
   `FontToolsTextMeasurer` already loads the faces.
-- **Gradient stop overrides** (S) — known approximation: `resolve/view.py:_blend_stop`
-  replaces every theme gradient stop with the `a:fillRef` override instead of re-deriving
-  each stop's own tint/shade against it, so such gradients render flat. Fix by keeping stop
-  colours unresolved in the format scheme until the override is known.
+- ~~**Gradient stop overrides**~~ — **done, and it was a bigger hole than it said.** The
+  entry read: `_blend_stop` replaces every theme gradient stop with the `a:fillRef`
+  override instead of re-deriving each stop's own tint/shade against it. `_blend_stop`
+  was never reached. The format scheme writes every colour as `a:schemeClr val="phClr"`,
+  which is no colour of the theme's, so each entry resolved to *nothing* before the
+  override could be applied: **every shape filled only by its `p:style` was drawn
+  unfilled**, which is every shape PowerPoint inserts with default formatting, and its
+  `a:fontRef` colour was never read, so its text was black where PowerPoint draws it
+  white. The corpus hid it: of its decks only `real-college-template` slide 3 has a
+  `p:style` at all, on a shape whose `a:spPr` states its own fill. Measured on
+  `tools/make_style_probe.py` (41 probes on the 2013 and on the 2007 Office theme,
+  exported by PowerPoint 16, read by `tools/read_style_probe.py`; 3 of 41 and 0 of 41
+  agreed before, 35 and 34 after):
+  * `phClr` is the reference's colour **with its modifiers**, and the entry's own
+    modifiers then apply to it: `fillRef idx="2"` over `accent2` + `shade 50000` is three
+    stops, each derived from the shaded orange. An `alpha` on the reference carries
+    through. The same holds for `a:lnRef` (the 2007 theme's first line style shades its
+    placeholder once more: `#BE4B48` for accent2, not `#C0504D`) and `a:effectRef`.
+  * `fillRef` 1-3 name `a:fillStyleLst`, 1001-1003 `a:bgFillStyleLst`; 0 and 1000 are no
+    fill. **`effectRef` counts from 1 too**: `idx="0"` is no effect. It was read from 0,
+    which put the first effect style's shadow under every default shape on a 2007 theme.
+  * `a:fontRef` gives the colour and the collection's face (`major` draws Calibri Light
+    where `p:otherStyle` alone gives Calibri; `none` keeps the face and still gives the
+    colour; no colour leaves it to `otherStyle`). It sits over the master's
+    `p:otherStyle`, under the shape's `a:lstStyle` and its runs -- where a table style's
+    `a:tcTxStyle` sits. ooxml-common 0.4.2 keeps the collection, which it used to read as
+    the number 0.
+  * A local `a:ln` overrides the referenced line attribute by attribute: one that names
+    only a colour keeps the reference's width (2 pt under the 2007 theme's `idx="2"`, not
+    the 0.75 pt default), and a local `a:noFill` turns the outline off -- it used to
+    bring the theme's line back.
+
+  The fixtures' 7 `p:bgRef` backgrounds now resolve rather than falling back to white;
+  all are `bg1` on white, so nothing is drawn differently, and no fidelity score moved.
+  **What still differs is the colour engine, not the reference:** `ColorRules.POWERPOINT`
+  composes `tint` with `satMod` and clamps the saturation, and PowerPoint does neither --
+  `tint 95000 satMod 170000` on `#ED7D31` is `#FF7718` drawn against our `#FF833E`, and
+  `satMod 200000` on `#4472C4` is `#0460FF` against `#0961FF`. `ColorRules.WORD`'s
+  sequential, unbounded composition gives `#FF7818` and `#0460FF`, so PowerPoint looks
+  like it composes as Word does; changing that moves every deck and wants its own swatch
+  probe first. The 2007 theme's background path gradients (`fillToRect` outside the
+  shape) and its third effect style's bevel are drawn as approximations, as before.
 - **Bidi / RTL text** (L) — Arabic and Hebrew need reordering and shaping. Depends on 5.2's
   complex-script fonts. Large, and only matters for those scripts.
 

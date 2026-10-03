@@ -61,7 +61,7 @@ from .chart import (
     three_d_camera,
     written_by_office_2007,
 )
-from .color import ColorContext, build_effective_color_map, resolve_color
+from .color import ColorContext, apply_transforms, build_effective_color_map, resolve_color
 
 #: Placeholder types that inherit from the master's ``body`` placeholder.
 BODY_PLACEHOLDER_TYPES = frozenset(
@@ -402,6 +402,9 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
                 master_shape.text_body if master_shape else None,
             ],
             placeholder_type=placeholder_type,
+            extra_defaults=(
+                _font_reference_defaults(shape.style) if placeholder_type is None else None
+            ),
         )
 
     return m.ShapeElement(
@@ -422,6 +425,30 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
         alt_text=shape.alt_text or shape.name,
         hyperlink=_resolve_hyperlink(context, shape.hyperlink_rel_id),
     )
+
+
+def _font_reference_defaults(style: s.SourceShapeStyle | None) -> s.SourceRunProperties | None:
+    """A shape's ``a:fontRef`` as the run defaults it stands for: its colour and the face
+    of the theme font collection it names.
+
+    Measured (``tools/make_style_probe.py``, ``font-*``): they sit where a table style's
+    ``a:tcTxStyle`` does -- over the master's ``p:otherStyle``, which says ``tx1`` and
+    ``+mn-lt``, and under the shape's own ``a:lstStyle`` and its runs.  So a default shape's
+    ``fontRef idx="minor"`` over ``lt1`` inks its text white, ``idx="major"`` draws it in
+    the theme's heading face (Calibri Light, where ``otherStyle`` alone gives Calibri),
+    ``idx="none"`` keeps the face and still gives the colour, and a reference with no
+    colour leaves the colour to ``otherStyle``.
+
+    Only for a shape that is not a placeholder: where a placeholder's ``fontRef`` would sit
+    against its ``titleStyle`` or ``bodyStyle`` has not been measured.
+    """
+    ref = style.font_ref if style is not None else None
+    if ref is None:
+        return None
+    typeface = {"major": "+mj-lt", "minor": "+mn-lt"}.get(ref.collection or "")
+    if ref.color is None and typeface is None:
+        return None
+    return s.SourceRunProperties(color=ref.color, typeface=typeface)
 
 
 def _resolve_connector(context: ResolveContext, connector: s.SourceConnector) -> m.ConnectorElement:
@@ -1297,17 +1324,24 @@ def _resolve_shape_outline(
     outline: s.SourceOutline | None,
     style: s.SourceShapeStyle | None,
 ) -> m.Outline | None:
-    resolved = _resolve_outline(context, outline)
-    if resolved is not None and resolved.fill is not None:
-        return resolved
+    """The shape's own ``a:ln`` over the theme line its ``a:lnRef`` names, attribute by
+    attribute.
 
+    Measured (``tools/make_style_probe.py``, ``own-line`` and ``line-local-width``): a local
+    line that states only a colour keeps the referenced line's width -- 2 pt under the
+    2007 Office theme's ``lnRef idx="2"``, where this used to fall back to the 0.75 pt
+    default -- and one that states only a width keeps the referenced colour.  A local
+    ``a:noFill`` turns the outline off whatever the reference says.
+    """
+    resolved = _resolve_outline(context, outline)
     reference = _resolve_line_reference(context, style.line_ref) if style else None
-    if reference is None:
-        return resolved
-    if resolved is None:
-        return reference
-    # A local `a:ln` that only sets width/dash still takes its colour from the theme.
+    if outline is None or reference is None:
+        return resolved if outline is not None else reference
+    if isinstance(outline.fill, s.SourceNoFill):
+        return None
     merged = replace(reference)
+    if resolved is not None and resolved.fill is not None:
+        merged.fill = resolved.fill
     if outline is not None:
         if outline.width is not None:
             merged.width = outline.width
@@ -1338,7 +1372,37 @@ def _resolve_shape_effects(
     return None
 
 
-def _resolve_fill(context: ResolveContext, fill: s.SourceFill | None) -> m.Fill | None:
+def _placeholder_color(
+    context: ResolveContext,
+    color: s.SourceColor | None,
+    placeholder: m.ResolvedColor | None,
+) -> m.ResolvedColor | None:
+    """A colour, where ``phClr`` is ``placeholder`` -- a style reference's own colour.
+
+    The theme's format scheme writes every colour as ``a:schemeClr val="phClr"`` with the
+    entry's own modifiers under it.  PowerPoint resolves the reference's colour first, its
+    modifiers included, and then applies the entry's modifiers to that (measured,
+    ``tools/make_style_probe.py``: ``fillRef idx="2"`` over ``accent2`` with a
+    ``shade 50000`` draws the theme gradient's three stops, each derived from the shaded
+    orange, not one flat colour).  An ``alpha`` on the reference carries through unless the
+    entry states its own.  Without a placeholder ``phClr`` names no colour at all.
+    """
+    if color is None or color.kind != "scheme" or color.scheme != "phClr":
+        return resolve_color(context.colors, color)
+    if placeholder is None:
+        return None
+    resolved = apply_transforms(placeholder.hex, color.transforms, context.colors.rules)
+    if placeholder.alpha < 1 and all(t.kind != "alpha" for t in color.transforms):
+        resolved = m.ResolvedColor(hex=resolved.hex, alpha=placeholder.alpha)
+    return resolved
+
+
+def _resolve_fill(
+    context: ResolveContext,
+    fill: s.SourceFill | None,
+    placeholder: m.ResolvedColor | None = None,
+) -> m.Fill | None:
+    """``placeholder`` is what ``phClr`` means: see :func:`_placeholder_color`."""
     if fill is None:
         return None
 
@@ -1346,13 +1410,13 @@ def _resolve_fill(context: ResolveContext, fill: s.SourceFill | None) -> m.Fill 
         return m.NoFill()
 
     if isinstance(fill, s.SourceSolidFill):
-        color = resolve_color(context.colors, fill.color)
+        color = _placeholder_color(context, fill.color, placeholder)
         return m.SolidFill(color=color) if color is not None else None
 
     if isinstance(fill, s.SourceGradientFill):
         stops = []
         for stop in fill.stops:
-            color = resolve_color(context.colors, stop.color)
+            color = _placeholder_color(context, stop.color, placeholder)
             if color is not None:
                 stops.append(m.GradientStop(position=stop.position, color=color))
         if not stops:
@@ -1368,8 +1432,8 @@ def _resolve_fill(context: ResolveContext, fill: s.SourceFill | None) -> m.Fill 
         )
 
     if isinstance(fill, s.SourcePatternFill):
-        foreground = resolve_color(context.colors, fill.foreground_color)
-        background = resolve_color(context.colors, fill.background_color)
+        foreground = _placeholder_color(context, fill.foreground_color, placeholder)
+        background = _placeholder_color(context, fill.background_color, placeholder)
         if foreground is None or background is None:
             return None
         return m.PatternFill(
@@ -1404,11 +1468,13 @@ def _resolve_fill(context: ResolveContext, fill: s.SourceFill | None) -> m.Fill 
 
 
 def _resolve_outline(
-    context: ResolveContext, outline: s.SourceOutline | None
+    context: ResolveContext,
+    outline: s.SourceOutline | None,
+    placeholder: m.ResolvedColor | None = None,
 ) -> m.Outline | None:
     if outline is None:
         return None
-    fill = _resolve_fill(context, outline.fill)
+    fill = _resolve_fill(context, outline.fill, placeholder)
     if isinstance(fill, m.NoFill):
         return None
     return m.Outline(
@@ -1459,7 +1525,15 @@ def _compound_line(
 def _resolve_fill_reference(
     context: ResolveContext, ref: s.SourceStyleReference
 ) -> m.Fill | None:
-    """``a:fillRef``/``p:bgRef``: index into the theme format scheme, colour overridden."""
+    """``a:fillRef``/``p:bgRef``: an entry of the theme's format scheme, ``phClr`` the
+    reference's own colour (:func:`_placeholder_color`).
+
+    Measured (``tools/make_style_probe.py``, ``fill-*``): 1 to 3 are ``a:fillStyleLst``'s
+    entries and 1001 to 1003 ``a:bgFillStyleLst``'s; 0 and 1000 are no fill.  Until the
+    placeholder was substituted every entry here resolved to nothing, because ``phClr`` is
+    not a colour of the theme's scheme -- so a shape PowerPoint inserts with its default
+    style, which says nothing else about its fill, was drawn unfilled.
+    """
     if ref.idx == 0:
         return None
     scheme = context.theme.format_scheme if context.theme else None
@@ -1473,78 +1547,60 @@ def _resolve_fill_reference(
         styles, array_index = scheme.fill_styles, ref.idx - 1
     if array_index < 0 or array_index >= len(styles):
         return None
-
-    resolved = _resolve_fill(context, styles[array_index])
-    override = resolve_color(context.colors, ref.color)
-    if resolved is None or override is None:
-        return resolved
-
-    if isinstance(resolved, m.SolidFill):
-        return m.SolidFill(color=override)
-    if isinstance(resolved, m.GradientFill):
-        # The theme gradient keeps its stop positions and transforms; only the base
-        # colour is replaced, so re-resolve each stop against the override.
-        return m.GradientFill(
-            stops=[
-                m.GradientStop(position=stop.position, color=_blend_stop(stop.color, override))
-                for stop in resolved.stops
-            ],
-            angle=resolved.angle,
-            gradient_type=resolved.gradient_type,
-            center_x=resolved.center_x,
-            center_y=resolved.center_y,
-        )
-    return resolved
-
-
-def _blend_stop(_original: m.ResolvedColor, override: m.ResolvedColor) -> m.ResolvedColor:
-    """Theme gradient stops carry their own tint/shade; the override supplies the hue.
-
-    The theme's stop colours are all the same scheme colour under different transforms,
-    and those transforms were already baked in when the format scheme was resolved
-    against the *theme's* colour, not the shape's.  Re-deriving them exactly would mean
-    keeping the unresolved stop colours around; matching pptx-glimpse, the override
-    simply replaces the stop.
-    """
-    return override
+    return _resolve_fill(context, styles[array_index], resolve_color(context.colors, ref.color))
 
 
 def _resolve_line_reference(
     context: ResolveContext, ref: s.SourceStyleReference | None
 ) -> m.Outline | None:
+    """``a:lnRef``: the theme's line style, ``phClr`` the reference's own colour.
+
+    The entry's modifiers apply to it, as a fill's do: the 2007 Office theme's first line
+    style is ``phClr`` under ``shade 95000`` and ``satMod 105000``, and PowerPoint draws
+    ``lnRef idx="1"`` over ``accent2`` as ``#BE4B48``, not accent2's own ``#C0504D``, which
+    replacing the colour outright drew (``line-local-width``, ``tools/make_style_probe.py``).
+    """
     if ref is None or ref.idx == 0:
         return None
     scheme = context.theme.format_scheme if context.theme else None
     if scheme is None or ref.idx - 1 >= len(scheme.line_styles) or ref.idx < 1:
         return None
-
-    resolved = _resolve_outline(context, scheme.line_styles[ref.idx - 1])
-    if resolved is None:
-        return None
-    override = resolve_color(context.colors, ref.color)
-    if override is not None:
-        resolved.fill = m.SolidFill(color=override)
-    return resolved
+    return _resolve_outline(
+        context, scheme.line_styles[ref.idx - 1], resolve_color(context.colors, ref.color)
+    )
 
 
 def _resolve_effect_reference(
     context: ResolveContext, ref: s.SourceStyleReference
 ) -> m.EffectList | None:
+    """``a:effectRef``: 1 to 3 are ``a:effectStyleLst``'s entries and 0 is none.
+
+    Measured (``tools/make_style_probe.py``, ``effect-0`` to ``effect-3``): under the 2007
+    Office theme, whose every effect style is a shadow, ``idx="0"`` draws none and
+    ``idx="1"`` the first; under the 2013 one, whose third alone is, only ``idx="3"`` does.
+    This used to read the list from 0, which put the first style's shadow under every
+    default shape on a 2007 theme.
+    """
     scheme = context.theme.format_scheme if context.theme else None
-    if scheme is None or ref.idx >= len(scheme.effect_styles) or ref.idx < 0:
+    if scheme is None or not 1 <= ref.idx <= len(scheme.effect_styles):
         return None
-    return _resolve_effects(context, scheme.effect_styles[ref.idx])
+    return _resolve_effects(
+        context, scheme.effect_styles[ref.idx - 1], resolve_color(context.colors, ref.color)
+    )
 
 
 def _resolve_effects(
-    context: ResolveContext, effects: s.SourceEffectList | None
+    context: ResolveContext,
+    effects: s.SourceEffectList | None,
+    placeholder: m.ResolvedColor | None = None,
 ) -> m.EffectList | None:
+    """``placeholder`` is what ``phClr`` means: see :func:`_placeholder_color`."""
     if effects is None:
         return None
 
     resolved = m.EffectList()
     if effects.outer_shadow is not None:
-        color = resolve_color(context.colors, effects.outer_shadow.color)
+        color = _placeholder_color(context, effects.outer_shadow.color, placeholder)
         if color is not None:
             resolved.outer_shadow = m.OuterShadow(
                 blur_radius=effects.outer_shadow.blur_radius,
@@ -1555,7 +1611,7 @@ def _resolve_effects(
                 rotate_with_shape=effects.outer_shadow.rotate_with_shape,
             )
     if effects.inner_shadow is not None:
-        color = resolve_color(context.colors, effects.inner_shadow.color)
+        color = _placeholder_color(context, effects.inner_shadow.color, placeholder)
         if color is not None:
             resolved.inner_shadow = m.InnerShadow(
                 blur_radius=effects.inner_shadow.blur_radius,
@@ -1564,7 +1620,7 @@ def _resolve_effects(
                 color=color,
             )
     if effects.glow is not None:
-        color = resolve_color(context.colors, effects.glow.color)
+        color = _placeholder_color(context, effects.glow.color, placeholder)
         if color is not None:
             resolved.glow = m.Glow(radius=effects.glow.radius, color=color)
     if effects.soft_edge is not None:

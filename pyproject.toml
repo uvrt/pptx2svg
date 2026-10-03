@@ -44,8 +44,9 @@ classifiers = [
 # profiled picture to sRGB before it is rasterised.  0.4 carries the chart reader and layout,
 # the shape tree and text body readers, and the shape, text body and group renderers
 # (parse/{chart,shapes,text}.py, resolve/chart.py, render/{context,shape,text}.py,
-# text/wrap.py and most of render/svg.py moved there).
-dependencies = ["ooxml-common>=0.4.0"]
+# text/wrap.py and most of render/svg.py moved there).  0.4.2 keeps the font collection
+# an `a:fontRef` names, which a shape's text takes its face from.
+dependencies = ["ooxml-common>=0.4.2"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler
