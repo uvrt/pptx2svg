@@ -249,12 +249,15 @@ def _write(out: zipfile.ZipFile, name: str, data: bytes) -> None:
     out.writestr(info, data)
 
 
-def write_deck(target: Path, source: Path) -> int:
+def write_deck(target: Path, source: Path, xml_slides: list[str] | None = None) -> int:
+    """Write ``xml_slides`` (this probe's own by default) over ``source``'s master, layouts
+    and theme, emptied."""
     archive = zipfile.ZipFile(source)
     presentation = archive.read("ppt/presentation.xml").decode()
     pres_rels = archive.read("ppt/_rels/presentation.xml.rels").decode()
     content_types = archive.read("[Content_Types].xml").decode()
-    xml_slides = slides()
+    if xml_slides is None:
+        xml_slides = slides()
     numbers = range(1, len(xml_slides) + 1)
 
     presentation = re.sub(
