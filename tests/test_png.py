@@ -75,8 +75,9 @@ TEXT_SVG = (
 )
 
 
-def test_bundled_fonts_are_used_and_the_host_is_ignored_by_default():
-    """The default render must not depend on what this machine happens to have.
+def test_bundled_fonts_are_used_and_the_host_is_ignored_without_office_fonts():
+    """The reproducible render -- the default where Office is not installed, and
+    ``host_fonts=False`` where it is -- must not depend on what this machine has.
 
     Compared against an explicit system-fonts render rather than against a stored hash:
     a hash would pin this test to one resvg build, while the property that matters is
@@ -87,7 +88,7 @@ def test_bundled_fonts_are_used_and_the_host_is_ignored_by_default():
 
     if bundle_dir() is None:
         pytest.skip("pptx2svg-fonts is not importable")
-    default = svg_to_png(TEXT_SVG, backend="resvg")
+    default = svg_to_png(TEXT_SVG, backend="resvg", host_fonts=False)
     system = svg_to_png(
         TEXT_SVG, backend="resvg", use_bundled_fonts=False, skip_system_fonts=False
     )
@@ -95,6 +96,26 @@ def test_bundled_fonts_are_used_and_the_host_is_ignored_by_default():
     # This machine has neither Calibri nor Carlito outside the bundle, so a default
     # render that matched the system one would mean the bundle was never consulted.
     assert default != system
+
+
+def test_office_fonts_draw_by_default_where_they_are_installed(monkeypatch):
+    """``host_fonts=None`` asks for the faces PowerPoint uses whenever Office's fonts are
+    here, bundle or not; ``False`` never does."""
+    from pptx2svg.fonts import office
+
+    asked = []
+    monkeypatch.setattr(office, "drawing_plan", lambda svg, supplied=frozenset(): asked.append(svg))
+    monkeypatch.setattr(office, "available", lambda: True)
+    svg_to_png(TEXT_SVG, backend="resvg")
+    assert len(asked) == 1
+    svg_to_png(TEXT_SVG, backend="resvg", host_fonts=False)
+    assert len(asked) == 1
+    monkeypatch.setattr(office, "available", lambda: False)
+    from pptx2svg.fonts import bundle_dir
+
+    if bundle_dir() is not None:
+        svg_to_png(TEXT_SVG, backend="resvg")
+        assert len(asked) == 1
 
 
 def test_without_a_bundle_the_host_fonts_are_used_rather_than_none(monkeypatch):

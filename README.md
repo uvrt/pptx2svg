@@ -20,7 +20,7 @@ carry the measurement that produced them.
 
 ```bash
 pip install pptx2svg                    # SVG only, zero dependencies
-pip install 'pptx2svg[png,fonts]'       # PNG output, rendered reproducibly
+pip install 'pptx2svg[png,fonts]'       # PNG output, reproducible where Office is not installed
 ```
 
 | Extra      | Pulls in         | For                                                        |
@@ -34,12 +34,17 @@ pip install 'pptx2svg[png,fonts]'       # PNG output, rendered reproducibly
 SVG output needs nothing but the standard library — an SVG names fonts, it does not
 embed them. PNG output *rasterises*, so it needs actual font files, and without them the
 rasteriser quietly substitutes whatever the host has. `[fonts]` is 11 MB and is what
-makes the same deck produce the same pixels on your laptop and on a build server.
+makes the same deck produce the same pixels on your laptop and on a build server —
+on a laptop with Office, with `host_fonts=False` (below).
 
-On a Mac with PowerPoint, a PNG drawn from the host's fonts — no `[fonts]`, or
-`--system-fonts` — uses the faces PowerPoint itself draws: Aptos and the rest from its
-application bundle, Aptos Display from Office's cloud-font cache, read where they are
-installed and never copied, for measurement as well as drawing
+**On a Mac with Office, the faces PowerPoint itself draws are used by default**, with or
+without `[fonts]`: Aptos and the rest from PowerPoint's application bundle, Aptos Display
+from Office's cloud-font cache, read where they are installed and never copied, for
+measurement as well as drawing — because that most closely resembles PowerPoint. **The
+output then depends on the machine.** For the reproducible render, pass
+`ConvertOptions(host_fonts=False)` (or `svg_to_png(..., host_fonts=False)`), or set
+`PPTX2SVG_OFFICE_FONTS=0`; with `[fonts]` installed that gives the same pixels everywhere.
+Where Office's folders do not exist (Linux, Windows, CI) nothing changes
 ([FONTS.md](FONTS.md#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place)).
 
 ## Use

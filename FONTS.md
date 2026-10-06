@@ -589,13 +589,21 @@ advances, 0.09 pt). The other 27 — Arial, Times New Roman, Verdana, Tahoma, Wi
 the like — have equal advances and identical outlines where checked, so either copy draws
 the same. No family is in the cloud cache and anywhere else, so its place is moot today.
 
-**When it applies:** whenever the PNG is drawn from this machine's fonts — without the
-font bundle (`pip install 'pptx2svg[png]'` alone, which is what pptx-agent installs), or
-with `--system-fonts` / `skip_system_fonts=False`. With the bundle and its defaults the
-output stays reproducible and no host face is read; `ConvertOptions(host_fonts=True)` and
-`svg_to_png(..., host_fonts=True)` opt in anyway, `host_fonts=False` opts out, and
-`PPTX2SVG_OFFICE_FONTS=0` turns the lookup off for the whole process. Where the folders do
-not exist — Linux, Windows, a Mac without Office — nothing changes.
+**When it applies: by default, wherever Office's fonts are installed** — PowerPoint's
+bundle or Office's cloud-font cache is on the machine — **with or without the font
+bundle**, because drawing and measuring with the faces PowerPoint uses is what most
+closely resembles PowerPoint. **The output then depends on the machine**: a Mac with Office
+and a build server with only the bundle draw the same deck differently, and two Macs with
+different Office versions can too. Elsewhere it applies when the PNG is drawn from this
+machine's fonts anyway — without the bundle, or with `--system-fonts` /
+`skip_system_fonts=False`.
+
+**The reproducible render is the escape hatch:** `ConvertOptions(host_fonts=False)` and
+`svg_to_png(..., host_fonts=False)` read no host face, and `PPTX2SVG_OFFICE_FONTS=0` turns
+the lookup off for the whole process (and for the CLI); with the bundle installed, either
+gives the same pixels on every machine. `host_fonts=True` opts in where the default would
+not. Where the folders do not exist — Linux, Windows, a Mac without Office, CI — nothing
+changes. `pptx2svg fonts` says which applies on the machine it runs on.
 
 **Both halves, so measure still equals draw:**
 
@@ -614,7 +622,18 @@ not exist — Linux, Windows, a Mac without Office — nothing changes.
   Cambria, and the metric-compatible rows — keeps its table, kern pairs included. A family
   they only guess at (Rockwell, Gill Sans MT, Segoe UI, Century Gothic…), or measure from
   another face (Aptos Narrow from Aptos, Aptos Light, Yu Gothic from Noto Sans JP), is
-  measured from the installed file instead. Those tables carry no kern pairs yet.
+  measured from the installed file instead, its legacy `kern` table included.
+
+**Kerned as PowerPoint kerns.** PowerPoint lays a static face out with its legacy `kern`
+table and never with its OpenType (GPOS) pairs, and a variable face with its GPOS pairs —
+measured with `tools/make_kern_source_probe.py` / `tools/read_kern_source_probe.py`, 29
+lines of pairs in 15 faces from PowerPoint's bundle, Office's cloud cache and macOS's
+folders (`ooxml_common.text.kerning` has the numbers). So Aptos's `ss`, which only GPOS
+holds, is not charged: "Pass" at 18 pt is 0.29 pt wider than the GPOS-kerned word, and
+PowerPoint breaks it "Pas / s" in a box that fits the latter. The static tables carry both
+kinds of pair — Calibri's legacy pairs for Carlito's entry, as its line gap is Calibri's —
+and pptx2svg measures with PowerPoint's choice (`DrawingRules.kerning`), whichever fonts
+draw.
 
 The SVG still names families and embeds nothing; only the rasteriser is given files, and
 only by path. No font is copied anywhere.

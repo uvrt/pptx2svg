@@ -248,8 +248,17 @@ def fonts_main(argv: list[str]) -> int:
     # is "is this render reproducible at all", and in system mode the answer is no
     # whatever the table below says.
     if mode == "bundled":
+        from .fonts import office
+
         print(f"mode:   bundled from {bundle_dir()}")
-        print("        this machine's own fonts are ignored, so output is reproducible")
+        if office.available():
+            # Office's fonts draw by default where they are installed: most like
+            # PowerPoint, and no longer the same pixels on the next machine.
+            print("        Office's fonts are installed here and draw the faces PowerPoint draws,")
+            print("        so output depends on this machine; PPTX2SVG_OFFICE_FONTS=0 for the")
+            print("        bundle alone, which is reproducible")
+        else:
+            print("        this machine's own fonts are ignored, so output is reproducible")
         print(f"        families: {', '.join(sorted(BUNDLED_FAMILIES))}")
     else:
         print("mode:   system; pptx2svg-fonts is NOT installed")

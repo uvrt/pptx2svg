@@ -86,12 +86,31 @@ def test_with_no_folders_the_svg_is_todays(no_office, authoring):
     )
 
 
-def test_the_default_follows_the_bundle(monkeypatch):
-    """Host faces take part exactly when the PNG is drawn from this machine's fonts."""
+def test_the_default_is_office_s_fonts_where_they_are_installed(monkeypatch, tmp_path):
+    """Host faces take part wherever Office's fonts are installed, bundle or not -- most
+    like PowerPoint -- and elsewhere exactly when the PNG is drawn from this machine's
+    fonts.  ``host_fonts=False`` and ``PPTX2SVG_OFFICE_FONTS=0`` are the reproducible
+    render."""
     from pptx2svg import _host_fonts
 
+    monkeypatch.delenv("PPTX2SVG_OFFICE_FONTS", raising=False)
     assert _host_fonts(ConvertOptions(host_fonts=True)) is True
     assert _host_fonts(ConvertOptions(host_fonts=False)) is False
+    # Office installed: on, with the bundle too.
+    monkeypatch.setattr(office, "POWERPOINT_FONTS", tmp_path)
+    monkeypatch.setattr("pptx2svg.fonts.bundle_dir", lambda: Path("/nonexistent"))
+    assert office.available() and _host_fonts(ConvertOptions()) is True
+    monkeypatch.setenv("PPTX2SVG_OFFICE_FONTS", "0")
+    assert not office.available() and _host_fonts(ConvertOptions()) is False
+    monkeypatch.delenv("PPTX2SVG_OFFICE_FONTS")
+    # The cloud cache alone counts as Office's fonts.
+    monkeypatch.setattr(office, "POWERPOINT_FONTS", tmp_path / "absent-bundle")
+    monkeypatch.setattr(office, "OFFICE_CLOUD_FONTS", tmp_path)
+    (tmp_path / "Aptos Display").mkdir()
+    assert office.available()
+    # No Office (CI): as before, the bundle decides.
+    monkeypatch.setattr(office, "OFFICE_CLOUD_FONTS", tmp_path / "absent-cache")
+    assert not office.available()
     monkeypatch.setattr("pptx2svg.fonts.bundle_dir", lambda: None)
     assert _host_fonts(ConvertOptions()) is True
     monkeypatch.setattr("pptx2svg.fonts.bundle_dir", lambda: Path("/nonexistent"))

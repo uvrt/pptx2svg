@@ -1265,6 +1265,11 @@ def our_raster_options(deck: Path, profile: dict) -> dict:
         ),
         skip_system_fonts=True,
         use_bundled_fonts=False,
+        # The profile's faces are handed over above; Office's faces drawing by default
+        # (svg_to_png's host_fonts, on wherever Office is installed) would load the same
+        # files a second time, ahead of them.  The SVG is still measured as the default
+        # conversion measures it -- with them (our_svgs).
+        host_fonts=False,
     )
 
 

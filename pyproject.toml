@@ -48,8 +48,10 @@ classifiers = [
 # an `a:fontRef` names, which a shape's text takes its face from.  0.4.3 composes colour
 # transforms as PowerPoint does, flows a Latin run on across a change of face, and
 # measures Consolas (ROADMAP.md, 5.6 and 5.7).  0.4.5 draws autofit as the file stores it
-# (`DrawingRules.autofit`; ROADMAP.md, 5.8).
-dependencies = ["ooxml-common>=0.4.5"]
+# (`DrawingRules.autofit`; ROADMAP.md, 5.8).  0.5 kerns as PowerPoint does
+# (`DrawingRules.kerning`, `LEGACY_KERNING`; 5.10) and carries the Office font lookup
+# fonts/office.py now sits on (`ooxml_common.fonts.office`).
+dependencies = ["ooxml-common>=0.5.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler
