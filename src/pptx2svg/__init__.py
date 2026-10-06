@@ -46,6 +46,7 @@ from .render.svg import render_slide_to_svg
 from .resolve import ResolvedPresentation, Warning, resolve_presentation
 from .text.fontmap import DEFAULT_FONT_MAPPING, create_font_mapping
 from .text.measure import DefaultTextMeasurer, FontToolsTextMeasurer, TextMeasurer
+from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
 
 __version__ = "0.1.0"
 
@@ -108,21 +109,27 @@ class ConvertOptions:
     #: beats any substitute.  Turn it off to reproduce pre-0.2 output, or when a deck's
     #: embedded fonts are known to be damaged -- decoding costs about a second per face.
     use_embedded_fonts: bool = True
-    #: Measure with the faces PowerPoint would use on this machine -- its own bundle,
-    #: macOS's fonts, Office's cloud-font cache, read in place (:mod:`pptx2svg.fonts.office`)
-    #: -- for every family the static tables do not measure as itself.  ``None`` (the
-    #: default) does so exactly when the PNG is drawn from this machine's fonts: without
-    #: the font bundle, or with ``skip_system_fonts=False``.  With the bundle the output
-    #: stays reproducible and no host face is read.  Where the folders are absent it
-    #: changes nothing.
+    #: Measure (and draw) with the faces PowerPoint would use on this machine -- its own
+    #: bundle, macOS's fonts, Office's cloud-font cache, read in place
+    #: (:mod:`pptx2svg.fonts.office`) -- for every family the static tables do not
+    #: measure as itself.  ``None`` (the default) does so whenever Office's fonts are on
+    #: this machine (:func:`pptx2svg.fonts.office.available`), with or without the font
+    #: bundle, because that most closely resembles PowerPoint; the output then depends on
+    #: the machine.  Elsewhere it does so when the PNG is drawn from this machine's fonts
+    #: anyway: without the font bundle, or with ``skip_system_fonts=False``.  ``False``
+    #: (or ``PPTX2SVG_OFFICE_FONTS=0``) is the reproducible render: no host face is read.
     host_fonts: bool | None = None
 
 
 def _host_fonts(options: ConvertOptions) -> bool:
-    """Whether this conversion measures (and draws) with the host's faces."""
+    """Whether this conversion measures (and draws) with the host's faces: as asked, or,
+    left to the default, wherever Office's fonts are installed, and otherwise when the
+    host's fonts draw the PNG anyway (no font bundle)."""
     if options.host_fonts is not None:
         return options.host_fonts
-    return fonts.bundle_mode() == "system"
+    from .fonts import office
+
+    return office.available() or fonts.bundle_mode() == "system"
 
 
 def _open_package(source) -> OpcPackage:
@@ -201,6 +208,10 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     # The faces PowerPoint itself would use on this machine come next, under the deck's
     # own: a family the static tables only guess at, or measure from another face, is
     # measured from the installed file the PNG will be drawn with.
+    #
+    # Kerned as PowerPoint kerns (``DrawingRules.kerning``): a static face's legacy
+    # ``kern`` table, a variable face's GPOS pairs -- measured, and not the OpenType
+    # feature the tables used to charge everywhere (ooxml_common.text.kerning).
     measurer = options.measurer
     if measurer is None:
         extra = dict(resolved.embedded_fonts.metrics)
@@ -209,7 +220,7 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
 
             for key, table in office.layout_metrics(resolved_families(resolved)).items():
                 extra.setdefault(key, table)
-        measurer = DefaultTextMeasurer(extra)
+        measurer = DefaultTextMeasurer(extra, kerning=POWERPOINT_RULES.kerning)
 
     documents: list[str] = []
     for slide in resolved.slides:

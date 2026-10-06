@@ -5618,6 +5618,53 @@ falls on one, `real-basic-theme` (0.978 → 0.966; `sample` rises overall but it
 falls) -- the two decks the harness skips because PowerPoint draws their ＭＳ Ｐゴシック as
 MS Gothic: we now draw the face the deck names, and PowerPoint does not.
 
+**Since: on by default where Office is installed** (5.10). The user's decision: Office's
+fonts are used whenever they are on the machine, with or without the bundle, because that
+most closely resembles PowerPoint; the output then depends on the machine, and
+`host_fonts=False` / `PPTX2SVG_OFFICE_FONTS=0` is the reproducible render.
+
+### 5.10 Which kern pairs PowerPoint charges — **measured, and fixed** (ooxml-common 0.5)
+
+Trial 2's p4 run 2 had a "Pass" label, Aptos 18 pt in a 650,000 EMU box, that pptx-agent's
+fit check kept on one line and PowerPoint broke "Pas / s". pptx-agent's
+`tools/wrap_boundary_probe.py` (290 one-word boxes) found the cause: PowerPoint did not
+charge Aptos's `ss` pair (-33/2048 em), which only the face's GPOS holds, and the tables
+did -- every kern pair here was the OpenType feature (*The `kern` feature, modelled*).
+`tools/make_kern_source_probe.py` / `read_kern_source_probe.py` asked the general
+question: 29 lines, each of pairs of one class in one face -- in the legacy `kern` table
+only, in GPOS only, in both alike, in both differently -- read off the export to 3/1000 em:
+
+| Faces | Where | What PowerPoint charged |
+| --- | --- | --- |
+| Aptos, Aptos Display | bundle, cloud cache | the legacy table: `ss`, `éV`, `vT`… (GPOS only) unkerned; pairs in both, kerned |
+| Calibri, Arial, Times New Roman, Cambria, Meiryo | bundle | pairs in both, kerned (these faces' GPOS-only pairs are outside the probe's letters) |
+| Segoe UI | cloud cache | the legacy value where the tables disagree (`Ta` -217, not -230); GPOS-only `Fa` -70 unkerned |
+| Verdana, Tahoma | bundle | the legacy table (they have no GPOS kerning) |
+| Lato, Raleway, Yu Gothic | cache, cache, bundle | nothing: no legacy table, GPOS pairs (Lato `aT` -248) unkerned |
+| Minion Pro, PT Sans, Avenir Next, Hiragino Sans (Latin and kana) | macOS | the legacy table; GPOS-only pairs (Hiragino `ダノ` -220) unkerned |
+| Noto Sans JP (Latin and kana), STIX Two Text | macOS, **variable** | **GPOS**, to 2/1000 em |
+
+So: **a static face is kerned with its legacy `kern` table alone, wherever it is installed;
+a variable face with its GPOS pairs** -- which is also why `sample-cjk`'s Noto Sans JP kana
+measured kerned (above). ooxml-common 0.5 makes it a rule, `DrawingRules.kerning`
+(`KerningSource`: PowerPoint's is legacy for a static face, GPOS for a variable one), and
+the tables carry both: `LEGACY_KERNING` holds the legacy pairs of the face each entry
+stands for -- Calibri's for Carlito, as its line gap is Calibri's -- generated here by
+`tools/extract_font_metrics.py` from the Office faces, and `FontMetrics.variable` marks
+Noto Sans JP. The shared default stays the feature; `convert_pptx_to_svg` measures with
+PowerPoint's rule. Faces read in place or embedded in a deck carry their legacy pairs too.
+
+Word, asked the same question by docx2svg (`tools/make_wrap_kern_probe.py`), kerns only
+where `w:kern` asks, with the legacy table (324/324 verdicts), and kerns a variable face
+not at all.
+
+**Effect.** The oracle corpus: every one of the 113 slides of the oracle decks and fixtures
+converts to the same SVG bytes as before, with Office's fonts on or off, and so all 52
+scored slides score as before -- no line in the corpus sits within a kern pair of its edge.
+Trial 2's p1-p6 (66 slides): one SVG changes, p4 run 2 slide 2, whose "Pass" now breaks as
+PowerPoint's does (SSIM 0.9732 → 0.9739); with Office's fonts now on by default, the six
+tasks' mean is 0.8278 against 0.5598 for main's default with the bundle installed.
+
 ---
 
 ## Phase 6 — Embedded fonts — **done**
