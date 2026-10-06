@@ -34,7 +34,7 @@ jobs:
         # (`@<branch>`) on the pull request, and back at @main before merging.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@font-resolution"
+          python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@main"
           python -m pip install -e .[dev]
           python -m pip install -e packages/pptx2svg-fonts
 
