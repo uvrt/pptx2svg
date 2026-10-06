@@ -37,6 +37,15 @@ twice its size; :func:`classify_kern` is where the size question was settled and
 :func:`effective_kern` is where the three sources -- ``PairPos`` format 1, format 2 and
 the legacy ``kern`` table -- are reduced to one function of two characters.
 
+**And the legacy ``kern`` table again, on its own** (``LEGACY_KERNING``,
+:data:`KERN_TABLE_SOURCES`).  PowerPoint and Word were measured laying a static face out
+with its legacy table and never with ``GPOS`` (``tools/make_kern_source_probe.py``; the
+rule is ``ooxml_common.drawingml.rules.DrawingRules.kerning``), so each entry also
+carries the legacy pairs of the face it stands for -- Calibri's for Carlito, as its line
+gap is Calibri's -- and whether that face is a variable one, which PowerPoint kerns from
+``GPOS`` after all.  Read from the Office faces through the local font profile, and
+re-emitted as checked in where they are absent, exactly as the line gaps are.
+
 Usage::
 
     python3 tools/extract_font_metrics.py --check     # exit 1 if either file is stale
@@ -85,6 +94,8 @@ BEGIN = "# --- BEGIN GENERATED METRICS (tools/extract_font_metrics.py) ---"
 END = "# --- END GENERATED METRICS ---"
 KERN_BEGIN = "# --- BEGIN GENERATED KERNING (tools/extract_font_metrics.py) ---"
 KERN_END = "# --- END GENERATED KERNING ---"
+LEGACY_BEGIN = "# --- BEGIN GENERATED LEGACY KERNING (tools/extract_font_metrics.py) ---"
+LEGACY_END = "# --- END GENERATED LEGACY KERNING ---"
 
 #: Faces we measure but never draw, resolved through the same local font profile the
 #: fidelity harness uses (``tools/fidelity.py --write-profile``).  Going through the
@@ -428,30 +439,38 @@ def effective_kern(font, characters: list[str]) -> dict[tuple[str, str], int]:
 def legacy_kern(font, characters: list[str]) -> dict[tuple[str, str], int]:
     """The same, from the pre-OpenType ``kern`` table.
 
-    Only reached for a face that has one and no GPOS ``kern`` feature.  Every face here
-    that carries a ``kern`` table carries the feature as well and the feature is the one
-    a shaper reads, so this is the fallback for a face none of ours turns out to be --
-    written because the roadmap asked for it and because the next Office face to arrive
-    may well be one.
+    Two uses.  For :data:`KERNING` it is the fallback for a face that has a ``kern``
+    table and no GPOS feature, which none of ours turns out to be.  For
+    ``LEGACY_KERNING`` it is the whole answer: the table PowerPoint and Word charge for a
+    static face (:func:`read_legacy`).
     """
     if "kern" not in font:
         return {}
     cmap = font.getBestCmap()
-    by_glyph: dict[str, str] = {}
+    # Every character a glyph answers for: a pair is kerned by glyph, so U+00A0 kerns as
+    # the space it shares a glyph with, and Ω (U+2126) as Ω.
+    by_glyph: dict[str, list[str]] = {}
     for char in characters:
         glyph = cmap.get(ord(char))
         if glyph is not None:
-            by_glyph.setdefault(glyph, char)
+            by_glyph.setdefault(glyph, []).append(char)
     pairs: dict[tuple[str, str], int] = {}
     try:
         subtables = font["kern"].kernTables
     except Exception:  # pragma: no cover - a malformed kern table is not worth a crash
         return {}
     for subtable in subtables:
-        for (first, second), value in subtable.kernTable.items():
+        # Horizontal kerning only (a vertical or cross-stream subtable moves nothing
+        # along the line); the first subtable to state a pair wins, as the applications
+        # read it (ooxml_common.fonts.office.read_legacy_kern).
+        coverage = getattr(subtable, "coverage", 1)
+        if getattr(subtable, "version", 0) == 0 and coverage & 0x1 == 0:
+            continue
+        for (first, second), value in getattr(subtable, "kernTable", {}).items():
             if value and first in by_glyph and second in by_glyph:
-                key = (by_glyph[first], by_glyph[second])
-                pairs[key] = pairs.get(key, 0) + value
+                for left in by_glyph[first]:
+                    for right in by_glyph[second]:
+                        pairs.setdefault((left, right), value)
     return {key: value for key, value in pairs.items() if value}
 
 
@@ -581,6 +600,47 @@ LINE_GAP_SOURCES = {
     "Tinos": "Times New Roman",
     "Cousine": "Courier New",
 }
+
+#: Metrics key -> the face whose legacy ``kern`` table (``LEGACY_KERNING``) and ``fvar``
+#: (``FontMetrics.variable``) the entry carries: the face PowerPoint and Word lay the
+#: family out with.  For the four clones the Office original, as for the line gap; every
+#: other key is its own family, resolved through the local font profile -- which finds
+#: Lato and Raleway in Office's cloud cache, static faces with no legacy table, where the
+#: bundle's Raleway is a variable file (PowerPoint drew the cache's, unkerned: pptx2svg's
+#: ``tools/read_kern_source_probe.py``).
+KERN_TABLE_SOURCES = dict(LINE_GAP_SOURCES)
+
+
+def office_kern_face(key: str):
+    """``(regular, bold, regular index, bold index)`` of the face :data:`KERN_TABLE_SOURCES`
+    names for ``key``, from the local profile; ``None`` where the profile lacks it."""
+    sys.path.insert(0, str(HERE))
+    import fidelity
+
+    profile = fidelity.load_profile()
+    if profile is None:
+        return None
+    family = KERN_TABLE_SOURCES.get(key, key)
+    styles = profile.get("faces", {}).get(family)
+    if not styles or "regular" not in styles:
+        return None
+    regular = Path(styles["regular"]["path"])
+    bold = Path(styles.get("bold", styles["regular"])["path"])
+    if not regular.exists() or not bold.exists():
+        return None
+    return regular, bold, collection_index(regular, family), collection_index(bold, family)
+
+
+def read_legacy(regular: Path, bold: Path, index: int = 0, bold_index: int = 0) -> dict:
+    """The legacy ``kern`` table's pairs of one face, upright and bold, and whether it is
+    variable: ``{"pairs", "bold_pairs", "variable"}``.  A variable face is read at its
+    default instance; it has no legacy table in any face here."""
+    characters = SAMPLE + CJK_SAMPLE
+    upright = _open(regular, None, index)
+    bold_font = upright if (bold, bold_index) == (regular, index) else _open(bold, None, bold_index)
+    pairs = legacy_kern(upright, characters)
+    bold_pairs = legacy_kern(bold_font, characters) if bold_font is not upright else {}
+    return {"pairs": pairs, "bold_pairs": bold_pairs, "variable": "fvar" in upright}
 
 #: Measured-only faces whose entire advance table is two constants.
 #:
@@ -868,6 +928,13 @@ def render_entry(key: str, face: dict, note: str) -> str:
     # should not have to scroll past them.  ``.get`` rather than ``[...]`` because a face
     # that does not kern has no entry there at all.
     lines.append(f'        kerning=_KERN.get("{key}"),')
+    # The legacy table of the face the entry stands for, which PowerPoint and Word charge
+    # for a static face (LEGACY_KERNING); and whether that face is variable, which
+    # PowerPoint kerns from GPOS.  Written only where true, so a static face's entry
+    # reads as it always did but for the one line.
+    lines.append(f'        legacy_kerning=_LEGACY_KERN.get("{key}"),')
+    if face.get("variable"):
+        lines.append("        variable=True,")
     lines.append("    ),")
     return "\n".join(lines)
 
@@ -952,7 +1019,7 @@ def _line_gap_for(key: str, measured: dict[str, int]) -> int | None:
 def _measure(task):
     """``read_face`` or ``read_kern`` of one face: what :func:`measure_all` hands a worker."""
     kind, args = task
-    return (read_face if kind == "face" else read_kern)(*args)
+    return _READERS[kind](*args)
 
 
 def measure_all(jobs: int) -> dict:
@@ -974,6 +1041,10 @@ def measure_all(jobs: int) -> dict:
     for key, entry in measured_only_faces().items():
         if entry[0].exists() and entry[1].exists():
             tasks += [(("kern", key), entry), (("face", key), entry)]
+    for key in list(source_faces()) + list(MEASURED_ONLY):
+        entry = office_kern_face(key)
+        if entry is not None:
+            tasks.append((("legacy", key), entry))
     results = pool_map(_measure, [(kind, args) for (kind, _key), args in tasks], jobs)
     return {name: result for (name, _args), result in zip(tasks, results)}
 
@@ -981,7 +1052,29 @@ def measure_all(jobs: int) -> dict:
 def _read(measured: dict | None, kind: str, key: str, args):
     if measured is not None and (kind, key) in measured:
         return measured[(kind, key)]
-    return (read_face if kind == "face" else read_kern)(*args)
+    return _READERS[kind](*args)
+
+
+_READERS = {"face": read_face, "kern": read_kern, "legacy": read_legacy}
+
+
+def _legacy(measured: dict | None, key: str) -> dict | None:
+    """:func:`read_legacy` of ``key``'s :data:`KERN_TABLE_SOURCES` face; ``None`` where the
+    local profile cannot supply it (and the checked-in entry stands)."""
+    entry = office_kern_face(key)
+    if entry is None:
+        return None
+    return _read(measured, "legacy", key, entry)
+
+
+def _variable_for(key: str, measured: dict | None) -> bool:
+    found = _legacy(measured, key)
+    if found is not None:
+        return found["variable"]
+    from pptx2svg.text.metrics import METRICS as CURRENT
+
+    existing = CURRENT.get(key)
+    return bool(existing is not None and existing.variable)
 
 
 def build_block(measured: dict | None = None) -> str:
@@ -996,6 +1089,7 @@ def build_block(measured: dict | None = None) -> str:
         face = _read(measured, "face", key, (regular, bold, weight))
         if key in LINE_GAP_SOURCES:
             face["line_gap"] = _line_gap_for(key, gaps)
+        face["variable"] = _variable_for(key, measured)
         parts.append(render_entry(key, face, NOTES[key]))
     local = measured_only_faces()
     for key in MEASURED_ONLY:
@@ -1005,6 +1099,7 @@ def build_block(measured: dict | None = None) -> str:
             if key in FIXED_PITCH:
                 face = prune_fixed_pitch(face)
                 verify_fixed_pitch(key, face)
+            face["variable"] = _variable_for(key, measured)
             parts.append(render_entry(key, face, NOTES[key]))
         else:
             # No Office on this machine, or no font profile written yet.  Re-emit what is
@@ -1052,12 +1147,34 @@ def build_kern_block(measured: dict | None = None) -> str:
     return block
 
 
-def _verify_kern_block(block: str, tables: dict[str, dict]) -> None:
+def build_legacy_block(measured: dict | None = None) -> str:
+    """The ``LEGACY_KERNING`` table: each key's :data:`KERN_TABLE_SOURCES` face's legacy
+    ``kern`` pairs, for the keys whose face has any; the checked-in entry where the local
+    profile cannot supply the face."""
+    parts = ["LEGACY_KERNING: dict[str, KernTable] = {"]
+    tables: dict[str, dict] = {}
+    for key in list(source_faces()) + list(MEASURED_ONLY):
+        found = _legacy(measured, key)
+        if found is None:
+            checked = _checked_in_kern(key, "LEGACY_KERNING")
+            if checked is not None:
+                parts.append(checked)
+            continue
+        if found["pairs"] or found["bold_pairs"]:
+            tables[key] = found
+            parts.append(render_kern_entry(key, found))
+    parts.append("}")
+    block = "\n".join(parts)
+    _verify_kern_block(block, tables, "LEGACY_KERNING")
+    return block
+
+
+def _verify_kern_block(block: str, tables: dict[str, dict], name: str = "KERNING") -> None:
     from pptx2svg.text.kerning import KernTable
 
     namespace: dict = {"KernTable": KernTable}
     exec(compile(block, "<kerning>", "exec"), namespace)
-    emitted = namespace["KERNING"]
+    emitted = namespace[name]
     for key, kern in tables.items():
         table = emitted[key]
         for bold, pairs in ((False, kern["pairs"]), (True, kern["bold_pairs"])):
@@ -1066,7 +1183,7 @@ def _verify_kern_block(block: str, tables: dict[str, dict]) -> None:
                     raise SystemExit(f"{key}: emitted source loses {first!r}{second!r}")
 
 
-def _checked_in_kern(key: str) -> str | None:
+def _checked_in_kern(key: str, table_name: str = "KERNING") -> str | None:
     """Re-render the checked-in entry for a face we cannot measure here.
 
     Byte-identical to what the measured path would write, which is the whole point: the
@@ -1074,9 +1191,9 @@ def _checked_in_kern(key: str) -> str | None:
     ``len(left class) * len(right class)`` pairs) rather than guessed at, so ``--check``
     stays green on a machine with no Office.
     """
-    from pptx2svg.text.kerning import KERNING as CURRENT
+    from pptx2svg.text import kerning
 
-    table = CURRENT.get(key)
+    table = getattr(kerning, table_name).get(key)
     if table is None:
         return None
     pairs = _kern_pair_count(table.left, table.right, table.matrix)
@@ -1123,6 +1240,7 @@ def _checked_in(key: str) -> dict:
         "bold_default_width": existing.bold_default_width,
         "bold_cjk_width": existing.bold_cjk_width,
         "bold_widths": existing.bold_widths,
+        "variable": existing.variable,
     }
 
 
@@ -1159,6 +1277,7 @@ def main() -> int:
     # are about to change.
     jobs = [
         (KERN_TARGET, KERN_BEGIN, KERN_END, build_kern_block(measured)),
+        (KERN_TARGET, LEGACY_BEGIN, LEGACY_END, build_legacy_block(measured)),
         (TARGET, BEGIN, END, build_block(measured)),
     ]
 
