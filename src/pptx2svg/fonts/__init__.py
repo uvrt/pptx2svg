@@ -10,6 +10,7 @@ deleted on the shared module.  Writes matter as much as reads -- a test that mon
 
 from __future__ import annotations
 
+import importlib
 import sys
 import types
 
@@ -30,9 +31,21 @@ def _is_shared(name: str) -> bool:
 class _SharedFonts(types.ModuleType):
     def __getattr__(self, name: str):
         try:
-            return getattr(_shared, name)
+            value = getattr(_shared, name)
         except AttributeError:
             raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+        if isinstance(value, types.ModuleType):
+            # A submodule of the shared package -- there once something imported it, as
+            # docx2svg imports `ooxml_common.fonts.office` -- is not this package's
+            # submodule of the same name: `from .fonts import office` must reach
+            # `pptx2svg.fonts.office`, which has `available()` and the shared one does
+            # not.  Only a name this package has no module for is the shared one's.
+            try:
+                return importlib.import_module(f"{__name__}.{name}")
+            except ModuleNotFoundError as error:
+                if error.name != f"{__name__}.{name}":
+                    raise
+        return value
 
     def __setattr__(self, name: str, value) -> None:
         if _is_shared(name):

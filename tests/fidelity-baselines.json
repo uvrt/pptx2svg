@@ -720,18 +720,64 @@
         "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
       ],
       "hash": "c6e32795015d",
-      "instead": [
-        "MS-Gothic",
-        "MS-Mincho"
-      ],
+      "instead": [],
       "missing": [],
-      "substituted": [
-        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
-      ],
+      "substituted": [],
       "uncovered": ""
     },
-    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
-    "slides": [],
+    "histogram": 1.0,
+    "loss": 4106.0,
+    "pdfium": {
+      "histogram": 0.9999,
+      "loss": 8641.0,
+      "slides": [
+        {
+          "coverage": 0.9056,
+          "histogram": 1.0,
+          "loss": 4427.0,
+          "mean_abs": 0.25,
+          "over10": 0.473,
+          "over64": 0.152,
+          "sparse": false,
+          "ssim": 0.9947
+        },
+        {
+          "coverage": 0.2527,
+          "histogram": 0.9997,
+          "loss": 4214.0,
+          "mean_abs": 0.846,
+          "over10": 1.878,
+          "over64": 0.425,
+          "sparse": false,
+          "ssim": 0.9819
+        }
+      ],
+      "ssim": 0.9883
+    },
+    "slides": [
+      {
+        "coverage": 0.9056,
+        "histogram": 1.0,
+        "loss": 2315.9,
+        "mean_abs": 0.177,
+        "over10": 0.269,
+        "over64": 0.117,
+        "sparse": false,
+        "ssim": 0.9972
+      },
+      {
+        "coverage": 0.2502,
+        "histogram": 0.9999,
+        "loss": 1790.1,
+        "mean_abs": 0.508,
+        "over10": 1.128,
+        "over64": 0.231,
+        "sparse": false,
+        "ssim": 0.9922
+      }
+    ],
+    "slides_scored": 2,
+    "ssim": 0.9947,
     "truth": "svg"
   },
   "real-college-template": {
@@ -962,11 +1008,11 @@
       "substituted": [],
       "uncovered": ""
     },
-    "histogram": 0.9998,
-    "loss": 58037.3,
+    "histogram": 0.9999,
+    "loss": 56511.3,
     "pdfium": {
-      "histogram": 0.9988,
-      "loss": 61565.3,
+      "histogram": 0.9989,
+      "loss": 59554.4,
       "slides": [
         {
           "coverage": 0.9898,
@@ -979,37 +1025,37 @@
           "ssim": 0.9849
         },
         {
-          "coverage": 0.1756,
-          "histogram": 0.9989,
-          "loss": 10349.3,
-          "mean_abs": 1.612,
-          "over10": 3.379,
-          "over64": 0.889,
+          "coverage": 0.1758,
+          "histogram": 0.999,
+          "loss": 9690.4,
+          "mean_abs": 1.548,
+          "over10": 3.378,
+          "over64": 0.833,
           "sparse": false,
-          "ssim": 0.9361
+          "ssim": 0.9402
         },
         {
-          "coverage": 0.1695,
-          "histogram": 0.9972,
-          "loss": 18774.0,
-          "mean_abs": 2.024,
-          "over10": 3.643,
-          "over64": 1.279,
+          "coverage": 0.1697,
+          "histogram": 0.9975,
+          "loss": 17729.2,
+          "mean_abs": 1.967,
+          "over10": 3.652,
+          "over64": 1.219,
           "sparse": false,
-          "ssim": 0.8798
+          "ssim": 0.8866
         },
         {
-          "coverage": 0.1742,
-          "histogram": 0.9991,
-          "loss": 18654.9,
-          "mean_abs": 2.074,
-          "over10": 3.682,
-          "over64": 1.199,
+          "coverage": 0.1743,
+          "histogram": 0.9992,
+          "loss": 18347.7,
+          "mean_abs": 2.033,
+          "over10": 3.683,
+          "over64": 1.164,
           "sparse": false,
-          "ssim": 0.8838
+          "ssim": 0.8858
         }
       ],
-      "ssim": 0.9212
+      "ssim": 0.9244
     },
     "slides": [
       {
@@ -1023,38 +1069,38 @@
         "ssim": 0.9878
       },
       {
-        "coverage": 0.1727,
+        "coverage": 0.1729,
         "histogram": 0.9999,
-        "loss": 9679.4,
-        "mean_abs": 1.33,
-        "over10": 2.639,
-        "over64": 0.751,
+        "loss": 9105.6,
+        "mean_abs": 1.282,
+        "over10": 2.611,
+        "over64": 0.706,
         "sparse": false,
-        "ssim": 0.9392
+        "ssim": 0.9429
       },
       {
-        "coverage": 0.167,
-        "histogram": 0.9995,
-        "loss": 17452.0,
-        "mean_abs": 1.807,
-        "over10": 3.2,
-        "over64": 1.122,
+        "coverage": 0.1671,
+        "histogram": 0.9997,
+        "loss": 16698.7,
+        "mean_abs": 1.764,
+        "over10": 3.176,
+        "over64": 1.076,
         "sparse": false,
-        "ssim": 0.8866
+        "ssim": 0.8916
       },
       {
-        "coverage": 0.1711,
+        "coverage": 0.1713,
         "histogram": 0.9999,
-        "loss": 19789.8,
-        "mean_abs": 2.036,
-        "over10": 3.166,
-        "over64": 1.205,
+        "loss": 19590.9,
+        "mean_abs": 2.017,
+        "over10": 3.164,
+        "over64": 1.189,
         "sparse": false,
-        "ssim": 0.8745
+        "ssim": 0.8759
       }
     ],
     "slides_scored": 4,
-    "ssim": 0.922,
+    "ssim": 0.9245,
     "truth": "svg"
   },
   "real-product-page": {
@@ -1071,10 +1117,41 @@
       "instead": [],
       "missing": [],
       "substituted": [],
-      "uncovered": "\u26a1\ud83d\udcf1\ud83d\udd12"
+      "uncovered": ""
     },
-    "skipped": "no named face can draw \u26a1\ud83d\udcf1\ud83d\udd12; both renderers invented a fallback",
-    "slides": [],
+    "histogram": 0.9992,
+    "loss": 25342.6,
+    "pdfium": {
+      "histogram": 0.9981,
+      "loss": 26919.3,
+      "slides": [
+        {
+          "coverage": 0.2744,
+          "histogram": 0.9981,
+          "loss": 26919.3,
+          "mean_abs": 2.816,
+          "over10": 4.54,
+          "over64": 1.752,
+          "sparse": false,
+          "ssim": 0.8936
+        }
+      ],
+      "ssim": 0.8936
+    },
+    "slides": [
+      {
+        "coverage": 0.27,
+        "histogram": 0.9992,
+        "loss": 25342.6,
+        "mean_abs": 2.641,
+        "over10": 3.83,
+        "over64": 1.638,
+        "sparse": false,
+        "ssim": 0.8982
+      }
+    ],
+    "slides_scored": 1,
+    "ssim": 0.8982,
     "truth": "svg"
   },
   "sample": {
@@ -1089,18 +1166,144 @@
         "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
       ],
       "hash": "9e2876cadc09",
-      "instead": [
-        "MS-Gothic",
-        "MS-Mincho"
-      ],
+      "instead": [],
       "missing": [],
-      "substituted": [
-        "\uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af"
-      ],
+      "substituted": [],
       "uncovered": ""
     },
-    "skipped": "PowerPoint did not draw \uff2d\uff33 \uff30\u30b4\u30b7\u30c3\u30af, which nothing else here covers; it drew MS-Gothic, MS-Mincho instead",
-    "slides": [],
+    "histogram": 0.9987,
+    "loss": 67994.8,
+    "pdfium": {
+      "histogram": 0.984,
+      "loss": 77134.2,
+      "slides": [
+        {
+          "coverage": 0.0136,
+          "histogram": 1.0,
+          "loss": 0.0,
+          "mean_abs": 0.683,
+          "over10": 0.88,
+          "over64": 0.41,
+          "sparse": true,
+          "ssim": 1.0
+        },
+        {
+          "coverage": 0.0322,
+          "histogram": 0.9843,
+          "loss": 14249.4,
+          "mean_abs": 2.702,
+          "over10": 2.262,
+          "over64": 1.426,
+          "sparse": false,
+          "ssim": 0.5196
+        },
+        {
+          "coverage": 0.0307,
+          "histogram": 0.9903,
+          "loss": 21067.9,
+          "mean_abs": 3.421,
+          "over10": 2.448,
+          "over64": 1.811,
+          "sparse": false,
+          "ssim": 0.2545
+        },
+        {
+          "coverage": 0.0296,
+          "histogram": 0.9741,
+          "loss": 21577.6,
+          "mean_abs": 3.451,
+          "over10": 2.414,
+          "over64": 1.718,
+          "sparse": false,
+          "ssim": 0.2101
+        },
+        {
+          "coverage": 0.0187,
+          "histogram": 0.9744,
+          "loss": 10033.6,
+          "mean_abs": 1.764,
+          "over10": 1.38,
+          "over64": 0.888,
+          "sparse": false,
+          "ssim": 0.4177
+        },
+        {
+          "coverage": 0.0198,
+          "histogram": 0.9809,
+          "loss": 10205.7,
+          "mean_abs": 1.386,
+          "over10": 1.491,
+          "over64": 0.877,
+          "sparse": false,
+          "ssim": 0.4406
+        }
+      ],
+      "ssim": 0.4737
+    },
+    "slides": [
+      {
+        "coverage": 0.0129,
+        "histogram": 1.0,
+        "loss": 0.0,
+        "mean_abs": 0.623,
+        "over10": 0.762,
+        "over64": 0.381,
+        "sparse": true,
+        "ssim": 1.0
+      },
+      {
+        "coverage": 0.0299,
+        "histogram": 0.9996,
+        "loss": 11047.9,
+        "mean_abs": 2.237,
+        "over10": 1.854,
+        "over64": 1.165,
+        "sparse": false,
+        "ssim": 0.5996
+      },
+      {
+        "coverage": 0.0293,
+        "histogram": 0.997,
+        "loss": 19697.5,
+        "mean_abs": 3.209,
+        "over10": 2.209,
+        "over64": 1.654,
+        "sparse": false,
+        "ssim": 0.2698
+      },
+      {
+        "coverage": 0.028,
+        "histogram": 0.9996,
+        "loss": 19123.4,
+        "mean_abs": 3.095,
+        "over10": 2.025,
+        "over64": 1.49,
+        "sparse": false,
+        "ssim": 0.2576
+      },
+      {
+        "coverage": 0.0174,
+        "histogram": 0.9989,
+        "loss": 7812.5,
+        "mean_abs": 1.422,
+        "over10": 1.102,
+        "over64": 0.711,
+        "sparse": false,
+        "ssim": 0.5136
+      },
+      {
+        "coverage": 0.0193,
+        "histogram": 0.997,
+        "loss": 10313.5,
+        "mean_abs": 1.386,
+        "over10": 1.418,
+        "over64": 0.865,
+        "sparse": false,
+        "ssim": 0.4187
+      }
+    ],
+    "slides_scored": 6,
+    "ssim": 0.5099,
     "truth": "svg"
   },
   "sample-cjk": {

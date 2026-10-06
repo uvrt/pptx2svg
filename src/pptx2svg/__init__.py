@@ -44,7 +44,8 @@ from .png import RasterizerNotAvailable, available_backends, svg_to_png
 from .render.context import RenderContext
 from .render.svg import render_slide_to_svg
 from .resolve import ResolvedPresentation, Warning, resolve_presentation
-from .text.fontmap import DEFAULT_FONT_MAPPING, create_font_mapping
+from .resolve.east_asian import EastAsianFaces
+from .text.fontmap import DEFAULT_FONT_MAPPING, create_font_mapping, family_key
 from .text.measure import DefaultTextMeasurer, FontToolsTextMeasurer, TextMeasurer
 from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
 
@@ -151,20 +152,40 @@ def convert_pptx_to_model(
     options = options or ConvertOptions()
     package = _open_package(source)
     presentation = read_presentation(package)
+    host_fonts = _host_fonts(options)
     resolved = resolve_presentation(
         package,
         presentation,
         slide_numbers=options.slide_numbers,
         metafile_converter=options.metafile_converter,
+        # Which face draws a run's Japanese depends on what is installed: as PowerPoint
+        # would find it here when the host's faces are in use, else from what we know.
+        east_asian=EastAsianFaces(host=host_fonts),
     )
     if options.use_embedded_fonts and presentation.embedded_fonts:
         # After resolution, not during it: `resolved_families` is what tells us which of
         # the embedded families a slide actually asks for, and decoding one costs about a
         # second.  A template deck routinely embeds a family that no slide uses.
+        #
+        # **An installed face beats the embedded one**, measured: PowerPoint draws a
+        # deck's embedded Lato 1.104 with the Lato 2.015 Office's cloud cache holds --
+        # glyph origins 0.12 pt from 2.015's advances over a 20-character line, 0.55 pt
+        # from 1.104's -- and still does when the embedded copy claims version 9.000; a
+        # face it embeds under a name nothing installs is drawn from the deck
+        # (``tools/make_font_resolution_probe.py``).  So with the host's faces in use, a
+        # family PowerPoint would find installed here is not taken from the deck at all.
+        wanted = resolved_families(resolved)
+        if host_fonts:
+            from .fonts import office
+
+            embedded = {family_key(entry.typeface or "") for entry in presentation.embedded_fonts}
+            installed = {family for family in wanted if family_key(family) in embedded and office.find(family)}
+            resolved.installed_families = frozenset(family_key(family) for family in installed)
+            wanted = [family for family in wanted if family not in installed]
         resolved.embedded_fonts = extract_embedded_fonts(
             package,
             presentation.embedded_fonts,
-            wanted_families=resolved_families(resolved),
+            wanted_families=wanted,
         )
         resolved.warnings.extend(
             Warning(code=code, message=message, part_path=presentation.part_path)
@@ -189,12 +210,11 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     resolved = convert_pptx_to_model(source, options)
 
     font_mapping = create_font_mapping(options.font_mapping)
-    # Minor before major, which is the opposite of what this used to do.  Measured:
-    # `real-financial-report.pptx`'s theme offers `游ゴシック Light` as its major Jpan face
-    # and `游ゴシック` as its minor, and PowerPoint's own PDF export drew every Japanese
-    # chart label in **YuGothic-Regular**.  Preferring the major entry picked a light
-    # weight for body copy.
-    jpan_fallback = resolved.font_scheme.minor_font_jpan or resolved.font_scheme.major_font_jpan
+    # No script-list fallback for text: a run's East Asian face is decided at resolution,
+    # and the theme's `Jpan` entry reaches a run only as `+mn-ea` for Japanese text --
+    # measured (pptx2svg.resolve.east_asian).  Offering it again behind every East Asian
+    # chunk put 游ゴシック into stacks PowerPoint never draws from.
+    jpan_fallback = None
 
     if options.warn_on_font_substitution:
         options.warnings.extend(_font_warnings(resolved))
@@ -255,7 +275,7 @@ def _font_warnings(resolved: ResolvedPresentation) -> list[Warning]:
     not one per face.  With the bundle, the remaining gaps are per-face and worth naming
     individually.
     """
-    embedded = resolved.embedded_fonts.families
+    embedded = resolved.embedded_fonts.families | resolved.installed_families
     report = check_families(resolved_families(resolved), embedded=embedded)
 
     if report.mode != "bundled":

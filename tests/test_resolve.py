@@ -7,6 +7,7 @@ from pptx2svg import ConvertOptions, convert_pptx_to_model, model as m
 from pptx2svg.opc import OpcPackage
 from pptx2svg.parse.parts import read_presentation
 from pptx2svg.resolve import resolve_presentation
+from pptx2svg.text.measure import is_cjk
 
 
 def resolve(path):
@@ -348,19 +349,18 @@ def test_a_known_table_style_id_raises_no_warning(authoring):
 # -- The East Asian typeface cascade -----------------------------------------------------
 
 
-def test_a_run_naming_no_east_asian_face_inherits_the_themes_script_face(financial):
-    """`<a:ea typeface=""/>` in the theme means "no face named", not "the empty face".
+def test_a_run_naming_no_east_asian_face_is_drawn_in_ms_gothic(financial):
+    """`<a:ea typeface=""/>` in the theme means "no face named", not "the empty face" --
+    and the theme's `<a:font script="Jpan"/>` does not stand in for it.
 
-    Every theme in this corpus writes one, so before this a run that named no `<a:ea>` of
-    its own reached the measurer with `font_family_ea=None` and had its kana and
-    ideographs measured through the *Latin* table -- a face with no East Asian glyph in
-    it, whose answer is therefore `FontMetrics.cjk_width`, which is 1.0 em in every table
-    because `tools/extract_font_metrics.py` writes `units_per_em` when the probe kanji is
-    absent.  Layout came from a constant while the rasteriser drew with a real face.
-
-    `real-financial-report.pptx`'s table cells state no typeface anywhere, so they take
-    the theme: Calibri for Latin, and `<a:font script="Jpan" typeface="游ゴシック"/>` for
-    the rest.
+    `real-financial-report.pptx`'s table cells state no typeface anywhere and no Japanese
+    `lang`, so they take the theme: Calibri for Latin, and for the rest the `<a:ea>` slot,
+    which is empty.  PowerPoint's export draws their Japanese in **MS-Gothic** -- not the
+    游ゴシック of the theme's `Jpan` entry, which the same deck's chart labels are drawn in
+    -- because Calibri is a sans serif face (pptx2svg.resolve.east_asian; measured with
+    `tools/make_font_resolution_probe.py`).  Before, a run with no `<a:ea>` of its own was
+    measured through the Latin table, then through the `Jpan` entry: neither is what
+    PowerPoint draws.
     """
     _, resolved = resolve(financial)
     runs = [
@@ -372,31 +372,31 @@ def test_a_run_naming_no_east_asian_face_inherits_the_themes_script_face(financi
         if cell.text_body is not None
         for paragraph in cell.text_body.paragraphs
         for run in paragraph.runs
+        if any(is_cjk(ord(char)) for char in run.text)
     ]
     assert runs
     assert {run.properties.font_family for run in runs} == {"Calibri"}
-    assert {run.properties.font_family_ea for run in runs} == {"游ゴシック"}
+    assert {run.properties.font_family_ea for run in runs} == {"MS Gothic"}
 
 
-def test_a_latin_face_named_as_the_east_asian_one_does_not_win(basic_theme):
-    """`real-basic-theme.pptx` writes `<a:ea typeface="Raleway"/>` on its master.
+def test_a_latin_face_named_as_the_east_asian_one_decides_gothic_or_mincho(basic_theme):
+    """`real-basic-theme.pptx` writes `<a:ea typeface="Raleway"/>` on its master's title
+    style and `Lato` on its body.
 
-    Raleway has no kana.  PowerPoint's own export of the deck drew the Japanese in MS
-    Gothic and MS Mincho, so it did not honour the name either; taking it at face value
-    measured every glyph at Raleway's 1.0 em `cjk_width`, which is the absence of a
-    measurement rather than one.  The theme's `<a:font script="Jpan"/>` is the next
-    candidate that can actually draw the text.
+    Neither has kana, and PowerPoint's own export of the deck drew the Japanese in MS
+    Mincho (the titles) and MS Gothic (the body): the face named decides between the two
+    by its PANOSE -- Lato's says sans serif, Raleway's says nothing at all -- rather than
+    giving way to the theme's `Jpan` entry, ＭＳ Ｐゴシック, which it never reaches.
     """
     _, resolved = resolve(basic_theme)
-    runs = [
-        run
-        for slide in resolved.slides
-        for element in walk(slide.elements)
-        if getattr(element, "text_body", None) is not None
-        for paragraph in element.text_body.paragraphs
-        for run in paragraph.runs
-        if run.text
-    ]
-    assert runs
-    assert {run.properties.font_family for run in runs} >= {"Raleway", "Lato"}
-    assert {run.properties.font_family_ea for run in runs} == {"ＭＳ Ｐゴシック"}
+    faces = {}
+    for slide in resolved.slides:
+        for element in walk(slide.elements):
+            if getattr(element, "text_body", None) is None:
+                continue
+            for paragraph in element.text_body.paragraphs:
+                for run in paragraph.runs:
+                    if any(is_cjk(ord(char)) for char in run.text):
+                        faces.setdefault(run.properties.font_family, set()).add(run.properties.font_family_ea)
+    assert faces["Raleway"] == {"MS Mincho"}
+    assert faces["Lato"] == {"MS Gothic"}

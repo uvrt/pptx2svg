@@ -65,6 +65,7 @@ has them: the reproducible render.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import sys
@@ -88,16 +89,20 @@ __all__ = [
     "POWERPOINT_FONTS",
     "DrawingPlan",
     "HostFace",
+    "APPLE_COLOR_EMOJI",
     "available",
     "cloud_font_dirs",
     "drawing_plan",
+    "emoji_face",
     "enabled",
     "find",
     "layout_metrics",
     "metrics",
     "pass_svg",
     "search_dirs",
+    "supplied_faces",
     "system_font_dirs",
+    "with_emoji",
 ]
 
 _SUFFIXES = _shared.FONT_SUFFIXES
@@ -162,7 +167,26 @@ def layout_metrics(families) -> dict:
     ``families`` that this machine has and the static tables do not measure as itself
     (:func:`has_own_table`).  What :class:`~pptx2svg.text.measure.DefaultTextMeasurer`
     takes as ``extra_metrics``."""
-    return _shared.layout_metrics(families, POWERPOINT, measure=metrics)
+    out = _shared.layout_metrics(families, POWERPOINT, measure=metrics)
+    # A bundled family is measured from the bundle's own release, which need not be the
+    # one installed here: the bundle's Raleway is later than the 4.026 Office's cloud
+    # cache holds, 338 of 340 shared advances apart.  Installed faces now draw a deck's
+    # family even where the deck embeds it (as PowerPoint draws it), so the installed
+    # release is the one to measure -- a static one: a variable face's advances are its
+    # default instance's (Noto Sans JP's is Thin), which no run draws.
+    from ooxml_common.fonts import BUNDLED_FAMILIES
+    from ooxml_common.text.fontmap import family_key
+
+    bundled = {family_key(name) for name in BUNDLED_FAMILIES}
+    for family in families:
+        key = family_key(family) if family else None
+        if key in bundled and key not in out:
+            faces = find(family)
+            if faces and not any(face.variable for face in faces):
+                table = metrics(family)
+                if table is not None:
+                    out[key] = table
+    return out
 
 
 # --------------------------------------------------------------------------------------
@@ -283,6 +307,126 @@ def supplied_families(font_files=(), font_dirs=()) -> frozenset:
         for face in _faces_in(path, "caller"):
             out.update(face.families)
     return frozenset(out)
+
+
+# --------------------------------------------------------------------------------------
+# Emoji: the face PowerPoint draws them in when the run's face has none
+# --------------------------------------------------------------------------------------
+
+#: macOS's colour emoji face, read in place.
+APPLE_COLOR_EMOJI = Path("/System/Library/Fonts/Apple Color Emoji.ttc")
+_EMOJI_FAMILY = "Apple Color Emoji"
+_TSPAN = re.compile(r'(<tspan\b[^>]*\bfont-family="([^"]*)"[^>]*>)([^<]*)(</tspan>)')
+
+
+def emoji_face() -> HostFace | None:
+    """macOS's Apple Color Emoji, where it is installed and host faces are in use."""
+    if not enabled() or sys.platform != "darwin" or not APPLE_COLOR_EMOJI.is_file():
+        return None
+    faces = _faces_in(APPLE_COLOR_EMOJI, "system")
+    return faces[0] if faces else None
+
+
+@functools.lru_cache(maxsize=64)
+def _cmap(face: HostFace) -> frozenset:
+    """The code points ``face`` maps, read from its tables alone (no outlines)."""
+    try:
+        return frozenset(_shared.Face(_shared.face_bytes(face)).cmap)
+    except Exception:  # noqa: BLE001 -- an unreadable face covers nothing
+        return frozenset()
+
+
+def with_emoji(svg: str, *, supplied: dict | None = None) -> tuple[str, list[str]]:
+    """``svg`` with every emoji its face cannot draw named in Apple Color Emoji, and the
+    file to hand the rasteriser for it; ``svg`` unchanged and no file where there is
+    nothing to do or the face is not installed.
+
+    **Measured** (``tools/make_font_resolution_probe.py``): PowerPoint for Mac draws ⚡ 📱
+    🔒 ✅ ❤ 😀 ✔ in AppleColorEmoji, in Calibri, Aptos, Lato and Noto Sans JP alike --
+    none of them has the glyphs -- while a character the run's own face has stays in it
+    (Noto Sans JP's ★, Calibri's →).  So a character is named in the emoji face only where
+    Apple Color Emoji maps it and the face drawing its run does not: the first face its
+    ``font-family`` finds installed (:func:`find`), or one the caller supplies
+    (``supplied``, family key -> faces), or the bundle's.
+
+    By name, rather than by handing resvg the file and leaving the rest to its fallback:
+    resvg falls back to the first face it loaded that has a glyph, and the emoji face,
+    loaded among the caller's files, then drew ↔ ♥ ⚠ that the bundle's Noto Sans JP has.
+    """
+    emoji = emoji_face()
+    if emoji is None:
+        return svg, []
+    emoji_map = _cmap(emoji)
+    if not any(ord(char) > 0x7F and ord(char) in emoji_map for char in svg):
+        return svg, []
+    from ..text.fontmap import family_key
+
+    supplied = supplied or {}
+    bundle = _bundle_faces()
+
+    @functools.lru_cache(maxsize=None)
+    def drawing(value: str) -> frozenset:
+        for name in stack_names(value):
+            key = family_key(name)
+            faces = supplied.get(key) or find(name) or bundle.get(key)
+            if faces:
+                regular = [f for f in faces if not f.bold and not f.italic] or list(faces)
+                return _cmap(regular[0])
+        return frozenset()
+
+    changed = False
+
+    def tspan(match: re.Match) -> str:
+        nonlocal changed
+        head, value, text, tail = match.groups()
+        if not any(ord(c) > 0x7F and ord(c) in emoji_map for c in text):
+            return match.group(0)
+        covered = drawing(value)
+        out, run = [], []
+        for char in text:
+            code = ord(char)
+            if code > 0x7F and code in emoji_map and code not in covered or (run and code in (0xFE0F, 0x200D)):
+                run.append(char)
+                continue
+            if run:
+                out.append(f'<tspan font-family="\'{_EMOJI_FAMILY}\'">{"".join(run)}</tspan>')
+                run = []
+            out.append(char)
+        if run:
+            out.append(f'<tspan font-family="\'{_EMOJI_FAMILY}\'">{"".join(run)}</tspan>')
+        new = "".join(out)
+        if new != text:
+            changed = True
+        return head + new + tail
+
+    out = _TSPAN.sub(tspan, svg)
+    return (out, [emoji.path]) if changed else (svg, [])
+
+
+@functools.lru_cache(maxsize=1)
+def _bundle_faces() -> dict:
+    from ooxml_common.fonts import bundle_dir
+
+    directory = bundle_dir()
+    if directory is None:
+        return {}
+    return {key: tuple(places.get("bundle", ())) for key, places in _index((("bundle", Path(directory)),)).items()}
+
+
+def supplied_faces(font_files=(), font_dirs=()) -> dict:
+    """``family key -> faces`` of the faces in ``font_files`` and ``font_dirs`` (a caller's own)."""
+    out: dict[str, list[HostFace]] = {}
+    paths = [Path(path) for path in font_files or ()]
+    for directory in font_dirs or ():
+        try:
+            paths.extend(p for p in Path(directory).rglob("*") if p.suffix.lower() in _SUFFIXES)
+        except OSError:
+            continue
+    for path in paths:
+        for face in _faces_in(path, "caller"):
+            for key in face.families:
+                out.setdefault(key, []).append(face)
+    return {key: tuple(faces) for key, faces in out.items()}
 
 
 #: macOS's font folders as resvg's font database reads them when it loads "the system's

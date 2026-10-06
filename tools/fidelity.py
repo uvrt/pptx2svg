@@ -114,13 +114,13 @@ The cost is real and worth stating: two decks that used to score, ``sample`` (0.
 about this library -- its Japanese runs were our MS PGothic against PowerPoint's MS
 Gothic, and it passed because there is not much Japanese on those slides.
 
-Both remain skipped, because ＭＳ Ｐゴシック is unresolvable by this PowerPoint under any
-spelling and is not ours to install where it would not be.  Seven exports establish what
-*would* move them and what would not -- the table is in :func:`font_profile` -- and the
-one lever that works is naming, in ``<a:ea>``, a face both renderers draw.
-``tools/make_cjk_deck.py`` takes it: it derives ``sample-cjk.pptx``, the first Japanese
-deck in this corpus where both sides ink the face the deck asks for, without editing the
-two decks that record the real-world case.
+Both are scored again since this library resolves a run's East Asian face as PowerPoint
+does (``pptx2svg.resolve.east_asian``, measured by ``tools/make_font_resolution_probe.py``):
+ＭＳ Ｐゴシック was never a face either renderer could not find -- it is a ``Jpan`` entry
+PowerPoint consults only for Japanese ``lang`` -- and both decks' Japanese is drawn in MS
+Gothic and MS Mincho on both sides.  Check 3 therefore holds the export to the faces *our
+conversion* draws (:func:`our_faces`), not to every name the XML spells, and an emoji both
+renderers draw in Apple Color Emoji counts as covered (``real-product-page``).
 
 The bundled substitutes are what we *ship*; ``pptx2svg fonts --check`` and
 ``tests/test_fonts.py`` cover those.  They are deliberately not the reference here.
@@ -968,6 +968,32 @@ def _face_cmaps(faces: dict, names: list[str]) -> dict[str, set[int]]:
     return result
 
 
+def our_faces(deck: Path) -> set[str] | None:
+    """The faces our conversion draws ``deck`` with (``pptx2svg.fonts.check.resolved_families``),
+    as the default conversion resolves them; ``None`` where the checkout under test cannot
+    say."""
+    sys.path.insert(0, SOURCE_ROOT)
+    try:
+        from pptx2svg import ConvertOptions, convert_pptx_to_model
+        from pptx2svg.fonts.check import resolved_families
+        from pptx2svg.resolve import east_asian  # noqa: F401 -- the rule this relies on
+    except ImportError:
+        return None
+    return set(resolved_families(convert_pptx_to_model(str(deck), ConvertOptions())))
+
+
+def _emoji_cmap() -> set[int] | None:
+    """The code points macOS's Apple Color Emoji maps, where it is installed and the
+    checkout under test draws with it."""
+    sys.path.insert(0, SOURCE_ROOT)
+    try:
+        from pptx2svg.fonts import office
+    except ImportError:
+        return None
+    face = office.emoji_face() if hasattr(office, "emoji_face") else None
+    return set(office._cmap(face)) if face is not None else None
+
+
 def _pdf_base_fonts(pdf: Path) -> set[str]:
     """The PostScript names in the export's ``/BaseFont`` entries.
 
@@ -1118,11 +1144,25 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
         (available if face in faces else missing).append(face)
 
     usable = available + [face for face in conditional if face in faces]
+    # The faces our own render draws with, where that can be asked: a name the deck
+    # spells but PowerPoint resolves past -- ＭＳ Ｐゴシック as a `Jpan` entry no run
+    # reaches -- is not drawn by us either, and the faces both draw instead (MS Gothic, MS
+    # Mincho) are the ones to hold the export to (pptx2svg.resolve.east_asian).
+    ours = our_faces(deck)
+    if ours is not None:
+        usable = [face for face in usable if face in ours] + sorted(
+            face for face in ours if face in faces and face not in usable)
     uncovered = ""
     substituted: list[str] = []
     instead: list[str] = []
     if not missing and profile:
         cmaps = _face_cmaps(faces, usable)
+        drawn = _pdf_base_fonts(pdf) if pdf is not None and pdf.exists() else set()
+        emoji = _emoji_cmap() if "AppleColorEmoji" in drawn else None
+        if emoji:
+            # Both renderers draw an emoji no named face has in macOS's colour emoji face
+            # (pptx2svg.fonts.office.with_emoji): the same fallback, not two inventions.
+            cmaps["Apple Color Emoji"] = emoji
         wanted = {ord(char) for char in text if not char.isspace()}
         unmatched = sorted(
             code for code in wanted if not any(code in c for c in cmaps.values())
@@ -1136,7 +1176,6 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
             # nothing, and a face PowerPoint used for content we do not render at all --
             # Arial for a chart's axis labels, say -- is a missing feature of ours, not a
             # font-matching difference, and must not be dressed up as one.
-            drawn = _pdf_base_fonts(pdf)
             for face, covered in cmaps.items():
                 others = [c for name, c in cmaps.items() if name != face]
                 exclusive = any(
@@ -1145,7 +1184,7 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
                 )
                 if not exclusive:
                     continue
-                postscript = _postscript_names(faces[face])
+                postscript = _postscript_names(faces[face]) if face in faces else {"AppleColorEmoji"}
                 if postscript and not (postscript & drawn):
                     substituted.append(face)
             substituted.sort()
@@ -1155,6 +1194,8 @@ def font_profile(deck: Path, profile: dict | None, pdf: Path | None = None) -> d
                 named_ps: set[str] = set()
                 for face in usable:
                     named_ps |= _postscript_names(faces[face])
+                if emoji:
+                    named_ps.add("AppleColorEmoji")
                 instead = sorted(drawn - named_ps)
 
     digest = hashlib.sha256()
@@ -1246,7 +1287,15 @@ def our_svgs(deck: Path) -> list[str]:
     # checkouts do not have these keywords.  Filtering by signature keeps the comparison
     # possible instead of making it a TypeError.
     convert_kwargs = _supported(ConvertOptions, warn_on_font_substitution=False)
-    return list(convert_pptx_to_svg(str(deck), ConvertOptions(width=WIDTH, **convert_kwargs)))
+    svgs = list(convert_pptx_to_svg(str(deck), ConvertOptions(width=WIDTH, **convert_kwargs)))
+    # What svg_to_png does to an SVG drawn with the host's faces, done here because the
+    # rasterisation below hands over the profile's faces itself (our_raster_options):
+    # an emoji no face of its run has is named in Apple Color Emoji, as PowerPoint draws it.
+    from pptx2svg.fonts import office
+
+    if hasattr(office, "with_emoji"):
+        svgs = [office.with_emoji(svg)[0] for svg in svgs]
+    return svgs
 
 
 def our_raster_options(deck: Path, profile: dict) -> dict:
@@ -1262,7 +1311,7 @@ def our_raster_options(deck: Path, profile: dict) -> dict:
         # addressable by the name the deck spells.  See :func:`addressable_font_files`.
         font_files=addressable_font_files(
             profile, requested_faces(deck) + list(script_faces(deck).values())
-        ),
+        ) + _emoji_files(),
         skip_system_fonts=True,
         use_bundled_fonts=False,
         # The profile's faces are handed over above; Office's faces drawing by default
@@ -1271,6 +1320,16 @@ def our_raster_options(deck: Path, profile: dict) -> dict:
         # conversion measures it -- with them (our_svgs).
         host_fonts=False,
     )
+
+
+def _emoji_files() -> list[str]:
+    """Apple Color Emoji, read in place, where the checkout under test names it
+    (:func:`our_svgs`): last, so it shadows nothing."""
+    sys.path.insert(0, SOURCE_ROOT)
+    from pptx2svg.fonts import office
+
+    face = office.emoji_face() if hasattr(office, "emoji_face") else None
+    return [face.path] if face is not None else []
 
 
 def rasterise_ours(svg: str, options: dict):
@@ -1723,7 +1782,8 @@ def run(oracle_dir: Path, profile: dict, truths=(DEFAULT_TRUTH,), jobs: int = 1,
     # Staged once here, not raced for by every worker (addressable_font_files).
     staged = sorted({path for deck, _pdf in scored
                      for path in addressable_font_files(profile, requested_faces(deck)
-                                                        + list(script_faces(deck).values()))})
+                                                        + list(script_faces(deck).values()))}
+                    | set(_emoji_files()))
     cache = None
     digests: dict = {}
     hashing = None

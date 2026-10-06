@@ -43,7 +43,9 @@ from typing import Sequence
 
 from .. import model as m
 from ..parse import source as s
-from ..text.fontmap import east_asian_family
+from ..text.fontmap import theme_east_asian
+from ..text.measure import is_cjk
+from .east_asian import EastAsianFaces
 from ..units import ROTATION_UNIT
 from .color import resolve_color
 
@@ -51,7 +53,8 @@ from .color import resolve_color
 #: master's.  ``bold`` and ``italic`` belong here -- see the module docstring for the
 #: measurement that moved them.
 _ALWAYS_INHERITED = (
-    "font_size", "typeface", "typeface_ea", "typeface_cs", "color", "bold", "italic",
+    "font_size", "typeface", "typeface_ea", "typeface_cs", "color", "bold", "italic", "lang",
+    "alt_lang",
 )
 #: Properties inherited only from the shape's own paragraph/list style.
 _DECORATIONS = (
@@ -250,7 +253,7 @@ def _resolve_paragraph(
     runs = [
         m.TextRun(
             text=run.text,
-            properties=_resolve_run_properties(context, run.properties, run_defaults),
+            properties=_resolve_run_properties(context, run.properties, run_defaults, run.text),
         )
         for run in paragraph.runs
     ]
@@ -339,6 +342,7 @@ def _resolve_run_properties(
     context,
     local: s.SourceRunProperties | None,
     defaults: Sequence[tuple[s.SourceRunProperties | None, bool]],
+    text: str = "",
 ) -> m.RunProperties:
     merged = replace(local) if local is not None else s.SourceRunProperties()
 
@@ -362,14 +366,17 @@ def _resolve_run_properties(
         if outline_color is not None:
             outline = m.TextOutline(width=merged.outline_width, color=outline_color)
 
+    latin = _resolve_typeface(context, merged.typeface) or _theme_body_latin(context)
+    east_asian = _east_asian_name(context, merged.typeface_ea, merged.lang, merged.alt_lang)
+    if any(is_cjk(ord(char)) for char in text):
+        # Only where there is East Asian text to draw is the face that draws it decided:
+        # a name that cannot draw it gives way to MS Gothic or MS Mincho.
+        faces = getattr(context, "east_asian", None) or _STATIC_EAST_ASIAN
+        east_asian = faces.face(east_asian, latin)
     return m.RunProperties(
         font_size=merged.font_size,
-        font_family=(
-            _resolve_typeface(context, merged.typeface) or _theme_body_latin(context)
-        ),
-        font_family_ea=east_asian_family(
-            _resolve_typeface(context, merged.typeface_ea), _theme_east_asian(context)
-        ),
+        font_family=latin,
+        font_family_ea=east_asian,
         font_family_cs=_resolve_typeface(context, merged.typeface_cs),
         bold=bool(merged.bold),
         italic=bool(merged.italic),
@@ -384,37 +391,37 @@ def _resolve_run_properties(
     )
 
 
-def _theme_east_asian(context) -> str | None:
-    """The face this theme draws East Asian text in, for a run that names none.
+_STATIC_EAST_ASIAN = EastAsianFaces(host=False)
 
-    The counterpart of :func:`_theme_body_latin`, and the piece that was missing: a run
-    stating no ``<a:ea>`` used to reach the measurer with ``font_family_ea=None``, so
-    every kana and every ideograph in it was measured through the *Latin* table.  That is
-    not a small approximation -- a Latin face has no East Asian glyph at all, so the
-    width came from :attr:`FontMetrics.cjk_width`, which is one em in every table because
-    the extractor writes ``units_per_em`` where the probe kanji is missing.  Layout was
-    computed from a constant while the rasteriser drew with a real face.
 
-    **Body before heading, measured.**  ``real-financial-report.pptx``'s theme offers
-    ``游ゴシック Light`` as its major Jpan face and ``游ゴシック`` as its minor, and
-    PowerPoint's own export drew the chart's Japanese in **YuGothic-Regular** -- the
-    minor.  The Latin side already makes the same choice for the same reason (see
-    :func:`_theme_body_latin`): a master that wants the heading face says so with
-    ``+mj-ea``, and guessing it for everything else gets a light weight on body copy.
+def _east_asian_name(context, typeface: str | None, lang: str | None,
+                     alt_lang: str | None = None) -> str | None:
+    """The East Asian face a run names: its own ``<a:ea>`` as inherited, or what the theme
+    pointer names for its language -- the ``Jpan`` entry for a Japanese run, ``<a:ea>``
+    otherwise (:func:`ooxml_common.text.fontmap.theme_east_asian`).  A run that inherits
+    no ``<a:ea>`` at all is read as ``+mn-ea``, as every default text style spells it.
 
-    Within a collection, ``<a:ea>`` comes before the ``<a:font script="..."/>`` list;
-    :func:`pptx2svg.text.fontmap.east_asian_family` is what enforces that an empty
-    ``typeface=""`` -- which is what every theme in this corpus writes -- is not a name.
+    This replaces a cascade that offered the theme's ``<a:ea>``, then its ``Jpan`` entry,
+    to every run, and skipped any name that could not draw Japanese.  Measured
+    (:mod:`pptx2svg.resolve.east_asian`), neither is what PowerPoint does: ``sample.pptx``
+    names ＭＳ Ｐゴシック only as its ``Jpan`` entry and its runs carry no ``lang``, so
+    PowerPoint draws them in MS Gothic -- and MS Mincho for a run in Courier New -- and
+    a name that cannot draw Japanese is not skipped but decides between those two.
+
+    **Body before heading** still holds for a run that says nothing: ``+mn-ea``.  A
+    master that wants the heading face says ``+mj-ea``.
     """
+    typeface = typeface if typeface else "+mn-ea"
+    if not typeface.startswith("+"):
+        return typeface
     scheme = context.theme.font_scheme if context.theme else None
     if scheme is None:
         return None
-    return east_asian_family(
-        scheme.minor_east_asian,
-        scheme.minor_japanese,
-        scheme.major_east_asian,
-        scheme.major_japanese,
-    )
+    if typeface == "+mj-ea":
+        return theme_east_asian(scheme.major_east_asian, scheme.major_japanese, lang, alt_lang)
+    if typeface == "+mn-ea":
+        return theme_east_asian(scheme.minor_east_asian, scheme.minor_japanese, lang, alt_lang)
+    return _resolve_typeface(context, typeface)
 
 
 def _theme_body_latin(context) -> str | None:
