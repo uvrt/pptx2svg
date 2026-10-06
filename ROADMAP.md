@@ -5468,6 +5468,86 @@ text, but it overrides the real advances inside a chunk with our tables, and
 corpus shears is in a face with no italic of its own. `tests/test_render.py` holds the probe's
 advances, the flowing chunk and the italic in its own face.
 
+### 5.8 Autofit is what the file stores — **measured, and fixed** (ooxml-common 0.4.5)
+
+An agent splitting an overlong slide was shown it already fitting. The body placeholder of
+a deck it was given held twenty paragraphs under the master's `a:normAutofit`, with no
+`fontScale` stored; pptx2svg drew them shrunk into the box, and PowerPoint draws them at
+full size running off the slide. The shrink was the renderer's own idea, from its first
+commit -- "the stored `fontScale` ... was computed against PowerPoint's font metrics;
+re-deriving it keeps text inside the box" -- and nothing had measured it. The same went
+for `a:spAutoFit`, whose shape was grown to its text.
+
+`tools/make_autofit_probe.py` puts one grey 400 x 150 pt Calibri text box on each of 47
+slides -- `normAutofit` with nothing stored on text that fits and on text that overflows
+at 12, 18 and 28 pt, wrapping and centred; a stored `fontScale` of 50, 62.5 and 92.5 % on
+text that fits and on text that still overflows; `lnSpcReduction` alone, with a scale,
+and against `spcBef`, `spcAft`, a 150 % and a 90 % `lnSpc` and a 30 pt `spcPts`, each beside
+a `noAutofit` twin; sizes a scale does not take to a whole point; `spAutoFit` on text
+taller and shorter than its box; `noAutofit`; no autofit element -- and
+`tools/read_autofit_probe.py` reads each run's size, each baseline and the box's drawn
+height off PowerPoint's PDF. **What PowerPoint draws on open is what the file stores; it
+fits nothing until the text is edited.**
+
+* **`normAutofit` with nothing stored overflows at full size.** Twelve 18 pt lines are
+  drawn at 18 pt, the last baseline at 297.60 pt in a box that ends at 190; centred, they
+  spill both ways (the first baseline at 2.40 pt, above the box). We drew 9.92 pt, the
+  last line at 183.76.
+* **A stored `fontScale` is applied, and nothing more.** 30 lines at 50 % are drawn at
+  9 pt and run to 365.52 pt; we shrank them again, to 3.97 pt.
+* **The scaled size is rounded to a whole point, half up**, read off each line's advance
+  (the PDF's own font size is not it: PowerPoint writes a stated 10.5 pt run as an 11 pt
+  font with 10.5 pt's advances, and that 10.5 pt is kept, at 100 % and with no autofit):
+
+  | stated | `fontScale` | exact | drawn |
+  | --- | --- | --- | --- |
+  | 18 pt | 62.5 % | 11.25 | 11 |
+  | 18 pt | 92.5 % | 16.65 | 17 |
+  | 18 pt | 70 % | 12.6 | 13 |
+  | 18 pt | 55 % | 9.9 | 10 |
+  | 25 / 21 / 13 / 11 pt | 50 % | 12.5 / 10.5 / 6.5 / 5.5 | 13 / 11 / 7 / 6 |
+  | 10 pt | 85 % | 8.5 | 9 |
+  | 10.5 pt | 50 % | 5.25 | 5 |
+
+  Every tie went up, so it is not to-even; a run of 24 pt beside the 18 pt one, at
+  62.5 %, is 15. The line pitch follows the rounded size: 9 pt lines step 10.96 pt.
+* **`lnSpcReduction` comes off a percentage line spacing in percentage points.** 150 %
+  less 20 steps 28.02 pt where 150 % steps 32.46 -- 130 %, not the 120 % a factor of 0.8
+  gives -- and 90 % less 10 draws exactly the `noAutofit` 80 % (first baseline 56.64,
+  last 125.52). A 30 pt `spcPts` keeps its 30.00 pt under 20 %, and neither the reduction
+  nor a `fontScale` touches `spcBef` (12 pt, and 50 %) or `spcAft` (50 %).
+* **`spAutoFit` keeps the stored extent.** Twelve lines draw in a box still 150 pt tall,
+  overflowing it (we grew it to 266.4); two lines in it leave it 150 tall, at the top
+  or, anchored `b`, at the bottom.
+* `noAutofit` and no autofit element overflow at full size, as we drew them.
+* `normAutofit` on `wrap="none"` text that overflows was left out: exporting it, PowerPoint
+  16.106 dropped the AppleEvent connection (-609) and refused every open after it with
+  -9074 until it was killed. Its first symptom was an export that exits 0 and writes no
+  PDF.
+
+So `DrawingRules.autofit` is new (ooxml-common 0.4.5). `"stored"`, PowerPoint's: a
+`normAutofit` body's runs are given their scaled, rounded sizes (the 18 pt default too,
+where no run states one) and each paragraph's percentage spacing the reduction off, before
+anything is laid out, and nothing is shrunk; a `spAutoFit` shape is drawn at its extent.
+`"fit"` keeps the old shrinking and growing for Word, where none of this was measured, so
+docx2svg does not move. A table row still grows to its cells' text (`_row_heights`): that
+is `a:tr@h` as a minimum, not autofit.
+
+The probe goes from **19 to 45 of 47** agreeing (size, line count, first and last baseline
+to 1 pt, box height). The two left are one rule that is not autofit's: a line with an 11 pt
+run then a 15 pt one puts its first baseline 57.60 pt down in PowerPoint and 53.85 in ours,
+the same scaled and stated (`ctl-mixed`) -- our first baseline follows the paragraph's
+first run, not the line's tallest. Recorded, not fixed.
+
+**One fidelity slide moved, closer**: `real-college-template` slide 8, a body at a stored
+90 %, **0.9889 → 0.9930** (loss 7,894.8 → 4,959.9; under pdfium 0.9014 → 0.9049), the deck
+0.8277 → 0.8282. One snapshot moved: slide 2 of the basic theme fixture, whose 25.5 pt title at a
+stored 90 % is drawn 23 pt rather than 22.95 (that deck is not scored: PowerPoint drew its
+ＭＳ Ｐゴシック with other faces). Otherwise only the three local template decks in
+`scratch/` changed, and not in a pixel: their top-anchored `spAutoFit` boxes with no fill
+or line are drawn at their stored height. The trial deck's twenty-paragraph body is now drawn at full size, running off the slide, as
+PowerPoint draws it. ooxml-common's `tests/test_autofit.py` holds the rules.
+
 ---
 
 ## Phase 6 — Embedded fonts — **done**
