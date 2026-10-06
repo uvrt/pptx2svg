@@ -121,9 +121,9 @@ either is skipped rather than scored against Microsoft's own fallback**.
 | `sample-issue-387.pptx` | **0.9897** | 1.0000 | pass |
 | `real-financial-report.pptx` | 0.9114 | 0.9988 | SSIM |
 | `sample-cjk.pptx` (derived) | 0.7367 | 0.9805 | SSIM |
-| `real-basic-theme.pptx` | skipped | — | resolves Japanese to ＭＳ Ｐゴシック, which this PowerPoint cannot use |
-| `sample.pptx` | skipped | — | same |
-| `real-product-page.pptx` | skipped | — | ⚡📱🔒: no face either deck names can draw them |
+| `real-basic-theme.pptx` | **0.9947** | 1.0000 | SSIM gate passes; scored since the East Asian resolution rule (below) |
+| `sample.pptx` | 0.5099 | 0.9987 | SSIM — the faces now match; every line sits about 2 px above PowerPoint's |
+| `real-product-page.pptx` | 0.8982 | 0.9992 | SSIM — emoji drawn in Apple Color Emoji, as PowerPoint draws them |
 
 **Five of nine fixtures could not be scored at all, and that was the single biggest hole
 in this project's feedback loop.** Not because the renderer is wrong on them — because
@@ -878,15 +878,29 @@ install and is the default face a new deck gets, so it would be the single most 
 row of any survey of open equivalents. It is already answered. Anyone running that survey
 should skip it and spend the budget on the faces that might actually have clones.
 
+**Both decks are scored now, and the premise above was wrong.** PowerPoint resolves
+ＭＳ Ｐゴシック perfectly well by either spelling when a run names it in `<a:ea>`;
+`sample.pptx` never does — its theme names it only as the `Jpan` script entry, which a run
+reaches only when its `lang` is Japanese — and `real-basic-theme`'s runs name Lato and
+Raleway. Both fall to PowerPoint's MS Gothic / MS Mincho choice by PANOSE, which this
+library now makes too (FONTS.md ▸ *Which face draws the Japanese?*,
+`tools/make_font_resolution_probe.py`). `real-product-page`'s emoji are drawn in Apple
+Color Emoji wherever the host's faces are in use, as PowerPoint draws them. `sample`
+scores low for a reason that is no longer about fonts: every line of it sits about 2 px
+(1.5 pt) above PowerPoint's, and shifting our page down 2 px lifts slide 4 from 0.26 to
+0.83 — a line-box question for East Asian lines, left open.
+
 *Source note:* the bugzilla thread itself is behind Anubis and could not be fetched by two
 independent attempts, so the TDF position statement is the citation here, not the ticket
 discussion. Flagged rather than laundered into a firmer claim than it is.
 
 ### Left undone
 
-* **Emoji.** `real-product-page.pptx` renders through PowerPoint with AppleColorEmoji.
-  Nothing open and redistributable is a drop-in for platform emoji, and colour emoji
-  fonts are large. Emoji render as the substitute's glyph or not at all.
+* **Emoji, in the reproducible render.** `real-product-page.pptx` renders through
+  PowerPoint with AppleColorEmoji, and so does this library wherever the host's faces are
+  in use (FONTS.md). Nothing open and redistributable is a drop-in for platform emoji,
+  and colour emoji fonts are large, so without the host's faces emoji still render as the
+  substitute's glyph or not at all.
 * **Complex scripts.** `a:cs` typefaces — Arabic, Hebrew, Thai, Devanagari — have no
   entry in the substitution table, so they fall through to the generic family and the
   per-category width guess. Adding them means shipping Noto for each script, which is

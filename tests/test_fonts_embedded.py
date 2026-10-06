@@ -618,7 +618,7 @@ BASIC_THEME_FACES = {
 
 
 def test_a_real_powerpoint_deck_decodes_all_eight_faces(basic_theme):
-    resolved = convert_pptx_to_model(basic_theme, ConvertOptions())
+    resolved = convert_pptx_to_model(basic_theme, ConvertOptions(host_fonts=False))
     embedded = resolved.embedded_fonts
     assert embedded.problems == ()
     assert {(f.family, f.bold, f.italic) for f in embedded.faces} == BASIC_THEME_FACES
@@ -679,7 +679,7 @@ def test_a_corrupted_payload_only_ever_raises_our_own_error(basic_theme):
 
 
 def test_the_decoded_faces_are_usable_fonts(basic_theme):
-    resolved = convert_pptx_to_model(basic_theme, ConvertOptions())
+    resolved = convert_pptx_to_model(basic_theme, ConvertOptions(host_fonts=False))
     for face in resolved.embedded_fonts.faces:
         parsed = read_sfnt(face.source)
         assert parsed.units_per_em in (1000, 2000)
@@ -712,7 +712,7 @@ def test_the_decks_own_raleway_is_not_the_bundled_one(basic_theme):
     """
     from pptx2svg.text.metrics import METRICS
 
-    embedded = convert_pptx_to_model(basic_theme, ConvertOptions()).embedded_fonts
+    embedded = convert_pptx_to_model(basic_theme, ConvertOptions(host_fonts=False)).embedded_fonts
     deck_table = embedded.metrics["raleway"]
     bundled = METRICS["Raleway"]
     assert deck_table.units_per_em == bundled.units_per_em
@@ -761,7 +761,7 @@ def test_a_template_deck_renders_with_no_substitution_warning(name):
     convert_pptx_to_svg(path, options)
     assert [w for w in options.warnings if w.code == "font-substituted"] == []
 
-    embedded = convert_pptx_to_model(path, ConvertOptions()).embedded_fonts
+    embedded = convert_pptx_to_model(path, ConvertOptions(host_fonts=False)).embedded_fonts
     assert set(embedded.metrics) == expected["families"]
     assert len(embedded.faces) == expected["faces"]
 
@@ -777,7 +777,7 @@ def test_the_sfnt_reader_reproduces_a_table_generated_by_fonttools(basic_theme):
     """
     from pptx2svg.text.metrics import METRICS
 
-    embedded = convert_pptx_to_model(basic_theme, ConvertOptions()).embedded_fonts
+    embedded = convert_pptx_to_model(basic_theme, ConvertOptions(host_fonts=False)).embedded_fonts
     deck_lato = embedded.metrics["lato"]
     bundled = METRICS["Lato"]
     assert deck_lato.units_per_em == bundled.units_per_em

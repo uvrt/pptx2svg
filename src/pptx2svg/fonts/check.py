@@ -113,7 +113,7 @@ def check_deck(source, *, system_fonts: bool = False) -> FontReport:
     return check_families(
         resolved_families(resolved),
         system_fonts=system_fonts,
-        embedded=resolved.embedded_fonts.families,
+        embedded=resolved.embedded_fonts.families | resolved.installed_families,
     )
 
 

@@ -20,7 +20,7 @@ Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the
 
 | The deck names… | How it is drawn | Grade | What to do |
 | --- | --- | --- | --- |
-| **Anything the deck embeds** (`<p:embeddedFontLst>`) | Measured *and* drawn from the deck's own file | `exact` | Nothing. This is the best outcome there is — [why](#1-the-deck-carries-it-best) |
+| **Anything the deck embeds** (`<p:embeddedFontLst>`) | Measured *and* drawn from the deck's own file — unless the same family is installed where PowerPoint looks, which it then draws instead, and so do we | `exact` | Nothing. This is the best outcome there is — [why](#1-the-deck-carries-it-best) |
 | **Arimo, Caladea, Carlito, Cousine, Lato, Noto Sans JP, Raleway, Tinos** | The bundle ships that exact family | `exact` | `pip install 'pptx2svg[fonts]'` |
 | **Calibri, Calibri Light** | Carlito | `compatible` | Nothing. Same advance widths; only outlines change |
 | **Arial, Helvetica** | Arimo | `compatible` | Nothing |
@@ -86,6 +86,26 @@ reading the embedded fonts raised SSIM on all twelve slides measured — the lar
 
 **If you control the deck, this is the fix for every `missing` row in the table above.**
 Tick *Embed fonts in the file* in PowerPoint and the question stops being ours.
+
+**An installed copy of the same family beats it, as it does in PowerPoint.** Measured
+with `tools/make_font_resolution_probe.py` (the observations are
+`tests/fixtures/font-resolution-probe.json`): `real-basic-theme.pptx` embeds Lato 1.104, a
+272-glyph subset, and Office's cloud cache holds Lato 2.015, whose advances differ. In
+PowerPoint's PDF export the glyph origins of a 20-character line sit 0.12 pt from 2.015's
+advances and 0.55 pt from 1.104's (bold: 0.09 pt against 0.95 pt), and the deck's `●`
+bullets — which the subset does not have — are drawn in Lato-Regular, the installed face.
+It is not a version contest: an embedded copy rewritten to claim version 9.000 loses the
+same way. The same face embedded under a name nothing installs (`Latoprobe`) *is* drawn
+from the deck, and where its subset lacks a glyph PowerPoint falls back per character (to
+Arial for a sans face, Times New Roman for Raleway, whose PANOSE says nothing).
+
+So, wherever this library uses the host's faces — by default on a Mac with Office
+([below](#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place)) — a family the
+deck embeds that is also installed where PowerPoint looks is measured and drawn from the
+installed face, and the embedded copy is not decoded. A bundled family installed there
+(Raleway, Lato) is measured from the installed release too. Without the host's faces —
+the reproducible render — there is no installed copy to prefer, and the deck's own face
+wins as described above.
 
 Three things it does not do:
 
@@ -340,37 +360,63 @@ convert_pptx_to_svg("deck.pptx", opts)
 ## Which face draws the Japanese?
 
 The five routes above answer *what do we draw this family with*. A run carrying kana or
-ideographs has an earlier question to answer first — **which family** — and OOXML gives
-it three places to look. In order:
+ideographs has an earlier question to answer first — **which family** — and it is
+answered as PowerPoint for Mac answers it, measured with
+`tools/make_font_resolution_probe.py` (one line of kana and ideographs per box, the run's
+Latin face, East Asian face, `lang`, table cell or text box and the theme varied one at a
+time; the observations are `tests/fixtures/font-resolution-probe.json`, and
+`tests/test_font_resolution.py` holds the library to every one of them):
 
-1. the run's own `<a:ea typeface="..."/>`;
-2. the theme font collection's `<a:ea>`;
-3. the theme's `<a:font script="Jpan"/>` list (then `Hans`, `Hant`, `Hang`).
+1. **The name.** The run's own `<a:ea>`, inherited as any typeface is. A `+mn-ea` /
+   `+mj-ea` pointer — or no `<a:ea>` at all, which every default text style spells
+   `+mn-ea` — names the theme's `<a:font script="Jpan"/>` entry **for a Japanese run**
+   (`lang="ja-JP"`, or `altLang="ja-JP"` beside a non-East-Asian `lang`), and the theme's
+   `<a:ea>` for any other. The script list is *not* a fallback behind an empty `<a:ea>`:
+   over `<a:ea typeface=""/>` and `Jpan` 游ゴシック, an `en-US` run draws MS Gothic and a
+   `ja-JP` run YuGothic-Regular; over `<a:ea>` 游ゴシック and `Jpan` ＭＳ Ｐゴシック, the
+   first draws YuGothic-Regular and the second MS-PGothic.
+2. **Whether it can draw Japanese.** An installed face found by that name with kana in
+   it draws the run. ＭＳ Ｐゴシック resolves perfectly well — named in a run's `<a:ea>`,
+   by its full-width Japanese name or as `MS PGothic`, PowerPoint draws MS-PGothic. A run
+   that names no East Asian face, but whose *Latin* face has kana (Noto Sans JP,
+   ＭＳ Ｐゴシック, 游ゴシック…), is drawn in its Latin face.
+3. **Otherwise MS Gothic or MS Mincho**, by the PANOSE of the face the run *does* name —
+   its `<a:ea>` if it names one, else its Latin face: MS Gothic for a sans serif (PANOSE
+   family 2, serif style 11–15, not monospaced), MS Mincho for anything else, MS Gothic
+   for a face that is not installed. Over 35 Latin faces the split is exact: Calibri,
+   Arial, Aptos, Verdana, Segoe UI, Lato, Futura… draw MS Gothic; Times New Roman,
+   Cambria, Georgia, Courier New, Consolas, Menlo, Comic Sans MS, Helvetica Neue
+   (PANOSE serif style "any"), Raleway (PANOSE all zero)… draw MS Mincho.
 
-The Latin `<a:latin>` face is the last resort, not the default, and that ordering is
-measured rather than assumed. PowerPoint's own PDF export of a deck whose charts name
-`<a:latin typeface="Arial"/>` and nothing else, over a theme writing
-`<a:ea typeface=""/>` and `<a:font script="Jpan" typeface="游ゴシック"/>`, embeds
-**YuGothic-Regular** for the Japanese and **ArialMT** for the Latin runs *inside the same
-labels*.
+Text boxes, placeholders and table cells all follow it, bold included. **Charts do not**:
+a chart's labels fall through to the theme's `Jpan` entry —
+`real-financial-report.pptx`'s chart labels are YuGothic-Regular while the same deck's
+table cells, which name no East Asian face and no Japanese `lang`, are MS-Gothic.
 
-Two things to know when reading a deck's XML:
+This is what the two decks that used to be unscorable were showing. `sample.pptx`
+names ＭＳ Ｐゴシック only as its theme's `Jpan` entry, and its runs carry no `lang`: they
+draw MS Gothic, and its one Courier New run MS Mincho. `real-basic-theme.pptx`'s runs
+name Lato and Raleway as their own `<a:ea>` (Latin faces, `lang="ja"`): the body draws MS
+Gothic and the titles MS Mincho. Nothing there is a failed lookup of ＭＳ Ｐゴシック.
 
-* **`typeface=""` is not a name.** Nearly every theme writes an empty `<a:ea>`; it means
-  the collection names no East Asian face, and the script list is what answers.
-* **A Latin face named as the East Asian one is ignored.** Decks really do write
-  `<a:ea typeface="Raleway"/>`, and PowerPoint draws their Japanese in a Japanese face
-  anyway. So does this library: a candidate that cannot draw kana loses to one that can.
-* **Step 3 is what *we* do; PowerPoint reaches it only sometimes.** Measured by rewriting
-  the entry and re-exporting: `real-financial-report.pptx`'s `script="Jpan"` pair does
-  decide its export — 游ゴシック draws YuGothic-Regular, and rewriting the pair to
-  `MS Mincho` draws MS-Mincho instead. `sample.pptx`'s does not: pointing it at Noto Sans
-  JP changes nothing, while filling that theme's empty `<a:ea>` with the same name is
-  decisive. And where a run names a Latin face as its own `<a:ea>`, as
-  `real-basic-theme.pptx` does, PowerPoint substitutes its own Japanese default and no
-  theme edit reaches it at all. Why one deck reaches the script list and another does not
-  is unsettled. This library reaches it in all three cases, which is a difference in
-  *input* rather than in rendering, and `tools/fidelity.py` skips rather than scores it.
+Which names find an installed face is measured the same way: name ID 1 in every language
+(`ヒラギノ角ゴシック W3`, `黒体-繁`, `游明朝 Demibold` all resolve), and name ID 16 in
+English only (`Hiragino Sans` and `Noto Sans JP` resolve, `ヒラギノ角ゴシック` does not and
+draws MS Gothic). One exception is unexplained — PowerPoint does not find Hiragino Kaku
+Gothic ProN by its family name though its records look like Hiragino Sans's — and this
+library finds it.
+
+**Synthetic bold.** MS Gothic and MS Mincho have no bold cut. PowerPoint fills and
+strokes the regular outline (0.12 pt + 2% of the size), and the stroke widens each advance
+by 0.125 pt — but only from 16 pt: up to 15.5 pt a bold kana advances exactly its size.
+Both are reproduced; a bold run in either face is drawn stroked rather than asked for as
+`font-weight="bold"`.
+
+With the host's faces in use, "installed" is answered from this machine as PowerPoint
+would answer it. In the reproducible render it is answered from what the library knows:
+the Japanese faces of the substitution table draw Japanese, and a Latin face's PANOSE is
+read from the bundled face that draws it (Carlito's for Calibri), or taken from its CSS
+generic.
 
 One run can therefore be two faces, and it is split into separate `<tspan>` chunks that
 each name their own, because rasterisers fall back per chunk rather than per glyph.
@@ -635,6 +681,16 @@ kinds of pair — Calibri's legacy pairs for Carlito's entry, as its line gap is
 and pptx2svg measures with PowerPoint's choice (`DrawingRules.kerning`), whichever fonts
 draw.
 
+**Emoji.** Where a run's face has no glyph for an emoji, PowerPoint draws it in macOS's
+Apple Color Emoji, in colour — measured for ⚡ 📱 🔒 ✅ ❤ 😀 ✔ in Calibri, Aptos, Lato and
+Noto Sans JP alike, while a character the run's face has stays in it (Noto Sans JP's ★).
+With the host's faces in use, `svg_to_png` does the same: such a character is named in
+Apple Color Emoji, and the file — read in place, never copied — is handed to resvg last.
+It is named rather than left to resvg's fallback, which takes the first face it loaded
+with a glyph and drew ↔ ♥ ⚠ as emoji that the bundle's Noto Sans JP has. Other symbols
+fall back elsewhere in PowerPoint (★ ✓ ◆ to Segoe UI Symbol, ⇒ to Cambria Math, ■ to
+Arial); those are not reproduced.
+
 The SVG still names families and embeds nothing; only the rasteriser is given files, and
 only by path. No font is copied anywhere.
 
@@ -686,12 +742,11 @@ Regular and Bold; neither draws Thin.
 snapshots stay byte-identical across the install. If one moves, the install is not the
 reason.
 
-Nothing above helps the other two Japanese decks. `sample.pptx` and
-`real-basic-theme.pptx` resolve their Japanese to **ＭＳ Ｐゴシック**, which this copy of
-PowerPoint cannot use under any spelling and which is Microsoft's to distribute, not
-ours. They stay skipped; `tools/make_cjk_deck.py` has the seven exports that establish
-what would and would not move them, and derives `sample-cjk.pptx`, which names a face
-both renderers draw.
+The other two Japanese decks, `sample.pptx` and `real-basic-theme.pptx`, need nothing
+installed: PowerPoint draws their Japanese in MS Gothic and MS Mincho by the rule in
+[Which face draws the Japanese?](#which-face-draws-the-japanese), and so does this library
+now, so `tools/fidelity.py` scores them. `tools/make_cjk_deck.py` still derives
+`sample-cjk.pptx`, which names a face both renderers draw.
 
 ---
 

@@ -17,11 +17,10 @@ decks for most of this project's life**. `tests/fidelity-baselines.json` records
 each one stands now. Installing the bundled Noto Sans JP into `~/Library/Fonts` and
 re-exporting (see FONTS.md ▸ *Making the oracle draw Japanese*) brought
 `real-financial-report` and `sample-issue-387` in; `sample-cjk` was derived to bring a
-Japanese deck in. Three are still skipped, each for a difference in the two renderers'
-*inputs* rather than their output: `real-basic-theme` and `sample` resolve their Japanese
-to ＭＳ Ｐゴシック, which this PowerPoint cannot use and which is not ours to install, and
-`real-product-page` carries emoji that no face either deck names can draw. Their
-snapshots record what we do, and that is all they record.
+Japanese deck in. The last three came in when this library learned to resolve a run's
+Japanese face as PowerPoint does: `real-basic-theme` and `sample` draw theirs in MS
+Gothic and MS Mincho on both sides, and `real-product-page`'s emoji in Apple Color Emoji
+(FONTS.md ▸ *Which face draws the Japanese?*).
 
 Nothing scores 1.0: `authoring-integration` is at SSIM 0.9327, `table test` at 0.9895,
 `sample-issue-387` at 0.9897, `real-financial-report` at 0.9112, `sample-cjk` at 0.6788

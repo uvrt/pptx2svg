@@ -143,6 +143,9 @@ class ResolveContext:
     #: ``a:ln@cmpd`` spellings already reported, so a themed table's hundreds of
     #: identically-compound cell borders warn once rather than once each.
     compound_lines_warned: set[str] = field(default_factory=set)
+    #: Which face draws a run's East Asian text (:class:`~pptx2svg.resolve.east_asian.EastAsianFaces`):
+    #: as PowerPoint would choose on this machine, or from what the library knows.
+    east_asian: object | None = None
 
     def warn(self, code: str, message: str) -> None:
         self.warnings.append(
@@ -166,6 +169,11 @@ class ResolvedPresentation:
     #: :func:`resolve_presentation`, which is what lets the decode be limited to the
     #: families the resolved slides actually ask for.
     embedded_fonts: EmbeddedFonts = field(default_factory=lambda: NO_EMBEDDED_FONTS)
+    #: Normalised keys of the families the deck embeds that are measured and drawn from
+    #: the face installed here instead, as PowerPoint draws them (only with the host's
+    #: faces in use; see :func:`pptx2svg.convert_pptx_to_model`).  As faithful as an
+    #: embedded face: the font report counts them with it.
+    installed_families: frozenset = frozenset()
 
 
 def resolve_presentation(
@@ -174,6 +182,7 @@ def resolve_presentation(
     *,
     slide_numbers: Iterable[int] | None = None,
     metafile_converter: MetafileConverter | None = None,
+    east_asian=None,
 ) -> ResolvedPresentation:
     wanted = set(slide_numbers) if slide_numbers is not None else None
     slide_size = m.SlideSize(width=presentation.slide_width, height=presentation.slide_height)
@@ -187,6 +196,7 @@ def resolve_presentation(
         context = _build_context(
             package, presentation, source_slide, metafile_converter=metafile_converter
         )
+        context.east_asian = east_asian
         slides.append(resolve_slide(context))
         warnings.extend(context.warnings)
         if context.theme is not None:

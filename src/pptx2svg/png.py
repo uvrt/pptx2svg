@@ -162,6 +162,13 @@ def svg_to_png(
         if host_fonts:
             from .fonts import office
 
+            # Emoji the run's face cannot draw, in macOS's colour emoji face, as
+            # PowerPoint draws them (:func:`pptx2svg.fonts.office.with_emoji`).  Last
+            # among the files, so it shadows nothing.
+            svg, emoji = office.with_emoji(
+                svg, supplied=office.supplied_faces(font_files, font_dirs)
+            )
+            font_files = [*(font_files or ()), *emoji]
             plan = office.drawing_plan(
                 svg, supplied=office.supplied_families(font_files, font_dirs)
             )
