@@ -19,11 +19,13 @@ Shapes, text boxes and table cells all follow it.  Charts do not: their labels f
 through to the theme's ``Jpan`` entry (:func:`ooxml_common.text.fontmap.east_asian_family`).
 
 "Installed" is a question about a machine.  With the host's faces in use
-(``ConvertOptions.host_fonts``) it is answered as PowerPoint would answer it here, by
-:func:`pptx2svg.fonts.office.find` and the face's own cmap and PANOSE.  Without them --
-the reproducible render -- by what this library knows: the Japanese faces of the
-substitution table draw Japanese, and a Latin face's PANOSE is read from the bundled
-face that draws it (Carlito's for Calibri), or else taken from its CSS generic.
+(``ConvertOptions.host_fonts``), a face :func:`pptx2svg.fonts.office.find` finds here is
+judged by its own cmap and PANOSE, as PowerPoint would judge it, and on a Mac with Office
+a face it does not find is one PowerPoint would not find either.  Elsewhere, and without
+the host's faces, a face is judged by what this library knows: the Japanese faces of the
+substitution table draw Japanese, and a Latin face's PANOSE is the one recorded for
+the bundled face that draws it (Carlito's for Calibri), or else taken from its CSS
+generic.
 """
 
 from __future__ import annotations
@@ -65,23 +67,37 @@ class EastAsianFaces:
 
     @functools.lru_cache(maxsize=None)  # noqa: B019 -- one instance per conversion
     def draws_japanese(self, name: str) -> bool:
-        if self.host:
-            face = _regular(name)
-            return face is not None and _covers(face, _PROBE)
+        face = _regular(name) if self.host else None
+        if face is not None:
+            return _covers(face, _PROBE)
+        if self.host and _office_here():
+            return False  # PowerPoint's own places were searched: it is not installed
+        # Not looked for, or looked for on a machine without Office: what the library
+        # knows, so that the SVG does not hang on whether a bundle happens to be there.
         return covers_east_asian(name)
 
     @functools.lru_cache(maxsize=None)  # noqa: B019
     def panose(self, name: str) -> tuple | None:
         """The PANOSE of the face ``name`` finds, ``None`` where it finds none."""
-        if self.host:
-            face = _regular(name)
-            return face.panose if face is not None else None
+        face = _regular(name) if self.host else None
+        if face is not None:
+            return face.panose
+        if self.host and _office_here():
+            return None
         bundled = _bundled_panose().get(family_key(metrics_fallback_font(name) or name))
         if bundled is not None:
             return bundled
         # A face known only by name.  An unknown one is "sans-serif" too, which is what
         # PowerPoint does with a face it does not have.
         return _SANS if generic_family(name) == "sans-serif" else (0,)
+
+
+def _office_here() -> bool:
+    """Whether this machine has Office's fonts, so that a face not found is one PowerPoint
+    would not find either (:func:`pptx2svg.fonts.office.available`)."""
+    from ..fonts import office
+
+    return office.available()
 
 
 def _regular(name: str):
@@ -105,21 +121,18 @@ def _covers(face, char: str) -> bool:
         return False
 
 
-@functools.lru_cache(maxsize=1)
-def _bundled_panose() -> dict:
-    """``family key -> PANOSE`` of the bundled faces' regular cuts (empty without the bundle)."""
-    from ooxml_common.fonts import bundle_dir
-    from ooxml_common.fonts.office import index
+#: The first four PANOSE bytes of the bundled families' regular faces, read from the files
+#: and written down so that the SVG does not depend on whether the bundle is installed.
+#: Raleway's and Tinos's are all zero, which PowerPoint reads as "not sans": MS Mincho.
+_BUNDLED_PANOSE = {
+    "arimo": (2, 11, 6, 4), "caladea": (2, 4, 5, 3), "carlito": (2, 15, 5, 2),
+    "cousine": (2, 7, 4, 9), "lato": (2, 15, 5, 2), "noto sans jp": (2, 11, 2, 0),
+    "raleway": (0, 0, 0, 0), "tinos": (0, 0, 0, 0),
+}
 
-    directory = bundle_dir()
-    if directory is None:
-        return {}
-    out = {}
-    for key, places in index((("bundle", directory),)).items():
-        faces = [face for face in places.get("bundle", ()) if not face.bold and not face.italic]
-        if faces and faces[0].panose:
-            out[key] = faces[0].panose
-    return out
+
+def _bundled_panose() -> dict:
+    return _BUNDLED_PANOSE
 
 
 __all__ = ["EastAsianFaces", "JAPANESE_GOTHIC"]

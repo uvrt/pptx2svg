@@ -243,3 +243,20 @@ def test_no_emoji_face_without_the_host(monkeypatch):
     monkeypatch.setenv("PPTX2SVG_OFFICE_FONTS", "0")
     svg = '<svg><text><tspan font-family="Lato">⚡</tspan></text></svg>'
     assert office.with_emoji(svg) == (svg, [])
+
+
+def test_the_bundled_panose_table_is_the_bundles():
+    from ooxml_common.fonts import bundle_dir
+
+    from pptx2svg.fonts import office
+    from pptx2svg.resolve.east_asian import _BUNDLED_PANOSE
+
+    if bundle_dir() is None:
+        pytest.skip("needs the pptx2svg-fonts bundle")
+    for path in sorted(Path(bundle_dir()).iterdir()):
+        for face in office._faces_in(path, "bundle"):
+            if face.bold or face.italic:
+                continue
+            for key in face.families | face.typographic:
+                if key in _BUNDLED_PANOSE:
+                    assert face.panose[:4] == _BUNDLED_PANOSE[key], key
