@@ -36,6 +36,12 @@ embed them. PNG output *rasterises*, so it needs actual font files, and without 
 rasteriser quietly substitutes whatever the host has. `[fonts]` is 11 MB and is what
 makes the same deck produce the same pixels on your laptop and on a build server.
 
+On a Mac with PowerPoint, a PNG drawn from the host's fonts — no `[fonts]`, or
+`--system-fonts` — uses the faces PowerPoint itself draws: Aptos and the rest from its
+application bundle, Aptos Display from Office's cloud-font cache, read where they are
+installed and never copied, for measurement as well as drawing
+([FONTS.md](FONTS.md#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place)).
+
 ## Use
 
 ```python

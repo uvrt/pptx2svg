@@ -27,6 +27,7 @@ resolved slide structure rather than markup.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import tempfile
 from dataclasses import dataclass, field
@@ -107,6 +108,21 @@ class ConvertOptions:
     #: beats any substitute.  Turn it off to reproduce pre-0.2 output, or when a deck's
     #: embedded fonts are known to be damaged -- decoding costs about a second per face.
     use_embedded_fonts: bool = True
+    #: Measure with the faces PowerPoint would use on this machine -- its own bundle,
+    #: macOS's fonts, Office's cloud-font cache, read in place (:mod:`pptx2svg.fonts.office`)
+    #: -- for every family the static tables do not measure as itself.  ``None`` (the
+    #: default) does so exactly when the PNG is drawn from this machine's fonts: without
+    #: the font bundle, or with ``skip_system_fonts=False``.  With the bundle the output
+    #: stays reproducible and no host face is read.  Where the folders are absent it
+    #: changes nothing.
+    host_fonts: bool | None = None
+
+
+def _host_fonts(options: ConvertOptions) -> bool:
+    """Whether this conversion measures (and draws) with the host's faces."""
+    if options.host_fonts is not None:
+        return options.host_fonts
+    return fonts.bundle_mode() == "system"
 
 
 def _open_package(source) -> OpcPackage:
@@ -181,7 +197,19 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     # and centred.  Handing them to the measurer here is what keeps measure-equals-draw
     # true for a face the deck brought with it.  A caller-supplied measurer wins, because
     # it was asked for explicitly.
-    measurer = options.measurer or DefaultTextMeasurer(resolved.embedded_fonts.metrics)
+    #
+    # The faces PowerPoint itself would use on this machine come next, under the deck's
+    # own: a family the static tables only guess at, or measure from another face, is
+    # measured from the installed file the PNG will be drawn with.
+    measurer = options.measurer
+    if measurer is None:
+        extra = dict(resolved.embedded_fonts.metrics)
+        if _host_fonts(options):
+            from .fonts import office
+
+            for key, table in office.layout_metrics(resolved_families(resolved)).items():
+                extra.setdefault(key, table)
+        measurer = DefaultTextMeasurer(extra)
 
     documents: list[str] = []
     for slide in resolved.slides:
@@ -268,11 +296,18 @@ def convert_pptx_to_png(
     appended to ``options.warnings``.
     """
     options = options or ConvertOptions()
+    if options.host_fonts is None and skip_system_fonts is not None:
+        # The rasteriser is told explicitly whether to read this machine's fonts, so
+        # measure as it will draw.
+        # A shallow copy: `warnings` is still the caller's own list.
+        options = dataclasses.replace(options, host_fonts=not skip_system_fonts)
     documents, resolved = _render(source, options)
+    host_fonts = _host_fonts(options)
 
     if not resolved.embedded_fonts:
         return _rasterise(
-            documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts
+            documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
+            host_fonts,
         )
 
     # The rasteriser's font database indexes files, so the extracted faces have to touch
@@ -288,11 +323,13 @@ def convert_pptx_to_png(
             [*extracted, *(font_files or ())],
             skip_system_fonts,
             use_bundled_fonts,
+            host_fonts,
         )
 
 
 def _rasterise(
-    documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts
+    documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
+    host_fonts,
 ) -> list[bytes]:
     return [
         svg_to_png(
@@ -302,6 +339,7 @@ def _rasterise(
             font_files=font_files,
             skip_system_fonts=skip_system_fonts,
             use_bundled_fonts=use_bundled_fonts,
+            host_fonts=host_fonts,
         )
         for document in documents
     ]

@@ -28,7 +28,7 @@ Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the
 | **Courier New, Courier** | Cousine | `compatible` | Nothing |
 | **Liberation Sans / Serif / Mono** | Arimo / Tinos / Cousine | `compatible` | Nothing. Same designs under another name |
 | **Cambria** | Measured as Cambria, drawn with Caladea | `approximate` | Caladea is **not** metric-compatible — [why this row is the important one](#3-the-bundle-supplies-a-metric-compatible-clone) |
-| **Aptos, Aptos Display, Aptos Narrow** | Measured as Aptos, drawn with Carlito | `approximate` | No clone exists anywhere. Install real Aptos — [Aptos](#aptos) |
+| **Aptos, Aptos Display, Aptos Narrow** | Measured as Aptos, drawn with Carlito | `approximate` | No clone exists anywhere. Install real Aptos — [Aptos](#aptos); on a Mac with PowerPoint, PowerPoint's own is used — [read in place](#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place) |
 | **MS Gothic, MS Mincho, MS PGothic, MS PMincho** | Measured from their own tables, drawn with Noto Sans JP | `approximate` | The ideographs and kana already measure exactly; the Latin sub-run does not — [CJK](#a-note-on-cjk-the-approximate-grade-understates-it) |
 | **Meiryo, Yu Gothic, Yu Mincho, Hiragino, Noto Serif JP** | Measured *and* drawn with Noto Sans JP | `approximate` | Same: exact on CJK, off on the Latin sub-run — [CJK](#a-note-on-cjk-the-approximate-grade-understates-it) |
 | **SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact (0.5 em Latin, 1.0 em ideographic); Noto Sans JP lacks about 8,200 of each face's ideographs and its Latin is proportional |
@@ -453,6 +453,10 @@ ConvertOptions(font_mapping={"Helvetica Neue": "Inter"})
 
 On the command line: `--system-fonts`, `--no-bundled-fonts`, `--font-dir DIR`.
 
+Any of these that lets the host's fonts take part also brings in PowerPoint's own on a Mac
+that has it — [read in place](#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place),
+for measurement as well as drawing.
+
 ### The trap
 
 **`font_dirs`, `font_files` and `--font-dir` feed the rasteriser only.** They reach
@@ -554,6 +558,70 @@ pptx2svg deck.pptx -f png --system-fonts
 The script pins the download by SHA-256 and refuses a changed payload rather than
 substituting silently. You accept Microsoft's terms; this project does not grant you any
 right to the file.
+
+**On a Mac with PowerPoint there is nothing to install** — see the next section.
+
+## A Mac with PowerPoint: the faces PowerPoint draws, read in place
+
+PowerPoint for Mac does not draw Aptos from a font macOS knows about. It draws it from its
+own bundle, `Microsoft PowerPoint.app/Contents/Resources/DFonts`, and it draws Aptos
+Display — the heading face of every deck PowerPoint 365 makes — from Office's cloud-font
+cache, `~/Library/Group Containers/UBF8T346G9.Office/FontCache/4/CloudFonts`. A rasteriser
+asking "the system" for Aptos finds neither, so a deck rendered on the very machine
+PowerPoint drew it on used to come out in a substitute (Noto Sans JP's Latin, where that
+happened to be installed: the last name in the stack that resolved).
+
+`pptx2svg.fonts.office` finds a family where PowerPoint does, **in the order PowerPoint
+does**, and reads it where it is installed:
+
+1. **PowerPoint's bundle**;
+2. **macOS's fonts** (`/System/Library/Fonts`, `Supplemental`, `/Library/Fonts`, `~/Library/Fonts`);
+3. **Office's cloud-font cache**, one folder per family.
+
+The order is measured (`tools/make_face_source_probe.py`, `tools/read_face_source_probe.py`).
+Of the 29 family-and-style pairs installed both in macOS and in the bundle, two can be told
+apart in PowerPoint's PDF export, and PowerPoint took **the bundle's** copy of both:
+Rockwell (macOS's 13.0 and the bundle's 1.65 differ on every ASCII advance and outline; all
+19 outlines PowerPoint embedded are the bundle's, and its glyphs sit within 0.5–1.5 pt of
+the bundle's advances over a 20-character line against 21–26 pt for macOS's) and Symbol
+(the bundle's is symbol-encoded, macOS's is not; PowerPoint drew SymbolMT at the bundle's
+advances, 0.09 pt). The other 27 — Arial, Times New Roman, Verdana, Tahoma, Wingdings and
+the like — have equal advances and identical outlines where checked, so either copy draws
+the same. No family is in the cloud cache and anywhere else, so its place is moot today.
+
+**When it applies:** whenever the PNG is drawn from this machine's fonts — without the
+font bundle (`pip install 'pptx2svg[png]'` alone, which is what pptx-agent installs), or
+with `--system-fonts` / `skip_system_fonts=False`. With the bundle and its defaults the
+output stays reproducible and no host face is read; `ConvertOptions(host_fonts=True)` and
+`svg_to_png(..., host_fonts=True)` opt in anyway, `host_fonts=False` opts out, and
+`PPTX2SVG_OFFICE_FONTS=0` turns the lookup off for the whole process. Where the folders do
+not exist — Linux, Windows, a Mac without Office — nothing changes.
+
+**Both halves, so measure still equals draw:**
+
+* *Drawing.* `svg_to_png` hands resvg the files of each family the SVG names, ahead of
+  everything but the caller's own `font_files`/`font_dirs` (and a deck's embedded faces,
+  which still win). Where one of them answers to the same name as a macOS face, macOS's
+  folders are handed over after them rather than loaded first, because resvg keeps the
+  first face it loads. **Aptos Display and Aptos cannot be told apart by resvg** — both
+  files call themselves "Aptos" (name ID 16), at weight 400, normal width and style — and
+  renaming one would mean copying a Microsoft font, which this library does not do. So a
+  slide that uses both is drawn in two passes: everything with Aptos loaded, the Aptos
+  Display text hidden; then that text alone, with Aptos Display loaded, over the first
+  pass. Hidden glyphs keep their advance, so nothing moves, and the composite is the
+  single render pixel for pixel wherever the faces do not collide.
+* *Measuring.* A family the static tables measure as itself — Aptos, Aptos Display,
+  Cambria, and the metric-compatible rows — keeps its table, kern pairs included. A family
+  they only guess at (Rockwell, Gill Sans MT, Segoe UI, Century Gothic…), or measure from
+  another face (Aptos Narrow from Aptos, Aptos Light, Yu Gothic from Noto Sans JP), is
+  measured from the installed file instead. Those tables carry no kern pairs yet.
+
+The SVG still names families and embeds nothing; only the rasteriser is given files, and
+only by path. No font is copied anywhere.
+
+Measured on trial 2's six PowerPoint outputs (66 slides, our render against PowerPoint's
+own PDF at the same size): mean SSIM 0.484 before, 0.828 after; 46 slides better, none
+worse.
 
 ## Making the oracle draw Japanese (developer setup)
 

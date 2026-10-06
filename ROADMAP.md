@@ -5548,6 +5548,76 @@ stored 90 % is drawn 23 pt rather than 22.95 (that deck is not scored: PowerPoin
 or line are drawn at their stored height. The trial deck's twenty-paragraph body is now drawn at full size, running off the slide, as
 PowerPoint draws it. ooxml-common's `tests/test_autofit.py` holds the rules.
 
+### 5.9 The faces PowerPoint draws, found where it keeps them — **measured, and fixed**
+
+Agents in end-to-end trial 2 judged their slides on renders in the wrong typeface. Every
+deck in Office's default theme names Aptos and Aptos Display; pptx-agent installs
+`pptx2svg[png]` without the font bundle, so the PNG was drawn from "this machine's
+fonts" -- and on the Mac PowerPoint ran on, neither face is one. **Aptos lives in
+PowerPoint's own bundle (`…/Microsoft PowerPoint.app/Contents/Resources/DFonts`), Aptos
+Display only in Office's cloud-font cache (`~/Library/Group Containers/UBF8T346G9.Office/
+FontCache/4/CloudFonts`)**, and resvg searched neither. The stack `'Aptos Display', Aptos,
+Carlito, '游ゴシック Light', 游ゴシック, 'Noto Sans JP', sans-serif` fell through to the first
+name anything answered: Noto Sans JP, installed for the oracle, whose Latin and vertical
+metrics put every line in another face and a few points lower. The SVG was right -- it
+names Aptos and embeds nothing, and Aptos was already measured from its own table, so line
+breaks agreed -- and the substitution was entirely the rasteriser's font lookup.
+
+`pptx2svg.fonts.office` now finds a family where PowerPoint does, read in place:
+**PowerPoint's bundle, then macOS's fonts, then the cloud cache**. The order is measured
+(`tools/make_face_source_probe.py` / `read_face_source_probe.py`, one 24 pt line per
+family and style). 29 family-and-style pairs are in both macOS and the bundle here; two
+can be told apart, and PowerPoint used the bundle's copy of both:
+
+| Probe | PDF draws | macOS copy, max error | bundle copy, max error |
+| --- | --- | --- | --- |
+| Rockwell, 4 styles | Rockwell, -Bold, -Italic, -BoldItalic | 20.8–25.9 pt (13.0) | 0.5–1.5 pt (1.65); 19 of 19 outlines |
+| Symbol, `abgdpqw` | SymbolMT | 75.6 pt | 0.09 pt |
+| Arial, Verdana, Tahoma, Times New Roman | ArialMT, Verdana, Tahoma, TimesNewRomanPSMT | same as the bundle's: equal advances, identical outlines | |
+| Aptos, Aptos Narrow, Calibri | Aptos, Aptos-Narrow, Calibri | — | 1.0, 1.0, 1.7 pt (only copy) |
+| Aptos Display, Segoe UI, Lato | AptosDisplay, SegoeUI, Lato-Regular | — | cache: 1.3, 0.4, 0.2 pt (only copy) |
+
+(The residue on the only-copy rows is kerning, which the probe's prediction leaves out.)
+Word, measured the same way by docx2svg, lays out with macOS's copy and draws its bundle's;
+PowerPoint does both with its bundle's. Nothing is in the cache and elsewhere, so the
+cache's place is moot; it is last, as Word's is.
+
+It applies when the host's fonts do: without the bundle, or with `--system-fonts`.
+`ConvertOptions.host_fonts` / `svg_to_png(host_fonts=)` override it, and
+`PPTX2SVG_OFFICE_FONTS=0` turns it off; where the folders are absent nothing changes.
+
+* **Drawing.** The files of each family the SVG names go to resvg as `font_files`, after
+  the caller's own and a deck's embedded faces, and before everything else. resvg keeps
+  the first face it loads of a name, and loads the system's before any file, so where a
+  bundle face shares its name with a macOS one (Rockwell, Symbol, Arial…) the system's
+  folders are handed over as directories after the files instead -- checked to draw the
+  committed fixtures byte for byte as resvg's own system loading does. **Aptos Display
+  and Aptos collide in resvg**: both files name their typographic family "Aptos" (ID 16),
+  which is all resvg's database files them under, at weight 400, width 5, upright, so
+  loaded together the first draws both. Renaming one would mean copying a Microsoft font.
+  Instead such a slide is drawn in passes: everything with Aptos loaded and the Aptos
+  Display text `visibility="hidden"` (a hidden glyph keeps its advance); then only that
+  text, with Aptos Display loaded, over the first pass as an image -- pixel-identical to
+  a single pass where faces do not collide (`tests/test_office_fonts.py`).
+* **Measuring.** A family the static tables measure as itself keeps its table, kern pairs
+  included: Aptos, Aptos Display, Cambria and the metric-compatible rows. One they guess
+  at or measure from another face -- Rockwell, Gill Sans MT, Segoe UI, Aptos Narrow,
+  Aptos Light, Yu Gothic -- is measured from the installed file (its `hmtx`/`cmap`, read
+  without the outlines), as an embedded face is; those tables have no kern pairs yet.
+
+**Trial 2's six PowerPoint tasks** (66 slides of the agents' outputs, ours at PowerPoint's
+export size against the PDF): mean SSIM **0.484 → 0.828**, 46 better, none worse;
+p6-restructure-deck 0.225 → 0.826, p3-split-slide 0.030 → 0.672. **The oracle corpus is
+unchanged**: `tools/fidelity.py` draws with the font profile's files and the bundle, so
+host faces never take part, and its output is identical with and without this change --
+and identical again with `host_fonts=True` forced, because no scored deck names a family
+the tables do not already measure as itself (the one host table it would build, 游ゴシック,
+moves no line). Drawn from the host's fonts instead (`skip_system_fonts=False`, the
+pptx-agent path), the corpus's mean SSIM rises on six decks, is unchanged on four and
+falls on one, `real-basic-theme` (0.978 → 0.966; `sample` rises overall but its slide 3
+falls) -- the two decks the harness skips because PowerPoint draws their ＭＳ Ｐゴシック as
+MS Gothic: we now draw the face the deck names, and PowerPoint does not.
+
 ---
 
 ## Phase 6 — Embedded fonts — **done**

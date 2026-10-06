@@ -103,6 +103,7 @@ def svg_to_png(
     font_files: Sequence[str] | None = None,
     skip_system_fonts: bool | None = None,
     use_bundled_fonts: bool = True,
+    host_fonts: bool | None = None,
 ) -> bytes:
     """Rasterise an SVG document to PNG bytes.
 
@@ -118,6 +119,14 @@ def svg_to_png(
     because skipping system fonts with no bundle would render every slide blank.  Set it
     to ``False`` explicitly to let bundled and installed fonts both take part, which is
     useful when a deck names a face the bundle does not carry.
+
+    ``host_fonts`` draws each family the SVG names with the face PowerPoint would use on
+    this machine -- its own bundle's, macOS's or Office's cloud-font cache's, read where
+    it is installed (:mod:`pptx2svg.fonts.office`) -- ahead of everything but
+    ``font_files`` and ``font_dirs``.  It defaults to whether this machine's fonts take
+    part at all (``not skip_system_fonts``), so a reproducible render stays reproducible;
+    where the folders are absent it changes nothing.  :func:`pptx2svg.convert_pptx_to_svg`
+    measures with the same faces under the same condition (``ConvertOptions.host_fonts``).
 
     Only the resvg backend takes any of this; cairosvg reads the host's fontconfig and
     cannot be pointed at a directory, so it cannot render reproducibly.
@@ -143,6 +152,27 @@ def svg_to_png(
             # reproducible *with*: an installation whose package data went missing must
             # fall back to the host rather than render every slide blank.
             skip_system_fonts = bool(bundled)
+        if host_fonts is None:
+            host_fonts = not skip_system_fonts
+        if host_fonts:
+            from .fonts import office
+
+            plan = office.drawing_plan(
+                svg, supplied=office.supplied_families(font_files, font_dirs)
+            )
+            if plan is not None:
+                return _render_plan(
+                    svg,
+                    plan,
+                    width=width,
+                    height=height,
+                    scale=scale,
+                    background=background,
+                    font_dirs=list(font_dirs or ()) + bundled,
+                    font_files=list(font_files or ()),
+                    skip_system_fonts=skip_system_fonts,
+                    generic_families=GENERIC_FAMILY_DEFAULTS if bundled else None,
+                )
         return _render_with_resvg(
             svg,
             width=width,
@@ -159,6 +189,54 @@ def svg_to_png(
             svg, width=width, height=height, scale=scale, background=background
         )
     raise ValueError(f"unknown rasterizer backend: {backend!r}")
+
+
+def _render_plan(
+    svg: str,
+    plan,
+    *,
+    width: int | None,
+    height: int | None,
+    scale: float | None,
+    background: str | None,
+    font_dirs: list[str],
+    font_files: list[str],
+    skip_system_fonts: bool,
+    generic_families: dict[str, str] | None,
+) -> bytes:
+    """Draw ``svg`` with the host faces ``plan`` names (:func:`pptx2svg.fonts.office.drawing_plan`).
+
+    resvg keeps the first face it loads among those answering to the same name, style,
+    weight and width, and loads ``font_files`` before ``font_dirs`` and the system's
+    fonts before either -- so the faces go in as files right behind the caller's own,
+    and where one of them shares its name with a system face (PowerPoint's Rockwell and
+    Symbol are not macOS's) the system's folders are handed over as directories after
+    them instead of being loaded first.  Faces that would shadow one another (Aptos
+    Display and Aptos) are drawn in separate passes, each over the last
+    (:func:`pptx2svg.fonts.office.pass_svg`).
+    """
+    from .fonts import office
+
+    system_dirs: list[str] = []
+    skip = skip_system_fonts
+    if plan.ahead_of_system and not skip_system_fonts:
+        skip, system_dirs = True, office.resvg_system_dirs()
+    image: bytes | None = None
+    for number, files in enumerate(plan.passes):
+        document = svg if len(plan.passes) == 1 else office.pass_svg(svg, plan, number, image)
+        image = _render_with_resvg(
+            document,
+            width=width,
+            height=height,
+            scale=scale,
+            background=background if number == 0 else None,
+            font_dirs=font_dirs + system_dirs,
+            font_files=font_files + files,
+            skip_system_fonts=skip,
+            generic_families=generic_families,
+        )
+    assert image is not None
+    return image
 
 
 def _render_with_resvg(
