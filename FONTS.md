@@ -3,7 +3,7 @@
 One question, answered in one place: **the deck names font X — will pptx2svg draw it at
 the widths PowerPoint laid it out at, and if not, what do I do?**
 
-The invariant everything below serves is short. Layout — wrapping, autofit shrinking,
+The invariant everything below serves is short. Layout — wrapping, line heights,
 vertical centring — is computed from a table of advance widths *before* the SVG is handed
 to a rasteriser. If the face that is finally drawn has different advance widths from the
 face that was measured, every line break is in the wrong place and nothing says so. resvg
@@ -305,8 +305,8 @@ the real tables:
 Cousine is the row that shows the guess is not even wrong in a consistent direction:
 monospaced, it is 7.7 % *wider* than the fallback assumes, while Caladea is 17.6 %
 narrower. A 20 % width error is not a cosmetic difference. It moves wrap points, changes
-how many lines a paragraph occupies, changes what autofit shrinks to, and moves every
-vertically centred block.
+how many lines a paragraph occupies, and with them how far the text overflows its box,
+and moves every vertically centred block.
 
 **How to detect it.** Two ways, both loud by design:
 

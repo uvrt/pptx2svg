@@ -134,8 +134,8 @@ every PowerPoint feature.
 **Shapes and text.** All 186 preset geometries in ECMA-376, plus `lineInv`, plus full
 custom geometry with guide formulas — every one of them verified against PowerPoint's own
 PDF export at two aspect ratios. Text carries the complete inheritance cascade, bullets
-and auto-numbering, line wrapping (Latin and CJK), autofit (`normAutofit` shrink-to-fit
-and `spAutofit` grow), vertical text, tabs and columns. Solid, gradient, pattern and
+and auto-numbering, line wrapping (Latin and CJK), autofit (the stored `normAutofit`
+scale, as PowerPoint draws a file it has not re-fitted), vertical text, tabs and columns. Solid, gradient, pattern and
 image fills; outlines with dashes and arrowheads; shadows, glow and soft edges; pictures
 with cropping, tiling and colour adjustments; groups with nested coordinate spaces;
 hyperlinks; and alt text as `aria-label`.
