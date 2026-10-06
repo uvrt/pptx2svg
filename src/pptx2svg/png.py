@@ -123,10 +123,13 @@ def svg_to_png(
     ``host_fonts`` draws each family the SVG names with the face PowerPoint would use on
     this machine -- its own bundle's, macOS's or Office's cloud-font cache's, read where
     it is installed (:mod:`pptx2svg.fonts.office`) -- ahead of everything but
-    ``font_files`` and ``font_dirs``.  It defaults to whether this machine's fonts take
-    part at all (``not skip_system_fonts``), so a reproducible render stays reproducible;
-    where the folders are absent it changes nothing.  :func:`pptx2svg.convert_pptx_to_svg`
-    measures with the same faces under the same condition (``ConvertOptions.host_fonts``).
+    ``font_files`` and ``font_dirs``.  It defaults to on wherever Office's fonts are
+    installed (:func:`pptx2svg.fonts.office.available`), bundle or not, and elsewhere to
+    whether this machine's fonts take part at all (``not skip_system_fonts``); where the
+    folders are absent it changes nothing.  ``host_fonts=False`` (or
+    ``PPTX2SVG_OFFICE_FONTS=0``) keeps a render reproducible.
+    :func:`pptx2svg.convert_pptx_to_svg` measures with the same faces under the same
+    condition (``ConvertOptions.host_fonts``).
 
     Only the resvg backend takes any of this; cairosvg reads the host's fontconfig and
     cannot be pointed at a directory, so it cannot render reproducibly.
@@ -153,7 +156,9 @@ def svg_to_png(
             # fall back to the host rather than render every slide blank.
             skip_system_fonts = bool(bundled)
         if host_fonts is None:
-            host_fonts = not skip_system_fonts
+            from .fonts import office
+
+            host_fonts = office.available() or not skip_system_fonts
         if host_fonts:
             from .fonts import office
 
