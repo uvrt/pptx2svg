@@ -61,7 +61,8 @@ from .chart import (
     three_d_camera,
     written_by_office_2007,
 )
-from .color import ColorContext, apply_transforms, build_effective_color_map, resolve_color
+from .color import ColorContext, apply_transforms, build_effective_color_map
+from .naming import NamingColorContext, note_derived, resolve_color
 
 #: Placeholder types that inherit from the master's ``body`` placeholder.
 BODY_PLACEHOLDER_TYPES = frozenset(
@@ -183,7 +184,11 @@ def resolve_presentation(
     slide_numbers: Iterable[int] | None = None,
     metafile_converter: MetafileConverter | None = None,
     east_asian=None,
+    color_names: dict | None = None,
 ) -> ResolvedPresentation:
+    """Resolve the slides.  ``color_names``, when given, collects the theme name of every
+    scheme colour resolved (``id(resolved) -> (resolved, "accent1 lumMod=75%")``), which
+    the agent view writes beside the hex (:mod:`.naming`); drawing is unaffected."""
     wanted = set(slide_numbers) if slide_numbers is not None else None
     slide_size = m.SlideSize(width=presentation.slide_width, height=presentation.slide_height)
     warnings: list[Warning] = []
@@ -194,7 +199,8 @@ def resolve_presentation(
         if wanted is not None and source_slide.slide_number not in wanted:
             continue
         context = _build_context(
-            package, presentation, source_slide, metafile_converter=metafile_converter
+            package, presentation, source_slide, metafile_converter=metafile_converter,
+            color_names=color_names,
         )
         context.east_asian = east_asian
         slides.append(resolve_slide(context))
@@ -213,6 +219,7 @@ def _build_context(
     slide: s.SourceSlide,
     *,
     metafile_converter: MetafileConverter | None = None,
+    color_names: dict | None = None,
 ) -> ResolveContext:
     layout = presentation.layouts.get(slide.layout_part_path or "")
     master = presentation.masters.get(layout.master_part_path or "") if layout else None
@@ -229,7 +236,8 @@ def _build_context(
         layout=layout,
         master=master,
         theme=theme,
-        colors=ColorContext(theme, color_map),
+        colors=(ColorContext(theme, color_map) if color_names is None
+                else NamingColorContext(theme, color_map, color_names)),
         part_path=slide.part_path,
         metafile_converter=metafile_converter,
     )
@@ -1404,6 +1412,7 @@ def _placeholder_color(
     resolved = apply_transforms(placeholder.hex, color.transforms, context.colors.rules)
     if placeholder.alpha < 1 and all(t.kind != "alpha" for t in color.transforms):
         resolved = m.ResolvedColor(hex=resolved.hex, alpha=placeholder.alpha)
+    note_derived(context.colors, resolved, placeholder, color.transforms)
     return resolved
 
 

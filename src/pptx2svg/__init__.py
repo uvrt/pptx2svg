@@ -12,6 +12,10 @@ Typical use::
 
 To render a single slide, pass ``slide_numbers=[1]`` (1-based, presentation order).
 
+For a model to *read* a slide rather than look at it, :func:`convert_pptx_to_agent_svg`
+writes a compact view: slide points, shape ids, theme-colour names, text without fonts,
+and placeholders for pictures, charts and tables (:mod:`pptx2svg.agent`).
+
 The pipeline is ``.pptx -> OPC package -> source model -> render model -> SVG -> PNG``:
 
 * :mod:`pptx2svg.opc` unpacks the ZIP and resolves relationships;
@@ -68,6 +72,7 @@ __all__ = [
     "Warning",
     "available_backends",
     "check_families",
+    "convert_pptx_to_agent_svg",
     "convert_pptx_to_model",
     "convert_pptx_to_png",
     "convert_pptx_to_svg",
@@ -374,3 +379,6 @@ def _rasterise(
         )
         for document in documents
     ]
+
+
+from .agent import convert_pptx_to_agent_svg  # noqa: E402  (needs the names above)
