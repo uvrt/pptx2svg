@@ -111,6 +111,40 @@ expanded, and placeholder properties are merged down from layout and master. A c
 carries its parsed series and categories alongside the primitives it draws with, so you
 can read the numbers without touching the chart XML.
 
+### The agent view
+
+For a language model to *read* a slide — its shapes, their boxes, colours and text, with
+the ids an editor addresses them by — rather than to look at it:
+
+```python
+from pptx2svg import ConvertOptions, convert_pptx_to_agent_svg
+
+svgs = convert_pptx_to_agent_svg("deck.pptx", ConvertOptions(slide_numbers=[3]))
+```
+
+Each slide is a compact SVG in **slide points** (`viewBox="0 0 960 540"` at 16:9), every
+shape carrying `data-pptx-id` as the normal render does, numbers rounded to a tenth of a
+point, and theme colours named beside the hex:
+
+```xml
+<g data-pptx-id="258.8"><rect x="142" y="125.3" width="99.7" height="21.6"
+   fill="#DAE8F9" data-fill="dk2 lumMod=10% lumOff=90%" stroke="#022A2F"
+   data-stroke="accent1 shade=15%" stroke-width="1.5"/>
+ <text x="149.2" y="128.9" data-anchor="middle"><tspan x="191.9" dy="11"
+   text-anchor="middle" font-size="11" font-weight="bold" fill="#0B2545"
+   data-fill="dk2">Diagnose</tspan></text></g>
+```
+
+A preset is `data-preset` on the shape's box (an ellipse is an `<ellipse>`, a line a
+`<line>`); text is one `<tspan>` per paragraph and run, unwrapped, with no fonts read or
+embedded; pictures, charts, tables, SmartArt and media are placeholders
+(`<rect data-kind="picture" …/>`; a table with its cell text, a chart with its type and
+title, SmartArt with its nodes' text). The layout's and master's own shapes come first,
+marked `data-layer="layout"`/`"master"`. There are no images, base64, fonts, filters or
+`<defs>`, so a shape-heavy slide is a few thousand tokens, typically well under the normal
+render — and far under it when the deck embeds pictures or fonts. It is a read view: it
+is not meant to look like the slide, and nothing reads it back.
+
 ## How it works
 
 ```

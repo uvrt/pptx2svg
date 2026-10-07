@@ -47,7 +47,7 @@ from ..text.fontmap import theme_east_asian
 from ..text.measure import is_cjk
 from .east_asian import EastAsianFaces
 from ..units import ROTATION_UNIT
-from .color import resolve_color
+from .naming import resolve_color
 
 #: Properties inherited from every level of the chain, including the layout's and
 #: master's.  ``bold`` and ``italic`` belong here -- see the module docstring for the
