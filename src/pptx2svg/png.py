@@ -33,9 +33,11 @@ keeps the picture as it came, profile and all, for a colour-managed reader to co
 
 from __future__ import annotations
 
+import warnings
 from typing import Iterable, Literal, Sequence
 
 from .fonts import GENERIC_FAMILY_DEFAULTS, font_dirs as bundled_font_dirs
+from .glyphs import MissingGlyphs, MissingGlyphsWarning, missing_glyphs
 from .iccimages import srgb_images
 
 Backend = Literal["resvg", "cairosvg", "auto"]
@@ -104,6 +106,7 @@ def svg_to_png(
     skip_system_fonts: bool | None = None,
     use_bundled_fonts: bool = True,
     host_fonts: bool | None = None,
+    check_glyphs: bool = True,
 ) -> bytes:
     """Rasterise an SVG document to PNG bytes.
 
@@ -133,7 +136,39 @@ def svg_to_png(
 
     Only the resvg backend takes any of this; cairosvg reads the host's fontconfig and
     cannot be pointed at a directory, so it cannot render reproducibly.
+
+    Text no loaded font has glyphs for is not drawn at all, so ``check_glyphs`` (on by
+    default) raises a :class:`~pptx2svg.glyphs.MissingGlyphsWarning` for it, once per face
+    and script (:mod:`pptx2svg.glyphs`).
     """
+    png, missing = _svg_to_png(
+        svg, width=width, height=height, scale=scale, background=background,
+        backend=backend, font_dirs=font_dirs, font_files=font_files,
+        skip_system_fonts=skip_system_fonts, use_bundled_fonts=use_bundled_fonts,
+        host_fonts=host_fonts, check_glyphs=check_glyphs,
+    )
+    for item in missing:
+        warnings.warn(item.message(), MissingGlyphsWarning, stacklevel=2)
+    return png
+
+
+def _svg_to_png(
+    svg: str,
+    *,
+    width: int | None,
+    height: int | None,
+    scale: float | None,
+    background: str | None,
+    backend: Backend,
+    font_dirs: Sequence[str] | None,
+    font_files: Sequence[str] | None,
+    skip_system_fonts: bool | None,
+    use_bundled_fonts: bool,
+    host_fonts: bool | None,
+    check_glyphs: bool,
+) -> "tuple[bytes, list[MissingGlyphs]]":
+    """:func:`svg_to_png`, the text no loaded font can draw returned rather than warned
+    about, so a caller rasterising many slides reports each face and script once."""
     # resvg and cairosvg both read a picture's samples as sRGB whatever profile it carries;
     # PowerPoint converts it.  See :mod:`pptx2svg.iccimages`.
     svg = srgb_images(svg)
@@ -173,6 +208,12 @@ def svg_to_png(
                 svg, supplied=office.supplied_families(font_files, font_dirs)
             )
             if plan is not None:
+                missing = _missing(
+                    check_glyphs, svg,
+                    [*(font_files or ()), *(path for files in plan.passes for path in files)],
+                    list(font_dirs or ()) + bundled, not skip_system_fonts,
+                    GENERIC_FAMILY_DEFAULTS if bundled else None,
+                )
                 return _render_plan(
                     svg,
                     plan,
@@ -184,7 +225,10 @@ def svg_to_png(
                     font_files=list(font_files or ()),
                     skip_system_fonts=skip_system_fonts,
                     generic_families=GENERIC_FAMILY_DEFAULTS if bundled else None,
-                )
+                ), missing
+        missing = _missing(check_glyphs, svg, list(font_files or ()),
+                           list(font_dirs or ()) + bundled, not skip_system_fonts,
+                           GENERIC_FAMILY_DEFAULTS if bundled else None)
         return _render_with_resvg(
             svg,
             width=width,
@@ -195,12 +239,24 @@ def svg_to_png(
             font_files=font_files,
             skip_system_fonts=skip_system_fonts,
             generic_families=GENERIC_FAMILY_DEFAULTS if bundled else None,
-        )
+        ), missing
     if chosen == "cairosvg":
+        # cairosvg draws from the host's fontconfig, and from nothing else.
+        missing = _missing(check_glyphs, svg, [], [], True, None)
         return _render_with_cairosvg(
             svg, width=width, height=height, scale=scale, background=background
-        )
+        ), missing
     raise ValueError(f"unknown rasterizer backend: {backend!r}")
+
+
+def _missing(check: bool, svg: str, font_files: list, font_dirs: list,
+             system_fonts: bool, generic_families) -> "list[MissingGlyphs]":
+    """What of ``svg``'s text the rasteriser will not draw (:mod:`.glyphs`)."""
+    if not check:
+        return []
+    return missing_glyphs(svg, font_files=[str(path) for path in font_files],
+                          font_dirs=[str(path) for path in font_dirs],
+                          system_fonts=system_fonts, generic_families=generic_families)
 
 
 def _render_plan(

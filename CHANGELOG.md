@@ -20,5 +20,10 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 - Chart labels as PowerPoint draws them: in their `c:txPr` colour (`tx1` at 65%, data
   labels at 75%, as Office writes them), data labels in their own number format
   (`€12.4m`), and a radar's category labels 4% of the radius off their vertex.
+- Text the PNG will not draw is said out loud: a `glyphs-missing` warning and a
+  `MissingGlyphsWarning`, once per face and script, when no font the rasteriser loads
+  answers to a run's `font-family` or has its characters (`pptx2svg.glyphs`) -- every CJK
+  character, rendered without `pptx2svg-fonts` on a host with no CJK font, vanished
+  silently. The README says what `pptx2svg-fonts` holds and under which licence.
 - `table_row_heights`: a table's rows as the renderer lays them out, grown to fit their text,
   for a caller that checks a slide without drawing it (pptx-agent's table overflow fact).
