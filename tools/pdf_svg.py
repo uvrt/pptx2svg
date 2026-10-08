@@ -64,8 +64,7 @@ PDFs (``ORACLE/svg/``, outside the tree), and never published.
 
 **Development tooling only**, behind the ``fidelity`` extra (PyMuPDF, AGPL-3.0 -- fine
 for a local tool that is not distributed with the library; nothing under ``src/``
-imports it), installed into the project's own ``.venv`` (README.md, "Checking fidelity
-against PowerPoint").  Where PyMuPDF is missing, :func:`available` is false and the tests
+imports it), installed into the project's own ``.venv`` (docs/fidelity.md).  Where PyMuPDF is missing, :func:`available` is false and the tests
 that need it skip.
 
 Usage::
@@ -903,7 +902,7 @@ def main(argv: list[str]) -> int:
                         "short); 1 is the serial path.  Results and output are identical either way")
     args = parser.parse_args(argv[1:])
     if not available():
-        print("PyMuPDF is not installed: see README.md, 'Checking fidelity against PowerPoint'")
+        print("PyMuPDF is not installed: see docs/fidelity.md")
         return 2
     import fidelity
 

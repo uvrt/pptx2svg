@@ -1,640 +1,100 @@
 # pptx2svg
 
 [![CI](https://github.com/uvrt/pptx2svg/actions/workflows/ci.yml/badge.svg)](https://github.com/uvrt/pptx2svg/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)](https://pypi.org/project/pptx2svg/)
+![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Render PowerPoint (`.pptx`) slides to **SVG**, and SVG to **PNG**.
+Render PowerPoint (`.pptx`) slides to **SVG**, and SVG to **PNG**, in pure Python.
 
-Parsing, layout and SVG generation are pure Python with no dependencies beyond the
-standard library. PNG output delegates to an existing rasteriser
-([resvg](https://github.com/linebender/resvg) via `resvg-py`, which ships prebuilt
-wheels — no compiler, no system libraries).
-
-Shape geometry, chart layout, table styles and font metrics are all **checked against
-PowerPoint's own output** rather than guessed: `tools/fidelity.py` scores a render
-against a PDF PowerPoint exported from the same deck, and the constants in this codebase
-carry the measurement that produced them.
+Parsing, layout and SVG generation need nothing beyond the standard library (and the
+sibling [ooxml-common](https://github.com/uvrt/ooxml-common)); PNG output delegates to
+[resvg](https://github.com/linebender/resvg) via `resvg-py`. Shape geometry, chart layout,
+table styles and font metrics are **checked against PowerPoint's own output** rather than
+guessed, and the constants carry the measurement that produced them.
 
 ## Install
 
+Neither pptx2svg nor ooxml-common is on PyPI yet; install from GitHub:
+
 ```bash
-pip install pptx2svg                    # SVG only, zero dependencies
-pip install 'pptx2svg[png,fonts]'       # PNG output, reproducible where Office is not installed
+pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@main"
+pip install "pptx2svg[png] @ git+https://github.com/uvrt/pptx2svg@main"
+pip install "pptx2svg-fonts @ git+https://github.com/uvrt/pptx2svg@main#subdirectory=packages/pptx2svg-fonts"
 ```
 
-| Extra      | Pulls in         | For                                                        |
-| ---------- | ---------------- | ---------------------------------------------------------- |
-| `png`      | `resvg-py`       | PNG output. Prebuilt wheels; the recommended backend.       |
-| `fonts`    | `pptx2svg-fonts` | The typefaces we draw with. **Install this for PNG output** — see [Fonts](#fonts). |
-| `metafile` | `pypdfium2`      | EMF/WMF pictures whose embedded preview is a PDF. Without it those draw a placeholder. |
-| `cairo`    | `cairosvg`       | PNG via Cairo. Weaker SVG filter support (shadows, glows).  |
-| `measure`  | `fonttools`      | Measure with real installed fonts instead of the built-in tables. |
-
-SVG output needs nothing but the standard library — an SVG names fonts, it does not
-embed them. PNG output *rasterises*, so it needs actual font files, and without them the
-rasteriser quietly substitutes whatever the host has. `[fonts]` is 11 MB and is what
-makes the same deck produce the same pixels on your laptop and on a build server —
-on a laptop with Office, with `host_fonts=False` (below).
-
-**On a Mac with Office, the faces PowerPoint itself draws are used by default**, with or
-without `[fonts]`: Aptos and the rest from PowerPoint's application bundle, Aptos Display
-from Office's cloud-font cache, read where they are installed and never copied, for
-measurement as well as drawing — because that most closely resembles PowerPoint. **The
-output then depends on the machine.** For the reproducible render, pass
-`ConvertOptions(host_fonts=False)` (or `svg_to_png(..., host_fonts=False)`), or set
-`PPTX2SVG_OFFICE_FONTS=0`; with `[fonts]` installed that gives the same pixels everywhere.
-Where Office's folders do not exist (Linux, Windows, CI) nothing changes
-([FONTS.md](FONTS.md#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place)).
+SVG output needs no extra. `png` adds the rasteriser; the `pptx2svg-fonts` bundle (11 MB,
+SIL OFL faces) is what makes the same deck produce the same pixels everywhere. The other
+extras (`metafile`, `cairo`, `measure`) and how Office's own faces are used on a Mac:
+[docs/usage.md](docs/usage.md#install-extras).
 
 ## Use
 
 ```python
 from pptx2svg import convert_pptx_to_svg, convert_pptx_to_png, ConvertOptions
 
-svgs = convert_pptx_to_svg("deck.pptx")                       # list[str], one per slide
+svgs = convert_pptx_to_svg("deck.pptx")                               # list[str], one per slide
 pngs = convert_pptx_to_png("deck.pptx", ConvertOptions(width=1920))   # list[bytes]
 
-# One slide, at a specific size
 options = ConvertOptions(slide_numbers=[3], width=1280)
 svg = convert_pptx_to_svg("deck.pptx", options)[0]
-
-# Anything unsupported is reported rather than silently dropped
-for warning in options.warnings:
-    print(warning)          # [code] (slide N) message
+for warning in options.warnings:     # anything unsupported is reported, not silently dropped
+    print(warning)                   # [code] (slide N) message
 ```
-
-`convert_pptx_to_svg` accepts a path, `bytes`, or any binary file object, and all three
-produce byte-identical output.
-
-Give only `width` or only `height` and the other follows the slide's aspect ratio; give
-neither and the slide's own size is used.
-
-`options.warnings` is the channel for everything the renderer could not do faithfully.
-The codes are stable strings — `chart-unsupported-type`, `chart-3d-flattened`,
-`diagram-no-cached-drawing`, `metafile-image`, `metafile-rasterizer-missing`,
-`table-style-unknown`, `font-substituted`, `font-bundle-missing` and a handful more — so a
-build can fail on the ones it cares about and ignore the rest. "Nothing was drawn" and
-"something simplified was drawn" are deliberately different codes: `chart-unsupported-type`
-is the first and `chart-3d-flattened` the second.
-
-### Command line
 
 ```bash
-pptx2svg deck.pptx -o out/                    # one .svg per slide
-pptx2svg deck.pptx -o out/ -f png --width 1920
-pptx2svg deck.pptx -o out/ -f both -s 1,3-5   # selected slides, both formats
-```
-
-`--height`, `--backend {auto,resvg,cairosvg}`, `--font-dir DIR`, `--system-fonts`,
-`--no-bundled-fonts` and `-q` are the rest of it; `pptx2svg --help` lists them.
-
-### The resolved model
-
-To inspect slide structure instead of markup — useful for extracting text, finding
-shapes, or building your own renderer:
-
-```python
-from pptx2svg import convert_pptx_to_model
-
-resolved = convert_pptx_to_model("deck.pptx")
-for slide in resolved.slides:
-    for element in slide.elements:
-        if getattr(element, "text_body", None):
-            for paragraph in element.text_body.paragraphs:
-                print("".join(run.text for run in paragraph.runs))
-```
-
-Everything in this model is already resolved: colours are concrete hex values with theme
-lookups and `lumMod`/`tint`/`shade` applied, fonts are real typeface names with `+mn-lt`
-expanded, and placeholder properties are merged down from layout and master. A chart
-carries its parsed series and categories alongside the primitives it draws with, so you
-can read the numbers without touching the chart XML.
-
-### The agent view
-
-For a language model to *read* a slide — its shapes, their boxes, colours and text, with
-the ids an editor addresses them by — rather than to look at it:
-
-```python
-from pptx2svg import ConvertOptions, convert_pptx_to_agent_svg
-
-svgs = convert_pptx_to_agent_svg("deck.pptx", ConvertOptions(slide_numbers=[3]))
-```
-
-Each slide is a compact SVG in **slide points** (`viewBox="0 0 960 540"` at 16:9), every
-shape carrying `data-pptx-id` as the normal render does, numbers rounded to a tenth of a
-point, and theme colours named beside the hex:
-
-```xml
-<g data-pptx-id="258.8"><rect x="142" y="125.3" width="99.7" height="21.6"
-   fill="#DAE8F9" data-fill="dk2 lumMod=10% lumOff=90%" stroke="#022A2F"
-   data-stroke="accent1 shade=15%" stroke-width="1.5"/>
- <text x="149.2" y="128.9" data-anchor="middle"><tspan x="191.9" dy="11"
-   text-anchor="middle" font-size="11" font-weight="bold" fill="#0B2545"
-   data-fill="dk2">Diagnose</tspan></text></g>
-```
-
-A preset is `data-preset` on the shape's box (an ellipse is an `<ellipse>`, a line a
-`<line>`); text is one `<tspan>` per paragraph and run, unwrapped, with no fonts read or
-embedded; pictures, charts, tables, SmartArt and media are placeholders
-(`<rect data-kind="picture" …/>`; a table with its cell text, a chart with its type and
-title, SmartArt with its nodes' text). The layout's and master's own shapes come first,
-marked `data-layer="layout"`/`"master"`. There are no images, base64, fonts, filters or
-`<defs>`, so a shape-heavy slide is a few thousand tokens, typically well under the normal
-render — and far under it when the deck embeds pictures or fonts. It is a read view: it
-is not meant to look like the slide, and nothing reads it back.
-
-## How it works
-
-```
-.pptx  ─▶  OPC package  ─▶  source model  ─▶  render model  ─▶  SVG  ─▶  PNG
-           pptx2svg.opc    pptx2svg.parse   pptx2svg.resolve   .render  .png
-```
-
-| Module              | Responsibility                                                           |
-| ------------------- | ------------------------------------------------------------------------ |
-| `pptx2svg.opc`      | ZIP container, content types, relationship graph                         |
-| `pptx2svg.parse`    | OOXML → source model, deliberately **unresolved** (theme refs, rel ids intact) |
-| `pptx2svg.resolve`  | Theme colours + the placeholder/background/text inheritance cascades      |
-| `pptx2svg.render`   | Text measurement, line breaking, geometry, SVG output                    |
-| `pptx2svg.text`     | Font metrics, measurement, wrapping                                      |
-| `pptx2svg.fonts`    | Which faces we can draw, and what happens when we cannot                 |
-| `pptx2svg.metafile` | EMF/WMF preview extraction                                               |
-| `pptx2svg.png`      | Rasterisation via an external backend                                    |
-
-Each stage is usable on its own.
-
-The parse/resolve split is what makes inheritance work: a `<a:schemeClr val="tx1"/>`
-means nothing until you know which colour map applies, and a placeholder's font size may
-live on the slide, the layout, the master's `txStyles`, or the presentation's
-`defaultTextStyle`. The parser records what the XML says; the resolver decides what it
-means.
-
-## What gets rendered
-
-The goal is accurate text, shapes and spatial layout — not a pixel-exact reproduction of
-every PowerPoint feature.
-
-**Shapes and text.** All 186 preset geometries in ECMA-376, plus `lineInv`, plus full
-custom geometry with guide formulas — every one of them verified against PowerPoint's own
-PDF export at two aspect ratios. Text carries the complete inheritance cascade, bullets
-and auto-numbering, line wrapping (Latin and CJK), autofit (the stored `normAutofit`
-scale, as PowerPoint draws a file it has not re-fitted), vertical text, tabs and columns. Solid, gradient, pattern and
-image fills; outlines with dashes and arrowheads; shadows, glow and soft edges; pictures
-with cropping, tiling and colour adjustments; groups with nested coordinate spaces;
-hyperlinks; and alt text as `aria-label`.
-
-**Tables** render with merged cells, borders and fills, and with **PowerPoint's built-in
-table styles** — all 74 of them, measured out of PowerPoint itself, because it keeps
-those definitions inside the application and never writes them into the file. A table
-that names one therefore renders banded and headed rather than as a bare grid.
-
-**Charts** — `barChart`, `lineChart`, `areaChart`, `scatterChart`, `bubbleChart`,
-`pieChart`, `doughnutChart`, `ofPieChart`, `radarChart`, `stockChart` and `surfaceChart`,
-which is every group element ECMA-376 defines — are read and drawn with their axis range,
-tick interval, gridlines, legend and data labels, laid out from constants measured out of
-PowerPoint's PDF export. No deck in the test corpus warns `chart-unsupported-type`.
-
-A **surface** is the one whose marks are not its series: it draws a lit lattice over
-(category, series, value) through the scene's depth, cut into bands by the value axis' own
-intervals and coloured band by band, with a legend of those value ranges rather than of
-the series. `c:bandFmts` and `c:wireframe` are both drawn.
-
-The 3-D spellings draw their scene where it is measured — `bar3DChart`'s prisms,
-`line3DChart`'s ribbons, a clustered `area3DChart`'s slabs and a surface's mesh, each with
-its floor and two walls, laid out through `c:view3D`'s camera. A `pie3DChart`, a stacked
-`area3DChart` and anything under a perspective camera (`c:rAngAx="0"`, or no `c:view3D` at
-all) **draw flat and say so** — one `chart-3d-flattened` warning each — with their data,
-categories, axis and legend in full. A 3-D value axis is **not** padded the way a flat one
-is — measured, and it is the difference between the 0–50 by 5 PowerPoint draws and the
-0–60 by 10 the flat rule asks for — so the numbers on the axis are PowerPoint's own even
-where the picture is not.
-
-**SmartArt** renders from the DrawingML drawing PowerPoint caches beside the diagram —
-shapes, text, fills and geometry, each label placed by its own `dsp:txXfrm`. Where that
-cache is missing or empty there is nothing to draw, and the renderer says so rather than
-leaving a blank rectangle unexplained.
-
-**EMF/WMF pictures** render the preview Office embeds in the metafile. A DIB preview
-needs nothing extra; a PDF preview needs `pptx2svg[metafile]`.
-
-### Not rendered
-
-Four things, and each of them is a real gap rather than a rough edge:
-
-- **3-D effects, bevels and reflections.** `a:scene3d`, `a:sp3d` and `a:reflection` are
-  ignored; the shape draws flat. This is the one item on the list that passes silently.
-- **SmartArt with no cached drawing.** There is no diagram layout engine here, and
-  implementing `dgm:layoutDef` is a project in its own right. Such a frame draws nothing
-  and warns `diagram-no-cached-drawing`. This is common in older files: of 46 real
-  SmartArt decks measured, 13 carried a drawing with shapes in it and 33 did not.
-- **Vector EMF/WMF content.** Only the embedded preview is read; the metafile's own
-  drawing records are not interpreted, so a metafile without a preview draws a
-  placeholder and warns. `ConvertOptions(metafile_converter=...)` is the hook for
-  shelling out to Inkscape or `libemf2svg` if you need the vectors.
-- **Every chart in the ChartEx family.** Office 2016's newer types (treemap, sunburst,
-  histogram, box-and-whisker, waterfall, funnel, map) live in a `cx:chartSpace` part in a
-  different namespace with a different data model; they draw an empty frame and warn
-  `chart-unsupported-type`. Every `c:*Chart` group ECMA-376 defines *is* drawn, the
-  surface included. A combo chart draws whichever of its groups is a type we know and
-  ignores the others.
-
-See [ROADMAP.md](ROADMAP.md) for what closing each of these involves.
-
-### Checking fidelity against PowerPoint
-
-`tools/fidelity.py` scores our render against PowerPoint's own PDF export on SSIM and
-colour-histogram correlation. It renders **our** side with the same licensed Microsoft
-faces PowerPoint used, read in place from wherever Office installed them, so a difference
-between the two images is attributable to this library rather than to font availability:
-
-```bash
-python3 tools/fidelity.py --write-profile               # once, on a machine with Office
-.venv/bin/python tools/fidelity.py --oracle ~/pptx2svg-oracle   # the .venv: see below
-```
-
-The profile records paths and hashes only; no licensed font is ever copied into the
-repository, and `tests/font-profile.local.json` is gitignored. Without it the harness
-refuses to run, and a deck naming a face PowerPoint did not have either is skipped rather
-than scored against Microsoft's fallback.
-
-Both sides are rasterised by the **same engine**, resvg: PowerPoint's PDF page is first
-converted to SVG by `tools/pdf_svg.py` (glyphs redrawn unhinted from the fonts the PDF
-embeds, and validated against the PDF page by page), so a score measures layout and
-drawing rather than pdfium against resvg. `--truth pdfium`, the old instrument, stays
-available, and runs only when asked for (`--truth pdfium`, or `--truth both`): the
-baselines keep its recorded scores beside the svg ones, a default `--update` carries them
-over untouched, and `--update --truth both` re-records them. The converter needs PyMuPDF, a development-only tool behind the `fidelity`
-extra, which is **not** part of `dev` and is not installed by CI; install it into a
-project virtual environment and run the harness from there:
-
-```bash
-python3 -m venv --system-site-packages .venv
-.venv/bin/pip install -e '.[fidelity]'        # or just: .venv/bin/pip install pymupdf
-.venv/bin/python tools/fidelity.py            # --truth pdfium / --truth both for the old instrument
-.venv/bin/python tools/pdf_svg.py --validate  # hold the converter to every export
-.venv/bin/python -m pytest                    # the converter's tests run here, and skip elsewhere
-.venv/bin/python -m pytest --pdfium           # also the tests that score against pdfium
-```
-
-Both tools use every logical core (fewer if memory is short): the harness scores a slide
-per process and the validation takes a page per process, and both reassemble the results
-in order, so every score, baseline and printed line is the serial run's. `--jobs 1` is
-the serial path. Scoring never launches PowerPoint; it reads the exports.
-
-The harness caches both sides' rasters in `~/pptx2svg-oracle/svg/rasters/` (never in the
-repository), keyed by every input that moves their pixels -- the SVG and PDF bytes, the
-*contents* of every font file resvg is handed, the converter, resvg and Pillow versions
-and the options -- and holds itself to them: each run re-draws a few slides, rotating
-through the corpus by date, and compares them with the cache byte for byte. Any
-difference discards the whole cache and stops the run. `--verify-cache` re-draws every
-slide and compares; `--no-cache` bypasses the cache. SSIM is computed over the content's
-bounding box only, which gives the full page's score bit for bit; the same sampled slides
-are scored both ways each run and held equal.
-
-PyMuPDF is AGPL-3.0, acceptable for a local tool that is never distributed with the
-library; nothing under `src/` imports it, and without it the tests that need it skip.
-Converted pages carry the glyph outlines PowerPoint embedded (Microsoft's fonts), so they
-are cached only beside PowerPoint's exports, in `~/pptx2svg-oracle/svg/`, and
-`pdf_svg.py` refuses to write one inside a repository.
-
-If Microsoft PowerPoint is installed, `tools/powerpoint_export_pdf.applescript` exports a
-deck through PowerPoint itself, giving authoritative ground truth to compare against:
-
-```bash
-osascript tools/powerpoint_export_pdf.applescript "$PWD/deck.pptx" "$HOME/gt.pdf"
-python -c "import pypdfium2 as p; d=p.PdfDocument('$HOME/gt.pdf'); \
-           d[0].render(scale=2).to_pil().save('gt.png')"
-```
-
-PowerPoint is sandboxed, and being under your home directory is not enough: both paths
-must be in a directory PowerPoint has already been granted access to. A brand-new one is
-refused, and the failure looks like a corrupt deck rather than a permissions problem.
-
-## Fonts
-
-> **[FONTS.md](FONTS.md) answers one question end to end: *the deck names font X — will it
-> be drawn correctly, and if not, what do I do?*** It has a scan table keyed on font name,
-> all five ways a face gets drawn, and the escape hatches with their trap. What follows here
-> is the summary.
-
-Office's typefaces are proprietary and cannot be redistributed. Layout is therefore
-computed from the advance widths of open fonts built to match them, and **those same
-files are what the rasteriser draws with** — measuring with one face and drawing with
-another is the failure this whole subsystem exists to prevent. resvg does not warn when
-it substitutes: rendering one string in Calibri, Carlito, Aptos, Noto Sans JP and Lato on
-a machine with none of them produces five byte-identical PNGs.
-
-| Office face        | Drawn with     | Debian package              | Licence     |
-| ------------------ | -------------- | --------------------------- | ----------- |
-| Calibri            | Carlito        | `fonts-crosextra-carlito`   | SIL OFL 1.1 |
-| Arial, Helvetica   | Arimo          | `fonts-croscore`            | SIL OFL 1.1 |
-| Times New Roman    | Tinos          | `fonts-croscore`            | SIL OFL 1.1 |
-| Courier New        | Cousine        | `fonts-croscore`            | SIL OFL 1.1 |
-| Cambria            | Caladea †      | `fonts-crosextra-caladea`   | SIL OFL 1.1 |
-| Aptos †            | Carlito †      | —                           | —           |
-| Japanese Gothic    | Noto Sans JP † | `fonts-noto-cjk`            | SIL OFL 1.1 |
-| Lato, Raleway      | themselves     | `fonts-lato`, — ‡           | SIL OFL 1.1 |
-
-The first four are exact: measured character by character against the copies Office
-installs, the advance widths match to the unit, so substituting them changes glyph shapes
-and nothing else — not one line break moves.
-
-**The right-hand column is also a left-hand column.** A deck may name Carlito, Caladea,
-Arimo, Tinos or Cousine directly — LibreOffice ships the first two as *its* Calibri and
-Cambria substitutes, so anything round-tripped through it does, and Arimo/Tinos/Cousine
-are the Chrome OS core fonts that Debian packages as `fonts-croscore`. Each resolves to
-itself and reports `exact`. So do the three Liberation aliases: Liberation Sans → Arimo,
-Liberation Serif → Tinos, Liberation Mono → Cousine, which are the same designs under
-another name.
-
-† **Approximate, and reported as such.** Caladea is universally described as
-metric-compatible with Cambria; measured, it runs 4.5 % narrow. **Aptos**, Microsoft's
-Office default since 2023, has no open clone at all — we measure it with its own widths
-(so line breaks match PowerPoint) and draw it with Carlito, whose widths sit closest of
-anything shippable, −3.6 % on a representative sentence. Noto Sans JP is not
-metric-compatible with MS Gothic or Meiryo either; nothing is, and a Gothic standing in
-for a Gothic beats a Latin fallback. The measurements behind all three, and what to do
-about each, are in [FONTS.md](FONTS.md#the-five-ways-a-font-gets-drawn).
-
-‡ Debian does not package Raleway. Use the pip bundle, or Google Fonts.
-
-### Fonts the deck brought with it
-
-A deck saved with *Embed fonts in the file* carries its typefaces in `ppt/fonts/*.fntdata`,
-and pptx2svg reads them. They are used for **both measurement and drawing**, so an
-embedded face lays out at its own advance widths rather than at a substitute's — which is
-the entire point, and the half that handing font files to the rasteriser alone would miss.
-
-That beats any bundle, and not by a little. Template vendors pick arbitrary Google Fonts,
-of which there are roughly 1,800 families; two commercial templates measured here embed
-Anton, Arimo, Literata, Merriweather Sans, Merriweather Sans Light and Inclusive Sans, and
-every one of them used to report "no substitute known; widths guessed" while sitting
-inside the file being rendered. Scored against PowerPoint's own PDF export of those two
-decks, reading the embedded fonts raised SSIM on all twelve slides measured — the largest
-by 0.123, the mean by 0.058.
-
-It also beats a bundled face of the *same name*: `real-basic-theme.pptx` embeds Raleway
-4.026, 338 of 340 advance widths differ from the release the bundle ships, and the same
-string measures 3.9 % apart between them. The author laid the deck out with the file
-inside it, so that is the file to measure with.
-
-Three things this does not do:
-
-- **Use a font whose licence refuses.** Every face is checked against its OS/2 `fsType`
-  before it is touched — in the EOT header and again in the decoded font, because the
-  first is written by the embedder and the second by the foundry. A restricted-licence
-  face is refused with a `font-embedded-restricted` warning naming the restriction, and
-  the deck falls back to substitution. The rule is LibreOffice's
-  (`EmbeddedFontsHelper::sufficientTTFRights`).
-- **Fail.** A payload that cannot be decoded warns `font-embedded-undecodable` and the
-  deck renders as it did before.
-- **Cost nothing.** Decoding is 0.15–1.1 s per face, and only the families a slide
-  actually asks for are decoded. `--no-embedded-fonts` (or
-  `ConvertOptions(use_embedded_fonts=False)`) turns it off.
-
-No extra is needed: the MicroType Express decoder is pure Python and lives in the core.
-
-### Will my deck render faithfully?
-
-```bash
-pptx2svg fonts                       # what the bundle covers
+pptx2svg deck.pptx -o out/ -f both -s 1,3-5 --width 1920
 pptx2svg fonts --check deck.pptx     # exit 1 if this deck cannot be drawn faithfully
 ```
 
-```
-mode:   bundled from .../site-packages/pptx2svg_fonts/files
-        this machine's own fonts are ignored, so output is reproducible
-        families: Arimo, Caladea, Carlito, Cousine, Lato, Noto Sans JP, Raleway, Tinos
+Also: the resolved model (`convert_pptx_to_model`) and a compact agent view for a language
+model to read (`convert_pptx_to_agent_svg`) -- see [docs/usage.md](docs/usage.md).
 
-face                       verdict      drawn with     note
-Arial                      compatible   Arimo          Arimo has Arial's advance widths
-Aptos                      approximate  Carlito        measured as Aptos, drawn as Carlito; no metric-compatible clone exists
-Aptos Display              approximate  Carlito        measured as Aptos Display, drawn as Carlito; no metric-compatible clone exists
+## What is rendered
 
-2 of 3 faces will not be drawn at the widths they were measured at.
-```
+- **Shapes and text:** all 186 ECMA-376 preset geometries plus custom geometry, the full
+  text inheritance cascade, bullets, wrapping (Latin and CJK), autofit, vertical text, tabs
+  and columns; fills, outlines, shadows, glow, soft edges, pictures, groups, hyperlinks.
+- **Tables** with merged cells and all 74 of PowerPoint's built-in table styles.
+- **Charts:** every `c:*Chart` group ECMA-376 defines, with axes, gridlines, legend and data
+  labels; 3-D scenes where measured, otherwise drawn flat with a warning.
+- **SmartArt** from its cached drawing; **EMF/WMF** from the embedded preview.
+- **Embedded fonts** (`ppt/fonts/*.fntdata`), for measurement and drawing, licence permitting.
 
-A face the deck embeds grades `exact` — "drawn with the face the deck embedded" — because
-the layout was measured from the very file the rasteriser is handed. That is a stronger
-guarantee than any clone offers, so it wins even where a substitute exists.
+**Not rendered:** 3-D effects, bevels and reflections (silently flat); SmartArt with no
+cached drawing; vector EMF/WMF records; the ChartEx family (treemap, sunburst, waterfall,
+...). Each but the first warns. Details: [docs/rendering.md](docs/rendering.md); what
+closing each gap involves: [ROADMAP.md](ROADMAP.md).
 
-`exact` and `compatible` are faithful; `approximate` and `missing` are not, and `--check`
-exits non-zero on them so a deck that cannot be rendered faithfully fails a build instead
-of shipping wrong pixels. The same information reaches library callers as
-`font-substituted` warnings on `ConvertOptions.warnings`. What each grade means and what to
-do about a bad one: [FONTS.md](FONTS.md#the-four-grades).
+## Status
 
-### Without the bundle
+Version 0.1.0, in active development, not yet released to PyPI. CI runs the suite on
+Linux, macOS and Windows for Python 3.10 to 3.13. Fidelity against PowerPoint is measured
+locally on a Mac with Office ([docs/fidelity.md](docs/fidelity.md)); CI checks regressions
+only. Changes: [CHANGELOG.md](CHANGELOG.md).
 
-`pptx2svg` alone renders PNGs with the host's fonts and emits one
-`font-bundle-missing` warning saying so. That is a deliberate downgrade, not a silent
-one — output is then whatever the machine happens to have installed.
+## Documentation
 
-### Escape hatches
+- [docs/usage.md](docs/usage.md) -- install extras, API, CLI, resolved model, agent view, output format
+- [docs/rendering.md](docs/rendering.md) -- the pipeline, what is and is not rendered
+- [docs/fonts.md](docs/fonts.md) -- font summary, embedded fonts, escape hatches, Linux hosts
+- [FONTS.md](FONTS.md) -- "the deck names font X: will it be drawn correctly?", end to end
+- [docs/fidelity.md](docs/fidelity.md) -- scoring renders against PowerPoint's PDF export
+- [docs/development.md](docs/development.md) -- running the tests, snapshots, generated tables
+- [ROADMAP.md](ROADMAP.md) -- what is next and the measurements behind it
+- [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), [docs/licensing.md](docs/licensing.md)
 
-```python
-# The host's fonts as well as the bundle, for a deck naming a face we do not carry
-convert_pptx_to_png("deck.pptx", skip_system_fonts=False)
+## Family
 
-# Your own faces only
-convert_pptx_to_png("deck.pptx", font_dirs=["./corporate-fonts"], use_bundled_fonts=False)
-
-# Layout measured from specific files on this machine
-from pptx2svg import ConvertOptions, FontToolsTextMeasurer
-measurer = FontToolsTextMeasurer({"Calibri": "/path/to/Calibri.ttf"})
-convert_pptx_to_svg("deck.pptx", ConvertOptions(measurer=measurer))
-
-# Map a face to a substitute you do have
-ConvertOptions(font_mapping={"Helvetica Neue": "Inter"})
-```
-
-On the command line: `--system-fonts`, `--no-bundled-fonts`, `--font-dir DIR`.
-
-**One trap, stated plainly.** `font_dirs`, `font_files` and `--font-dir` reach the
-rasteriser *after* measurement has already happened, so pointing them at the face a deck
-asks for gives right glyphs at guessed widths — correct letters, wrong line breaks. The
-complete route is `measurer=FontToolsTextMeasurer({...})` *and* `font_dirs=`, which needs
-`pptx2svg[measure]`; the CLI has no measurer flag, so this one needs the Python API. See
-[FONTS.md](FONTS.md#the-escape-hatches-and-their-trap).
-
-### Debian and other Linux hosts
-
-Two routes, and only one of them is reproducible.
-
-**The bundle (recommended).** `pip install 'pptx2svg[fonts]'` pins the exact font files.
-Two machines running the same version produce the same pixels, which is the only way to
-get that guarantee.
-
-**System packages.** `tools/install-fonts-debian.sh` installs the same designs from apt
-(`fonts-croscore`, `fonts-crosextra-carlito`, `fonts-crosextra-caladea`,
-`fonts-liberation2`, `fonts-noto-cjk`, `fonts-lato`) and verifies each family with
-`fc-list`. Render with `--system-fonts` to use them. This is fine for correct *layout* —
-Liberation Sans/Serif/Mono are derived from Arimo/Tinos/Cousine and measure identically,
-checked character by character — but apt gives you whatever version the distribution
-shipped, so two machines on different releases can still differ.
-
-The same script reaches the faces no bundle can legally contain, behind explicit flags:
-
-```bash
-tools/install-fonts-debian.sh                  # open substitutes from apt
-tools/install-fonts-debian.sh --clones         # + the rest of the open metric clones
-tools/install-fonts-debian.sh --aptos          # + Aptos, from Microsoft's own download
-tools/install-fonts-debian.sh --mscorefonts    # + Arial, Georgia, Verdana … (EULA)
-tools/install-fonts-debian.sh --ppviewer       # + Calibri, Cambria and the ClearType set
-tools/install-fonts-debian.sh --office-dir auto   # + everything else PowerPoint ships
-```
-
-`--clones` needs no licence from anyone. It adds `fonts-urw-base35`, `fonts-texgyre`,
-`fonts-liberation-sans-narrow` and two faces Debian does not package (Comic Relief and
-Symbol Neu, both hash-pinned), which between them cover Book Antiqua, Palatino Linotype,
-Century Schoolbook, Century, Century Gothic, Bookman Old Style, Arial Narrow, Monotype
-Corsiva, Symbol, Monotype Sorts and Comic Sans MS. Each of those pairings was measured
-character by character against the PowerPoint face it substitutes for; the numbers are in
-`ROADMAP.md` under *The clone landscape*. These are not in the wheel because the wheel
-*redistributes* and their licences (AGPL and GPL-2, both with document-embedding
-exceptions) do not permit that; installing them from Debian's archive is a different act.
-Installing a clone under its own name does not by itself make pptx2svg use it — see
-[FONTS.md](FONTS.md#4-a-clone-exists-but-is-not-bundled) for the two lines it needs.
-
-`--mscorefonts` installs Debian's `ttf-mscorefonts-installer` from **contrib**, which
-presents Microsoft's EULA through debconf — use `--accept-eula` to preseed it for a fleet.
-`--ppviewer` extracts the ClearType set from the PowerPoint Viewer installer, the route
-documented at [wiki.debian.org/ppviewerFonts](https://wiki.debian.org/ppviewerFonts)
-(hash-pinned; needs `cabextract`). **These are non-free Microsoft fonts — you must already
-hold a licence to use them.** Nothing extracted is ever committed or shipped.
-
-`--office-dir PATH` is for organisations that hold Office licences and want the ~150
-families nothing above reaches — Gill Sans MT, Rockwell, Franklin Gothic, Tw Cen MT,
-Perpetua, Garamond, the Lucida family, the CJK and Indic faces. **It downloads nothing.**
-It copies from a licensed Microsoft Office installation you point it at (`--office-dir
-auto` probes the usual places, including a mounted macOS `PowerPoint.app/Contents/
-Resources/DFonts` and `/mnt/c/Windows/Fonts`) into a directory fontconfig indexes, and
-then names what landed. Whether those files may be copied onto a given machine is your
-organisation's licensing decision; the script makes no part of it for you.
-
-## Output notes
-
-The SVG uses **inline presentation attributes only** — no CSS classes, no `<style>`
-elements. librsvg and resvg do not apply CSS selectors reliably, and this keeps output
-portable across rasterisers. Element ids (`grad-1`, `patt-2`) come from a per-slide
-counter, so the same input always produces byte-identical output; SVGs are diffable and
-snapshot-testable.
-
-Every shape group also carries its source identity, so rendered output can be mapped back to
-the deck it came from:
-
-```xml
-<g role="img" aria-label="Contract picture" data-pptx-id="256.3" data-pptx-path="2"
-   transform="translate(346.457, 146.982)"> ... </g>
-```
-
-`data-pptx-id` is `"<sldId>.<cNvPr id>"` for slide shapes and `lay:`/`mst:` for shapes
-inherited from the layout or master. `data-pptx-path` is the index path through the shape
-tree, and it is **not** redundant — `cNvPr@id` is not unique in real decks, so the pair is
-what addresses a shape unambiguously. Alt text is still emitted as `aria-label` alongside.
-
-## Development
-
-```bash
-pip install -e ../ooxml-common        # a checkout of https://github.com/uvrt/ooxml-common
-pip install -e '.[dev]'
-pip install -e packages/pptx2svg-fonts
-pytest
-```
-
-A bare `pytest` runs serially, as CI does. To use every core, pass `-n` (pytest-xdist, in
-the `dev` extra):
-
-```bash
-pytest -n auto
-```
-
-It collects, passes and skips exactly the tests the serial run does. Here `-n` means
-`--dist loadgroup` (`tests/conftest.py`), which is `load` for every test but one marked
-`@pytest.mark.powerpoint` -- one that drives PowerPoint, of which there are none today:
-those all run on one worker, one at a time. Under any other `--dist` such a test fails
-rather than races.
-
-The format-neutral half of this library -- the OPC reader, units, the font modules and
-the measured text metrics, and DrawingML: its value types, colour resolution, guides,
-preset geometry, patterns, and the fill, outline, effect and geometry renderers; the
-shape tree and text body readers, the shape, text body and group renderers, and the
-charts, read and laid out -- lives in
-[ooxml-common](https://github.com/uvrt/ooxml-common), extracted with its history so that
-docx2svg can measure text with the same tables and draw DrawingML, charts and SmartArt
-with the same code. It is a runtime dependency with no dependencies of its own, and not on
-PyPI yet, so it is installed first. Every old import path (`pptx2svg.opc`,
-`pptx2svg.text.metrics`, `pptx2svg.fonts`, `pptx2svg.render.fill`,
-`pptx2svg.resolve.color`, `pptx2svg.resolve.chart`, `pptx2svg.render.text`, ...) still
-works and returns the same module object, and every type in `pptx2svg.model` and
-`pptx2svg.parse.source` that moved is the shared class.
-
-`pptx2svg-fonts` is a sibling distribution in this repository and is not on PyPI yet, so
-it is installed from the checkout rather than named as a dependency.
-
-Tests run against real `.pptx` files in `tests/fixtures/` produced by PowerPoint, Google
-Slides and python-pptx; `tests/fixtures/README.md` records where each came from.
-
-Decks that are not ours to redistribute are not committed at all. `tests/conftest.py`
-looks for those in the gitignored `scratch/`, and the tests that need one skip where it
-is absent.
-
-`tests/vrt/` holds a committed SVG of every slide of every fixture, and `tests/test_vrt.py`
-fails when a render stops matching one. It is a regression net, not a correctness check --
-it reports that the output *changed*, never that it is *right*, and the committed files
-freeze today's bugs along with today's behaviour. Read `tests/vrt/README.md` before
-trusting one, and rebaseline deliberately:
-
-```bash
-pytest tests/test_vrt.py --update-snapshots    # then read the diff
-```
-
-The metrics table, now `ooxml_common/text/metrics.py` in ooxml-common, is **generated**
-from the font files in `packages/pptx2svg-fonts` by a tool that stayed here, and the tool
-writes into whichever ooxml-common is installed -- the editable sibling checkout. Do not
-edit the table by hand:
-
-```bash
-python3 tools/extract_font_metrics.py --check    # fails if the table has drifted
-python3 tools/extract_font_metrics.py --write    # regenerate
-```
-
-A test runs `--check`, so a font update that is not accompanied by a regenerated table
-fails the suite rather than silently making layout wrong. The same idea applies to the
-two other generated tables: ooxml-common's `drawingml/preset_specs.py` and
-`drawingml/presets.py` come from `tools/derive_preset_geometry.py`, and `parse/table_styles_builtin.py` from
-`tools/derive_table_styles.py`, which measures the styles by rendering them through
-PowerPoint. Edit the tool, not the table.
+- [pptx2svg](https://github.com/uvrt/pptx2svg) (this repo) -- renders PowerPoint (`.pptx`) slides to SVG and PNG.
+- [docx2svg](https://github.com/uvrt/docx2svg) -- renders Word (`.docx`) documents to SVG, page by page.
+- [ooxml-common](https://github.com/uvrt/ooxml-common) -- the format-neutral reading, DrawingML, fonts and text metrics both renderers share.
+- [ooxml-edit](https://github.com/uvrt/ooxml-edit) -- lossless, undoable editing of OOXML packages, shared by both agent layers.
+- [pptx-agent](https://github.com/uvrt/pptx-agent) -- an AI-editable PowerPoint layer: inspect, edit, re-render.
+- [docx-agent](https://github.com/uvrt/docx-agent) -- an AI-editable Word layer: inspect, edit (optionally as tracked changes), re-render.
 
 ## Licence
 
-MIT. Ported from [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse) (MIT,
-© Hiroki Sakabe).
-
-The `pptx2svg-fonts` distribution is a separate matter: its Python module is MIT, but the
-font files it carries are each **SIL Open Font License 1.1**, redistributed byte-for-byte
-as published on [Google Fonts](https://github.com/google/fonts) with their full licence
-texts alongside them in `src/pptx2svg_fonts/licenses/`. Carlito, Caladea, Arimo, Tinos and
-Cousine are © their respective Project Authors; Lato is © tyPoland Łukasz Dziedzic; Noto
-Sans JP is © Adobe; Raleway is © the Raleway Project Authors. None has been subsetted,
-renamed or otherwise modified, so the Reserved Font Name clauses are satisfied.
-
-No Microsoft font is bundled, vendored or committed anywhere in this repository.
-
-Neither is ECMA-376 itself. `pptx2svg/render/preset_specs.py` is *compiled* from the
-standard's `presetShapeDefinitions.xml`, but that source is not redistributed here --
-`tools/derive_preset_geometry.py` requires a copy you obtained yourself and verifies its
-SHA-256 before reading it.
-
-**The `.pptx` files in `tests/fixtures/` are not covered by the MIT grant above.** They are
-third-party documents included as renderer inputs, and they remain their owners'. They came
-from pptx-glimpse's own `shared-fixtures/` (MIT), so that rendering differences between the
-two implementations can be compared directly; their provenance is recorded in
-`tests/fixtures/FIXTURES-README.md`.
-
-Decks that are *not* ours to redistribute are not committed at all -- not even as a test
-input. `tests/conftest.py` looks for those in the gitignored `scratch/`, and the tests that
-need one skip where it is absent. `real-college-template.pptx`, Dickinson College's public
-sample deck, is the only such deck today; `tests/fixtures/README.md` says where to get it.
+MIT ([LICENSE](LICENSE)). Ported from [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse)
+(MIT, © Hiroki Sakabe). The fonts in `pptx2svg-fonts` are SIL OFL 1.1; the `.pptx` files
+in `tests/fixtures/` are third-party documents not covered by the MIT grant; no Microsoft
+font is committed anywhere. Details: [docs/licensing.md](docs/licensing.md).

@@ -126,7 +126,7 @@ The bundled substitutes are what we *ship*; ``pptx2svg fonts --check`` and
 ``tests/test_fonts.py`` cover those.  They are deliberately not the reference here.
 
 Dev-only.  This needs numpy, pillow, pypdfium2, fontTools and a rasteriser, and PyMuPDF
-for the ``svg`` truth (the ``fidelity`` extra, in the project's ``.venv``: README.md); the
+for the ``svg`` truth (the ``fidelity`` extra, in the project's ``.venv``: docs/fidelity.md); the
 library itself stays standard-library-only, which is why this lives in ``tools/`` and not
 in ``src/``.
 
@@ -1246,8 +1246,8 @@ def truth_svg(pdf: Path, slide_index: int) -> str:
     import pdf_svg
 
     if not pdf_svg.available():
-        raise RuntimeError("the svg truth needs PyMuPDF (the fidelity extra): see README.md, "
-                           "'Checking fidelity against PowerPoint', or pass --truth pdfium")
+        raise RuntimeError("the svg truth needs PyMuPDF (the fidelity extra): see docs/fidelity.md"
+                           ", or pass --truth pdfium")
     key = (str(Path(pdf).resolve()), Path(pdf).stat().st_mtime_ns)
     if key not in _TRUTH_CACHE:
         _TRUTH_CACHE.clear()  # one deck at a time: run() walks them in order
@@ -2081,8 +2081,8 @@ def main() -> int:
         if not pdf_svg.available():
             print(
                 "the svg truth needs PyMuPDF, which is not installed in this interpreter.\n"
-                "Install the fidelity extra into the project's .venv (README.md, 'Checking "
-                "fidelity against PowerPoint'),\nor score with the old instrument: --truth pdfium",
+                "Install the fidelity extra into the project's .venv (docs/fidelity.md)"
+                ",\nor score with the old instrument: --truth pdfium",
                 file=sys.stderr,
             )
             return 2

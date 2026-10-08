@@ -149,7 +149,7 @@ def college_template() -> Path:
     """Dickinson College's public sample deck -- **not committed**.
 
     It is a third-party document, so it is not in `tests/fixtures/`; see the licence note
-    in README.md.  Tests that need it skip where it is absent, which is every machine but
+    in docs/licensing.md.  Tests that need it skip where it is absent, which is every machine but
     one.  Put a copy in `scratch/` to run them:
 
         https://www.dickinson.edu/download/downloads/id/1076/sample_powerpoint_slides.pptx

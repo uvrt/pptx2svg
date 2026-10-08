@@ -85,8 +85,7 @@ metafile = ["pypdfium2>=4"]
 # that both sides of the score go through resvg.  It is AGPL-3.0 -- acceptable for a local
 # tool that is never distributed with the library -- so it is deliberately NOT in `dev`:
 # CI does not install it, and the tests that need it skip there.  Install it into the
-# project's own virtual environment only (README.md, "Checking fidelity against
-# PowerPoint"):
+# project's own virtual environment only (docs/fidelity.md):
 #   python3 -m venv --system-site-packages .venv && .venv/bin/pip install -e '.[fidelity]'
 fidelity = [
   "numpy>=1.24",
@@ -98,7 +97,7 @@ fidelity = [
 ]
 dev = [
   "pytest>=7",
-  # `pytest -n auto` (README.md, "Development").  Opt-in: a bare `pytest` stays serial,
+  # `pytest -n auto` (docs/development.md).  Opt-in: a bare `pytest` stays serial,
   # and so does CI.
   "pytest-xdist>=3",
   "resvg-py>=0.5",
