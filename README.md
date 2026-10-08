@@ -25,7 +25,7 @@ pip install "pptx2svg-fonts @ git+https://github.com/uvrt/pptx2svg@main#subdirec
 SVG output needs no extra. `png` adds the rasteriser. **Install `pptx2svg-fonts` for PNG
 output** (the third line; about 11 MB): it is the fonts the PNG is drawn with --
 
-- Carlito, Arimo, Tinos and Cousine, metric-compatible stand-ins for Calibri, Arial, Times
+- Carlito, Arimo, Tinos and Cousine, stand-ins with the advance widths of Calibri, Arial, Times
   New Roman and Courier New, so text is drawn at the widths it was laid out at; Caladea
   for Cambria;
 - Noto Sans JP for Japanese and Chinese text (Meiryo, Yu Gothic, MS Gothic, SimSun...);
