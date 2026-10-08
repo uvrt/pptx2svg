@@ -17,3 +17,6 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
   colour transforms and run placement (#11), autofit on open (#12), kerning and Office's
   own faces by default on a Mac (#13, #14), Japanese face resolution and colour emoji (#15).
 - The agent view: a compact per-slide SVG for a model to read (#16).
+- Chart labels as PowerPoint draws them: in their `c:txPr` colour (`tx1` at 65%, data
+  labels at 75%, as Office writes them), data labels in their own number format
+  (`€12.4m`), and a radar's category labels 4% of the radius off their vertex.

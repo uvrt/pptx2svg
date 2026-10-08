@@ -455,7 +455,9 @@ def test_the_decade_helper_survives_the_ends_of_the_double_range():
         (4285.0, "0", "4285"),
         (0.125, "0.0%", "12.5%"),
         (-0.125, "0.0%", "-12.5%"),
-        (1.5, '"$"0.00', "1.50"),
+        # The text round the number is drawn: PowerPoint labelled data in
+        # '"€"#,##0.0"m"' "€12,4m" (a Dutch Mac's separators).
+        (1.5, '"$"0.00', "$1.50"),
         # A negative value keeps its own sign when the code has no negative section, and
         # takes that section's decoration -- brackets, or an explicit minus -- when it has.
         (-1234.0, "#,##0", "-1,234"),
@@ -706,6 +708,93 @@ def test_a_chart_type_that_is_not_implemented_says_so(authoring):
     convert_pptx_to_model(deck_bytes, options)
     warning = next(w for w in options.warnings if w.code == "chart-unsupported-type")
     assert "nothing" in warning.message
+
+
+def _office_chart(label_format: str) -> bytes:
+    """A clustered column chart as Office and ooxml-edit's ``add_chart`` write one: axis
+    and legend text ``tx1`` at 65%, data labels at 75% in their own number format."""
+
+    def tx(mod: int) -> str:
+        return (
+            "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz='1197'><a:solidFill>"
+            f"<a:schemeClr val='tx1'><a:lumMod val='{mod}000'/><a:lumOff val='{100 - mod}000'/>"
+            "</a:schemeClr></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang='en-US'/></a:p>"
+            "</c:txPr>"
+        )
+
+    return (
+        "<?xml version='1.0'?>"
+        f"<c:chartSpace {C} {A} {R}><c:chart><c:autoTitleDeleted val='1'/><c:plotArea>"
+        "<c:barChart><c:barDir val='col'/><c:grouping val='clustered'/><c:varyColors val='0'/>"
+        "<c:ser><c:idx val='0'/><c:order val='0'/><c:tx><c:strRef><c:strCache>"
+        "<c:ptCount val='1'/><c:pt idx='0'><c:v>North</c:v></c:pt></c:strCache></c:strRef>"
+        f"</c:tx><c:dLbls>{label_format}{tx(75)}<c:showLegendKey val='0'/><c:showVal val='1'/>"
+        "<c:showCatName val='0'/><c:showSerName val='0'/><c:showPercent val='0'/>"
+        "<c:showBubbleSize val='0'/></c:dLbls><c:cat><c:strRef><c:strCache><c:ptCount val='2'/>"
+        "<c:pt idx='0'><c:v>Q1</c:v></c:pt><c:pt idx='1'><c:v>Q2</c:v></c:pt></c:strCache>"
+        "</c:strRef></c:cat><c:val><c:numRef><c:numCache><c:formatCode>#,##0.0</c:formatCode>"
+        "<c:ptCount val='2'/><c:pt idx='0'><c:v>12.4</c:v></c:pt><c:pt idx='1'><c:v>14.9</c:v>"
+        "</c:pt></c:numCache></c:numRef></c:val></c:ser><c:gapWidth val='50'/>"
+        "<c:axId val='1'/><c:axId val='2'/></c:barChart>"
+        f"<c:catAx><c:axId val='1'/><c:delete val='0'/><c:axPos val='b'/>{tx(65)}"
+        "<c:crossAx val='2'/></c:catAx>"
+        f"<c:valAx><c:axId val='2'/><c:delete val='0'/><c:axPos val='l'/>{tx(65)}"
+        "<c:crossAx val='1'/></c:valAx></c:plotArea>"
+        f"<c:legend><c:legendPos val='b'/>{tx(65)}</c:legend></c:chart></c:chartSpace>"
+    ).encode()
+
+
+def _render_chart(authoring, chart_xml: bytes) -> str:
+    from pptx2svg import convert_pptx_to_svg
+    from tests.deckbuilder import derive_deck
+
+    frame = (
+        "<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id='96' name='Revenue'/>"
+        "<p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>"
+        "<p:xfrm><a:off x='0' y='0'/><a:ext cx='6096000' cy='4064000'/></p:xfrm>"
+        "<a:graphic><a:graphicData "
+        "uri='http://schemas.openxmlformats.org/drawingml/2006/chart'>"
+        "<c:chart xmlns:c='http://schemas.openxmlformats.org/drawingml/2006/chart' "
+        "xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships' "
+        "r:id='rIdLabels'/></a:graphicData></a:graphic></p:graphicFrame>"
+    )
+    deck = derive_deck(
+        authoring,
+        parts={"ppt/charts/chartLabels.xml": chart_xml},
+        shapes_xml=frame,
+        slide_relationships=[(
+            "rIdLabels",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+            "../charts/chartLabels.xml",
+        )],
+        overrides={
+            "ppt/charts/chartLabels.xml":
+                "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"
+        },
+    )
+    return convert_pptx_to_svg(deck)[0]
+
+
+def _ink(svg: str, text: str) -> str:
+    """The fill the run reading exactly ``text`` is drawn in."""
+    match = re.search(r'fill="(#[0-9a-fA-F]{6})"[^>]*>' + re.escape(text) + "<", svg)
+    assert match, f"{text!r} is not drawn"
+    return match.group(1).upper()
+
+
+def test_chart_labels_are_drawn_in_their_text_properties_colour_and_number_format(authoring):
+    """PowerPoint's PDF of a deck built by ooxml-edit's ``add_chart`` (pptx-agent's p9):
+    tick, category and legend text ``595959``, the ``tx1`` at 65% the chart states, and
+    data labels ``404040`` (75%) reading ``€12,4m`` -- where this drew the first three
+    black and the labels ``12.4``."""
+    euro = "<c:numFmt formatCode='&quot;€&quot;#,##0.0&quot;m&quot;' sourceLinked='0'/>"
+    svg = _render_chart(authoring, _office_chart(euro))
+    assert _ink(svg, "Q1") == _ink(svg, "North") == _ink(svg, "10.0") == "#595959"
+    assert _ink(svg, "€12.4m") == _ink(svg, "€14.9m") == "#404040"
+    # Source-linked, the labels take the cache's format whatever code they carry.
+    linked = euro.replace("sourceLinked='0'", "sourceLinked='1'")
+    svg = _render_chart(authoring, _office_chart(linked))
+    assert "€12.4m" not in svg and _ink(svg, "12.4") == "#404040"
 
 
 # -- The probe sweep -------------------------------------------------------------------

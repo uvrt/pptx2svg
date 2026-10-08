@@ -52,8 +52,10 @@ classifiers = [
 # (`DrawingRules.kerning`, `LEGACY_KERNING`; 5.10) and carries the Office font lookup
 # fonts/office.py now sits on (`ooxml_common.fonts.office`).  0.6 resolves a run's
 # Japanese face as PowerPoint does (`theme_east_asian`, `japanese_fallback`, a run's
-# `lang`), finds a face by its English typographic family and draws synthetic bold.
-dependencies = ["ooxml-common>=0.6.0"]
+# `lang`), finds a face by its English typographic family and draws synthetic bold.  0.7
+# draws chart text in its `c:txPr` colour and a number format's text round the number,
+# and places a radar's category labels as PowerPoint does (tests/test_chart.py).
+dependencies = ["ooxml-common>=0.7.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler
