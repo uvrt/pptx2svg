@@ -93,6 +93,11 @@ expanded, and placeholder properties are merged down from layout and master. A c
 carries its parsed series and categories alongside the primitives it draws with, so you
 can read the numbers without touching the chart XML.
 
+A table's rows are laid out when it is drawn: `a:tr@h` is only a minimum, and PowerPoint
+grows a row to fit its text and moves the rows below it down. `table_row_heights(table,
+context)` is each row's height, EMU, as the renderer draws it -- for a caller that checks
+whether a table runs off the slide without rendering it (pptx-agent's `overflows()` does).
+
 ## The agent view
 
 For a language model to *read* a slide — its shapes, their boxes, colours and text, with

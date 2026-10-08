@@ -49,6 +49,7 @@ from .render.context import RenderContext
 from .render.svg import render_slide_to_svg
 from .resolve import ResolvedPresentation, Warning, resolve_presentation
 from .resolve.east_asian import EastAsianFaces
+from .tables import table_row_heights
 from .text.fontmap import DEFAULT_FONT_MAPPING, create_font_mapping, family_key
 from .text.measure import DefaultTextMeasurer, FontToolsTextMeasurer, TextMeasurer
 from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
@@ -80,6 +81,7 @@ __all__ = [
     "model",
     "render_slide_to_svg",
     "svg_to_png",
+    "table_row_heights",
 ]
 
 

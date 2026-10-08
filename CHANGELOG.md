@@ -20,3 +20,5 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 - Chart labels as PowerPoint draws them: in their `c:txPr` colour (`tx1` at 65%, data
   labels at 75%, as Office writes them), data labels in their own number format
   (`€12.4m`), and a radar's category labels 4% of the radius off their vertex.
+- `table_row_heights`: a table's rows as the renderer lays them out, grown to fit their text,
+  for a caller that checks a slide without drawing it (pptx-agent's table overflow fact).
