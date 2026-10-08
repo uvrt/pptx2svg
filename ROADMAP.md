@@ -2128,11 +2128,15 @@ What is wrong or unmeasured in the radar path:
   line chart. A ring is a cycle, so the stretch running through index 0 is one run and not
   two — that was a real defect the test caught, and `_rotate_past_blank` is why it is not
   one now.
-* **The label's vertical anchoring is about 1.5 pt loose.** The four horizontal directions
-  land within 0.15 pt of the fitted 2.85 pt gap; the two vertical ones measured 4.49 pt
-  above the top vertex and 2.29 pt below the bottom one. The split is consistent with
-  PowerPoint's line box being about a point taller than our metrics give — a font
-  discrepancy rather than a second layout rule — so one constant is used for all four.
+* **The label stands off its vertex by 4% of the radius** (`RADAR_LABEL_GAP_FRACTION`).
+  The fitted 2.85 pt gap above was that 4% of those probes' 70 pt radius: radars of 3 to
+  8 categories at radii of 87 to 148 pt, in PowerPoint and in Word, put every label's near
+  edge `0.04 r |dx|` from its vertex, and a label on a sloping spoke is **centred** on its
+  anchor rather than hung from it by a corner, which had put the side labels of a
+  6-spoke radar 5 to 10 pt out. A label on a vertical spoke still hangs from the anchor,
+  over the top vertex 1.35 pt higher (`RADAR_LABEL_FOOT_PT`, a constant of the fit).
+  Every label of thirteen probes and pptx-agent's p13 now lands within 0.41 pt across and
+  0.65 pt down of PowerPoint's PDF (ooxml-common `tests/test_chart_labels.py`).
 * **The wrap threshold is one bracket.** 43.72 pt of label stayed on one line and 59.10 pt
   wrapped, on a 198.47 pt region; 0.25 is the round number inside (0.2203, 0.2978].
 

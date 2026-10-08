@@ -1061,8 +1061,10 @@ def _chart_style(context: ResolveContext, source) -> ChartStyle:
 
     Measured on ``authoring-integration.pptx``: with no ``c:txPr`` anywhere, PowerPoint
     drew every axis label and legend entry in **Aptos at 10 pt** -- the theme's minor
-    latin face -- and black.  The title is deliberately not styled here; see
-    :func:`_resolve_chart_title_text`.
+    latin face -- and black, which is that theme's ``tx1``: under a theme whose ``dk1`` is
+    ``203864`` the same labels came out ``203864``.  A ``c:txPr`` fill overrides it per
+    element (``ooxml_common.chart.layout.ChartBuilder._text_color``).  The title is
+    deliberately not styled here; see :func:`_resolve_chart_title_text`.
     """
     theme = context.theme
     minor = (theme.font_scheme.minor_latin or None) if theme is not None else None
