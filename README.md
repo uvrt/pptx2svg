@@ -22,10 +22,22 @@ pip install "pptx2svg[png] @ git+https://github.com/uvrt/pptx2svg@main"
 pip install "pptx2svg-fonts @ git+https://github.com/uvrt/pptx2svg@main#subdirectory=packages/pptx2svg-fonts"
 ```
 
-SVG output needs no extra. `png` adds the rasteriser; the `pptx2svg-fonts` bundle (11 MB,
-SIL OFL faces) is what makes the same deck produce the same pixels everywhere. The other
-extras (`metafile`, `cairo`, `measure`) and how Office's own faces are used on a Mac:
-[docs/usage.md](docs/usage.md#install-extras).
+SVG output needs no extra. `png` adds the rasteriser. **Install `pptx2svg-fonts` for PNG
+output** (the third line; about 11 MB): it is the fonts the PNG is drawn with --
+
+- Carlito, Arimo, Tinos and Cousine, stand-ins with the advance widths of Calibri, Arial, Times
+  New Roman and Courier New, so text is drawn at the widths it was laid out at; Caladea
+  for Cambria;
+- Noto Sans JP for Japanese and Chinese text (Meiryo, Yu Gothic, MS Gothic, SimSun...);
+- Lato and Raleway, two faces template decks name.
+
+All are under the SIL Open Font License 1.1, each with its licence text in the package
+(`pptx2svg_fonts/licenses/`); the package's own code is MIT. No Microsoft font is in it.
+Without it the PNG is drawn with whatever fonts the machine has, and text no installed font
+can draw -- on a server with no CJK font, every Japanese, Chinese or Korean character -- is
+left out: pptx2svg then warns (`glyphs-missing`, a `MissingGlyphsWarning`), once per face
+and script. The other extras (`metafile`, `cairo`, `measure`) and how Office's own faces
+are used on a Mac: [docs/usage.md](docs/usage.md#install-extras).
 
 ## Use
 

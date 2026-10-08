@@ -59,6 +59,15 @@ build can fail on the ones it cares about and ignore the rest. "Nothing was draw
 "something simplified was drawn" are deliberately different codes: `chart-unsupported-type`
 is the first and `chart-3d-flattened` the second.
 
+`glyphs-missing` (PNG output) is text the rasteriser will not draw: no font it loads answers
+to the text's `font-family`, or none has its characters -- Japanese rendered without
+`pptx2svg-fonts` on a host with no CJK font, Korean with the bundle alone (Noto Sans JP has
+no Hangul). It comes once per face and script, on the first slide that has it, and as a
+`MissingGlyphsWarning` through Python's `warnings` too; `svg_to_png` raises only the latter.
+`ConvertOptions(check_glyphs=False)` (or `svg_to_png(..., check_glyphs=False)`) skips the
+check, which reads the fonts' `name` and `cmap` tables -- the host's only when the bundle
+and the files passed in leave something unfound.
+
 
 ## Command line
 
@@ -92,6 +101,11 @@ lookups and `lumMod`/`tint`/`shade` applied, fonts are real typeface names with 
 expanded, and placeholder properties are merged down from layout and master. A chart
 carries its parsed series and categories alongside the primitives it draws with, so you
 can read the numbers without touching the chart XML.
+
+A table's rows are laid out when it is drawn: `a:tr@h` is only a minimum, and PowerPoint
+grows a row to fit its text and moves the rows below it down. `table_row_heights(table,
+context)` is each row's height, EMU, as the renderer draws it -- for a caller that checks
+whether a table runs off the slide without rendering it (pptx-agent's `overflows()` does).
 
 ## The agent view
 

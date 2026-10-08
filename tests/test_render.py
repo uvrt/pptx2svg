@@ -942,6 +942,33 @@ def test_rows_that_already_fit_keep_their_stated_height():
     assert abs(y - 94.49) < 0.5
 
 
+def test_table_row_heights_are_the_rows_the_table_is_drawn_with():
+    """The public measurement is the renderer's layout: a caller checking whether a table
+    runs off the slide gets the rows the render draws, grown and kept alike."""
+    from pptx2svg import table_row_heights
+    from pptx2svg.render.shape import render_table
+
+    long = "a much longer run of text that has to wrap over several lines here"
+    rows = [m.TableRow(height=200000, cells=[m.TableCell(text_body=cell_text(text))])
+            for text in ("short", long, "last")]
+    rows.append(m.TableRow(height=900000, cells=[m.TableCell(text_body=cell_text("tall"))]))
+    table = m.TableElement(
+        transform=m.Transform(extent_width=1500000, extent_height=1500000),
+        table=m.TableData(rows=rows, columns=[m.TableColumn(width=1500000)]),
+    )
+    context = RenderContext(
+        measurer=DefaultTextMeasurer(), font_mapping={}, jpan_fallback_font=None
+    )
+    heights = table_row_heights(table, context)
+    assert heights[0] > 200000 and heights[1] > 3 * heights[0] and heights[3] == 900000
+    assert table_row_heights(table.table, context) == heights
+    # The renderer draws the rows' fills at exactly these heights.
+    rows[2].cells[0].fill = m.SolidFill(color=m.ResolvedColor(hex="#00ff00"))
+    y = float(re.search(r'<rect x="0" y="([\d.]+)"[^>]*fill="#00ff00"',
+                        render_table(table, context)).group(1))
+    assert abs(y - sum(heights[:2]) / 9525) < 0.01
+
+
 # -- Built-in table styles -------------------------------------------------------------
 
 

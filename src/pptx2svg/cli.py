@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 
 from . import ConvertOptions, __version__, _render
-from .png import RasterizerNotAvailable, available_backends, svg_to_png
+from .png import RasterizerNotAvailable, _svg_to_png, available_backends
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -166,6 +166,9 @@ def _write_outputs(args, options, documents, numbers, stem, wants_png, embedded_
     Split out of :func:`main` only so the extracted embedded faces can live in a
     temporary directory that is open for the whole rasterisation and closed after it.
     """
+    from .resolve import Warning
+
+    unreadable: set[tuple[str, str]] = set()
     for number, document in zip(numbers, documents):
         if args.format in ("svg", "both"):
             path = args.output / f"{stem}-{number}.svg"
@@ -174,23 +177,35 @@ def _write_outputs(args, options, documents, numbers, stem, wants_png, embedded_
         if wants_png:
             path = args.output / f"{stem}-{number}.png"
             try:
-                path.write_bytes(
-                    svg_to_png(
-                        document,
-                        backend=args.backend,
-                        font_dirs=args.font_dirs,
-                        font_files=embedded_files or None,
-                        # None means "decide from the bundle": skip system fonts
-                        # when there is a bundle to be deterministic with, keep them
-                        # when there is not, because skipping both renders blank
-                        # slides.  --system-fonts is explicit and overrides that.
-                        skip_system_fonts=False if args.system_fonts else None,
-                        use_bundled_fonts=not args.no_bundled_fonts,
-                    )
+                png, missing = _svg_to_png(
+                    document,
+                    width=None,
+                    height=None,
+                    scale=None,
+                    background=None,
+                    backend=args.backend,
+                    font_dirs=args.font_dirs,
+                    font_files=embedded_files or None,
+                    # None means "decide from the bundle": skip system fonts
+                    # when there is a bundle to be deterministic with, keep them
+                    # when there is not, because skipping both renders blank
+                    # slides.  --system-fonts is explicit and overrides that.
+                    skip_system_fonts=False if args.system_fonts else None,
+                    use_bundled_fonts=not args.no_bundled_fonts,
+                    host_fonts=None,
+                    check_glyphs=True,
                 )
+                path.write_bytes(png)
             except RasterizerNotAvailable as error:
                 print(f"pptx2svg: {error}", file=sys.stderr)
                 return 1
+            # Text the PNG leaves out, with the other warnings, once per face and script.
+            for item in missing:
+                if (item.face, item.script) not in unreadable:
+                    unreadable.add((item.face, item.script))
+                    options.warnings.append(Warning(code="glyphs-missing",
+                                                    message=item.message(),
+                                                    slide_number=number, detail=item))
             print(path)
 
     if options.warnings and not args.quiet:

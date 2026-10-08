@@ -44,11 +44,13 @@ from .parse.parts import read_presentation
 from . import fonts
 from .fonts.check import FontReport, check_families, resolved_families
 from .fonts.embedded import EmbeddedFonts, extract_embedded_fonts
+from .glyphs import MissingGlyphsWarning
 from .png import RasterizerNotAvailable, available_backends, svg_to_png
 from .render.context import RenderContext
 from .render.svg import render_slide_to_svg
 from .resolve import ResolvedPresentation, Warning, resolve_presentation
 from .resolve.east_asian import EastAsianFaces
+from .tables import table_row_heights
 from .text.fontmap import DEFAULT_FONT_MAPPING, create_font_mapping, family_key
 from .text.measure import DefaultTextMeasurer, FontToolsTextMeasurer, TextMeasurer
 from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
@@ -62,6 +64,7 @@ __all__ = [
     "EmbeddedFonts",
     "FontReport",
     "FontToolsTextMeasurer",
+    "MissingGlyphsWarning",
     "OpcPackage",
     "RasterizerNotAvailable",
     "RenderContext",
@@ -80,6 +83,7 @@ __all__ = [
     "model",
     "render_slide_to_svg",
     "svg_to_png",
+    "table_row_heights",
 ]
 
 
@@ -125,6 +129,13 @@ class ConvertOptions:
     #: anyway: without the font bundle, or with ``skip_system_fonts=False``.  ``False``
     #: (or ``PPTX2SVG_OFFICE_FONTS=0``) is the reproducible render: no host face is read.
     host_fonts: bool | None = None
+    #: Check, before rasterising, that some font the rasteriser loads has a glyph for every
+    #: character of the slide's text, and say which face and script it lacks: a
+    #: ``glyphs-missing`` warning here and a :class:`~pptx2svg.glyphs.MissingGlyphsWarning`
+    #: (:mod:`pptx2svg.glyphs`).  resvg draws nothing for such a character, silently --
+    #: every CJK character of a deck, rendered without ``pptx2svg-fonts`` on a host with no
+    #: CJK face.  PNG output only: an SVG viewer draws with its own fonts.
+    check_glyphs: bool = True
 
 
 def _host_fonts(options: ConvertOptions) -> bool:
@@ -339,11 +350,12 @@ def convert_pptx_to_png(
         options = dataclasses.replace(options, host_fonts=not skip_system_fonts)
     documents, resolved = _render(source, options)
     host_fonts = _host_fonts(options)
+    numbers = [slide.slide_number for slide in resolved.slides]
 
     if not resolved.embedded_fonts:
         return _rasterise(
             documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
-            host_fonts,
+            host_fonts, options, numbers,
         )
 
     # The rasteriser's font database indexes files, so the extracted faces have to touch
@@ -360,25 +372,50 @@ def convert_pptx_to_png(
             skip_system_fonts,
             use_bundled_fonts,
             host_fonts,
+            options,
+            numbers,
         )
 
 
 def _rasterise(
     documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
-    host_fonts,
+    host_fonts, options: ConvertOptions, numbers: Sequence[int | None],
 ) -> list[bytes]:
-    return [
-        svg_to_png(
+    """Each slide's PNG; text no loaded font can draw reported once per face and script
+    for the whole deck, on the first slide that has it (:mod:`pptx2svg.glyphs`)."""
+    import warnings
+
+    from .glyphs import MissingGlyphsWarning
+    from .png import _svg_to_png
+
+    images: list[bytes] = []
+    reported: set[tuple[str, str]] = set()
+    for document, number in zip(documents, numbers):
+        png, missing = _svg_to_png(
             document,
+            width=None,
+            height=None,
+            scale=None,
+            background=None,
             backend=backend,  # type: ignore[arg-type]
             font_dirs=font_dirs,
             font_files=font_files,
             skip_system_fonts=skip_system_fonts,
             use_bundled_fonts=use_bundled_fonts,
             host_fonts=host_fonts,
+            check_glyphs=options.check_glyphs,
         )
-        for document in documents
-    ]
+        images.append(png)
+        for item in missing:
+            if (item.face, item.script) in reported:
+                continue
+            reported.add((item.face, item.script))
+            options.warnings.append(
+                Warning(code="glyphs-missing", message=item.message(), slide_number=number,
+                        detail=item)
+            )
+            warnings.warn(item.message(), MissingGlyphsWarning, stacklevel=3)
+    return images
 
 
 from .agent import convert_pptx_to_agent_svg  # noqa: E402  (needs the names above)
