@@ -2,7 +2,8 @@
 # to run the test suite from a source checkout, which is what distro packagers and
 # conda-forge do. Shipping test_*.py without conftest.py and the fixtures would give
 # them a suite that cannot run.
-include LICENSE README.md ROADMAP.md
+include LICENSE README.md ROADMAP.md FONTS.md CHANGELOG.md CONTRIBUTING.md
+recursive-include docs *.md
 recursive-include tests *.py *.pptx *.md *.svg
 # *.svg is tests/vrt/: the committed render snapshots test_vrt.py compares against.
 # ~195 kB, and without them that suite fails rather than skips, by design.
