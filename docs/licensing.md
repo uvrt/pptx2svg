@@ -2,8 +2,10 @@
 
 Back to the [README](../README.md); the licence itself is [LICENSE](../LICENSE).
 
-MIT. Ported from [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse) (MIT,
-© Hiroki Sakabe).
+MIT. Originally ported from [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse)
+(MIT, © Hiroki Sakabe); since extended with geometry, charts, tables and text layout
+checked against PowerPoint's own PDF export, PowerPoint's font-resolution and kerning rules,
+the shared [ooxml-common](https://github.com/uvrt/ooxml-common) core, and an agent SVG view.
 
 The `pptx2svg-fonts` distribution is a separate matter: its Python module is MIT, but the
 font files it carries are each **SIL Open Font License 1.1**, redistributed byte-for-byte

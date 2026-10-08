@@ -94,7 +94,11 @@ only. Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
-MIT ([LICENSE](LICENSE)). Ported from [pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse)
-(MIT, © Hiroki Sakabe). The fonts in `pptx2svg-fonts` are SIL OFL 1.1; the `.pptx` files
-in `tests/fixtures/` are third-party documents not covered by the MIT grant; no Microsoft
+MIT ([LICENSE](LICENSE)). Originally ported from
+[pptx-glimpse](https://github.com/hirokisakabe/pptx-glimpse) (MIT, © Hiroki Sakabe); since
+extended with geometry, charts, tables and text layout checked against PowerPoint's own PDF
+export, PowerPoint's font-resolution and kerning rules, the shared
+[ooxml-common](https://github.com/uvrt/ooxml-common) core, and an agent SVG view. The fonts
+in `pptx2svg-fonts` are SIL OFL 1.1; the `.pptx` files in `tests/fixtures/` are third-party
+documents not covered by the MIT grant; no Microsoft
 font is committed anywhere. Details: [docs/licensing.md](docs/licensing.md).
