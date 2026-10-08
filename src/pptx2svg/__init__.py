@@ -411,7 +411,8 @@ def _rasterise(
                 continue
             reported.add((item.face, item.script))
             options.warnings.append(
-                Warning(code="glyphs-missing", message=item.message(), slide_number=number)
+                Warning(code="glyphs-missing", message=item.message(), slide_number=number,
+                        detail=item)
             )
             warnings.warn(item.message(), MissingGlyphsWarning, stacklevel=3)
     return images

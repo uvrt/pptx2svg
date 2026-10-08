@@ -205,7 +205,7 @@ def _write_outputs(args, options, documents, numbers, stem, wants_png, embedded_
                     unreadable.add((item.face, item.script))
                     options.warnings.append(Warning(code="glyphs-missing",
                                                     message=item.message(),
-                                                    slide_number=number))
+                                                    slide_number=number, detail=item))
             print(path)
 
     if options.warnings and not args.quiet:

@@ -113,6 +113,9 @@ class Warning:
     message: str
     slide_number: int | None = None
     part_path: str | None = None
+    #: What the warning is about, for a program to read rather than parse the message:
+    #: a ``glyphs-missing`` warning's :class:`~pptx2svg.glyphs.MissingGlyphs`.
+    detail: object | None = field(default=None, compare=False, repr=False)
 
     def __str__(self) -> str:
         where = f" (slide {self.slide_number})" if self.slide_number else ""

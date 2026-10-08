@@ -57,6 +57,7 @@ def test_cjk_without_the_font_bundle_is_reported_once_not_dropped_silently(monke
     assert len(images) == 6
     found = [w for w in options.warnings if w.code == "glyphs-missing"]
     assert len(found) == 1 and found[0].slide_number == 1
+    assert (found[0].detail.face, found[0].detail.script) == ("Noto Sans JP", "CJK")
     assert found[0].message.startswith("Noto Sans JP: no font this render loads has its CJK")
     assert "サンプル" in found[0].message and "pptx2svg-fonts" in found[0].message
     assert [str(w.message) for w in caught.list] == [found[0].message]
