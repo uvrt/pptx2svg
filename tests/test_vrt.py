@@ -89,6 +89,7 @@ import math
 import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -118,9 +119,16 @@ HASH_SEED_DECK = "real-financial-report.pptx"
 LOG10_DECK = "real-financial-report.pptx"
 
 
+#: The clock a date field shows (`ConvertOptions.now`).  Every other option is the
+#: default; this one is pinned because the default, the time of the render, would make a
+#: snapshot holding a date field change every day.
+SNAPSHOT_CLOCK = datetime(2026, 1, 31, 9, 0)
+
+
 def render(deck: Path) -> list[str]:
-    """One SVG per slide, with the defaults a caller gets from `convert_pptx_to_svg`."""
-    return convert_pptx_to_svg(deck, ConvertOptions())
+    """One SVG per slide, with the defaults a caller gets from `convert_pptx_to_svg`,
+    the clock pinned (:data:`SNAPSHOT_CLOCK`)."""
+    return convert_pptx_to_svg(deck, ConvertOptions(now=SNAPSHOT_CLOCK))
 
 
 def snapshot_path(deck: Path, slide_number: int) -> Path:
@@ -331,9 +339,11 @@ def test_a_second_process_with_a_different_hash_seed_renders_the_same_bytes():
     deck = FIXTURE_DIR / HASH_SEED_DECK
     script = (
         "import sys;"
+        "from datetime import datetime;"
         "from pptx2svg import ConvertOptions, convert_pptx_to_svg;"
-        "sys.stdout.buffer.write("
-        "chr(30).join(convert_pptx_to_svg(sys.argv[1], ConvertOptions())).encode('utf-8'))"
+        "sys.stdout.buffer.write(chr(30).join(convert_pptx_to_svg(sys.argv[1], "
+        f"ConvertOptions(now=datetime.fromisoformat({SNAPSHOT_CLOCK.isoformat()!r})))"
+        ").encode('utf-8'))"
     )
 
     def run(seed: str) -> str:

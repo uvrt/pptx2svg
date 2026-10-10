@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+from datetime import datetime
 import tempfile
 from dataclasses import dataclass, field
 from typing import Callable, Sequence
@@ -145,6 +146,14 @@ class ConvertOptions:
     #: Added to the system's folders, never in their place.  ``convert_pptx_to_png``'s
     #: own ``font_dirs`` argument, when given, takes precedence.
     font_dirs: Sequence[str] | None = None
+    #: The clock a date field shows (``a:fld type="datetime1"`` .. ``"datetime13"``, as in
+    #: a footer's date), formatted in the field's language
+    #: (:mod:`pptx2svg.resolve.fields`).  ``None`` (the default) is the local time of the
+    #: conversion, as PowerPoint shows the time it draws -- so output holding such a field
+    #: differs from day to day.  Pin it (``datetime(2026, 1, 31, 9, 0)``) for output that
+    #: must be reproducible: tests, snapshot goldens, a cache keyed by the deck.  A naive
+    #: value is used as it stands; an aware one in its own time zone.
+    now: datetime | None = None
 
 
 def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> list[str]:
@@ -197,6 +206,7 @@ def convert_pptx_to_model(
         # Which face draws a run's Japanese depends on what is installed: as PowerPoint
         # would find it here when the host's faces are in use, else from what we know.
         east_asian=EastAsianFaces(host=host_fonts),
+        now=options.now,
     )
     if options.use_embedded_fonts and presentation.embedded_fonts:
         # After resolution, not during it: `resolved_families` is what tells us which of

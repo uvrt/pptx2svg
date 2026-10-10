@@ -5,6 +5,17 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- Slide numbers and dates are evaluated per slide, as PowerPoint draws them: an `a:fld`
+  in a plain text box on the layout or master (the corporate footer "‹#› | Copyright …")
+  and in the slide's own `sldNum`/`dt` placeholders shows the slide's number, counted from
+  `p:presentation@firstSlideNum`, and the date, instead of the text cached in the file.
+  `datetime1` to `datetime13` (and `datetime`, `datetimeFigureOut`) are formatted as
+  PowerPoint 16 drew them for en-US, en-GB, nl-NL, de-DE and fr-FR
+  (`tools/make_field_probe.py`); another language is drawn in en-US's formats with a
+  `field-date-format` warning. The clock is `ConvertOptions.now` (new; `--now` on the
+  command line), the time of the conversion unless pinned, so output with a date field
+  changes from day to day unless it is; the snapshot tests pin it. Requires ooxml-common
+  with `SourceTextRun.field_type`.
 - A layout's or master's background picture is drawn: an inherited `p:bg`'s `r:embed` is
   now looked up in the part that owns it, not in the slide's relationships (where the
   same id is usually the notes slide, so the background was dropped with an

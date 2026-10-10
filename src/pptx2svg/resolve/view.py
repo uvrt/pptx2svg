@@ -27,6 +27,7 @@ placeholder and a warning rather than being dropped silently.
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable, Sequence
@@ -151,6 +152,11 @@ class ResolveContext:
     #: Which face draws a run's East Asian text (:class:`~pptx2svg.resolve.east_asian.EastAsianFaces`):
     #: as PowerPoint would choose on this machine, or from what the library knows.
     east_asian: object | None = None
+    #: The clock a date field (``a:fld type="datetime1"``) shows; see
+    #: :mod:`pptx2svg.resolve.fields`.  ``None``: the time of resolution.
+    now: datetime | None = None
+    #: Languages a date field fell back from, so each is reported once per slide.
+    field_languages_warned: set[str] = field(default_factory=set)
 
     def warn(self, code: str, message: str) -> None:
         self.warnings.append(
@@ -189,11 +195,14 @@ def resolve_presentation(
     metafile_converter: MetafileConverter | None = None,
     east_asian=None,
     color_names: dict | None = None,
+    now: datetime | None = None,
 ) -> ResolvedPresentation:
     """Resolve the slides.  ``color_names``, when given, collects the theme name of every
     scheme colour resolved (``id(resolved) -> (resolved, "accent1 lumMod=75%")``), which
     the agent view writes beside the hex (:mod:`.naming`); drawing is unaffected."""
     wanted = set(slide_numbers) if slide_numbers is not None else None
+    # One clock for the whole deck, so every slide's date field agrees.
+    now = now if now is not None else datetime.now()
     slide_size = m.SlideSize(width=presentation.slide_width, height=presentation.slide_height)
     warnings: list[Warning] = []
     slides: list[m.Slide] = []
@@ -207,6 +216,7 @@ def resolve_presentation(
             color_names=color_names,
         )
         context.east_asian = east_asian
+        context.now = now
         slides.append(resolve_slide(context))
         warnings.extend(context.warnings)
         if context.theme is not None:

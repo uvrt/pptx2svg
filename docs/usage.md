@@ -66,6 +66,22 @@ build can fail on the ones it cares about and ignore the rest. "Nothing was draw
 "something simplified was drawn" are deliberately different codes: `chart-unsupported-type`
 is the first and `chart-3d-flattened` the second.
 
+**Slide numbers and dates are evaluated per slide**, as PowerPoint does: an `a:fld` in a
+slide's own placeholders or in a plain text box on the layout or master (a footer's
+"‹#› | Copyright …") shows the slide's number (counting from `firstSlideNum`) and the
+date, rather than the text cached in the file. The date is the clock at conversion, in the
+field's language and format (`datetime1` … `datetime13`, measured for en-US, en-GB, nl-NL,
+de-DE and fr-FR; any other language is drawn in en-US's formats with a
+`field-date-format` warning). Output holding a date field therefore changes from day to
+day; pin the clock for anything that must be reproducible -- tests, goldens, a cache:
+
+```python
+from datetime import datetime
+convert_pptx_to_svg("deck.pptx", ConvertOptions(now=datetime(2026, 1, 31, 9, 0)))
+```
+
+or `--now 2026-01-31T09:00` on the command line.
+
 `glyphs-missing` (PNG output) is text the rasteriser will not draw: no font it loads answers
 to the text's `font-family`, or none has its characters -- Japanese rendered without
 `pptx2svg-fonts` on a host with no CJK font, Korean with the bundle alone (Noto Sans JP has

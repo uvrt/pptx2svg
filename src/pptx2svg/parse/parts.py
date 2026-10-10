@@ -18,7 +18,7 @@ from ..opc import (
     REL_TABLE_STYLES,
     REL_THEME,
 )
-from ..xmlutil import attr, child, children, is_true, ns_attr, num_attr
+from ..xmlutil import attr, child, children, int_attr, is_true, ns_attr, num_attr
 from .drawing import (  # noqa: F401 -- the theme readers moved there and are re-exported
     COLOR_SCHEME_KEYS,
     parse_color,
@@ -87,6 +87,7 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         table_styles=read_table_styles(package, presentation_path),
         embedded_fonts=read_embedded_fonts(root, presentation_path),
         app_version=read_app_version(package),
+        first_slide_number=_first_slide_number(root),
     )
 
     entries = _slide_paths(package, presentation_path, root)
@@ -98,6 +99,12 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         _ensure_ancestry(package, presentation, slide)
 
     return presentation
+
+
+def _first_slide_number(root) -> int:
+    """``p:presentation@firstSlideNum``, 1 when absent (0 is legal)."""
+    value = int_attr(root, "firstSlideNum")
+    return 1 if value is None else value
 
 
 #: The package relationship that names ``docProps/app.xml``.

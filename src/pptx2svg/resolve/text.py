@@ -38,6 +38,7 @@ Underline, strike, baseline and highlight stay excluded: no deck here sets one a
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 from dataclasses import dataclass, replace
 from typing import Sequence
 
@@ -46,6 +47,7 @@ from ..parse import source as s
 from ..text.fontmap import theme_east_asian
 from ..text.measure import is_cjk
 from .east_asian import EastAsianFaces
+from .fields import DEFAULT_LANGUAGE, evaluate_field
 from ..units import ROTATION_UNIT
 from .naming import resolve_color
 
@@ -272,13 +274,15 @@ def _resolve_paragraph(
         for props, include in level_entries
     )
 
-    runs = [
-        m.TextRun(
-            text=run.text,
-            properties=_resolve_run_properties(context, run.properties, run_defaults, run.text),
+    runs = []
+    for run in paragraph.runs:
+        text = _field_text(context, run, run_defaults)
+        runs.append(
+            m.TextRun(
+                text=text,
+                properties=_resolve_run_properties(context, run.properties, run_defaults, text),
+            )
         )
-        for run in paragraph.runs
-    ]
 
     end_properties = None
     if paragraph.end_para_run_properties is not None:
@@ -368,6 +372,45 @@ def _resolve_bullet(
     return m.BlipBullet(
         image_data=base64.b64encode(payload).decode("ascii"), mime_type=mime_type
     )
+
+
+def _field_text(
+    context,
+    run: s.SourceTextRun,
+    defaults: Sequence[tuple[s.SourceRunProperties | None, bool]],
+) -> str:
+    """A run's text, with a field (``a:fld``) evaluated for the slide being drawn as
+    PowerPoint does (:mod:`.fields`): a slide number or a date, in a slide placeholder or
+    in a layout's or master's text box alike.  Any other run is its own text."""
+    field_type = run.field_type
+    if field_type is None:
+        return run.text
+    slide = getattr(context, "slide", None)
+    presentation = getattr(context, "presentation", None)
+    if slide is None or presentation is None:
+        return run.text
+    lang = run.properties.lang if run.properties is not None else None
+    for properties, _ in defaults:
+        if lang is not None:
+            break
+        if properties is not None:
+            lang = properties.lang
+    now = getattr(context, "now", None) or datetime.now()
+    text, missing = evaluate_field(
+        field_type,
+        run.text,
+        slide_number=slide.slide_number + presentation.first_slide_number - 1,
+        now=now,
+        lang=lang,
+    )
+    if missing is not None and missing not in context.field_languages_warned:
+        context.field_languages_warned.add(missing)
+        context.warn(
+            "field-date-format",
+            f"a {field_type} date field in language {missing or '(none)'!r}, whose formats "
+            f"are not measured, is drawn in {DEFAULT_LANGUAGE}'s",
+        )
+    return text
 
 
 def _resolve_run_properties(
