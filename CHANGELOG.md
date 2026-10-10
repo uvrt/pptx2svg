@@ -5,6 +5,12 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A layout's or master's background picture is drawn: an inherited `p:bg`'s `r:embed` is
+  now looked up in the part that owns it, not in the slide's relationships (where the
+  same id is usually the notes slide, so the background was dropped with an
+  `unsupported-fill-image` warning, or a wrong picture was drawn without one). The same
+  holds for a theme's image fill reached through `p:bgRef`/`a:fillRef`, and for an
+  `a:buBlip` picture bullet a slide inherits from its layout's or master's list styles.
 - Python 3.14 and 3.15: CI runs the suite on both, on Linux, macOS and Windows, and the
   classifiers declare them. `requires-python` stays `>=3.10`; no library change, and the
   `png` extra's resvg-py has wheels for both. CPython 3.14's Windows builds deflate with
