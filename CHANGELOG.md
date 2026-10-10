@@ -5,6 +5,9 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- Python 3.14 and 3.15: CI runs the suite on both, on Linux, macOS and Windows, and the
+  classifiers declare them. `requires-python` stays `>=3.10`. No code change was needed;
+  the `png` extra's resvg-py has wheels for both.
 - An application's own font folder is measured from as well as drawn with:
   `ConvertOptions.font_dirs` (new), `convert_pptx_to_png(font_dirs=...)` and `--font-dir`
   now reach measurement (`fonts.office.user_layout_metrics`) -- a face there is measured
