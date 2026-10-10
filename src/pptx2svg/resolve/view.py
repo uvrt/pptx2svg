@@ -27,6 +27,8 @@ placeholder and a warning rather than being dropped silently.
 from __future__ import annotations
 
 import base64
+from datetime import datetime
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable, Sequence
 
@@ -150,6 +152,11 @@ class ResolveContext:
     #: Which face draws a run's East Asian text (:class:`~pptx2svg.resolve.east_asian.EastAsianFaces`):
     #: as PowerPoint would choose on this machine, or from what the library knows.
     east_asian: object | None = None
+    #: The clock a date field (``a:fld type="datetime1"``) shows; see
+    #: :mod:`pptx2svg.resolve.fields`.  ``None``: the time of resolution.
+    now: datetime | None = None
+    #: Languages a date field fell back from, so each is reported once per slide.
+    field_languages_warned: set[str] = field(default_factory=set)
 
     def warn(self, code: str, message: str) -> None:
         self.warnings.append(
@@ -188,11 +195,14 @@ def resolve_presentation(
     metafile_converter: MetafileConverter | None = None,
     east_asian=None,
     color_names: dict | None = None,
+    now: datetime | None = None,
 ) -> ResolvedPresentation:
     """Resolve the slides.  ``color_names``, when given, collects the theme name of every
     scheme colour resolved (``id(resolved) -> (resolved, "accent1 lumMod=75%")``), which
     the agent view writes beside the hex (:mod:`.naming`); drawing is unaffected."""
     wanted = set(slide_numbers) if slide_numbers is not None else None
+    # One clock for the whole deck, so every slide's date field agrees.
+    now = now if now is not None else datetime.now()
     slide_size = m.SlideSize(width=presentation.slide_width, height=presentation.slide_height)
     warnings: list[Warning] = []
     slides: list[m.Slide] = []
@@ -206,6 +216,7 @@ def resolve_presentation(
             color_names=color_names,
         )
         context.east_asian = east_asian
+        context.now = now
         slides.append(resolve_slide(context))
         warnings.extend(context.warnings)
         if context.theme is not None:
@@ -329,19 +340,41 @@ def _is_empty_placeholder(shape: s.SourceShape) -> bool:
 
 
 def _resolve_background(context: ResolveContext) -> m.Background | None:
-    """Background falls back slide -> layout -> master."""
-    for source in (
-        context.slide.background,
-        context.layout.background if context.layout else None,
-        context.master.background if context.master else None,
-    ):
+    """Background falls back slide -> layout -> master.
+
+    An inherited ``p:bg`` is read in the part that owns it: a layout's
+    ``<a:blip r:embed="rId2"/>`` names the *layout's* rId2.  Resolving it against the
+    slide drew whatever the slide's own rId2 happened to be -- typically its notes slide,
+    so no background at all, or worse a wrong picture with no warning.
+    """
+    for owner in (context.slide, context.layout, context.master):
+        source = owner.background if owner is not None else None
         if source is None:
             continue
-        if source.fill is not None:
-            return m.Background(fill=_resolve_fill(context, source.fill))
-        if source.bg_ref is not None:
-            return m.Background(fill=_resolve_fill_reference(context, source.bg_ref))
+        with _in_part(context, owner.part_path):
+            if source.fill is not None:
+                return m.Background(fill=_resolve_fill(context, source.fill))
+            if source.bg_ref is not None:
+                return m.Background(fill=_resolve_fill_reference(context, source.bg_ref))
     return None
+
+
+@contextmanager
+def _in_part(context: ResolveContext, part_path: str | None):
+    """Resolve relationship ids against ``part_path`` for the duration of the block.
+
+    For anything read from a part other than the one being drawn: an inherited
+    background, a theme's image fill, a picture bullet from a layout or master style.
+    """
+    if not part_path:
+        yield
+        return
+    outer = context.part_path
+    context.part_path = part_path
+    try:
+        yield
+    finally:
+        context.part_path = outer
 
 
 # --------------------------------------------------------------------------------------
@@ -421,6 +454,10 @@ def _resolve_shape(context: ResolveContext, shape: s.SourceShape) -> m.ShapeElem
             inherited=[
                 layout_shape.text_body if layout_shape else None,
                 master_shape.text_body if master_shape else None,
+            ],
+            inherited_parts=[
+                context.layout.part_path if context.layout else None,
+                context.master.part_path if context.master else None,
             ],
             placeholder_type=placeholder_type,
             extra_defaults=(
@@ -1571,7 +1608,12 @@ def _resolve_fill_reference(
         styles, array_index = scheme.fill_styles, ref.idx - 1
     if array_index < 0 or array_index >= len(styles):
         return None
-    return _resolve_fill(context, styles[array_index], resolve_color(context.colors, ref.color))
+    # The theme's own fills name the theme's relationships: an `a:blipFill` in
+    # `a:bgFillStyleLst` embeds an image related to theme1.xml, not to the slide.
+    with _in_part(context, context.theme.part_path if context.theme else None):
+        return _resolve_fill(
+            context, styles[array_index], resolve_color(context.colors, ref.color)
+        )
 
 
 def _resolve_line_reference(

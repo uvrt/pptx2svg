@@ -5,6 +5,37 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A data label with text of its own is drawn (ooxml-common): a typed or "Value From Cells"
+  label (`c:dLbl/c:tx`, `c15:datalabelsRange`) prints its text with its runs' formatting
+  instead of the point's value, on scatter and bubble charts too.
+  `tools/make_point_label_probe.py` builds the deck it was measured on.
+- A symbol face this conversion cannot draw -- Wingdings, Wingdings 2/3, Webdings, Symbol;
+  not embedded, not in `font_dirs`, not on the host where the host's faces are in use --
+  is drawn as the Unicode characters its codes stand for (ooxml-common's
+  `text.symbol_fonts`): a Wingdings `q` box bullet as ❑, `ü` as ✓, `§` as ▪, `Ø` as ➢, in
+  runs and bullets, spelled as the code or as its U+F0xx alias, with a
+  `symbol-font-mapped` warning. Symbol and Wingdings are laid out at their own advances,
+  recorded from Word's copies; the glyph choices were compared with PowerPoint 16's export
+  of `tools/make_symbol_probe.py`. A face that is available still draws itself. The
+  `pptx2svg-fonts` bundle (0.2.0) ships Noto Sans Symbols 2 (SIL OFL 1.1) to draw them
+  with; no deck is measured in it.
+- Slide numbers and dates are evaluated per slide, as PowerPoint draws them: an `a:fld`
+  in a plain text box on the layout or master (the corporate footer "‹#› | Copyright …")
+  and in the slide's own `sldNum`/`dt` placeholders shows the slide's number, counted from
+  `p:presentation@firstSlideNum`, and the date, instead of the text cached in the file.
+  `datetime1` to `datetime13` (and `datetime`, `datetimeFigureOut`) are formatted as
+  PowerPoint 16 drew them for en-US, en-GB, nl-NL, de-DE and fr-FR
+  (`tools/make_field_probe.py`); another language is drawn in en-US's formats with a
+  `field-date-format` warning. The clock is `ConvertOptions.now` (new; `--now` on the
+  command line), the time of the conversion unless pinned, so output with a date field
+  changes from day to day unless it is; the snapshot tests pin it. Requires ooxml-common
+  with `SourceTextRun.field_type`.
+- A layout's or master's background picture is drawn: an inherited `p:bg`'s `r:embed` is
+  now looked up in the part that owns it, not in the slide's relationships (where the
+  same id is usually the notes slide, so the background was dropped with an
+  `unsupported-fill-image` warning, or a wrong picture was drawn without one). The same
+  holds for a theme's image fill reached through `p:bgRef`/`a:fillRef`, and for an
+  `a:buBlip` picture bullet a slide inherits from its layout's or master's list styles.
 - Python 3.14 and 3.15: CI runs the suite on both, on Linux, macOS and Windows, and the
   classifiers declare them. `requires-python` stays `>=3.10`; no library change, and the
   `png` extra's resvg-py has wheels for both. CPython 3.14's Windows builds deflate with

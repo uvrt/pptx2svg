@@ -60,7 +60,8 @@ def convert_pptx_to_agent_svg(source, options=None) -> list[str]:
 
     ``source`` is a path, bytes, a file object or an :class:`~pptx2svg.opc.OpcPackage`, as
     for :func:`pptx2svg.convert_pptx_to_svg`; of ``options`` (a
-    :class:`~pptx2svg.ConvertOptions`) only ``slide_numbers`` and ``warnings`` apply.
+    :class:`~pptx2svg.ConvertOptions`) only ``slide_numbers``, ``now`` and ``warnings``
+    apply.
     """
     if isinstance(source, OpcPackage):
         package = source
@@ -72,7 +73,8 @@ def convert_pptx_to_agent_svg(source, options=None) -> list[str]:
     names: dict = {}
     slide_numbers = getattr(options, "slide_numbers", None) if options is not None else None
     resolved = resolve_presentation(package, presentation, slide_numbers=slide_numbers,
-                                    color_names=names)
+                                    color_names=names,
+                                    now=getattr(options, "now", None) if options else None)
     if options is not None and getattr(options, "warnings", None) is not None:
         options.warnings.extend(resolved.warnings)
     return [render_slide_to_agent_svg(slide, resolved.slide_size, names)

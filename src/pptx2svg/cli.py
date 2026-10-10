@@ -18,6 +18,7 @@ import argparse
 import contextlib
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 from . import ConvertOptions, __version__, _render, user_font_dirs
@@ -87,10 +88,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not use the fonts shipped with pptx2svg",
     )
     parser.add_argument(
+        "--now",
+        type=_moment,
+        metavar="YYYY-MM-DDTHH:MM",
+        help=(
+            "the date and time a date field (a footer's date) shows; default: now. Pin it "
+            "for output that must not change from day to day"
+        ),
+    )
+    parser.add_argument(
         "-q", "--quiet", action="store_true", help="suppress warnings about unsupported content"
     )
     parser.add_argument("--version", action="version", version=f"pptx2svg {__version__}")
     return parser
+
+
+def _moment(value: str) -> datetime:
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an ISO date and time: {value!r}") from None
 
 
 def parse_slide_selection(value: str | None) -> list[int] | None:
@@ -126,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
         height=args.height,
         use_embedded_fonts=not args.no_embedded_fonts,
         font_dirs=args.font_dirs,
+        now=args.now,
     )
 
     try:

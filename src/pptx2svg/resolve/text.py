@@ -38,6 +38,7 @@ Underline, strike, baseline and highlight stay excluded: no deck here sets one a
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 from dataclasses import dataclass, replace
 from typing import Sequence
 
@@ -46,6 +47,7 @@ from ..parse import source as s
 from ..text.fontmap import theme_east_asian
 from ..text.measure import is_cjk
 from .east_asian import EastAsianFaces
+from .fields import DEFAULT_LANGUAGE, evaluate_field
 from ..units import ROTATION_UNIT
 from .naming import resolve_color
 
@@ -72,6 +74,9 @@ class _StyleEntry:
     style: s.SourceTextStyle
     #: False for inherited defaults, whose decorations must not leak into the run.
     include_decorations: bool
+    #: The part the style was read from, whose relationships its ``r:`` ids name (an
+    #: ``a:buBlip`` picture bullet); ``None`` for the part being drawn.
+    part_path: str | None = None
 
 
 def resolve_text_body(
@@ -80,9 +85,12 @@ def resolve_text_body(
     inherited: Sequence[s.SourceTextBody | None],
     placeholder_type: str | None,
     extra_defaults: s.SourceRunProperties | None = None,
+    inherited_parts: Sequence[str | None] = (),
 ) -> m.TextBody:
+    """``inherited_parts`` names the part each of ``inherited`` was read from, in order,
+    so a relationship id in an inherited list style resolves where it was written."""
     chain = _build_style_chain(
-        context, text_body, inherited, placeholder_type, extra_defaults
+        context, text_body, inherited, placeholder_type, extra_defaults, inherited_parts
     )
 
     # Whether this body is a plain text box: no placeholder to inherit a face from, and
@@ -164,15 +172,19 @@ def _build_style_chain(
     inherited: Sequence[s.SourceTextBody | None],
     placeholder_type: str | None,
     extra_defaults: s.SourceRunProperties | None = None,
+    inherited_parts: Sequence[str | None] = (),
 ) -> list[_StyleEntry]:
     chain: list[_StyleEntry] = []
 
     if text_body.list_style is not None:
         chain.append(_StyleEntry(text_body.list_style, include_decorations=True))
 
-    for body in inherited:
+    for index, body in enumerate(inherited):
         if body is not None and body.list_style is not None:
-            chain.append(_StyleEntry(body.list_style, include_decorations=False))
+            part = inherited_parts[index] if index < len(inherited_parts) else None
+            chain.append(
+                _StyleEntry(body.list_style, include_decorations=False, part_path=part)
+            )
 
     if extra_defaults is not None:
         # A table style's `a:tcTxStyle`.  It sits *above* the master's `p:otherStyle` and
@@ -200,11 +212,21 @@ def _build_style_chain(
 
     master_style = _tx_style_for_placeholder(context.master, placeholder_type)
     if master_style is not None:
-        chain.append(_StyleEntry(master_style, include_decorations=False))
+        chain.append(
+            _StyleEntry(
+                master_style, include_decorations=False, part_path=context.master.part_path
+            )
+        )
 
     default_style = context.presentation.default_text_style
     if default_style is not None:
-        chain.append(_StyleEntry(default_style, include_decorations=False))
+        chain.append(
+            _StyleEntry(
+                default_style,
+                include_decorations=False,
+                part_path=context.presentation.part_path,
+            )
+        )
 
     return chain
 
@@ -238,7 +260,9 @@ def _resolve_paragraph(
     ]
     level_properties = [properties for properties, _ in level_entries]
 
-    properties = _resolve_paragraph_properties(context, paragraph.properties, level_properties)
+    properties = _resolve_paragraph_properties(
+        context, paragraph.properties, level_properties, [entry.part_path for entry in chain]
+    )
 
     # The run-property fallback order: the paragraph's own defRPr (decorations included),
     # then each style level's defRPr with that level's decoration policy.
@@ -250,13 +274,15 @@ def _resolve_paragraph(
         for props, include in level_entries
     )
 
-    runs = [
-        m.TextRun(
-            text=run.text,
-            properties=_resolve_run_properties(context, run.properties, run_defaults, run.text),
+    runs = []
+    for run in paragraph.runs:
+        text = _field_text(context, run, run_defaults)
+        runs.append(
+            m.TextRun(
+                text=text,
+                properties=_resolve_run_properties(context, run.properties, run_defaults, text),
+            )
         )
-        for run in paragraph.runs
-    ]
 
     end_properties = None
     if paragraph.end_para_run_properties is not None:
@@ -271,14 +297,20 @@ def _resolve_paragraph_properties(
     context,
     local: s.SourceParagraphProperties | None,
     inherited: Sequence[s.SourceParagraphProperties | None],
+    inherited_parts: Sequence[str | None] = (),
 ) -> m.ParagraphProperties:
     def pick(name: str):
+        return pick_with_part(name)[0]
+
+    def pick_with_part(name: str):
+        """The value, and the part it was read from (``None``: the part being drawn)."""
         if local is not None and getattr(local, name) is not None:
-            return getattr(local, name)
-        for properties in inherited:
+            return getattr(local, name), None
+        for index, properties in enumerate(inherited):
             if properties is not None and getattr(properties, name) is not None:
-                return getattr(properties, name)
-        return None
+                part = inherited_parts[index] if index < len(inherited_parts) else None
+                return getattr(properties, name), part
+        return None, None
 
     bullet_color_source = pick("bullet_color")
 
@@ -288,7 +320,7 @@ def _resolve_paragraph_properties(
         space_before=pick("space_before") or m.PercentSpacing(0),
         space_after=pick("space_after") or m.PercentSpacing(0),
         level=(local.level if local and local.level is not None else 0),
-        bullet=_resolve_bullet(context, pick("bullet")),
+        bullet=_resolve_bullet(context, *pick_with_part("bullet")),
         bullet_font=pick("bullet_font"),
         bullet_color=resolve_color(context.colors, bullet_color_source),
         bullet_size_pct=pick("bullet_size_pct"),
@@ -299,7 +331,9 @@ def _resolve_paragraph_properties(
     )
 
 
-def _resolve_bullet(context, bullet: s.SourceBulletType | None) -> m.BulletType | None:
+def _resolve_bullet(
+    context, bullet: s.SourceBulletType | None, part_path: str | None = None
+) -> m.BulletType | None:
     """Turn a parsed bullet into a model one.  Only ``a:buBlip`` needs anything done.
 
     A picture bullet is a relationship id until here; every other spelling is already
@@ -315,9 +349,11 @@ def _resolve_bullet(context, bullet: s.SourceBulletType | None) -> m.BulletType 
         return bullet
 
     # Circular at module scope: view.py imports this file, at its own foot.
-    from .view import SUPPORTED_IMAGE_MIME_TYPES, _load_media_bytes
+    from .view import SUPPORTED_IMAGE_MIME_TYPES, _in_part, _load_media_bytes
 
-    media = _load_media_bytes(context, bullet.relationship_id)
+    # A picture bullet a layout or master style defines names that part's image.
+    with _in_part(context, part_path):
+        media = _load_media_bytes(context, bullet.relationship_id)
     if media is None:
         context.warn(
             "unresolved-bullet-image",
@@ -336,6 +372,45 @@ def _resolve_bullet(context, bullet: s.SourceBulletType | None) -> m.BulletType 
     return m.BlipBullet(
         image_data=base64.b64encode(payload).decode("ascii"), mime_type=mime_type
     )
+
+
+def _field_text(
+    context,
+    run: s.SourceTextRun,
+    defaults: Sequence[tuple[s.SourceRunProperties | None, bool]],
+) -> str:
+    """A run's text, with a field (``a:fld``) evaluated for the slide being drawn as
+    PowerPoint does (:mod:`.fields`): a slide number or a date, in a slide placeholder or
+    in a layout's or master's text box alike.  Any other run is its own text."""
+    field_type = run.field_type
+    if field_type is None:
+        return run.text
+    slide = getattr(context, "slide", None)
+    presentation = getattr(context, "presentation", None)
+    if slide is None or presentation is None:
+        return run.text
+    lang = run.properties.lang if run.properties is not None else None
+    for properties, _ in defaults:
+        if lang is not None:
+            break
+        if properties is not None:
+            lang = properties.lang
+    now = getattr(context, "now", None) or datetime.now()
+    text, missing = evaluate_field(
+        field_type,
+        run.text,
+        slide_number=slide.slide_number + presentation.first_slide_number - 1,
+        now=now,
+        lang=lang,
+    )
+    if missing is not None and missing not in context.field_languages_warned:
+        context.field_languages_warned.add(missing)
+        context.warn(
+            "field-date-format",
+            f"a {field_type} date field in language {missing or '(none)'!r}, whose formats "
+            f"are not measured, is drawn in {DEFAULT_LANGUAGE}'s",
+        )
+    return text
 
 
 def _resolve_run_properties(

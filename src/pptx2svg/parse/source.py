@@ -275,6 +275,9 @@ class SourcePresentation:
     themes: dict[str, SourceTheme] = field(default_factory=dict)
     #: ``<p:embeddedFontLst>``, in document order.  Empty for the great majority of decks.
     embedded_fonts: list[SourceEmbeddedFont] = field(default_factory=list)
+    #: ``p:presentation@firstSlideNum``: the number the first slide's ``slidenum``
+    #: field shows (:mod:`pptx2svg.resolve.fields`).
+    first_slide_number: int = 1
     #: ``docProps/app.xml``'s ``AppVersion`` -- the version of the application that wrote
     #: the deck, ``12.0000`` for Office 2007 -- or ``None`` when the deck does not say.
     #: PowerPoint reads a chart's missing elements differently for a 2007 file; see
