@@ -127,5 +127,6 @@ def test_the_old_variable_name_is_not_read(monkeypatch, tmp_path):
     assert pptx2svg.user_font_dirs(ConvertOptions()) == []
     monkeypatch.setenv(FONT_DIRS_ENV, str(tmp_path))
     assert pptx2svg.user_font_dirs(ConvertOptions()) == [str(tmp_path)]
-    assert pptx2svg.user_font_dirs(ConvertOptions(font_dirs=["/x"])) == ["/x"]
-    assert pptx2svg.user_font_dirs(ConvertOptions(font_dirs=["/x"]), ["/y"]) == ["/y"]
+    x, y = str(tmp_path / "x"), str(tmp_path / "y")
+    assert pptx2svg.user_font_dirs(ConvertOptions(font_dirs=[x])) == [x]
+    assert pptx2svg.user_font_dirs(ConvertOptions(font_dirs=[x]), [y]) == [y]
