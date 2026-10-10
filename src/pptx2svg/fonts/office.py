@@ -102,6 +102,7 @@ __all__ = [
     "search_dirs",
     "supplied_faces",
     "system_font_dirs",
+    "user_layout_metrics",
     "with_emoji",
 ]
 
@@ -167,6 +168,35 @@ def layout_metrics(families) -> dict:
     ``families`` that this machine has and the static tables do not measure as itself
     (:func:`has_own_table`).  What :class:`~pptx2svg.text.measure.DefaultTextMeasurer`
     takes as ``extra_metrics``."""
+    return _layout_metrics(families, find, metrics)
+
+
+def user_layout_metrics(families, font_dirs=None) -> dict:
+    """:func:`layout_metrics` from the application's own folders alone -- ``font_dirs``,
+    else ``OOXML_FONT_DIRS`` (:func:`ooxml_common.fonts.office.user_font_dirs`) -- the
+    faces the rasteriser is handed ahead of every other.  Read whether or not the host's
+    faces are (``host_fonts``) and whatever ``PPTX2SVG_OFFICE_FONTS`` says: the
+    application supplied them, and they are what is drawn."""
+    dirs = _shared.user_search_dirs(font_dirs)
+    if not dirs:
+        return {}
+
+    def found(family):
+        return _shared.find(family, POWERPOINT, dirs=dirs)
+
+    def measured(family):
+        faces = found(family)
+        if not faces:
+            return None
+        try:
+            return _shared.metrics_of(faces)
+        except Exception:  # noqa: BLE001 -- an unreadable face is one we do not have
+            return None
+
+    return _layout_metrics(families, found, measured)
+
+
+def _layout_metrics(families, find, metrics) -> dict:
     out = _shared.layout_metrics(families, POWERPOINT, measure=metrics)
     # A bundled family is measured from the bundle's own release, which need not be the
     # one installed here: the bundle's Raleway is later than the 4.026 Office's cloud

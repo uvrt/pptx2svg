@@ -28,6 +28,13 @@ output then depends on the machine.** For the reproducible render, pass
 Where Office's folders do not exist (Linux, Windows, CI) nothing changes
 ([FONTS.md](../FONTS.md#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place)).
 
+**Your own font folder** -- licensed faces kept where the system does not look -- is
+`ConvertOptions(font_dirs=[...])` (or `--font-dir`), or the environment variable
+**`OOXML_FONT_DIRS`** (folders separated by `os.pathsep`), which docx2svg reads too. The
+explicit argument wins over the variable; either is added to the system's folders and
+searched before them. Its faces are measured from and drawn with
+([FONTS.md](../FONTS.md#your-own-folder-measured-and-drawn)).
+
 ## Python API
 
 ```python

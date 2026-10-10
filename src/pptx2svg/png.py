@@ -117,7 +117,8 @@ def svg_to_png(
 
     Fonts, in the order resvg searches them: ``font_dirs``/``font_files`` first, then the
     bundled families unless ``use_bundled_fonts=False``, then the host's own fonts unless
-    ``skip_system_fonts`` is set.  ``skip_system_fonts`` defaults to *whether we have a
+    ``skip_system_fonts`` is set.  ``font_dirs`` left out reads ``OOXML_FONT_DIRS``
+    (``os.pathsep``-separated); an empty list means none.  ``skip_system_fonts`` defaults to *whether we have a
     bundle to be reproducible with*: on with ``pptx2svg-fonts`` installed, off without it,
     because skipping system fonts with no bundle would render every slide blank.  Set it
     to ``False`` explicitly to let bundled and installed fonts both take part, which is
@@ -141,9 +142,12 @@ def svg_to_png(
     default) raises a :class:`~pptx2svg.glyphs.MissingGlyphsWarning` for it, once per face
     and script (:mod:`pptx2svg.glyphs`).
     """
+    from ooxml_common.fonts.office import user_font_dirs
+
     png, missing = _svg_to_png(
         svg, width=width, height=height, scale=scale, background=background,
-        backend=backend, font_dirs=font_dirs, font_files=font_files,
+        backend=backend, font_dirs=[str(path) for path in user_font_dirs(font_dirs)],
+        font_files=font_files,
         skip_system_fonts=skip_system_fonts, use_bundled_fonts=use_bundled_fonts,
         host_fonts=host_fonts, check_glyphs=check_glyphs,
     )

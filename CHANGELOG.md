@@ -5,6 +5,16 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- An application's own font folder is measured from as well as drawn with:
+  `ConvertOptions.font_dirs` (new), `convert_pptx_to_png(font_dirs=...)` and `--font-dir`
+  now reach measurement (`fonts.office.user_layout_metrics`) -- a face there is measured
+  from its file unless the tables measure its family as itself (Aptos, Calibri) -- and a
+  face found there grades `exact` instead of raising `font-substituted`. Without an
+  explicit `font_dirs`, the `OOXML_FONT_DIRS` environment variable (`os.pathsep`-separated,
+  shared with docx2svg) is read, `svg_to_png` included; an explicit empty list means none.
+  Added to the system's folders, searched before them. Changes the layout for existing
+  `font_dirs` callers whose folder holds a face the tables do not measure as itself: it was
+  drawn from the folder at guessed widths before. Requires ooxml-common 0.8.
 - First port of pptx-glimpse: PPTX slides to SVG and PNG in pure Python, with the full
   placeholder, colour and text inheritance cascades, all ECMA-376 preset geometries,
   tables with PowerPoint's 74 built-in styles, and charts laid out from measurements.
