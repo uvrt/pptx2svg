@@ -8,6 +8,7 @@ from the bundle's files, so the test means the same on every machine.
 
 from __future__ import annotations
 
+import gc
 import io
 import warnings
 from pathlib import Path
@@ -51,6 +52,9 @@ def test_cjk_without_the_font_bundle_is_reported_once_not_dropped_silently(monke
     carlito = [str(BUNDLE / name) for name in ("Carlito-Regular.ttf", "Carlito-Bold.ttf")]
     monkeypatch.setattr("pptx2svg.fonts.bundle_dir", lambda: None)
     options = ConvertOptions(host_fonts=False)
+    # A file an earlier test left to the garbage collector (fontTools' lazy TTFont holds
+    # its font open) must not close inside the window that counts this test's warnings.
+    gc.collect()
     with pytest.warns(MissingGlyphsWarning) as caught:
         images = convert_pptx_to_png(FIXTURES / "sample-cjk.pptx", options,
                                      skip_system_fonts=True, font_files=carlito)
