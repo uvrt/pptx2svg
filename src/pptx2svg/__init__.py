@@ -55,6 +55,7 @@ from .tables import table_row_heights
 from .text.fontmap import DEFAULT_FONT_MAPPING, create_font_mapping, family_key
 from .text.measure import DefaultTextMeasurer, FontToolsTextMeasurer, TextMeasurer
 from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
+from ooxml_common.text.symbol_fonts import recorded_font_metrics
 
 __version__ = "0.1.0"
 
@@ -266,6 +267,10 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     if options.warn_on_font_substitution:
         options.warnings.extend(_font_warnings(resolved, user_dirs))
 
+    # A symbol face this conversion has no copy of is drawn as the Unicode its codes
+    # stand for (:mod:`pptx2svg.symbols`), and always said so.
+    symbol_faces = _absent_symbol_faces(resolved, options, user_dirs)
+
     # The embedded faces have to reach *measurement*, not only the rasteriser: by the
     # time `svg_to_png` sees a font file every line has already been wrapped, autofitted
     # and centred.  Handing them to the measurer here is what keeps measure-equals-draw
@@ -295,6 +300,12 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
 
             for key, table in office.layout_metrics(resolved_families(resolved)).items():
                 extra.setdefault(key, table)
+        # An absent Symbol or Wingdings is laid out at its own advances, recorded from
+        # Word's copy, not at guessed ones.
+        for face, family in symbol_faces.items():
+            table = recorded_font_metrics(face)
+            if table is not None:
+                extra.setdefault(family_key(family), table)
         measurer = DefaultTextMeasurer(extra, kerning=POWERPOINT_RULES.kerning)
 
     documents: list[str] = []
@@ -304,6 +315,7 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
             measurer=measurer,
             font_mapping=font_mapping,
             jpan_fallback_font=jpan_fallback,
+            mapped_symbol_faces=frozenset(symbol_faces),
         )
         documents.append(
             render_slide_to_svg(
@@ -315,6 +327,29 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
             )
         )
     return documents, resolved
+
+
+def _absent_symbol_faces(
+    resolved: ResolvedPresentation, options: ConvertOptions, user_dirs: Sequence[str] = ()
+) -> dict[str, str]:
+    """The symbol faces the deck draws in that this conversion cannot draw itself, as
+    ``{face key: family}``, each reported as ``symbol-font-mapped``."""
+    from .symbols import absent_faces, mapped_warning, symbol_text
+
+    used = symbol_text(resolved)
+    if not used:
+        return {}
+    available = set(resolved.embedded_fonts.families | resolved.installed_families)
+    if user_dirs:
+        from ooxml_common.fonts.office import user_families
+
+        available |= set(user_families(user_dirs))
+    absent = absent_faces(used, available=available, host=_host_fonts(options))
+    options.warnings.extend(
+        Warning(code="symbol-font-mapped", message=mapped_warning(family, used[face][1]))
+        for face, family in absent.items()
+    )
+    return absent
 
 
 def _font_warnings(resolved: ResolvedPresentation, user_dirs: Sequence[str] = ()) -> list[Warning]:

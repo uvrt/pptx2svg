@@ -25,11 +25,17 @@ Cousine          Courier New                                   SIL OFL 1.1
 Noto Sans JP     MS Gothic, Meiryo, Yu Gothic, MS Mincho, ...  SIL OFL 1.1
 Lato             itself                                        SIL OFL 1.1
 Raleway          itself                                        SIL OFL 1.1
+Noto Sans        Wingdings, Webdings, Symbol: their pictures,  SIL OFL 1.1
+Symbols 2        drawn as the Unicode characters they stand
+                 for, when the face itself is absent
 ===============  ============================================  ==============
 
 Every file is redistributed byte-for-byte as published on Google Fonts -- none has been
 subsetted, renamed or otherwise modified -- so the Reserved Font Name clauses that
-Carlito, Lato, Raleway and Noto Sans JP carry are satisfied.  The full licence text for
+Carlito, Lato, Raleway and Noto Sans JP carry are satisfied.  Noto Sans Symbols 2 (Google Fonts' ``ofl/notosanssymbols2``) is
+there because a symbol face is never on a server: pptx2svg draws a Wingdings bullet it
+cannot draw as itself as the character it stands for (``q`` as U+2751), and needs a face
+that has those characters.  The full licence text for
 each family is in ``licenses/`` next to the fonts, as the OFL requires.
 
 On Debian the same faces are ``fonts-crosextra-carlito``, ``fonts-crosextra-caladea``,
@@ -43,9 +49,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-__all__ = ["FILES_DIR", "LICENSE_DIR", "FAMILIES", "__version__"]
+__all__ = ["FILES_DIR", "LICENSE_DIR", "FAMILIES", "FALLBACK_FAMILIES", "__version__"]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 #: Directory pptx2svg hands to the rasteriser.
 FILES_DIR = Path(__file__).resolve().parent / "files"
@@ -58,3 +64,8 @@ LICENSE_DIR = Path(__file__).resolve().parent / "licenses"
 FAMILIES = frozenset(
     {"Arimo", "Caladea", "Carlito", "Cousine", "Lato", "Noto Sans JP", "Raleway", "Tinos"}
 )
+
+#: Faces shipped only to draw characters no deck names them for: the Unicode equivalents
+#: of a symbol face's glyphs (``ooxml_common.text.symbol_fonts.FALLBACK_FAMILIES``).  Not
+#: in :data:`FAMILIES`, which are the faces a deck can ask for and be measured in.
+FALLBACK_FAMILIES = frozenset({"Noto Sans Symbols 2"})

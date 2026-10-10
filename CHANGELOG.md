@@ -5,6 +5,16 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A symbol face this conversion cannot draw -- Wingdings, Wingdings 2/3, Webdings, Symbol;
+  not embedded, not in `font_dirs`, not on the host where the host's faces are in use --
+  is drawn as the Unicode characters its codes stand for (ooxml-common's
+  `text.symbol_fonts`): a Wingdings `q` box bullet as ❑, `ü` as ✓, `§` as ▪, `Ø` as ➢, in
+  runs and bullets, spelled as the code or as its U+F0xx alias, with a
+  `symbol-font-mapped` warning. Symbol and Wingdings are laid out at their own advances,
+  recorded from Word's copies; the glyph choices were compared with PowerPoint 16's export
+  of `tools/make_symbol_probe.py`. A face that is available still draws itself. The
+  `pptx2svg-fonts` bundle (0.2.0) ships Noto Sans Symbols 2 (SIL OFL 1.1) to draw them
+  with; no deck is measured in it.
 - Slide numbers and dates are evaluated per slide, as PowerPoint draws them: an `a:fld`
   in a plain text box on the layout or master (the corporate footer "‹#› | Copyright …")
   and in the slide's own `sldNum`/`dt` placeholders shows the slide's number, counted from

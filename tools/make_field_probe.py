@@ -116,14 +116,7 @@ def slide_xml(shapes: str) -> str:
 
 
 def build(first_slide_number: int = 1) -> bytes:
-    source = zipfile.ZipFile(SOURCE)
-    parts = {
-        name: source.read(name)
-        for name in source.namelist()
-        if not name.startswith(("ppt/slides/", "ppt/notesSlides/"))
-    }
     slides = [language_slide(lang) for lang in LANGUAGES] + [placeholder_slide()]
-
     layout_footer = text_box(
         90, "Layout footer", 457200, 6172200, 6000000, 300000,
         [probe_line("layout.slidenum", field("slidenum", "‹#›", "en-US"))
@@ -133,8 +126,26 @@ def build(first_slide_number: int = 1) -> bytes:
         91, "Master footer", 6600000, 6172200, 5000000, 300000,
         [probe_line("master.slidenum", field("slidenum", "‹#›", "en-US"))],
     )
-    for name, extra in ((LAYOUT, layout_footer), (MASTER, master_footer)):
-        parts[name] = parts[name].decode().replace("</p:spTree>", extra + "</p:spTree>", 1).encode()
+    return build_deck(slides, first_slide_number=first_slide_number,
+                      layout_extra=layout_footer, master_extra=master_footer)
+
+
+def build_deck(
+    slides: list[str], *, first_slide_number: int = 1, layout_extra: str = "",
+    master_extra: str = "",
+) -> bytes:
+    """``sample.pptx`` with its slides replaced by ``slides`` (each a ``p:spTree``'s
+    shapes) on its Blank layout, and ``layout_extra``/``master_extra`` added to the
+    layout's and the master's shape trees."""
+    source = zipfile.ZipFile(SOURCE)
+    parts = {
+        name: source.read(name)
+        for name in source.namelist()
+        if not name.startswith(("ppt/slides/", "ppt/notesSlides/"))
+    }
+    for name, extra in ((LAYOUT, layout_extra), (MASTER, master_extra)):
+        if extra:
+            parts[name] = parts[name].decode().replace("</p:spTree>", extra + "</p:spTree>", 1).encode()
 
     presentation = parts["ppt/presentation.xml"].decode()
     rels = parts["ppt/_rels/presentation.xml.rels"].decode()

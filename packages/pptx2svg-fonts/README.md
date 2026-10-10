@@ -20,6 +20,7 @@ rather than by name — the extra pins a compatible version.
 | Noto Sans JP | Japanese and Chinese text: MS Gothic, Meiryo, Yu Gothic, MS Mincho, SimSun... (no Hangul) | SIL OFL 1.1 |
 | Lato | itself | SIL OFL 1.1 |
 | Raleway | itself | SIL OFL 1.1 |
+| Noto Sans Symbols 2 | Wingdings, Webdings, Symbol when absent: their pictures drawn as the Unicode characters they stand for | SIL OFL 1.1 |
 
 pptx2svg draws its PNGs from these files and nothing else when this package is installed,
 so the same deck gives the same pixels on every machine.  Without it the host's fonts are
@@ -42,8 +43,9 @@ among them:
   (<team@latofonts.com>), with Reserved Font Name "Lato".
 * **Raleway** — Copyright 2010 The Raleway Project Authors (<impallari@gmail.com>), with
   Reserved Font Name "Raleway".
-* **Arimo, Tinos, Cousine** (The Arimo, Tinos and Cousine Project Authors) and
-  **Caladea** (The Caladea Project Authors).
+* **Arimo, Tinos, Cousine** (The Arimo, Tinos and Cousine Project Authors),
+  **Caladea** (The Caladea Project Authors) and **Noto Sans Symbols 2** (The Noto Project
+  Authors).
 
 The files are redistributed byte-for-byte as published on
 [Google Fonts](https://github.com/google/fonts); none has been subsetted, renamed or

@@ -22,6 +22,7 @@ Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the
 | --- | --- | --- | --- |
 | **Anything the deck embeds** (`<p:embeddedFontLst>`) | Measured *and* drawn from the deck's own file — unless the same family is installed where PowerPoint looks, which it then draws instead, and so do we | `exact` | Nothing. This is the best outcome there is — [why](#1-the-deck-carries-it-best) |
 | **Arimo, Caladea, Carlito, Cousine, Lato, Noto Sans JP, Raleway, Tinos** | The bundle ships that exact family | `exact` | `pip install 'pptx2svg[fonts]'` |
+| **Symbol, Wingdings, Wingdings 2, Wingdings 3, Webdings** (absent) | Drawn as the Unicode characters their codes stand for (`q` in Wingdings as ❑ U+2751), in the host's symbol faces or Noto Sans Symbols 2, which the bundle ships for this alone; Symbol and Wingdings laid out at their own advances, recorded from Word's copies; a `symbol-font-mapped` warning | `missing` | Nothing for the common bullets and marks. Where the face is installed (a Mac with Office), embedded or in `font_dirs`, it draws itself |
 | **Calibri, Calibri Light** | Carlito | `compatible` | Nothing. Same advance widths; only outlines change |
 | **Arial, Helvetica** | Arimo | `compatible` | Nothing |
 | **Times New Roman, Times** | Tinos | `compatible` | Nothing |
@@ -35,8 +36,8 @@ Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the
 | **BatangChe, GulimChe, DotumChe, GungsuhChe** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact, but **Noto Sans JP draws no Hangul at all** — supply a Korean face yourself — [escape hatches](#the-escape-hatches) |
 | **Lucida Console, Lucida Sans Typewriter** | Measured at 0.602539 em, drawn with Cousine at 0.600098 | `approximate` | Nothing worth doing; each drawn line is 0.41% narrow |
 | **Consolas** | Measured at 0.549805 em, drawn with Cousine at 0.600098 | `approximate` | Install real Consolas; each drawn line is 9.1% wide. Measured because PowerPoint lays the line out at Consolas's pitch |
-| **Book Antiqua, Palatino Linotype, Century, Century Schoolbook, Century Gothic, Bookman Old Style, Monotype Corsiva, Arial Narrow, Symbol, Monotype Sorts, Comic Sans MS** | Widths guessed; drawn with the generic family | `missing` | A measured open clone exists but pptx2svg does not ship or map it — [tier 4](#4-a-clone-exists-but-is-not-bundled) |
-| **Anything else** — Gill Sans MT, Verdana, Segoe UI, Georgia, Garamond, Tahoma, Trebuchet MS, Wingdings, the Indic and Thai faces… | Widths guessed; drawn with the generic family | `missing` | [Embed the font in the deck](#1-the-deck-carries-it-best), or supply it yourself — [escape hatches](#the-escape-hatches) |
+| **Book Antiqua, Palatino Linotype, Century, Century Schoolbook, Century Gothic, Bookman Old Style, Monotype Corsiva, Arial Narrow, Monotype Sorts, Comic Sans MS** | Widths guessed; drawn with the generic family | `missing` | A measured open clone exists but pptx2svg does not ship or map it — [tier 4](#4-a-clone-exists-but-is-not-bundled) |
+| **Anything else** — Gill Sans MT, Verdana, Segoe UI, Georgia, Garamond, Tahoma, Trebuchet MS, the Indic and Thai faces… | Widths guessed; drawn with the generic family | `missing` | [Embed the font in the deck](#1-the-deck-carries-it-best), or supply it yourself — [escape hatches](#the-escape-hatches) |
 
 `exact` and `compatible` are faithful. `approximate` and `missing` are not, and
 `pptx2svg fonts --check` exits non-zero on them.
@@ -128,6 +129,9 @@ Three things it does not do:
 Eight families, from `pip install 'pptx2svg[fonts]'`:
 
 **Arimo, Caladea, Carlito, Cousine, Lato, Noto Sans JP, Raleway, Tinos.**
+
+The bundle also ships Noto Sans Symbols 2, which no deck names: it draws the Unicode
+equivalents of an absent symbol face's glyphs (Wingdings' `q` as ❑), and nothing else.
 
 A deck that names one of these directly gets that exact file, measured from that exact
 file. Decks reach these names by ordinary routes: Carlito and Caladea are LibreOffice's
