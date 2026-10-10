@@ -84,6 +84,7 @@ __all__ = [
     "render_slide_to_svg",
     "svg_to_png",
     "table_row_heights",
+    "user_font_dirs",
 ]
 
 
@@ -136,6 +137,25 @@ class ConvertOptions:
     #: every CJK character of a deck, rendered without ``pptx2svg-fonts`` on a host with no
     #: CJK face.  PNG output only: an SVG viewer draws with its own fonts.
     check_glyphs: bool = True
+    #: The application's own font folders, searched before every other: a face in them
+    #: is drawn from its file and, where the static tables do not measure its family as
+    #: itself, measured from it too (:func:`pptx2svg.fonts.office.user_layout_metrics`),
+    #: whatever ``host_fonts`` says.  ``None`` (the default) reads ``OOXML_FONT_DIRS``
+    #: (``os.pathsep``-separated); an empty list means none, the variable not read.
+    #: Added to the system's folders, never in their place.  ``convert_pptx_to_png``'s
+    #: own ``font_dirs`` argument, when given, takes precedence.
+    font_dirs: Sequence[str] | None = None
+
+
+def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> list[str]:
+    """The application's font folders a conversion uses, as strings: ``font_dirs`` when
+    given, else ``options.font_dirs``, else ``OOXML_FONT_DIRS``
+    (:func:`ooxml_common.fonts.office.user_font_dirs`)."""
+    from ooxml_common.fonts.office import user_font_dirs as _user_font_dirs
+
+    if font_dirs is None and options is not None:
+        font_dirs = options.font_dirs
+    return [str(path) for path in _user_font_dirs(font_dirs)]
 
 
 def _host_fonts(options: ConvertOptions) -> bool:
@@ -232,8 +252,9 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     # chunk put 游ゴシック into stacks PowerPoint never draws from.
     jpan_fallback = None
 
+    user_dirs = user_font_dirs(options)
     if options.warn_on_font_substitution:
-        options.warnings.extend(_font_warnings(resolved))
+        options.warnings.extend(_font_warnings(resolved, user_dirs))
 
     # The embedded faces have to reach *measurement*, not only the rasteriser: by the
     # time `svg_to_png` sees a font file every line has already been wrapped, autofitted
@@ -248,9 +269,17 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     # Kerned as PowerPoint kerns (``DrawingRules.kerning``): a static face's legacy
     # ``kern`` table, a variable face's GPOS pairs -- measured, and not the OpenType
     # feature the tables used to charge everywhere (ooxml_common.text.kerning).
+    #
+    # The application's own folders (``font_dirs``, ``OOXML_FONT_DIRS``) come before the
+    # host's: the rasteriser is handed them ahead of every installed face.
     measurer = options.measurer
     if measurer is None:
         extra = dict(resolved.embedded_fonts.metrics)
+        if user_dirs:
+            from .fonts import office
+
+            for key, table in office.user_layout_metrics(resolved_families(resolved), user_dirs).items():
+                extra.setdefault(key, table)
         if _host_fonts(options):
             from .fonts import office
 
@@ -278,7 +307,7 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     return documents, resolved
 
 
-def _font_warnings(resolved: ResolvedPresentation) -> list[Warning]:
+def _font_warnings(resolved: ResolvedPresentation, user_dirs: Sequence[str] = ()) -> list[Warning]:
     """Say out loud what the rasteriser would otherwise do silently.
 
     Deliberately warnings rather than errors: a deck that names Aptos still renders, and
@@ -292,7 +321,12 @@ def _font_warnings(resolved: ResolvedPresentation) -> list[Warning]:
     individually.
     """
     embedded = resolved.embedded_fonts.families | resolved.installed_families
-    report = check_families(resolved_families(resolved), embedded=embedded)
+    supplied = frozenset()
+    if user_dirs:
+        from ooxml_common.fonts.office import user_families
+
+        supplied = user_families(user_dirs)
+    report = check_families(resolved_families(resolved), embedded=embedded, supplied=supplied)
 
     if report.mode != "bundled":
         unsupplied = [face.requested for face in report.faces if not face.faithful]
@@ -341,8 +375,17 @@ def convert_pptx_to_png(
     whatever the machine happens to have installed, which is faster to set up and
     impossible to reproduce.  Either way, faces the render could not draw faithfully are
     appended to ``options.warnings``.
+
+    ``font_dirs`` -- the application's own folders, handed to the rasteriser ahead of
+    the bundle and the system's fonts, and measured from as ``options.font_dirs`` is --
+    takes precedence over ``options.font_dirs``; without either, ``OOXML_FONT_DIRS`` is
+    read.
     """
     options = options or ConvertOptions()
+    if font_dirs is not None:
+        # Measured as drawn: the folders the rasteriser is given are the ones measured.
+        options = dataclasses.replace(options, font_dirs=list(font_dirs))
+    font_dirs = user_font_dirs(options)
     if options.host_fonts is None and skip_system_fonts is not None:
         # The rasteriser is told explicitly whether to read this machine's fonts, so
         # measure as it will draw.

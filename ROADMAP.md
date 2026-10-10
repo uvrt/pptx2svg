@@ -912,35 +912,15 @@ discussion. Flagged rather than laundered into a firmer claim than it is.
   friends are unmapped. Mapping them to a bundled family would be better than the 0.6 em
   guess, but only if the mapping is measured first — guessing is how the Caladea claim got
   in.
-* **`font_dirs` / `font_files` / `--font-dir` feed the rasteriser only.** They reach
-  `svg_to_png`; measurement has already happened by then, in `convert_pptx_to_svg`, which
-  never sees them (`__init__.py`, where `convert_pptx_to_png` calls
-  `convert_pptx_to_svg(source, options)` and only then passes the font arguments on). So
-  pointing `--font-dir` at a folder containing the face a deck asks for produces **the
-  right glyphs at guessed widths** — correct letters, wrong line breaks. That is the
-  measure-with-one-draw-with-another failure this subsystem exists to prevent, reachable
-  through a documented flag.
-
-  It is not fully silent: the face is still absent from the bundle, so `font-substituted`
-  fires and its "widths guessed" clause is true. But its "drawn with the generic family"
-  clause is then false, and **the warning gets the interesting half wrong in the
-  reassuring direction**. Worse, the `font-bundle-missing` message advises "or pass
-  `font_dirs=` explicitly" — recommending the parameter that fixes only drawing.
-
-  Callers can already get both halves right by combining `measurer=FontToolsTextMeasurer({...})`
-  with `font_dirs=`, which needs `pptx2svg[measure]`. **The CLI cannot**: there is no
-  measurer flag, so `--font-dir` is the only route a command-line user has, and it is the
-  half-right one. Three candidate fixes, none obviously best: teach `font_dirs` to feed
-  measurement as well (changes existing behaviour), add a CLI measurer option, or narrow
-  the warning text so it stops claiming to know what the rasteriser drew with.
-
-  **Still unfixed, but no longer a design question.** Phase 6 needed exactly this
-  plumbing and built it: `DefaultTextMeasurer(extra_metrics=...)` takes a
-  family -> `FontMetrics` map that wins over the static tables, and `fonts/sfnt.py`
-  builds one from a font file using only the standard library, so no extra is involved.
-  Pointing `font_dirs` at that is now a small change. It is left alone here because it
-  alters existing behaviour for every caller of a documented parameter, which deserves
-  its own decision rather than being a side effect of the embedded-font work.
+* **`font_files` feeds the rasteriser only.** Fixed for `font_dirs` and `--font-dir`
+  (2026-10-10, the first of the three candidate fixes once listed here): an application's
+  own folders -- `ConvertOptions.font_dirs`, `convert_pptx_to_png(font_dirs=...)`,
+  `--font-dir`, or `OOXML_FONT_DIRS` -- are measured from as well as drawn with
+  (`pptx2svg.fonts.office.user_layout_metrics`), and a face found there reports `exact`
+  instead of `font-substituted`. A family the static tables measure as itself (Aptos,
+  Calibri) keeps its table, which was measured against PowerPoint. `font_files` still
+  reaches the rasteriser alone: a caller with single files can name their folder instead,
+  or pair them with `measurer=FontToolsTextMeasurer({...})`.
 
 ### Two open design questions, from the landscape review
 

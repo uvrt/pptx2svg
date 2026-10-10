@@ -138,12 +138,14 @@ ConvertOptions(font_mapping={"Helvetica Neue": "Inter"})
 
 On the command line: `--system-fonts`, `--no-bundled-fonts`, `--font-dir DIR`.
 
-**One trap, stated plainly.** `font_dirs`, `font_files` and `--font-dir` reach the
-rasteriser *after* measurement has already happened, so pointing them at the face a deck
-asks for gives right glyphs at guessed widths — correct letters, wrong line breaks. The
-complete route is `measurer=FontToolsTextMeasurer({...})` *and* `font_dirs=`, which needs
-`pptx2svg[measure]`; the CLI has no measurer flag, so this one needs the Python API. See
-[FONTS.md](../FONTS.md#the-escape-hatches-and-their-trap).
+**Your own folder is measured and drawn.** `font_dirs` (on `ConvertOptions` or
+`convert_pptx_to_png`) and `--font-dir` reach measurement as well as the rasteriser: a
+face there is measured from its file unless the tables measure its family as itself
+(Aptos, Calibri), and grades `exact`. Without them, **`OOXML_FONT_DIRS`** (folders
+separated by `os.pathsep`) is read -- the one variable pptx2svg and docx2svg share.
+Precedence: the explicit argument, then the variable; added to the system's folders and
+searched before them. `font_files` still reaches the rasteriser alone. See
+[FONTS.md](../FONTS.md#your-own-folder-measured-and-drawn).
 
 ## Debian and other Linux hosts
 

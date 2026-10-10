@@ -14,7 +14,7 @@ So there is exactly one thing to know about your font: **is it measured and draw
 same widths?**
 
 Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the-tool-pptx2svg-fonts---check)
-· [Aptos](#aptos) · [what to do about a font we cannot draw](#the-escape-hatches-and-their-trap)
+· [Aptos](#aptos) · [what to do about a font we cannot draw](#the-escape-hatches)
 
 ## Find your font
 
@@ -32,11 +32,11 @@ Skip to the answer: [find your font](#find-your-font) · [ask the tool](#ask-the
 | **MS Gothic, MS Mincho, MS PGothic, MS PMincho** | Measured from their own tables, drawn with Noto Sans JP | `approximate` | The ideographs and kana already measure exactly; the Latin sub-run does not — [CJK](#a-note-on-cjk-the-approximate-grade-understates-it) |
 | **Meiryo, Yu Gothic, Yu Mincho, Hiragino, Noto Serif JP** | Measured *and* drawn with Noto Sans JP | `approximate` | Same: exact on CJK, off on the Latin sub-run — [CJK](#a-note-on-cjk-the-approximate-grade-understates-it) |
 | **SimSun, NSimSun, SimHei, KaiTi, FangSong, MingLiU, MingLiU_HKSCS** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact (0.5 em Latin, 1.0 em ideographic); Noto Sans JP lacks about 8,200 of each face's ideographs and its Latin is proportional |
-| **BatangChe, GulimChe, DotumChe, GungsuhChe** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact, but **Noto Sans JP draws no Hangul at all** — supply a Korean face yourself — [escape hatches](#the-escape-hatches-and-their-trap) |
+| **BatangChe, GulimChe, DotumChe, GungsuhChe** | Measured from their own fixed-pitch tables, drawn with Noto Sans JP | `approximate` | Widths exact, but **Noto Sans JP draws no Hangul at all** — supply a Korean face yourself — [escape hatches](#the-escape-hatches) |
 | **Lucida Console, Lucida Sans Typewriter** | Measured at 0.602539 em, drawn with Cousine at 0.600098 | `approximate` | Nothing worth doing; each drawn line is 0.41% narrow |
 | **Consolas** | Measured at 0.549805 em, drawn with Cousine at 0.600098 | `approximate` | Install real Consolas; each drawn line is 9.1% wide. Measured because PowerPoint lays the line out at Consolas's pitch |
 | **Book Antiqua, Palatino Linotype, Century, Century Schoolbook, Century Gothic, Bookman Old Style, Monotype Corsiva, Arial Narrow, Symbol, Monotype Sorts, Comic Sans MS** | Widths guessed; drawn with the generic family | `missing` | A measured open clone exists but pptx2svg does not ship or map it — [tier 4](#4-a-clone-exists-but-is-not-bundled) |
-| **Anything else** — Gill Sans MT, Verdana, Segoe UI, Georgia, Garamond, Tahoma, Trebuchet MS, Wingdings, the Indic and Thai faces… | Widths guessed; drawn with the generic family | `missing` | [Embed the font in the deck](#1-the-deck-carries-it-best), or supply it yourself — [escape hatches](#the-escape-hatches-and-their-trap) |
+| **Anything else** — Gill Sans MT, Verdana, Segoe UI, Georgia, Garamond, Tahoma, Trebuchet MS, Wingdings, the Indic and Thai faces… | Widths guessed; drawn with the generic family | `missing` | [Embed the font in the deck](#1-the-deck-carries-it-best), or supply it yourself — [escape hatches](#the-escape-hatches) |
 
 `exact` and `compatible` are faithful. `approximate` and `missing` are not, and
 `pptx2svg fonts --check` exits non-zero on them.
@@ -295,7 +295,7 @@ convert_pptx_to_png(
 ```
 
 `font_mapping` alone gives right glyphs at guessed widths. See
-[the escape hatches and their trap](#the-escape-hatches-and-their-trap).
+[the escape hatches](#the-escape-hatches).
 
 ### 5. Nothing matches: widths are guessed
 
@@ -355,7 +355,7 @@ convert_pptx_to_svg("deck.pptx", opts)
 **What to do.** In order of how well it works: embed the font in the deck
 ([tier 1](#1-the-deck-carries-it-best)); install the real face and render with
 `--system-fonts`; or map and measure it yourself
-([escape hatches](#the-escape-hatches-and-their-trap)).
+([escape hatches](#the-escape-hatches)).
 
 ## Which face draws the Japanese?
 
@@ -484,7 +484,7 @@ The faces reported are taken from the *resolved* model, not by grepping the XML 
 `+mj-lt` is a pointer, not a face. What is reported is what a run ends up asking for after
 the inheritance cascade has run, which is exactly what goes into the SVG.
 
-## The escape hatches, and their trap
+## The escape hatches
 
 ```python
 # The host's fonts as well as the bundle
@@ -503,27 +503,30 @@ Any of these that lets the host's fonts take part also brings in PowerPoint's ow
 that has it — [read in place](#a-mac-with-powerpoint-the-faces-powerpoint-draws-read-in-place),
 for measurement as well as drawing.
 
-### The trap
+### Your own folder: measured and drawn
 
-**`font_dirs`, `font_files` and `--font-dir` feed the rasteriser only.** They reach
-`svg_to_png`. Measurement has already happened by then, inside `convert_pptx_to_svg`,
-which never sees them. So pointing `--font-dir` at a folder containing the exact face a
-deck asks for produces **the right glyphs at guessed widths** — correct letters, wrong
-line breaks. That is precisely the measure-with-one, draw-with-another failure this
-subsystem exists to prevent, reachable through a documented flag.
+**`font_dirs` and `--font-dir` reach measurement as well as the rasteriser.** A face in
+the folder is drawn from its file and, where the static tables do not measure its family
+as itself, measured from it too (`pptx2svg.fonts.office.user_layout_metrics`), whether or
+not the host's faces are in use; `font-substituted` no longer fires for it -- it grades
+`exact`, "drawn with the face the application supplied". A family the tables measure as
+itself (Aptos, Calibri, Cambria) keeps its table, which was measured against PowerPoint.
 
-It is not fully silent — the face is still absent from the bundle, so `font-substituted`
-fires and its "widths guessed" clause is true. But its "drawn with the generic family"
-clause is then false, so the warning gets the interesting half wrong in the reassuring
-direction. The `font-bundle-missing` message compounds it by advising "or pass `font_dirs=`
-explicitly", which is the parameter that fixes only drawing.
+The folder can also come from the environment: **`OOXML_FONT_DIRS`**, folders separated
+by `os.pathsep` (`:` on macOS and Linux, `;` on Windows), read by pptx2svg and docx2svg
+alike. Precedence: `convert_pptx_to_png`'s `font_dirs` argument, then
+`ConvertOptions.font_dirs`, then `OOXML_FONT_DIRS`; an explicit empty list means none.
+Whichever applies is added to the bundle and the system's folders and searched before
+them, never in their place, and the folders under it are read too. (pptx2svg reads no
+other variable for this: a `PPTX_FONT_DIR` an application sets for itself has no effect
+here unless the application passes it on as `font_dirs`.)
 
-`font_mapping` has the same shape of limitation: it changes the `font-family` the SVG
-names, not the table the layout was computed from.
+```python
+convert_pptx_to_png("deck.pptx", ConvertOptions(font_dirs=["./corporate-fonts"]))
+```
 
-### The complete route
-
-Both halves, which needs `pip install 'pptx2svg[measure]'` (fontTools):
+`font_files` still feeds the rasteriser only: name the folder instead, or pair the files
+with a measurer, which needs `pip install 'pptx2svg[measure]'` (fontTools):
 
 ```python
 import pathlib
@@ -536,29 +539,15 @@ measurer = FontToolsTextMeasurer({"Gill Sans MT": str(fonts / "GillSansMT.ttf")}
 convert_pptx_to_png(
     "deck.pptx",
     ConvertOptions(measurer=measurer),   # measured from the real file
-    font_dirs=[str(fonts)],              # and drawn from it
+    font_files=[str(fonts / "GillSansMT.ttf")],   # and drawn from it
 )
 ```
 
-`FontToolsTextMeasurer` opens faces lazily and caches them; a family with no entry falls
-back to the static tables, so a partial map is fine.
+### On the command line
 
-### The CLI cannot do this
-
-**There is no measurer flag.** `pptx2svg --help` offers `--font-dir`, `--system-fonts`,
-`--no-bundled-fonts` and `--no-embedded-fonts`, and none of them reaches measurement. A
-command-line user's only route to a face pptx2svg does not know is `--font-dir`, and it is
-the half-right one.
-
-This is a current limitation, stated plainly rather than hidden: it is recorded in
-[ROADMAP ▸ Fonts ▸ Left undone](ROADMAP.md#left-undone), where three candidate fixes are
-listed and none is obviously best. The plumbing exists —
-`DefaultTextMeasurer(extra_metrics=...)` takes a family → `FontMetrics` map that wins over
-the static tables, and `fonts/sfnt.py` builds one from a font file using only the standard
-library — so the change is small. It is unmade because it alters existing behaviour for
-every caller of a documented parameter, which deserves its own decision.
-
-Until then: **if you need both halves, use the Python API.**
+`--font-dir DIR` (repeatable; default `$OOXML_FONT_DIRS`) is the same folder, measured
+from and drawn with. There is no measurer flag; a folder is the command line's route to
+a face pptx2svg does not know.
 
 ## Aptos
 

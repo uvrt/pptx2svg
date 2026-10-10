@@ -20,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import ConvertOptions, __version__, _render
+from . import ConvertOptions, __version__, _render, user_font_dirs
 from .png import RasterizerNotAvailable, _svg_to_png, available_backends
 
 
@@ -62,7 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         dest="font_dirs",
         metavar="DIR",
-        help="directory of fonts for PNG rendering (repeatable)",
+        help="the application's own font folder, measured from and drawn with ahead of "
+        "every other (repeatable; default: $OOXML_FONT_DIRS)",
     )
     parser.add_argument(
         "--system-fonts",
@@ -124,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         width=args.width,
         height=args.height,
         use_embedded_fonts=not args.no_embedded_fonts,
+        font_dirs=args.font_dirs,
     )
 
     try:
@@ -184,7 +186,7 @@ def _write_outputs(args, options, documents, numbers, stem, wants_png, embedded_
                     scale=None,
                     background=None,
                     backend=args.backend,
-                    font_dirs=args.font_dirs,
+                    font_dirs=user_font_dirs(None, args.font_dirs),
                     font_files=embedded_files or None,
                     # None means "decide from the bundle": skip system fonts
                     # when there is a bundle to be deterministic with, keep them

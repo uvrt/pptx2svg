@@ -34,7 +34,8 @@ jobs:
         # (`@<branch>`) on the pull request, and back at @main before merging.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@main"
+          # TEMPORARY (font-dirs): ooxml-common 0.8 is on its font-dirs branch until uvrt/ooxml-common merges it; back to @main then.
+          python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@font-dirs"
           python -m pip install -e .[dev]
           python -m pip install -e packages/pptx2svg-fonts
 

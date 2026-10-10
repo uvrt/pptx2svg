@@ -55,7 +55,9 @@ classifiers = [
 # `lang`), finds a face by its English typographic family and draws synthetic bold.  0.7
 # draws chart text in its `c:txPr` colour and a number format's text round the number,
 # and places a radar's category labels as PowerPoint does (tests/test_chart.py).
-dependencies = ["ooxml-common>=0.7.0"]
+# 0.8 resolves an application's own font folders, `font_dirs` or `OOXML_FONT_DIRS`
+# (`office.user_font_dirs`, `check_families(supplied=...)`; tests/test_font_dirs.py).
+dependencies = ["ooxml-common>=0.8.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler
