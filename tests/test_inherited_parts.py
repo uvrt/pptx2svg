@@ -62,8 +62,8 @@ def _add_relationship(rels: str, rel_id: str, target: str) -> str:
 def _deck(edits: dict[str, callable], images_for: dict[str, bytes]) -> bytes:
     """``sample.pptx`` with ``edits`` applied (part -> fn(xml) -> xml) and, for each part
     in ``images_for``, an ``rId90`` image relationship to the given PNG."""
-    source = zipfile.ZipFile(SAMPLE)
-    parts = {name: source.read(name) for name in source.namelist()}
+    with zipfile.ZipFile(SAMPLE) as source:
+        parts = {name: source.read(name) for name in source.namelist()}
     for index, (owner, png) in enumerate(images_for.items()):
         media = f"ppt/media/inherited{index}.png"
         parts[media] = png

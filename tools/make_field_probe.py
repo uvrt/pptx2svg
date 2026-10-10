@@ -137,12 +137,12 @@ def build_deck(
     """``sample.pptx`` with its slides replaced by ``slides`` (each a ``p:spTree``'s
     shapes) on its Blank layout, and ``layout_extra``/``master_extra`` added to the
     layout's and the master's shape trees."""
-    source = zipfile.ZipFile(SOURCE)
-    parts = {
-        name: source.read(name)
-        for name in source.namelist()
-        if not name.startswith(("ppt/slides/", "ppt/notesSlides/"))
-    }
+    with zipfile.ZipFile(SOURCE) as source:
+        parts = {
+            name: source.read(name)
+            for name in source.namelist()
+            if not name.startswith(("ppt/slides/", "ppt/notesSlides/"))
+        }
     for name, extra in ((LAYOUT, layout_extra), (MASTER, master_extra)):
         if extra:
             parts[name] = parts[name].decode().replace("</p:spTree>", extra + "</p:spTree>", 1).encode()

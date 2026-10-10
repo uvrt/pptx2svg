@@ -295,7 +295,11 @@ def probes_for(target: Path) -> list[dict]:
 def write_deck(target: Path, probes: list[dict], chart=None) -> None:
     """``chart`` builds each probe's chart part; :func:`chart_xml` unless given."""
     chart = chart or chart_xml
-    source = zipfile.ZipFile(SOURCE)
+    with zipfile.ZipFile(SOURCE) as source:
+        _write_deck(target, probes, chart, source)
+
+
+def _write_deck(target: Path, probes: list[dict], chart, source: zipfile.ZipFile) -> None:
     presentation = source.read("ppt/presentation.xml").decode()
     pres_rels = source.read("ppt/_rels/presentation.xml.rels").decode()
     content_types = source.read("[Content_Types].xml").decode()
