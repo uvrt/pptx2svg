@@ -5,6 +5,13 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- Python 3.14 and 3.15: CI runs the suite on both, on Linux, macOS and Windows, and the
+  classifiers declare them. `requires-python` stays `>=3.10`; no library change, and the
+  `png` extra's resvg-py has wheels for both. CPython 3.14's Windows builds deflate with
+  zlib-ng, whose bytes differ from zlib's for the same entries (both valid; what a package
+  holds is unchanged), so the test that `sample-cjk.pptx` is what `tools/make_cjk_deck.py`
+  writes compares every entry everywhere and the archive's bytes where deflate is zlib's
+  (`tests/zip_content.py`).
 - An application's own font folder is measured from as well as drawn with:
   `ConvertOptions.font_dirs` (new), `convert_pptx_to_png(font_dirs=...)` and `--font-dir`
   now reach measurement (`fonts.office.user_layout_metrics`) -- a face there is measured

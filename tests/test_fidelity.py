@@ -132,17 +132,30 @@ def test_the_cjk_deck_is_exactly_what_its_generator_writes(tmp_path):
 
     Byte-for-byte rather than "the themes match", because the point is that *nothing
     else* moved, and because the generator writes each entry back through its own
-    ``ZipInfo`` precisely so that two runs agree.
+    ``ZipInfo`` precisely so that two runs agree.  Every entry -- name, metadata, bytes --
+    is compared everywhere; the deflated bytes where deflate is zlib's own, since CPython
+    3.14's Windows builds deflate with zlib-ng, whose bytes differ (``zip_content.py``).
     """
     import make_cjk_deck
+    from zip_content import content_sha256, stock_deflate
 
     derived = tmp_path / "sample-cjk.pptx"
     replacements = make_cjk_deck.write_deck(FIXTURES / "sample.pptx", derived)
     assert replacements == 8, replacements
-    assert derived.read_bytes() == (FIXTURES / "sample-cjk.pptx").read_bytes(), (
-        "tests/fixtures/sample-cjk.pptx is not what tools/make_cjk_deck.py writes; "
-        "regenerate it rather than editing either deck by hand"
-    )
+    written, committed = derived.read_bytes(), (FIXTURES / "sample-cjk.pptx").read_bytes()
+    stale = ("tests/fixtures/sample-cjk.pptx is not what tools/make_cjk_deck.py writes; "
+             "regenerate it rather than editing either deck by hand")
+    assert content_sha256(written) == content_sha256(committed), stale
+    if stock_deflate():
+        assert written == committed, stale
+
+
+def test_deflate_is_zlibs_unless_this_python_says_zlib_ng():
+    """The deflated bytes go unchecked only where they cannot match, never by a probe gone
+    wrong."""
+    from zip_content import stock_deflate, zlib_ng
+
+    assert stock_deflate() or zlib_ng()
 
 
 def test_font_profile_hash_changes_when_a_face_changes():
