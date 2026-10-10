@@ -5,6 +5,10 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A data label with text of its own is drawn (ooxml-common): a typed or "Value From Cells"
+  label (`c:dLbl/c:tx`, `c15:datalabelsRange`) prints its text with its runs' formatting
+  instead of the point's value, on scatter and bubble charts too.
+  `tools/make_point_label_probe.py` builds the deck it was measured on.
 - A symbol face this conversion cannot draw -- Wingdings, Wingdings 2/3, Webdings, Symbol;
   not embedded, not in `font_dirs`, not on the host where the host's faces are in use --
   is drawn as the Unicode characters its codes stand for (ooxml-common's

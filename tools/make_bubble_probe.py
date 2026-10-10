@@ -292,7 +292,9 @@ def probes_for(target: Path) -> list[dict]:
     raise SystemExit(f"name the deck after one of {sorted(DECKS)}, not {target.stem!r}")
 
 
-def write_deck(target: Path, probes: list[dict]) -> None:
+def write_deck(target: Path, probes: list[dict], chart=None) -> None:
+    """``chart`` builds each probe's chart part; :func:`chart_xml` unless given."""
+    chart = chart or chart_xml
     source = zipfile.ZipFile(SOURCE)
     presentation = source.read("ppt/presentation.xml").decode()
     pres_rels = source.read("ppt/_rels/presentation.xml.rels").decode()
@@ -348,7 +350,7 @@ def write_deck(target: Path, probes: list[dict]) -> None:
         for index, item in enumerate(probes):
             out.writestr(f"ppt/slides/slide{index + 1}.xml", slide_xml(index, item))
             out.writestr(f"ppt/slides/_rels/slide{index + 1}.xml.rels", slide_rels(index))
-            out.writestr(f"ppt/charts/probe{index}.xml", chart_xml(item))
+            out.writestr(f"ppt/charts/probe{index}.xml", chart(item))
 
 
 def main() -> int:
