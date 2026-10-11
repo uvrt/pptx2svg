@@ -5,6 +5,19 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- An SVG picture (`asvg:svgBlip`) is drawn in PNG output whatever unit its root's size is
+  in: resvg-py drew nothing for `width="72pt"` -- or `pc`, `in`, `cm`, `mm` -- ("SVG has an
+  invalid size") and nothing for an SVG that is not UTF-8, so the picture vanished from the
+  PNG while the SVG output showed it.  The page now reaches the rasteriser with each
+  embedded SVG's `width` and `height` restated in pixels as PowerPoint reads them
+  (`ooxml_common.svgimage`, 0.12): a length at 96 px to the inch, an `em` of 12 px unless
+  the root states a font-size, the `viewBox`'s size for a percentage or none, 500 px
+  without a `viewBox`; and a root with no `viewBox` gets one of its own size, which
+  CairoSVG needs to scale it.  Measured on PowerPoint 16's export of 30 SVG pictures
+  (`tools/make_svg_size_probe.py`, `tools/read_svg_size_probe.py`): resvg now draws all 30
+  as PowerPoint does (8 before), CairoSVG 27 (10 before; it reads no root's
+  `preserveAspectRatio`, so a root out of proportion with its `viewBox` is stretched
+  rather than letterboxed).  The SVG output is unchanged.
 - Three things PowerPoint 16 draws that were missing, each measured from its export
   (production feedback round 3): an empty placeholder's own fill and outline (the prompt
   text still is not drawn; one with neither is still left out); the "Light Style 2" family's
