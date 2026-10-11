@@ -36,6 +36,8 @@ from __future__ import annotations
 import warnings
 from typing import Iterable, Literal, Sequence
 
+from ooxml_common.svgimage import with_pixel_sized_images
+
 from .fonts import GENERIC_FAMILY_DEFAULTS, font_dirs as bundled_font_dirs
 from .glyphs import MissingGlyphs, MissingGlyphsWarning, missing_glyphs
 from .iccimages import srgb_images
@@ -176,6 +178,10 @@ def _svg_to_png(
     # resvg and cairosvg both read a picture's samples as sRGB whatever profile it carries;
     # PowerPoint converts it.  See :mod:`pptx2svg.iccimages`.
     svg = srgb_images(svg)
+    # An SVG picture's root size in units other than px (`width="72pt"`) makes resvg drop
+    # the picture, and CairoSVG draws one with no viewBox unscaled; both get it restated in
+    # pixels as PowerPoint reads it (:mod:`ooxml_common.svgimage`).
+    svg = with_pixel_sized_images(svg)
 
     chosen = backend
     if chosen == "auto":
