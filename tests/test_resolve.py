@@ -400,3 +400,75 @@ def test_a_latin_face_named_as_the_east_asian_one_decides_gothic_or_mincho(basic
                         faces.setdefault(run.properties.font_family, set()).add(run.properties.font_family_ea)
     assert faces["Raleway"] == {"MS Mincho"}
     assert faces["Lato"] == {"MS Gothic"}
+
+
+# -- Round 3: what PowerPoint draws that the catalogue and the empty-placeholder rule missed --
+
+
+def test_light_style_2_draws_its_outline_and_band_edges(authoring):
+    """Measured in PowerPoint 16: every Light Style 2 style rules the table's outline and the
+    top and bottom of each odd banded row in its colour, 1 pt (the generated catalogue had
+    only the header fill and the total-row rule).  This theme's accent 3 is ``#a5a5a5``."""
+    table, _ = table_naming(authoring, "{F2DE63D5-997A-4646-A377-4702673A728D}")
+    rows = table.table.rows
+    header, band, plain = rows[0].cells[0], rows[1].cells[0], rows[2].cells[1]
+    assert header.fill.color.hex == "#a5a5a5"
+    for edge in (header.borders.left, header.borders.top, band.borders.top,
+                 band.borders.bottom, plain.borders.bottom):
+        assert edge.width == 12700 and edge.fill.color.hex == "#a5a5a5"
+    # Between two cells of a row there is no line: the style rules no gridlines.
+    assert plain.borders.left is None or plain.borders.left.fill is None
+
+
+#: A deck's own table styles that leave edges unstated, as a template's can.
+OWN_STYLES = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    '<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    'def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}">'
+    '<a:tblStyle styleId="{8F44A2D9-6A0B-4E0C-9C51-2C4A0F2A7B00}" styleName="Rows only">'
+    '<a:wholeTbl><a:tcTxStyle><a:schemeClr val="tx1"/></a:tcTxStyle><a:tcStyle><a:tcBdr>'
+    '<a:insideH><a:ln w="6350"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln>'
+    '</a:insideH><a:insideV><a:ln><a:noFill/></a:ln></a:insideV></a:tcBdr>'
+    '<a:fill><a:noFill/></a:fill></a:tcStyle></a:wholeTbl></a:tblStyle></a:tblStyleLst>')
+
+
+def test_a_decks_own_style_draws_its_unstated_edges_black(basic_theme):
+    """Measured in PowerPoint 16: an edge a deck's own style does not state is a 1 pt black
+    line (black whatever the theme's dk1); one it states as no line is not drawn."""
+    from deckbuilder import derive_deck
+
+    options = ConvertOptions()
+    deck = derive_deck(basic_theme, parts={"ppt/tableStyles.xml": OWN_STYLES.encode()},
+                       shapes_xml=TABLE_NAMING_STYLE.format(
+                           style_id="{8F44A2D9-6A0B-4E0C-9C51-2C4A0F2A7B00}"))
+    resolved = convert_pptx_to_model(deck, options)
+    table = [e for e in walk(resolved.slides[0].elements) if isinstance(e, m.TableElement)][-1]
+    middle = table.table.rows[1].cells[1]
+    corner = table.table.rows[0].cells[0]
+    assert middle.borders.top.fill.color.hex == "#ff0000"           # stated: insideH
+    assert middle.borders.left is None or middle.borders.left.fill is None   # stated: none
+    for edge in (corner.borders.top, corner.borders.left):           # unstated: the outline
+        assert edge.width == 12700 and edge.fill.color.hex == "#000000"
+
+
+def test_an_empty_placeholder_draws_its_box_but_no_prompt(authoring):
+    """Measured in PowerPoint 16: an empty placeholder's fill is drawn in the export (its
+    prompt is not); one with neither fill nor outline draws nothing, as before."""
+    from deckbuilder import derive_deck
+
+    def placeholder(number, fill):
+        return (f'<p:sp><p:nvSpPr><p:cNvPr id="{number}" name="Empty {number}"/><p:cNvSpPr/>'
+                f'<p:nvPr><p:ph type="body" idx="{number}"/></p:nvPr></p:nvSpPr><p:spPr>'
+                '<a:xfrm><a:off x="300000" y="300000"/><a:ext cx="900000" cy="600000"/>'
+                f'</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>{fill}</p:spPr>'
+                '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p>'
+                '</p:txBody></p:sp>')
+
+    deck = derive_deck(authoring, shapes_xml=placeholder(
+        901, '<a:solidFill><a:srgbClr val="FF0000"/></a:solidFill>') + placeholder(902, ""))
+    resolved = convert_pptx_to_model(deck, ConvertOptions())
+    shapes = {e.element_id: e for e in walk(resolved.slides[0].elements)
+              if isinstance(e, m.ShapeElement)}
+    box = next(e for key, e in shapes.items() if key and key.endswith(".901"))
+    assert box.fill.color.hex == "#ff0000" and box.text_body is None
+    assert not any(key and key.endswith(".902") for key in shapes)

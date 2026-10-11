@@ -47,7 +47,7 @@ from ..opc import OpcPackage
 from ..parse import source as s
 from ..parse.chart import is_three_d_kind, parse_chart_space
 from ..parse.shapes import parse_shape_tree
-from ..parse.table_styles_builtin import builtin_table_style
+from ..parse.table_styles_builtin import BUILTIN_TABLE_STYLES, builtin_table_style
 from ..text.fontmap import east_asian_family
 from ..units import ROTATION_UNIT
 from ..xmlutil import child
@@ -322,11 +322,30 @@ def _resolve_slide_elements(
     resolved: list[m.SlideElement] = []
     for index, shape in enumerate(shapes):
         if isinstance(shape, s.SourceShape) and _is_empty_placeholder(shape):
-            continue
-        element = resolve_element(context, shape, (index,))
+            element = _empty_placeholder_box(context, shape, (index,))
+        else:
+            element = resolve_element(context, shape, (index,))
         if element is not None:
             resolved.append(element)
     return resolved
+
+
+def _empty_placeholder_box(context: ResolveContext, shape: s.SourceShape,
+                           path: tuple[int, ...]) -> m.SlideElement | None:
+    """An empty placeholder as PowerPoint draws it outside editing: no prompt text, but its
+    fill and outline -- its own or its layout's -- like any shape's.  Measured in PowerPoint
+    16 (production feedback round 3): an empty content placeholder with a red fill exports
+    as a red box.  One that draws neither is left out, as before."""
+    element = resolve_element(context, shape, path)
+    if not isinstance(element, m.ShapeElement):
+        return None
+    filled = element.fill is not None and not isinstance(element.fill, m.NoFill)
+    outlined = (element.outline is not None and element.outline.fill is not None
+                and not isinstance(element.outline.fill, m.NoFill)
+                and (element.outline.width or 0) > 0)
+    if not (filled or outlined):
+        return None
+    return replace(element, text_body=None)
 
 
 def _is_empty_placeholder(shape: s.SourceShape) -> bool:
@@ -652,7 +671,7 @@ def _table_style(context: ResolveContext, table: s.SourceTable) -> s.SourceTable
     if not style_id:
         return None
     if styles is not None and style_id in styles.styles:
-        return styles.styles[style_id]
+        return _unstated_edges_black(styles.styles[style_id])
     style = builtin_table_style(style_id)
     if style is None:
         named = table.alt_text or table.name or "a table"
@@ -666,6 +685,30 @@ def _table_style(context: ResolveContext, table: s.SourceTable) -> s.SourceTable
             "every fill, border and bold it carries is missing here.",
         )
     return style
+
+
+#: The ``wholeTbl`` edges a deck's own table style may leave unstated.
+_WHOLE_TABLE_EDGES = ("border_left", "border_right", "border_top", "border_bottom",
+                      "border_inside_h", "border_inside_v")
+_BLACK_HAIRLINE = s.SourceOutline(width=12700, fill=s.SourceSolidFill(
+    color=s.SrgbColor(hex="000000")))
+
+
+def _unstated_edges_black(style: s.SourceTableStyle) -> s.SourceTableStyle:
+    """A deck's own table style as PowerPoint draws it: every ``wholeTbl`` edge the style
+    does not state -- the outline and the gridlines -- is a 1 pt black line; an edge stated
+    as ``a:noFill`` is not drawn.  Measured in PowerPoint 16 (production feedback round 3):
+    an empty ``a:tcBdr``, none at all, one stating only ``insideH`` and one stating only
+    ``left`` each drew every other edge 1 pt ``#000000``, still black with the theme's
+    ``dk1`` blue.  A built-in style's id is left alone (PowerPoint draws those from its own
+    definitions), and so is a style without ``wholeTbl``, which was not measured."""
+    if style.whole_table is None or style.style_id.upper() in BUILTIN_TABLE_STYLES:
+        return style
+    edges = {edge: _BLACK_HAIRLINE for edge in _WHOLE_TABLE_EDGES
+             if getattr(style.whole_table, edge) is None}
+    if not edges:
+        return style
+    return replace(style, whole_table=replace(style.whole_table, **edges))
 
 
 def _band(index: int, first: bool, last: bool, count: int) -> int | None:

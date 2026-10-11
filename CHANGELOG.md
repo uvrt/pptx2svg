@@ -5,6 +5,14 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- Three things PowerPoint 16 draws that were missing, each measured from its export
+  (production feedback round 3): an empty placeholder's own fill and outline (the prompt
+  text still is not drawn; one with neither is still left out); the "Light Style 2" family's
+  1 pt lines -- the table's outline and the edges of the odd banded rows and columns, in the
+  style's colour -- which the generated catalogue lacked (an overlay in
+  `table_styles_builtin`, kept apart from the generated table); and a deck's own table
+  style's unstated `wholeTbl` edges, which PowerPoint draws as 1 pt black lines (black
+  whatever the theme's `dk1`; an edge stated as `a:noFill` stays undrawn).
 - A data label with text of its own is drawn (ooxml-common): a typed or "Value From Cells"
   label (`c:dLbl/c:tx`, `c15:datalabelsRange`) prints its text with its runs' formatting
   instead of the point's value, on scatter and bubble charts too.
