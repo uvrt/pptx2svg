@@ -117,6 +117,42 @@ def _region(spec: dict) -> SourceTableCellStyle:
     return style
 
 
+def _with_borders(spec: dict | None, borders: dict | None) -> dict | None:
+    """A region's spec with measured borders added to (not over) the ones it has."""
+    if not borders:
+        return spec
+    merged = dict(spec or {})
+    merged["borders"] = {**borders, **merged.get("borders", {})}
+    return merged
+
+
+def _light_style_2(color: str) -> dict:
+    """Light Style 2's lines in ``color``: the table's outline, and the edges of the banded
+    rows and columns -- 1 pt each."""
+    line = (1.0, color)
+    return {"wholeTbl": {"left": line, "right": line, "top": line, "bottom": line},
+            "band1H": {"top": line, "bottom": line},
+            "band1V": {"left": line, "right": line}}
+
+
+#: Borders the generated catalogue lacks, measured in PowerPoint 16 (production feedback
+#: round 3): every "Light Style 2" style draws a 1 pt line in its colour around the table,
+#: along the top and bottom of each odd banded row (``band1H``) and down both sides of each
+#: odd banded column (``band1V``) -- seven styles, each with the header row and banded rows
+#: on, and Accent 1 with banded columns only, with no flags and with every flag but banded
+#: columns.  The swatch measurement that generated the catalogue read fills and the header
+#: and total-row rules, not these 1 pt lines.  Kept apart so a re-run of
+#: ``tools/derive_table_styles.py`` does not drop them.
+_MEASURED_BORDERS: dict[str, dict] = {
+    "{7E9639D4-E3E2-4D34-9284-5A2195B3D0D7}": _light_style_2("dk1"),
+    "{69012ECD-51FC-41F1-AA8D-1B2483CD663E}": _light_style_2("accent1"),
+    "{72833802-FEF1-4C79-8D5D-14CF1EAF98D9}": _light_style_2("accent2"),
+    "{F2DE63D5-997A-4646-A377-4702673A728D}": _light_style_2("accent3"),
+    "{17292A2E-F333-43FB-9621-5CBBE7FDCDCB}": _light_style_2("accent4"),
+    "{5A111915-BE36-4E01-A7E5-04B1672EAD32}": _light_style_2("accent5"),
+    "{912C8C85-51F0-491E-9774-3900AFEF0FD7}": _light_style_2("accent6"),
+}
+
 _CACHE: dict[str, SourceTableStyle] = {}
 
 
@@ -133,8 +169,10 @@ def builtin_table_style(style_id: str) -> SourceTableStyle | None:
 
     style = SourceTableStyle(style_id=style_id, name=spec["name"])
     for element_name, attribute in TABLE_STYLE_REGIONS:
-        if element_name in spec:
-            setattr(style, attribute, _region(spec[element_name]))
+        region = _with_borders(spec.get(element_name), _MEASURED_BORDERS.get(key, {}).get(
+            element_name))
+        if region is not None:
+            setattr(style, attribute, _region(region))
     _CACHE[key] = style
     return style
 
