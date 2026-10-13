@@ -58,6 +58,13 @@ pptx2svg deck.pptx -o out/ -f both -s 1,3-5 --width 1920
 pptx2svg fonts --check deck.pptx     # exit 1 if this deck cannot be drawn faithfully
 ```
 
+What PowerPoint takes from its machine rather than the file -- a chart's decimal and
+thousands separators, the language of a date field that names none -- comes from
+`ConvertOptions(locale=...)` (an `ooxml_common.locales.Locale`), en-US unless given and
+never read from the server. A date field shows `ConvertOptions(now=...)`, else the
+current time in the server's local time zone: pin it, or pass an aware datetime in the
+user's zone ([docs/usage.md](docs/usage.md#locale-and-clock)).
+
 Also: the resolved model (`convert_pptx_to_model`) and a compact agent view for a language
 model to read (`convert_pptx_to_agent_svg`) -- see [docs/usage.md](docs/usage.md).
 

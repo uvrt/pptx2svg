@@ -27,9 +27,13 @@ What one reading on 10 October cannot settle: the order of day and month and whe
 either is zero-padded, since both are 10.  There the patterns follow the locale's own
 short date pattern (Unicode CLDR as macOS ships it), which every measured numeric
 reading agrees with (en-US ``M/d/yy`` gives ``10/10/26``, de-DE ``dd.MM.yy`` gives
-``10.10.26``).  A language with no measured table draws in en-US's formats and says so
-(``field-date-format``): PowerPoint itself falls back to the machine's locale, which a
-renderer has no business reproducing.  Japanese is not in the table for that reason --
+``10.10.26``).
+
+A field with no ``lang``, or one with no measured table, is drawn in the language of the
+caller's locale (:attr:`pptx2svg.ConvertOptions.locale`, en-US unless given) when that has
+a table, else in en-US's, and says so (``field-date-format``): PowerPoint itself falls
+back to the machine's locale, which a renderer has no business reading from *its*
+machine -- the caller states it instead.  Japanese is not in the table because
 PowerPoint for Mac drew three of its thirteen formats from the machine's Dutch.
 """
 
@@ -104,7 +108,8 @@ NAMES: dict[str, tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[
 #: en-GB writes its markers in lower case ("9:26 pm"); measured.
 _MARKERS = {"en-GB": ("am", "pm")}
 
-#: The language a field with no (known) ``lang`` is formatted in.
+#: The language a field with no (known) ``lang`` is formatted in when the caller's
+#: locale has no table either (:func:`fallback_language`).
 DEFAULT_LANGUAGE = "en-US"
 
 SLIDE_NUMBER = "slidenum"
@@ -138,6 +143,13 @@ def table_language(lang: str | None) -> str | None:
     return None
 
 
+def fallback_language(language: str | None) -> str:
+    """The :data:`DATE_FORMATS` key a field with no (known) ``lang`` is drawn in, for a
+    locale in ``language`` (:attr:`ooxml_common.locales.Locale.language`): its own table
+    when it has one, else :data:`DEFAULT_LANGUAGE`."""
+    return table_language(language) or DEFAULT_LANGUAGE
+
+
 def evaluate_field(
     field_type: str | None,
     cached: str,
@@ -145,9 +157,12 @@ def evaluate_field(
     slide_number: int,
     now: datetime,
     lang: str | None,
+    default_language: str = DEFAULT_LANGUAGE,
 ) -> tuple[str, str | None]:
     """The text PowerPoint draws for a field, and the language it fell back from when
-    it had no table for the field's own (``None`` when it did, or for a non-date)."""
+    it had no table for the field's own (``None`` when it did, or for a non-date).
+    ``default_language`` -- a :data:`DATE_FORMATS` key, see :func:`fallback_language` --
+    is the language it falls back to."""
     if not field_type:
         return cached, None
     if field_type.lower() == SLIDE_NUMBER:
@@ -158,7 +173,7 @@ def evaluate_field(
     language = table_language(lang)
     missing = None
     if language is None:
-        missing, language = (lang or ""), DEFAULT_LANGUAGE
+        missing, language = (lang or ""), fallback_language(default_language)
     return format_date(now, DATE_FORMATS[language][index - 1], language), missing
 
 

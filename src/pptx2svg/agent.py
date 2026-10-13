@@ -37,6 +37,8 @@ from collections import Counter
 from typing import Callable, Iterable
 from xml.sax.saxutils import escape, quoteattr
 
+from ooxml_common.locales import EN_US
+
 from . import model as m
 from .opc import OpcPackage
 from .parse.parts import read_presentation
@@ -60,8 +62,8 @@ def convert_pptx_to_agent_svg(source, options=None) -> list[str]:
 
     ``source`` is a path, bytes, a file object or an :class:`~pptx2svg.opc.OpcPackage`, as
     for :func:`pptx2svg.convert_pptx_to_svg`; of ``options`` (a
-    :class:`~pptx2svg.ConvertOptions`) only ``slide_numbers``, ``now`` and ``warnings``
-    apply.
+    :class:`~pptx2svg.ConvertOptions`) only ``slide_numbers``, ``now``, ``locale`` and
+    ``warnings`` apply.
     """
     if isinstance(source, OpcPackage):
         package = source
@@ -74,7 +76,8 @@ def convert_pptx_to_agent_svg(source, options=None) -> list[str]:
     slide_numbers = getattr(options, "slide_numbers", None) if options is not None else None
     resolved = resolve_presentation(package, presentation, slide_numbers=slide_numbers,
                                     color_names=names,
-                                    now=getattr(options, "now", None) if options else None)
+                                    now=getattr(options, "now", None) if options else None,
+                                    locale=getattr(options, "locale", EN_US) if options else EN_US)
     if options is not None and getattr(options, "warnings", None) is not None:
         options.warnings.extend(resolved.warnings)
     return [render_slide_to_agent_svg(slide, resolved.slide_size, names)
