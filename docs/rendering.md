@@ -45,7 +45,10 @@ hyperlinks; and alt text as `aria-label`.
 **Tables** render with merged cells, borders and fills, and with **PowerPoint's built-in
 table styles** — all 74 of them, measured out of PowerPoint itself, because it keeps
 those definitions inside the application and never writes them into the file. A table
-that names one therefore renders banded and headed rather than as a bare grid.
+that names one therefore renders banded and headed rather than as a bare grid. "Themed
+Style 1" and "2" are carried as PowerPoint's own definitions instead, since they draw on
+the theme's format scheme: the table on a theme fill style (a gradient in Office's themes)
+with its effect style's shadow, every line a theme line style.
 
 **Charts** — `barChart`, `lineChart`, `areaChart`, `scatterChart`, `bubbleChart`,
 `pieChart`, `doughnutChart`, `ofPieChart`, `radarChart`, `stockChart` and `surfaceChart`,

@@ -340,6 +340,31 @@ def test_the_builtin_catalogue_is_complete():
     assert names == expected
 
 
+
+def test_themed_styles_are_powerpoints_own_definitions():
+    """"Themed Style 1" and "2" draw on the theme's format scheme, which no fixed colour
+    measured on one theme can stand for: every accent of both is read from PowerPoint's own
+    definition -- a ``a:tblBg`` fill and effect style and ``a:lnRef`` lines in its accent --
+    under the GUID and name the catalogue lists."""
+    from pptx2svg.parse.source import SourceStyleReference
+    from pptx2svg.parse.table_styles_builtin import BUILTIN_TABLE_STYLES, builtin_table_style
+
+    themed = {key: spec["name"] for key, spec in BUILTIN_TABLE_STYLES.items()
+              if spec["name"].startswith("Themed Style")}
+    assert len(themed) == 12
+    for key, name in themed.items():
+        style = builtin_table_style(key)
+        accent = "accent" + name[-1]
+        family_two = name.startswith("Themed Style 2")
+        assert style.name == name
+        assert style.background.fill_ref.idx == (3 if family_two else 2)
+        assert style.background.effect_ref.idx == (3 if family_two else 1)
+        assert style.background.fill_ref.color.scheme == accent
+        outline = style.whole_table.border_left
+        assert isinstance(outline, SourceStyleReference) and outline.idx == 1
+        assert outline.color.scheme == accent
+        assert (style.se_cell is not None) == family_two
+
 # -- Whole packages --------------------------------------------------------------------
 
 

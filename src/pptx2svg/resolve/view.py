@@ -627,28 +627,68 @@ def _resolve_table(context: ResolveContext, table: s.SourceTable) -> m.TableElem
     column_count = len(table.columns)
     row_count = len(table.rows)
 
+    styles = [
+        [
+            _cell_style(style, table, row_index, column_index, cell, row_count, column_count)
+            for column_index, cell in enumerate(row.cells)
+        ]
+        for row_index, row in enumerate(table.rows)
+    ]
+    _settle_shared_edges(table, styles)
     rows = [
         m.TableRow(
             height=row.height,
             cells=[
-                _resolve_table_cell(
-                    context,
-                    cell,
-                    _cell_style(style, table, row_index, column_index, cell,
-                                row_count, column_count),
-                )
+                _resolve_table_cell(context, cell, styles[row_index][column_index])
                 for column_index, cell in enumerate(row.cells)
             ],
         )
         for row_index, row in enumerate(table.rows)
     ]
+    background, effects = _resolve_table_background(
+        context, style.background if style is not None else None
+    )
     return m.TableElement(
         transform=_resolve_transform(context, table.transform),
         table=m.TableData(
-            rows=rows, columns=[m.TableColumn(width=width) for width in table.columns]
+            rows=rows,
+            columns=[m.TableColumn(width=width) for width in table.columns],
+            background=background,
+            effects=effects,
         ),
         alt_text=table.alt_text or table.name,
     )
+
+
+def _resolve_table_background(
+    context: ResolveContext, background: s.SourceTableBackground | None
+) -> tuple[m.Fill | None, m.EffectList | None]:
+    """A table style's ``a:tblBg``: the fill drawn under the whole table and the effects
+    applied to it, each its own or the theme's format-scheme entry its reference names,
+    ``phClr`` the reference's colour -- as a shape's ``a:style`` resolves.
+
+    "Themed Style 1" is drawn on fill style 2 with effect style 1, "Themed Style 2" on fill
+    style 3 with effect style 3.  Measured on PowerPoint 16's PDF export (every accent, six
+    flag sets): under the 2013 Office theme both draw fill style 2's or 3's gradient across
+    the table, and only "Themed Style 2" a shadow, effect style 3 being the 2013 theme's
+    only shadow; under the 2007 Office theme both draw a shadow, and no bevel for effect
+    style 3's ``a:sp3d`` -- a table has no 3-D here either.
+    """
+    if background is None:
+        return None, None
+    fill = None
+    if background.fill is not None:
+        fill = _resolve_fill(context, background.fill)
+    elif background.fill_ref is not None:
+        fill = _resolve_fill_reference(context, background.fill_ref)
+    if isinstance(fill, m.NoFill):
+        fill = None
+    effects = None
+    if background.effects is not None:
+        effects = _resolve_effects(context, background.effects)
+    elif background.effect_ref is not None:
+        effects = _resolve_effect_reference(context, background.effect_ref)
+    return fill, effects
 
 
 def _table_style(context: ResolveContext, table: s.SourceTable) -> s.SourceTableStyle | None:
@@ -734,7 +774,8 @@ def _cell_regions(
     row_count: int,
     column_count: int,
 ) -> list[tuple[s.SourceTableCellStyle, tuple[int, int], tuple[int, int]]]:
-    """Every style region covering this cell, lowest precedence first.
+    """Every style region covering this cell, lowest precedence first (the order of
+    :data:`~pptx2svg.parse.source.TABLE_STYLE_REGIONS`).
 
     Each entry carries the region's own row and column extent, because a region's four
     named borders apply at *its* boundary and its inside borders within it: ``firstRow``
@@ -795,10 +836,68 @@ class _CellStyle:
     fill: s.SourceFill | None = None
     fill_ref: s.SourceStyleReference | None = None
     text: s.SourceRunProperties | None = None
-    border_top: s.SourceOutline | None = None
-    border_bottom: s.SourceOutline | None = None
-    border_left: s.SourceOutline | None = None
-    border_right: s.SourceOutline | None = None
+    border_top: s.SourceTableBorder | None = None
+    border_bottom: s.SourceTableBorder | None = None
+    border_left: s.SourceTableBorder | None = None
+    border_right: s.SourceTableBorder | None = None
+    #: Edge name -> the precedence of the region that set it (its index in
+    #: ``TABLE_STYLE_REGIONS``), for :func:`_settle_shared_edges`.
+    edge_ranks: dict[str, int] = field(default_factory=dict)
+
+
+def _region_rank(style: s.SourceTableStyle, region: s.SourceTableCellStyle) -> int:
+    """A region's precedence: its place in ``TABLE_STYLE_REGIONS``."""
+    for rank, (_, attribute) in enumerate(s.TABLE_STYLE_REGIONS):
+        if getattr(style, attribute) is region:
+            return rank
+    return -1
+
+
+def _settle_shared_edges(table: s.SourceTable, styles: list[list[_CellStyle]]) -> None:
+    """Give two neighbouring cells one style line on the edge they share: the one the
+    higher-precedence region states.
+
+    Each cell takes its own four edges from the regions covering it, so the line between a
+    header row and the first body row is stated twice -- ``firstRow``'s ``bottom`` for the
+    cell above, ``wholeTbl``'s ``insideH`` for the one below -- and whichever cell was drawn
+    last used to win.  PowerPoint draws the region of higher precedence, whichever side it
+    is on: measured on its PDF export of "Themed Style 1" (production feedback, gaps round),
+    the header's 1 pt ``lt1`` bottom over the body's 0.5 pt accent ``insideH``, the total
+    row's 1 pt top over the row above's 0.5 pt, and the first and last columns' 1 pt inner
+    sides over their neighbours' 0.5 pt.  Only single cells are settled; a merged cell
+    keeps its own edges.
+    """
+    rows = table.rows
+
+    def single(row_index: int, column_index: int) -> bool:
+        if row_index >= len(rows) or column_index >= len(rows[row_index].cells):
+            return False
+        cell = rows[row_index].cells[column_index]
+        return (max(1, cell.grid_span) == 1 and max(1, cell.row_span) == 1
+                and not cell.h_merge and not cell.v_merge)
+
+    for row_index, row in enumerate(rows):
+        for column_index in range(len(row.cells)):
+            if not single(row_index, column_index):
+                continue
+            here = styles[row_index][column_index]
+            for neighbour_at, own, theirs in (
+                ((row_index + 1, column_index), "border_bottom", "border_top"),
+                ((row_index, column_index + 1), "border_right", "border_left"),
+            ):
+                if not single(*neighbour_at):
+                    continue
+                there = styles[neighbour_at[0]][neighbour_at[1]]
+                own_rank = here.edge_ranks.get(own, -1)
+                their_rank = there.edge_ranks.get(theirs, -1)
+                if own_rank == their_rank:
+                    continue
+                winner, source, rank = ((here, own, own_rank) if own_rank > their_rank
+                                        else (there, theirs, their_rank))
+                line = getattr(winner, source)
+                setattr(here, own, line)
+                setattr(there, theirs, line)
+                here.edge_ranks[own] = there.edge_ranks[theirs] = rank
 
 
 def _cell_style(
@@ -838,6 +937,7 @@ def _cell_style(
             outline = outer if at_boundary else inner
             if outline is not None:
                 setattr(merged, edge, outline)
+                merged.edge_ranks[edge] = _region_rank(style, region)
 
     return merged
 
@@ -909,8 +1009,12 @@ def _resolve_table_cell(
 
 
 def _resolve_table_border(
-    context: ResolveContext, outline: s.SourceOutline | None
+    context: ResolveContext, outline: s.SourceTableBorder | None
 ) -> m.Outline | None:
+    """A cell edge: its line, or the theme line style an ``a:lnRef`` names with ``phClr``
+    the reference's colour (:func:`_resolve_line_reference`)."""
+    if isinstance(outline, s.SourceStyleReference):
+        return _resolve_line_reference(context, outline)
     border = _resolve_outline(context, outline)
     if border is None:
         return None

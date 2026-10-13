@@ -131,6 +131,9 @@ class SourceTableCellStyle:
     named sides are the region's own outer boundary.  For ``wholeTbl`` that boundary is
     the table's outline and the inside borders are every gridline; for ``firstRow`` the
     boundary is the header row's four sides and ``insideV`` separates its cells.
+
+    A border is an ``a:ln`` of its own or an ``a:lnRef`` into the theme's line styles
+    (:class:`SourceStyleReference`), which the built-in "Themed Style" tables use.
     """
 
     fill: SourceFill | None = None
@@ -138,18 +141,36 @@ class SourceTableCellStyle:
     fill_ref: SourceStyleReference | None = None
     #: ``a:tcTxStyle`` as run properties, so it can join the text cascade unchanged.
     text: SourceRunProperties | None = None
-    border_left: SourceOutline | None = None
-    border_right: SourceOutline | None = None
-    border_top: SourceOutline | None = None
-    border_bottom: SourceOutline | None = None
-    border_inside_h: SourceOutline | None = None
-    border_inside_v: SourceOutline | None = None
+    border_left: SourceTableBorder | None = None
+    border_right: SourceTableBorder | None = None
+    border_top: SourceTableBorder | None = None
+    border_bottom: SourceTableBorder | None = None
+    border_inside_h: SourceTableBorder | None = None
+    border_inside_v: SourceTableBorder | None = None
+
+
+#: One edge of a table style region: a line of its own, or a theme line style by index.
+SourceTableBorder = SourceOutline | SourceStyleReference
+
+
+@dataclass
+class SourceTableBackground:
+    """``a:tblBg`` -- what a table style draws under the whole table: a fill (``a:fill``)
+    or a theme fill style (``a:fillRef``), and effects (``a:effect``) or a theme effect
+    style (``a:effectRef``).  The built-in "Themed Style 1" and "2" tables are drawn on a
+    theme fill and effect style this way, their cells mostly unfilled over it."""
+
+    fill: SourceFill | None = None
+    fill_ref: SourceStyleReference | None = None
+    effects: SourceEffectList | None = None
+    effect_ref: SourceStyleReference | None = None
 
 
 @dataclass
 class SourceTableStyle:
     style_id: str
     name: str | None = None
+    background: SourceTableBackground | None = None
     whole_table: SourceTableCellStyle | None = None
     band1_h: SourceTableCellStyle | None = None
     band2_h: SourceTableCellStyle | None = None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 
 from pptx2svg import ConvertOptions, convert_pptx_to_model, model as m
 from pptx2svg.opc import OpcPackage
@@ -472,3 +473,73 @@ def test_an_empty_placeholder_draws_its_box_but_no_prompt(authoring):
     box = next(e for key, e in shapes.items() if key and key.endswith(".901"))
     assert box.fill.color.hex == "#ff0000" and box.text_body is None
     assert not any(key and key.endswith(".902") for key in shapes)
+
+
+# -- Gaps: "Themed Style 1" and "2" draw on the theme's format scheme ---------------------
+
+
+def themed_table(source, style_id, flags):
+    """``source`` with one 3 x 3 table in ``style_id`` and the ``tblPr`` ``flags`` given."""
+    from deckbuilder import derive_deck
+
+    attributes = "".join(f' {flag}="1"' for flag in flags)
+    frame = TABLE_NAMING_STYLE.format(style_id=style_id).replace(
+        '<a:tblPr firstRow="1" bandRow="1">', f"<a:tblPr{attributes}>")
+    resolved = convert_pptx_to_model(derive_deck(source, shapes_xml=frame), ConvertOptions())
+    return [e for e in walk(resolved.slides[0].elements) if isinstance(e, m.TableElement)][-1]
+
+
+THEMED_1_ACCENT_1 = "{3C2FFA5D-87B4-456A-9821-1D502468CF0F}"
+THEMED_2_ACCENT_1 = "{D113A9D2-9D6B-4929-AA2D-F23B5EE8CBE7}"
+SAMPLE = Path(__file__).parent / "fixtures" / "sample.pptx"
+
+
+def test_themed_style_2_draws_on_a_theme_fill_and_effect_style(financial):
+    """PowerPoint's definition: the table on fill style 3 and effect style 3 in accent 1,
+    text ``lt1``, the header ruled with line style 3 and the first column, the total row
+    and the corners with line style 2 in ``lt1``.  Measured on PowerPoint 16's export under
+    this (2013 Office) theme: a gradient across the table, a shadow under it, 1.5 pt and
+    1 pt white rules, and no rule into or along the total row's corner cells."""
+    table = themed_table(financial, THEMED_2_ACCENT_1, ("firstRow", "lastRow", "firstCol",
+                                                        "bandRow"))
+    data, rows = table.table, table.table.rows
+    assert isinstance(data.background, m.GradientFill)
+    assert data.effects is not None and data.effects.outer_shadow is not None
+    header, band = rows[0].cells[1], rows[1].cells[1]
+    corner, total = rows[2].cells[0], rows[2].cells[1]
+    for cell in (header, total):                               # a:noFill over the gradient
+        assert cell.fill is None or isinstance(cell.fill, m.NoFill)
+    assert band.fill.color.hex == "#ffffff" and band.fill.color.alpha == 0.2
+    assert header.text_body.paragraphs[0].runs[0].properties.color.hex == "#ffffff"
+    assert (header.borders.bottom.width, header.borders.bottom.fill.color.hex) == (
+        19050, "#ffffff")
+    assert band.borders.top == header.borders.bottom           # one line on the shared edge
+    assert total.borders.top.width == 12700
+    assert rows[1].cells[0].borders.right.width == 12700       # firstCol's right rule
+    assert corner.borders.top is None and corner.borders.right is None   # swCell: none
+
+
+def test_themed_style_1_rules_every_edge_with_a_theme_line_style(financial):
+    """Fill style 2 under the table, every gridline line style 1 in the accent, the header
+    solid accent with a line style 2 ``lt1`` rule under it.  PowerPoint draws that white
+    rule over the body's 0.5 pt accent ``insideH`` on the edge the two share (it draws the
+    region of higher precedence there), and no shadow: this theme's effect style 1 is
+    empty."""
+    table = themed_table(financial, THEMED_1_ACCENT_1, ("firstRow", "bandRow"))
+    data, rows = table.table, table.table.rows
+    assert isinstance(data.background, m.GradientFill)
+    assert data.effects is None or data.effects.is_empty()
+    header, body = rows[0].cells[0], rows[1].cells[0]
+    assert header.fill.color.hex == "#4472c4"
+    assert (body.borders.top.width, body.borders.top.fill.color.hex) == (12700, "#ffffff")
+    assert (body.borders.right.width, body.borders.right.fill.color.hex) == (6350, "#4472c4")
+    assert body.fill.color.alpha == 0.4                         # band1H over the gradient
+
+
+def test_themed_styles_take_a_2007_themes_shadow_and_no_bevel():
+    """The 2007 Office theme's effect styles are all shadows, the third with a bevel: both
+    families draw a shadow under the table there, and PowerPoint draws no bevel."""
+    for style_id in (THEMED_1_ACCENT_1, THEMED_2_ACCENT_1):
+        table = themed_table(SAMPLE, style_id, ("firstRow", "bandRow"))
+        assert isinstance(table.table.background, m.GradientFill)
+        assert table.table.effects.outer_shadow is not None
