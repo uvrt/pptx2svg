@@ -42,6 +42,8 @@ from .source import (
     SourceSlide,
     SourceSlideLayout,
     SourceSlideMaster,
+    SourceTableBackground,
+    SourceTableBorder,
     SourceTableCellStyle,
     SourceTableStyle,
     SourceTableStyles,
@@ -363,7 +365,8 @@ def parse_table_style(node: Element) -> SourceTableStyle | None:
     style_id = attr(node, "styleId")
     if not style_id:
         return None
-    style = SourceTableStyle(style_id=style_id, name=attr(node, "styleName"))
+    style = SourceTableStyle(style_id=style_id, name=attr(node, "styleName"),
+                             background=parse_table_background(child(node, "tblBg")))
     for element_name, attribute in TABLE_STYLE_REGIONS:
         region = parse_table_cell_style(child(node, element_name))
         if region is not None:
@@ -383,16 +386,39 @@ def parse_table_cell_style(node: Element | None) -> SourceTableCellStyle | None:
         fill=parse_fill(child(tc_style, "fill")),
         fill_ref=parse_style_reference(child(tc_style, "fillRef")),
         text=parse_table_text_style(child(node, "tcTxStyle")),
-        border_left=parse_line(child(child(borders, "left"), "ln")),
-        border_right=parse_line(child(child(borders, "right"), "ln")),
-        border_top=parse_line(child(child(borders, "top"), "ln")),
-        border_bottom=parse_line(child(child(borders, "bottom"), "ln")),
-        border_inside_h=parse_line(child(child(borders, "insideH"), "ln")),
-        border_inside_v=parse_line(child(child(borders, "insideV"), "ln")),
+        border_left=parse_table_border(child(borders, "left")),
+        border_right=parse_table_border(child(borders, "right")),
+        border_top=parse_table_border(child(borders, "top")),
+        border_bottom=parse_table_border(child(borders, "bottom")),
+        border_inside_h=parse_table_border(child(borders, "insideH")),
+        border_inside_v=parse_table_border(child(borders, "insideV")),
     )
     if all(value is None for value in vars(style).values()):
         return None
     return style
+
+
+def parse_table_border(node: Element | None) -> SourceTableBorder | None:
+    """One ``a:tcBdr`` edge: its own ``a:ln``, or an ``a:lnRef`` into the theme's line
+    styles (the built-in "Themed Style" tables draw every line that way)."""
+    if node is None:
+        return None
+    return parse_line(child(node, "ln")) or parse_style_reference(child(node, "lnRef"))
+
+
+def parse_table_background(node: Element | None) -> SourceTableBackground | None:
+    """``a:tblBg``: a fill or a theme fill style, and effects or a theme effect style."""
+    if node is None:
+        return None
+    background = SourceTableBackground(
+        fill=parse_fill(child(node, "fill")),
+        fill_ref=parse_style_reference(child(node, "fillRef")),
+        effects=parse_effect_list(child(child(node, "effect"), "effectLst")),
+        effect_ref=parse_style_reference(child(node, "effectRef")),
+    )
+    if all(value is None for value in vars(background).values()):
+        return None
+    return background
 
 
 def parse_table_text_style(node: Element | None) -> SourceRunProperties | None:

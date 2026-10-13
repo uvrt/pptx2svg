@@ -64,7 +64,9 @@ classifiers = [
 # symbols.py) and a data label's own text (tests/test_point_labels.py).
 # 0.12 restates an SVG picture's root size in pixels as PowerPoint reads it before a page
 # is rasterised (`svgimage.with_pixel_sized_images`; tests/test_svg_picture_png.py).
-dependencies = ["ooxml-common>=0.12.0"]
+# 0.14 draws a table style's background and effects under the table (`TableData.background`
+# and `.effects`; the built-in "Themed Style" tables, tests/test_resolve.py).
+dependencies = ["ooxml-common>=0.14.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

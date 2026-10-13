@@ -5,6 +5,31 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- The built-in "Themed Style 1" and "Themed Style 2" tables (all six accents of each) are
+  drawn as PowerPoint draws them.  They draw on the theme's format scheme -- the table on
+  a fill style with an effect style under it, every line a line style -- which the
+  measured catalogue had flattened to one solid accent fill and a few white rules.
+  `tools/derive_themed_table_styles.py` measures, on PowerPoint 16's PDF export under five
+  themes built to tell the indices and the `phClr` colour apart, which fill, line and
+  effect style each region uses and in which colour, the fills' alpha, the text's colour,
+  weight and face, and the corner cells' exceptions; the twelve styles are written from
+  that and read like a deck's own `tableStyles.xml`, which now reads `a:lnRef` borders and
+  `a:tblBg` (fill or fill style, effects or effect style) too.  The background is drawn
+  once under the whole table and its shadow under the table (ooxml-common 0.14); a bevel
+  in the effect style is not drawn, as PowerPoint draws none on a table.  The tool's
+  `check` finds no cell fill, edge, shadow or text that differs from PowerPoint's.
+  Two neighbouring cells now share one style line on their common edge -- the one the
+  region of higher precedence states, whichever side it is on (a header's bottom rule
+  over the first body row's gridline), where the cell drawn last used to win.
+  Under the 2013 and 2007 Office themes, every accent with six flag sets: 109 of 144
+  tables match PowerPoint's export in fill, every grid edge and shadow (0 before); the
+  other 35 are "Themed Style 2" on the 2007 theme, whose gradient PowerPoint interpolates
+  lighter mid-way than a linear SVG gradient (as it does on a shape with the same fill
+  style, not a table matter) and whose shadow is drawn a little lighter.  Two VRT
+  snapshots change only in the first body row's top line under a Medium Style 2 header,
+  now the header's 3 pt rule rather than a 1 pt one drawn over it: the same pixels but
+  for anti-aliasing.
+
 - An SVG picture (`asvg:svgBlip`) is drawn in PNG output whatever unit its root's size is
   in: resvg-py drew nothing for `width="72pt"` -- or `pc`, `in`, `cm`, `mm` -- ("SVG has an
   invalid size") and nothing for an SVG that is not UTF-8, so the picture vanished from the
