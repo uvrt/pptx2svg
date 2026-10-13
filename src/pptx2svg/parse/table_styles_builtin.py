@@ -42,6 +42,12 @@ same run reproduced the other 72 entries byte for byte.
 -- PowerPoint genuinely pairs that family's accents as "Accent 1/Accent 2", "Accent
 3/Accent 4" and "Accent 5/Accent 6", and all three pairs are present.
 
+*Exception:* "Themed Style 1" and "Themed Style 2" draw on the theme's format scheme --
+fill, effect and line styles by index -- so a colour measured under one theme is wrong
+under the next.  ``tools/derive_themed_table_styles.py`` measures which index and which
+colour each region uses instead, and :data:`_THEMED_STYLE_XML` is written from that; their
+entries in :data:`BUILTIN_TABLE_STYLES` stay for the GUID and the name.
+
 A table naming a GUID that is in neither the deck nor this table still falls back to no
 style, which is what PowerPoint does too -- but the resolver now says so with a
 ``table-style-unknown`` warning, because the render being defensible does not make the
@@ -58,6 +64,7 @@ from __future__ import annotations
 
 import re
 
+from ..xmlutil import parse_xml
 from .source import (
     ColorTransform,
     SchemeColor,
@@ -153,6 +160,113 @@ _MEASURED_BORDERS: dict[str, dict] = {
     "{912C8C85-51F0-491E-9774-3900AFEF0FD7}": _light_style_2("accent6"),
 }
 
+
+#: Built-in styles carried as definitions rather than as measured colours: "Themed Style 1"
+#: and "Themed Style 2".  They draw on the theme's format scheme -- the table on a fill
+#: style (``a:tblBg/a:fillRef``) with an effect style under it (``a:effectRef``), their
+#: lines line styles (``a:lnRef``) -- so a colour measured under one theme is wrong under
+#: the next.  ``tools/derive_themed_table_styles.py`` measured what each region draws in
+#: PowerPoint 16 for Mac's PDF export under five themes built to tell the indices and the
+#: ``phClr`` colour apart, on six tables per style that expose every region, and these
+#: templates are written from that and nothing else:
+#:
+#: * Themed Style 1: the table on fill style 2 and effect style 1 in the accent; text
+#:   ``dk1`` in the theme's minor font; every line line style 1 in the accent; banded rows
+#:   and columns the accent at 40 % alpha; the header filled with the accent, white bold
+#:   text, line style 2 in ``lt1`` under it and no line between its cells; the total row
+#:   unfilled and bold with line style 2 in the accent above and below it and no line
+#:   between its cells; the first and last columns bold with line style 2 in the accent on
+#:   their inner side.
+#: * Themed Style 2: the table on fill style 3 and effect style 3 in the accent; text
+#:   ``lt1`` in the minor font; line style 1 in the accent tinted 50 % round the outside
+#:   and no gridlines; banded rows and columns ``lt1`` at 20 % alpha; the header and the
+#:   total row unfilled and bold, line style 3 in ``lt1`` under the header and line style
+#:   2 in ``lt1`` above the total row; the first and last columns bold with line style 2 in
+#:   ``lt1`` on their inner side; and no line under the header's last cell or into or along
+#:   either corner of the total row.
+#:
+#: All six accents of each family measured alike but for the accent, written ``{accent}``
+#: here; neither family has an accent-less member.  An edge or fill no measurement could
+#: tell from "not stated" is left unstated.  Under the themes' bevelled effect styles
+#: PowerPoint drew no bevel on a table, so none is drawn here either.
+_THEMED_STYLE_XML = {
+    "Themed Style 1": (
+        '<a:tblBg><a:fillRef idx="2"><a:schemeClr val="{accent}"/></a:fillRef>'
+        '<a:effectRef idx="1"><a:schemeClr val="{accent}"/></a:effectRef></a:tblBg>'
+        '<a:wholeTbl><a:tcTxStyle><a:fontRef idx="minor"/><a:schemeClr val="dk1"/>'
+        '</a:tcTxStyle><a:tcStyle><a:tcBdr><a:left><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:left><a:right><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:right><a:top><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:top><a:bottom><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:bottom><a:insideH><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:insideH><a:insideV><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:insideV></a:tcBdr></a:tcStyle>'
+        '</a:wholeTbl><a:band1H><a:tcStyle><a:fill><a:solidFill><a:schemeClr val="{accent}">'
+        '<a:alpha val="40000"/></a:schemeClr></a:solidFill></a:fill></a:tcStyle></a:band1H>'
+        '<a:band1V><a:tcStyle><a:fill><a:solidFill><a:schemeClr val="{accent}">'
+        '<a:alpha val="40000"/></a:schemeClr></a:solidFill></a:fill></a:tcStyle></a:band1V>'
+        '<a:lastCol><a:tcTxStyle b="on"/><a:tcStyle><a:tcBdr><a:left><a:lnRef idx="2">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:left></a:tcBdr></a:tcStyle></a:lastCol>'
+        '<a:firstCol><a:tcTxStyle b="on"/><a:tcStyle><a:tcBdr><a:right><a:lnRef idx="2">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:right></a:tcBdr></a:tcStyle></a:firstCol>'
+        '<a:lastRow><a:tcTxStyle b="on"/><a:tcStyle><a:tcBdr><a:top><a:lnRef idx="2">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:top><a:bottom><a:lnRef idx="2">'
+        '<a:schemeClr val="{accent}"/></a:lnRef></a:bottom><a:insideV><a:ln><a:noFill/>'
+        '</a:ln></a:insideV></a:tcBdr><a:fill><a:noFill/></a:fill></a:tcStyle></a:lastRow>'
+        '<a:firstRow><a:tcTxStyle b="on"><a:schemeClr val="lt1"/></a:tcTxStyle><a:tcStyle>'
+        '<a:tcBdr><a:bottom><a:lnRef idx="2"><a:schemeClr val="lt1"/></a:lnRef></a:bottom>'
+        '<a:insideV><a:ln><a:noFill/></a:ln></a:insideV></a:tcBdr><a:fill><a:solidFill>'
+        '<a:schemeClr val="{accent}"/></a:solidFill></a:fill></a:tcStyle></a:firstRow>'
+    ),
+    "Themed Style 2": (
+        '<a:tblBg><a:fillRef idx="3"><a:schemeClr val="{accent}"/></a:fillRef>'
+        '<a:effectRef idx="3"><a:schemeClr val="{accent}"/></a:effectRef></a:tblBg>'
+        '<a:wholeTbl><a:tcTxStyle><a:fontRef idx="minor"/><a:schemeClr val="lt1"/>'
+        '</a:tcTxStyle><a:tcStyle><a:tcBdr><a:left><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"><a:tint val="50000"/></a:schemeClr></a:lnRef></a:left>'
+        '<a:right><a:lnRef idx="1"><a:schemeClr val="{accent}"><a:tint val="50000"/>'
+        '</a:schemeClr></a:lnRef></a:right><a:top><a:lnRef idx="1">'
+        '<a:schemeClr val="{accent}"><a:tint val="50000"/></a:schemeClr></a:lnRef></a:top>'
+        '<a:bottom><a:lnRef idx="1"><a:schemeClr val="{accent}"><a:tint val="50000"/>'
+        '</a:schemeClr></a:lnRef></a:bottom></a:tcBdr></a:tcStyle></a:wholeTbl><a:band1H>'
+        '<a:tcStyle><a:fill><a:solidFill><a:schemeClr val="lt1"><a:alpha val="20000"/>'
+        '</a:schemeClr></a:solidFill></a:fill></a:tcStyle></a:band1H><a:band1V><a:tcStyle>'
+        '<a:fill><a:solidFill><a:schemeClr val="lt1"><a:alpha val="20000"/></a:schemeClr>'
+        '</a:solidFill></a:fill></a:tcStyle></a:band1V><a:lastCol><a:tcTxStyle b="on"/>'
+        '<a:tcStyle><a:tcBdr><a:left><a:lnRef idx="2"><a:schemeClr val="lt1"/></a:lnRef>'
+        '</a:left></a:tcBdr></a:tcStyle></a:lastCol><a:firstCol><a:tcTxStyle b="on"/>'
+        '<a:tcStyle><a:tcBdr><a:right><a:lnRef idx="2"><a:schemeClr val="lt1"/></a:lnRef>'
+        '</a:right></a:tcBdr></a:tcStyle></a:firstCol><a:lastRow><a:tcTxStyle b="on"/>'
+        '<a:tcStyle><a:tcBdr><a:top><a:lnRef idx="2"><a:schemeClr val="lt1"/></a:lnRef>'
+        '</a:top></a:tcBdr><a:fill><a:noFill/></a:fill></a:tcStyle></a:lastRow><a:firstRow>'
+        '<a:tcTxStyle b="on"/><a:tcStyle><a:tcBdr><a:bottom><a:lnRef idx="3">'
+        '<a:schemeClr val="lt1"/></a:lnRef></a:bottom></a:tcBdr><a:fill><a:noFill/></a:fill>'
+        '</a:tcStyle></a:firstRow><a:neCell><a:tcStyle><a:tcBdr><a:bottom><a:ln><a:noFill/>'
+        '</a:ln></a:bottom></a:tcBdr></a:tcStyle></a:neCell><a:seCell><a:tcStyle><a:tcBdr>'
+        '<a:left><a:ln><a:noFill/></a:ln></a:left><a:top><a:ln><a:noFill/></a:ln></a:top>'
+        '</a:tcBdr></a:tcStyle></a:seCell><a:swCell><a:tcStyle><a:tcBdr><a:right><a:ln>'
+        '<a:noFill/></a:ln></a:right><a:top><a:ln><a:noFill/></a:ln></a:top></a:tcBdr>'
+        '</a:tcStyle></a:swCell>'
+    ),
+}
+
+#: GUID -> (family, accent) of each style :data:`_THEMED_STYLE_XML` defines.
+_THEMED_STYLES: dict[str, tuple[str, str]] = {
+    "{3C2FFA5D-87B4-456A-9821-1D502468CF0F}": ("Themed Style 1", "accent1"),
+    "{284E427A-3D55-4303-BF80-6455036E1DE7}": ("Themed Style 1", "accent2"),
+    "{69C7853C-536D-4A76-A0AE-DD22124D55A5}": ("Themed Style 1", "accent3"),
+    "{775DCB02-9BB8-47FD-8907-85C794F793BA}": ("Themed Style 1", "accent4"),
+    "{35758FB7-9AC5-4552-8A53-C91805E547FA}": ("Themed Style 1", "accent5"),
+    "{08FB837D-C827-4EFA-A057-4D05807E0F7C}": ("Themed Style 1", "accent6"),
+    "{D113A9D2-9D6B-4929-AA2D-F23B5EE8CBE7}": ("Themed Style 2", "accent1"),
+    "{18603FDC-E32A-4AB5-989C-0864C3EAD2B8}": ("Themed Style 2", "accent2"),
+    "{306799F8-075E-4A3A-A7F6-7FBC6576F1A4}": ("Themed Style 2", "accent3"),
+    "{E269D01E-BC32-4049-B463-5C60D7B0CCD2}": ("Themed Style 2", "accent4"),
+    "{327F97BB-C833-4FB7-BDE5-3F7075034690}": ("Themed Style 2", "accent5"),
+    "{638B1855-1B75-4FBE-930C-398BA8C253C6}": ("Themed Style 2", "accent6"),
+}
+
+
 _CACHE: dict[str, SourceTableStyle] = {}
 
 
@@ -162,6 +276,10 @@ def builtin_table_style(style_id: str) -> SourceTableStyle | None:
         return None
     key = style_id.upper()
     if key in _CACHE:
+        return _CACHE[key]
+    if key in _THEMED_STYLES:
+        _CACHE[key] = _themed_style(style_id, BUILTIN_TABLE_STYLES[key]["name"],
+                                    *_THEMED_STYLES[key])
         return _CACHE[key]
     spec = BUILTIN_TABLE_STYLES.get(key)
     if spec is None:
@@ -175,6 +293,21 @@ def builtin_table_style(style_id: str) -> SourceTableStyle | None:
             setattr(style, attribute, _region(region))
     _CACHE[key] = style
     return style
+
+
+def _themed_style(style_id: str, name: str, family: str, accent: str) -> SourceTableStyle:
+    """One of :data:`_THEMED_STYLES`, read by the reader a deck's ``tableStyles.xml`` goes
+    through."""
+    from .parts import parse_table_style  # parts reads tableStyles.xml; imported late
+
+    xml = (f'<a:tblStyle xmlns:a="{_DRAWINGML}" styleId="{style_id}" styleName="{name}">'
+           + _THEMED_STYLE_XML[family].replace("{accent}", accent) + "</a:tblStyle>")
+    style = parse_table_style(parse_xml(xml))
+    assert style is not None
+    return style
+
+
+_DRAWINGML = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 
 #: GUID -> style definition.  Generated by ``tools/derive_table_styles.py``; edit that
