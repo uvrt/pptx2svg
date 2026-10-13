@@ -55,6 +55,7 @@ from .tables import table_row_heights
 from .text.fontmap import DEFAULT_FONT_MAPPING, create_font_mapping, family_key
 from .text.measure import DefaultTextMeasurer, FontToolsTextMeasurer, TextMeasurer
 from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
+from ooxml_common.locales import EN_US, Locale
 from ooxml_common.text.symbol_fonts import recorded_font_metrics
 
 __version__ = "0.1.0"
@@ -153,8 +154,17 @@ class ConvertOptions:
     #: conversion, as PowerPoint shows the time it draws -- so output holding such a field
     #: differs from day to day.  Pin it (``datetime(2026, 1, 31, 9, 0)``) for output that
     #: must be reproducible: tests, snapshot goldens, a cache keyed by the deck.  A naive
-    #: value is used as it stands; an aware one in its own time zone.
+    #: value is used as it stands; an aware one in its own time zone.  The time zone is
+    #: not the locale's: left to the default, it is the server's own local time zone, so
+    #: an application drawing for users elsewhere passes an aware ``now`` in theirs.
     now: datetime | None = None
+    #: The regional settings PowerPoint would take from its machine, which a deck does not
+    #: state (:class:`ooxml_common.locales.Locale`): the decimal and thousands separators
+    #: of a chart's numbers, and the language of a date field that names none.  A field's
+    #: own ``lang`` still wins.  Always :data:`~ooxml_common.locales.EN_US` unless given --
+    #: never read from the operating system, so a deck draws the same on every server.
+    #: Frozen and picklable: it travels with the options into a worker process.
+    locale: Locale = EN_US
 
 
 def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> list[str]:
@@ -208,6 +218,7 @@ def convert_pptx_to_model(
         # would find it here when the host's faces are in use, else from what we know.
         east_asian=EastAsianFaces(host=host_fonts),
         now=options.now,
+        locale=options.locale,
     )
     if options.use_embedded_fonts and presentation.embedded_fonts:
         # After resolution, not during it: `resolved_families` is what tells us which of

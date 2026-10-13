@@ -5,6 +5,15 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- `ConvertOptions(locale=...)` takes ooxml-common's shared `Locale` (0.15.0, now the
+  floor): what PowerPoint takes from its machine rather than from the deck.  A chart's
+  numbers -- data labels, axis ticks, percentages -- are printed in its decimal and
+  thousands separators, and a date field with no `lang` (or one whose language has no
+  measured table) is drawn in its language when `DATE_FORMATS` has it, else in en-US's as
+  before; a field's own `lang` still wins.  The default is `EN_US`, never the operating
+  system's locale, and draws byte for byte what it drew before: goldens and VRT
+  snapshots unchanged.  The agent view takes it too.  The docs now say that `now` left
+  to the default is the server's local time zone, which is not a locale field.
 - The built-in "Themed Style 1" and "Themed Style 2" tables (all six accents of each) are
   drawn as PowerPoint draws them.  They draw on the theme's format scheme -- the table on
   a fill style with an effect style under it, every line a line style -- which the

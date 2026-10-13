@@ -47,7 +47,7 @@ from ..parse import source as s
 from ..text.fontmap import theme_east_asian
 from ..text.measure import is_cjk
 from .east_asian import EastAsianFaces
-from .fields import DEFAULT_LANGUAGE, evaluate_field
+from .fields import evaluate_field, fallback_language
 from ..units import ROTATION_UNIT
 from .naming import resolve_color
 
@@ -396,19 +396,23 @@ def _field_text(
         if properties is not None:
             lang = properties.lang
     now = getattr(context, "now", None) or datetime.now()
+    locale = getattr(context, "locale", None)
+    # Where the field states no language PowerPoint uses its machine's; here the caller's.
+    fallback = fallback_language(locale.language if locale is not None else None)
     text, missing = evaluate_field(
         field_type,
         run.text,
         slide_number=slide.slide_number + presentation.first_slide_number - 1,
         now=now,
         lang=lang,
+        default_language=fallback,
     )
     if missing is not None and missing not in context.field_languages_warned:
         context.field_languages_warned.add(missing)
         context.warn(
             "field-date-format",
             f"a {field_type} date field in language {missing or '(none)'!r}, whose formats "
-            f"are not measured, is drawn in {DEFAULT_LANGUAGE}'s",
+            f"are not measured, is drawn in {fallback}'s",
         )
     return text
 

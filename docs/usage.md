@@ -71,9 +71,10 @@ slide's own placeholders or in a plain text box on the layout or master (a foote
 "‹#› | Copyright …") shows the slide's number (counting from `firstSlideNum`) and the
 date, rather than the text cached in the file. The date is the clock at conversion, in the
 field's language and format (`datetime1` … `datetime13`, measured for en-US, en-GB, nl-NL,
-de-DE and fr-FR; any other language is drawn in en-US's formats with a
-`field-date-format` warning). Output holding a date field therefore changes from day to
-day; pin the clock for anything that must be reproducible -- tests, goldens, a cache:
+de-DE and fr-FR). A field with no `lang`, or one in any other language, is drawn in the
+language of the conversion's locale (below) when that is one of the five, else in
+en-US's, with a `field-date-format` warning. Output holding a date field therefore changes
+from day to day; pin the clock for anything that must be reproducible -- tests, goldens, a cache:
 
 ```python
 from datetime import datetime
@@ -90,6 +91,31 @@ no Hangul). It comes once per face and script, on the first slide that has it, a
 `ConvertOptions(check_glyphs=False)` (or `svg_to_png(..., check_glyphs=False)`) skips the
 check, which reads the fonts' `name` and `cmap` tables -- the host's only when the bundle
 and the files passed in leave something unfound.
+
+### Locale and clock
+
+PowerPoint takes a few things from the machine it runs on rather than from the file: the
+decimal and thousands separators of a chart's numbers (a data label in `#,##0.0` is drawn
+`1,240.0` by default, `1.240,0` in a locale with a decimal comma) and the language of a
+date field that states none. A renderer that read them from *its* machine would draw the
+same deck differently on every server, so pptx2svg never does: the caller says which
+locale a conversion is in, and without one it is en-US.
+
+```python
+from ooxml_common.locales import Locale
+
+nl = Locale(decimal_separator=",", thousands_separator=".", date_order="dmy",
+            language="nl-NL", list_separator=";")
+convert_pptx_to_svg("deck.pptx", ConvertOptions(locale=nl))
+```
+
+`Locale` is frozen and picklable, so the options travel into worker processes unchanged.
+A field's own `lang` still wins over the locale's language.
+
+The time zone is not part of the locale. `now` left to the default is the current time in
+the **server's local time zone** (`datetime.now()`); a service drawing for users elsewhere
+passes `now` as an aware datetime in the user's zone
+(`datetime.now(ZoneInfo("Europe/Brussels"))`), or a fixed value for reproducible output.
 
 
 ## Command line

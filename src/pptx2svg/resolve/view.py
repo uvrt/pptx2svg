@@ -38,6 +38,7 @@ from ooxml_common.drawingml.diagram import (  # noqa: F401  (moved; re-exported)
     diagram_child_transform,
     diagram_drawing_part,
 )
+from ooxml_common.locales import EN_US, Locale
 
 from .. import model as m
 from ..fonts.embedded import NO_EMBEDDED_FONTS, EmbeddedFonts
@@ -155,6 +156,9 @@ class ResolveContext:
     #: The clock a date field (``a:fld type="datetime1"``) shows; see
     #: :mod:`pptx2svg.resolve.fields`.  ``None``: the time of resolution.
     now: datetime | None = None
+    #: The caller's regional settings (:attr:`pptx2svg.ConvertOptions.locale`): a chart's
+    #: number separators and the language of a date field with none of its own.
+    locale: Locale = EN_US
     #: Languages a date field fell back from, so each is reported once per slide.
     field_languages_warned: set[str] = field(default_factory=set)
 
@@ -196,6 +200,7 @@ def resolve_presentation(
     east_asian=None,
     color_names: dict | None = None,
     now: datetime | None = None,
+    locale: Locale = EN_US,
 ) -> ResolvedPresentation:
     """Resolve the slides.  ``color_names``, when given, collects the theme name of every
     scheme colour resolved (``id(resolved) -> (resolved, "accent1 lumMod=75%")``), which
@@ -217,6 +222,7 @@ def resolve_presentation(
         )
         context.east_asian = east_asian
         context.now = now
+        context.locale = locale
         slides.append(resolve_slide(context))
         warnings.extend(context.warnings)
         if context.theme is not None:
@@ -1164,6 +1170,8 @@ def _resolve_chart(context: ResolveContext, node: s.SourceUnsupported) -> m.Slid
         # Every drawable group, not only the first: a combo chart is several of them over
         # one plot area.  `ChartBuilder` decides which of them it can draw together.
         plots=plots,
+        # The separators PowerPoint would take from its machine: the caller's.
+        locale=chart_context.locale,
     )
     children, data = builder.build()
 
