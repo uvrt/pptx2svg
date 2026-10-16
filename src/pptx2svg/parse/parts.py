@@ -199,6 +199,60 @@ def _slide_paths(
     ]
 
 
+def template_parts(package: OpcPackage, presentation: SourcePresentation) -> dict[str, str]:
+    """Every slide master and layout of the deck, ``{part path: "master" | "layout"}``:
+    each master in ``p:sldMasterIdLst`` order, then its layouts."""
+    found: dict[str, str] = {}
+    for master in package.related_parts_of_type(presentation.part_path, REL_SLIDE_MASTER):
+        found.setdefault(master, "master")
+        for layout in package.related_parts_of_type(master, REL_SLIDE_LAYOUT):
+            found.setdefault(layout, "layout")
+    return found
+
+
+def read_template(
+    package: OpcPackage, presentation: SourcePresentation, part_path: str
+) -> SourceSlide:
+    """A stand-in slide on the layout or master ``part_path``, with the placeholders of
+    that part as its shapes, for a template view to draw (:mod:`pptx2svg.resolve.templates`).
+
+    A layout's stand-in is built on it, so its background, the master's shapes (unless
+    the layout's ``showMasterSp`` says not) and its own shapes come as a slide's would; a
+    master's has no layout.  The layout, master and theme are read into ``presentation``
+    as a slide's are.  Raises ``ValueError`` when ``part_path`` is neither.
+    """
+    part_path = part_path.lstrip("/")
+    kinds = template_parts(package, presentation)
+    kind = kinds.get(part_path)
+    if kind is None:
+        raise ValueError(
+            f"{part_path!r} is not a slide layout or master of this deck; it has "
+            f"{list(kinds)}"
+        )
+    if kind == "layout":
+        stand_in = SourceSlide(part_path=part_path, layout_part_path=part_path,
+                               slide_number=0, template="layout")
+        _ensure_ancestry(package, presentation, stand_in)
+        owner = presentation.layouts.get(part_path)
+    else:
+        stand_in = SourceSlide(part_path=part_path, slide_number=0, template="master")
+        owner = presentation.masters.get(part_path)
+        if owner is None:
+            owner = read_slide_master(package, part_path)
+            if owner is not None:
+                presentation.masters[part_path] = owner
+        theme_path = owner.theme_part_path if owner is not None else None
+        if theme_path is not None and theme_path not in presentation.themes:
+            theme = read_theme(package, theme_path)
+            if theme is not None:
+                presentation.themes[theme_path] = theme
+    if owner is None:
+        raise ValueError(f"{part_path!r} could not be read")
+    stand_in.shapes = [shape for shape in owner.shapes
+                       if getattr(shape, "placeholder", None) is not None]
+    return stand_in
+
+
 def _ensure_ancestry(
     package: OpcPackage, presentation: SourcePresentation, slide: SourceSlide
 ) -> None:
@@ -275,6 +329,7 @@ def read_slide_layout(package: OpcPackage, part_path: str) -> SourceSlideLayout 
         master_part_path=package.first_related_part(part_path, REL_SLIDE_MASTER),
         show_master_shapes=True if show_master is None else is_true(show_master),
         layout_type=attr(root, "type"),
+        name=attr(common, "name") if common is not None else None,
     )
 
 
@@ -294,6 +349,7 @@ def read_slide_master(package: OpcPackage, part_path: str) -> SourceSlideMaster 
         title_style=parse_text_style(child(tx_styles, "titleStyle")),
         body_style=parse_text_style(child(tx_styles, "bodyStyle")),
         other_style=parse_text_style(child(tx_styles, "otherStyle")),
+        name=attr(common, "name") if common is not None else None,
     )
 
 

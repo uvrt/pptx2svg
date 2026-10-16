@@ -47,7 +47,7 @@ from ..parse import source as s
 from ..text.fontmap import theme_east_asian
 from ..text.measure import is_cjk
 from .east_asian import EastAsianFaces
-from .fields import evaluate_field, fallback_language
+from .fields import SLIDE_NUMBER, evaluate_field, fallback_language
 from ..units import ROTATION_UNIT
 from .naming import resolve_color
 
@@ -388,6 +388,9 @@ def _field_text(
     slide = getattr(context, "slide", None)
     presentation = getattr(context, "presentation", None)
     if slide is None or presentation is None:
+        return run.text
+    if getattr(slide, "template", None) and field_type.lower() == SLIDE_NUMBER:
+        # A template view is of no slide: the field's own text, the layout's "‹#›".
         return run.text
     lang = run.properties.lang if run.properties is not None else None
     for properties, _ in defaults:

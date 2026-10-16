@@ -237,6 +237,8 @@ class SourceSlideBase:
 @dataclass
 class SourceSlideMaster(SourceSlideBase):
     theme_part_path: str | None = None
+    #: ``p:cSld@name`` -- what Slide Master view calls it -- or ``None``.
+    name: str | None = None
     color_map: SourceColorMap | None = None
     title_style: SourceTextStyle | None = None
     body_style: SourceTextStyle | None = None
@@ -248,6 +250,8 @@ class SourceSlideLayout(SourceSlideBase):
     master_part_path: str | None = None
     show_master_shapes: bool = True
     layout_type: str | None = None
+    #: ``p:cSld@name``, "Title and Content", or ``None``.
+    name: str | None = None
 
 
 @dataclass
@@ -258,6 +262,9 @@ class SourceSlide(SourceSlideBase):
     #: ``p:sldId/@id`` from the presentation's slide list -- deck-unique and, unlike
     #: ``slide_number``, unaffected by reordering.
     slide_id: int | None = None
+    #: ``"layout"`` or ``"master"`` for the stand-in slide a template view draws a layout
+    #: or master on (:func:`pptx2svg.parse.parts.read_template`); ``None`` for a slide.
+    template: str | None = None
 
 
 @dataclass(frozen=True)

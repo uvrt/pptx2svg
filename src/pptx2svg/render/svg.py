@@ -20,7 +20,7 @@ from ooxml_common.drawingml.elements import (  # noqa: F401  (moved; re-exported
 
 from .. import model as m
 from ..units import emu_to_px
-from .context import RenderContext, num
+from .context import RenderContext, escape_xml_attr, num
 from .fill import render_fill_attrs
 
 
@@ -53,9 +53,16 @@ def render_slide_to_svg(
 
     defs = f"<defs>{''.join(context.defs)}</defs>" if context.defs else ""
 
+    # A template view (pptx2svg.resolve.templates) says so on its root: it is no slide.
+    template = (
+        f'data-template="{escape_xml_attr(slide.template)}" '
+        f'data-template-part="{escape_xml_attr(slide.template_part or "")}" '
+        f'data-template-name="{escape_xml_attr(slide.template_name or "")}" '
+        if getattr(slide, "template", None) else ""
+    )
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-        f'viewBox="0 0 {num(view_width)} {num(view_height)}" '
+        f'{template}viewBox="0 0 {num(view_width)} {num(view_height)}" '
         f'width="{num(out_width)}" height="{num(out_height)}">'
         f"{defs}{''.join(body)}</svg>"
     )

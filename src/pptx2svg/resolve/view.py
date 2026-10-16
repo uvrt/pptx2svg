@@ -201,10 +201,13 @@ def resolve_presentation(
     color_names: dict | None = None,
     now: datetime | None = None,
     locale: Locale = EN_US,
+    templates: Iterable[str] = (),
 ) -> ResolvedPresentation:
     """Resolve the slides.  ``color_names``, when given, collects the theme name of every
     scheme colour resolved (``id(resolved) -> (resolved, "accent1 lumMod=75%")``), which
-    the agent view writes beside the hex (:mod:`.naming`); drawing is unaffected."""
+    the agent view writes beside the hex (:mod:`.naming`); drawing is unaffected.
+    ``templates`` -- layout and master part paths -- adds their template views
+    (:mod:`.templates`) after the slides, in that order."""
     wanted = set(slide_numbers) if slide_numbers is not None else None
     # One clock for the whole deck, so every slide's date field agrees.
     now = now if now is not None else datetime.now()
@@ -227,6 +230,23 @@ def resolve_presentation(
         warnings.extend(context.warnings)
         if context.theme is not None:
             font_scheme = _font_scheme(context.theme)
+
+    if templates:
+        from .templates import resolve_template
+
+        for part_path in templates:
+            view = resolve_template(
+                package, presentation, part_path, metafile_converter=metafile_converter,
+                east_asian=east_asian, color_names=color_names, now=now, locale=locale,
+                warnings=warnings,
+            )
+            slides.append(view)
+            master = presentation.masters.get(
+                (presentation.layouts[view.template_part].master_part_path or "")
+                if view.template == "layout" else view.template_part)
+            theme = presentation.themes.get(master.theme_part_path or "") if master else None
+            if theme is not None:
+                font_scheme = _font_scheme(theme)
 
     return ResolvedPresentation(
         slide_size=slide_size, slides=slides, warnings=warnings, font_scheme=font_scheme
