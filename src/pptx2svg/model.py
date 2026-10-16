@@ -118,6 +118,14 @@ class Slide:
     background: Background | None = None
     elements: list[SlideElement] = field(default_factory=list)
     show_master_sp: bool = True
+    #: ``"layout"`` or ``"master"`` for a template view
+    #: (:mod:`pptx2svg.resolve.templates`), whose ``slide_number`` is 0; ``None`` for a
+    #: slide.
+    template: str | None = None
+    #: The template view's part, ``ppt/slideLayouts/slideLayout2.xml``.
+    template_part: str | None = None
+    #: The layout's or master's ``p:cSld@name``.
+    template_name: str | None = None
 
 
 @dataclass

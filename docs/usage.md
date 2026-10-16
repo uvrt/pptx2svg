@@ -55,6 +55,27 @@ for warning in options.warnings:
 `convert_pptx_to_svg` accepts a path, `bytes`, or any binary file object, and all three
 produce byte-identical output.
 
+**A layout or master on its own** (`ConvertOptions.templates`, part paths), drawn after
+the slides `slide_numbers` picks -- `slide_numbers=[]` for none:
+
+```python
+options = ConvertOptions(slide_numbers=[], templates=[
+    "ppt/slideLayouts/slideLayout2.xml", "ppt/slideMasters/slideMaster1.xml"])
+layout_svg, master_svg = convert_pptx_to_svg("template.potx", options)
+```
+
+A layout's view is what a slide on it starts as -- the background, the master's shapes
+unless the layout's `showMasterSp` hides them, the layout's own shapes -- with each
+placeholder drawn as a wireframe: a grey dashed box, its prompt in the text style a
+slide's text there inherits, and a tag on its top edge with its type and `idx` (`title`,
+`content 1`, `dt 10`); a banner in the top right corner names the layout. A master's
+view is the same with its own placeholders. The SVG's root carries `data-template`
+(`layout`/`master`), `data-template-part` and `data-template-name`, and the model's
+`Slide.template` says the same, with `slide_number` 0. The wireframe is this library's
+drawing, not PowerPoint's: PowerPoint draws no empty placeholder outside editing, and how
+Slide Master view draws one has not been measured. A slide-number field shows its own
+text (`‹#›`); a part that is no layout or master of the deck raises `ValueError`.
+
 Give only `width` or only `height` and the other follows the slide's aspect ratio; give
 neither and the slide's own size is used.
 

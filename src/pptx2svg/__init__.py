@@ -97,6 +97,12 @@ class ConvertOptions:
 
     #: 1-based slide numbers in presentation order; ``None`` renders every slide.
     slide_numbers: Sequence[int] | None = None
+    #: Slide layouts and masters to draw as well, after the slides, by part path
+    #: (``ppt/slideLayouts/slideLayout2.xml``, ``ppt/slideMasters/slideMaster1.xml``): what
+    #: a slide on the layout starts as, its placeholders as an outlined wireframe with
+    #: their type and ``idx`` (:mod:`pptx2svg.resolve.templates`).  Not PowerPoint's own
+    #: drawing of a layout.  With ``slide_numbers=[]`` only these are drawn.
+    templates: Sequence[str] = ()
     #: Output width in pixels.  The slide's own size is used when both are ``None``.
     width: int | None = None
     height: int | None = None
@@ -219,6 +225,7 @@ def convert_pptx_to_model(
         east_asian=EastAsianFaces(host=host_fonts),
         now=options.now,
         locale=options.locale,
+        templates=options.templates,
     )
     if options.use_embedded_fonts and presentation.embedded_fonts:
         # After resolution, not during it: `resolved_families` is what tells us which of
@@ -449,7 +456,7 @@ def convert_pptx_to_png(
         options = dataclasses.replace(options, host_fonts=not skip_system_fonts)
     documents, resolved = _render(source, options)
     host_fonts = _host_fonts(options)
-    numbers = [slide.slide_number for slide in resolved.slides]
+    numbers = [(slide.slide_number, slide.template_part) for slide in resolved.slides]
 
     if not resolved.embedded_fonts:
         return _rasterise(
@@ -478,10 +485,12 @@ def convert_pptx_to_png(
 
 def _rasterise(
     documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
-    host_fonts, options: ConvertOptions, numbers: Sequence[int | None],
+    host_fonts, options: ConvertOptions, numbers: Sequence[tuple[int, str | None]],
 ) -> list[bytes]:
     """Each slide's PNG; text no loaded font can draw reported once per face and script
-    for the whole deck, on the first slide that has it (:mod:`pptx2svg.glyphs`)."""
+    for the whole deck, on the first slide that has it (:mod:`pptx2svg.glyphs`).
+    ``numbers`` is each image's slide number and template part (a template view's
+    warning names its part, its slide number 0)."""
     import warnings
 
     from .glyphs import MissingGlyphsWarning
@@ -489,7 +498,7 @@ def _rasterise(
 
     images: list[bytes] = []
     reported: set[tuple[str, str]] = set()
-    for document, number in zip(documents, numbers):
+    for document, (number, part) in zip(documents, numbers):
         png, missing = _svg_to_png(
             document,
             width=None,
@@ -511,7 +520,7 @@ def _rasterise(
             reported.add((item.face, item.script))
             options.warnings.append(
                 Warning(code="glyphs-missing", message=item.message(), slide_number=number,
-                        detail=item)
+                        part_path=part, detail=item)
             )
             warnings.warn(item.message(), MissingGlyphsWarning, stacklevel=3)
     return images

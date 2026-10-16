@@ -5,6 +5,18 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A slide layout or master can be drawn on its own (round 6, R11):
+  `ConvertOptions(templates=[part path, ...])` adds a template view of each after the
+  slides (`slide_numbers=[]` for none), for PNG too. What a slide on the layout starts as
+  -- background, the master's shapes as `showMasterSp` says, the layout's shapes -- with
+  every placeholder a grey dashed box holding its prompt in its inherited text style, a
+  tag with its type and `idx`, and a banner naming the layout or master
+  (`pptx2svg.resolve.templates`). A wireframe of this library's, not PowerPoint's drawing
+  (Slide Master view is not measured). The SVG root carries `data-template`,
+  `data-template-part` and `data-template-name`; `Slide.template` and friends in the
+  model; a `glyphs-missing` warning on a view names its part (`part_path`), its slide
+  number 0. Layouts and masters carry their `cSld` name in the source model. Slides draw
+  as before: goldens and VRT snapshots unchanged.
 - A chart's date categories are drawn as dates (ooxml-common 0.17.0, now the floor): a
   category kept as a serial under a date code -- `[$-413]d\ mmmm\ yyyy`, as ooxml-edit's
   `date_format` writes it -- reads `5 januari 2026` where it read `46027`, as PowerPoint
