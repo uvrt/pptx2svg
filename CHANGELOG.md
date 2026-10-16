@@ -5,6 +5,20 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A chart's date categories are drawn as dates (ooxml-common 0.17.0, now the floor): a
+  category kept as a serial under a date code -- `[$-413]d\ mmmm\ yyyy`, as ooxml-edit's
+  `date_format` writes it -- reads `5 januari 2026` where it read `46027`, as PowerPoint
+  16 drew it (measured 16 October 2026; `[$-407]d\ mmm\ yyyy` `15 Mär 2026`,
+  `[$-409]dd/mm/yyyy` `05/01/2026`).  A code without a language prefix takes its month
+  names from `ConvertOptions.locale`'s language, as PowerPoint takes its interface's; a
+  `/` is drawn as `/` (PowerPoint shows the viewer's region separator, which the locale
+  does not hold -- as a date field's pattern is its language's, not the region's).
+- A chart's automatic title is drawn: a `c:title` with no text over one series showed
+  nothing; it is the series' name, bold, in the theme's minor face, at 1.2 times the
+  chart's text size rounded to the point, 18 pt where the chart states none (measured on
+  PowerPoint 16's PDF export: 8, 10, 11 and 24 pt chart text gave 10, 12, 13 and 29 pt).
+  Over several series PowerPoint's own words are not measured and nothing is drawn, as
+  before.  Goldens and VRT snapshots unchanged: none holds such a chart.
 - `ConvertOptions(locale=...)` takes ooxml-common's shared `Locale` (0.15.0, now the
   floor): what PowerPoint takes from its machine rather than from the deck.  A chart's
   numbers -- data labels, axis ticks, percentages -- are printed in its decimal and
