@@ -449,6 +449,13 @@ With fonts eliminated as a variable, what remains is layout, and it is concentra
   69.538 — the 19.8 pt error is 0.95. **The radar's two truncations are not fixed**: that
   is a different allowance (`RADAR_LABEL_MAX_FRACTION`) and no probe here measured it.
 * **A manually laid out legend** is the whole of slide 4's remaining chart error.
+* **Chart glyphs at whole points — measured, not applied.** PowerPoint 16 for Mac draws a
+  chart's glyphs (titles, axis titles, data labels, tick labels) at a whole-point size —
+  `sz` 1749 → 17 pt, 1750 → 18, 1850 and 1862 → 19, 2050 → 20, 1197 → 12 — while its
+  character spacing keeps each line's width at the stated size (about 5.9 pt per stated
+  point, within 0.5%). The half-point rule is unclear (17.5 → 18, 18.5 → 19, 20.5 → 20),
+  so pptx2svg draws at the stated size: widths already agree to about 0.5%, glyph height
+  is what differs (oracle-titlefont probe2, 2026-10-16).
 * **Text displacement of 1–2 px** on body copy is what slides 6 and 7 are made of, and
   `tools/fidelity.py`'s own docstring warns that SSIM is unusually sensitive to exactly
   that on thin high-contrast content.
