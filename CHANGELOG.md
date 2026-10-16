@@ -5,6 +5,19 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A rich chart title that states no font is drawn in Arial, as PowerPoint draws it
+  (ooxml-common 0.18.0, now the floor): a `c:title/c:tx/c:rich` whose runs, paragraphs,
+  list style and title `c:txPr` state no face and no size took the face a text box gets
+  (the theme's minor face, Aptos, where the deck's default text style names `+mn-lt`);
+  PowerPoint 16 for Mac drew it in 18 pt ArialMT, regular and black, at a chart-wide size
+  of none, 8 and 24 pt and under an unsized title `c:txPr` (measured 16 October 2026,
+  PDF export). The probe decks' plot area now matches to 0.1 pt (190.9 pt from the 6 to
+  the 0 tick label, PowerPoint 191.0; 188.2 before) because the title band is Arial's.
+  Only the face changes: size, weight and colour stay the cascade's. A title that names
+  a face (`+mn-lt`, `Georgia`), states a size, or sits under a chart-wide `c:txPr` that
+  names a face is unchanged (not measured), as is the automatic title. Goldens and VRT
+  snapshots unchanged: the one fixture chart with such a title (`authoring-integration`)
+  already resolved to Arial through its deck's text style.
 - A slide layout or master can be drawn on its own (round 6, R11):
   `ConvertOptions(templates=[part path, ...])` adds a template view of each after the
   slides (`slide_numbers=[]` for none), for PNG too. What a slide on the layout starts as
