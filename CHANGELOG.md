@@ -5,6 +5,23 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- A rich chart title is drawn in PowerPoint's own fonts (ooxml-common 0.18.0, now the
+  floor), measured on PowerPoint 16 for Mac's PDF export, 16 October 2026, in a deck whose
+  text boxes are Aptos. A `c:title/c:tx/c:rich` whose paragraphs state no `a:defRPr` and
+  whose runs name no face is **Arial, regular**, at the run's size or 18 pt — whatever the
+  chart-wide `c:txPr` states, `+mn-lt` included — where it took the text box's face. A
+  title whose paragraph states an `a:defRPr` is the theme's **minor face** unless a face
+  is stated, **bold** unless `b` is stated (`sz` alone: Aptos bold; `b="0"`: regular). A
+  run naming a face keeps it. Colour and stated sizes are unchanged.
+  The probe decks' plot area now matches to 0.1 pt (190.9 pt from the 6 to the 0 tick
+  label, PowerPoint 191.0; 188.2 before).
+  **VRT snapshots changed: `chart-gallery` slides 1, 4, 6, 7, 9, 11, 12, 13, 15 and 17.**
+  Their titles state `a:defRPr sz="1400" b="0"` and were drawn Arial (that deck's text
+  boxes are Arial); they are now Aptos regular, which is what PowerPoint's own export of
+  that deck draws (`chart-gallery.pdf`: every one Aptos 14 regular). The title band is
+  Aptos's, so each plot moves: slide 1's value-axis step is now 21.89 pt against
+  PowerPoint's 21.74 (22.19 before). Chart glyphs at whole points (PowerPoint draws 18.62
+  pt as 19) are measured and not applied (ROADMAP.md).
 - A slide layout or master can be drawn on its own (round 6, R11):
   `ConvertOptions(templates=[part path, ...])` adds a template view of each after the
   slides (`slide_numbers=[]` for none), for PNG too. What a slide on the layout starts as

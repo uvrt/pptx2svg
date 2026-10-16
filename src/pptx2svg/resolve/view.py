@@ -1329,6 +1329,10 @@ def _resolve_chart_title_text(
     labels came out Aptos 10 pt and the title, whose ``a:rPr`` names nothing at all, came
     out Arial 18 pt -- the same face and size that file's plain text boxes get.  Running
     it through :func:`resolve_text_body` reproduces both halves of that for free.
+
+    The face, though, is not always the text box's: a title that states no face and no
+    size is drawn in Arial even where the deck's text boxes are Aptos (measured; the
+    chart layout stamps it, ``ooxml_common.chart.layout.title_states_no_font``).
     """
     if rich is None:
         return m.TextBody(
