@@ -571,7 +571,23 @@ def test_records_not_played_are_named_in_a_warning(basic_theme):
     assert found and "EMR_EXTFLOODFILL" in found[0].message
 
 
-def test_an_emf_plus_dual_file_draws_its_gdi_records_and_says_so(basic_theme):
+def test_an_emf_plus_file_is_drawn_from_its_emf_plus_records(basic_theme):
+    """As Windows draws it: the EMF+ green rectangle, not the GDI fallback's red one."""
+    header = struct.pack("<HHII", 0x4001, 1, 28, 16) + struct.pack("<IIII", 0xDBC01002, 1, 96, 96)
+    fill = struct.pack("<HHII", 0x400A, 0x8000, 36, 24) + struct.pack("<II", 0xFF00C000, 1) + struct.pack("<4f", 0, 0, 50, 50)
+    eof = struct.pack("<HHII", 0x4002, 0, 12, 0)
+    plus = header + fill + eof
+    options = ConvertOptions(slide_numbers=[1])
+    emf = build_emf([_record(70, struct.pack("<II", len(plus) + 4, 0x2B464D45) + plus)] + _red_rectangle())
+    resolved = convert_pptx_to_model(deck_with_emf(basic_theme, emf), options)
+    images = _emf_images(resolved.slides[0])
+    assert images[0].mime_type == "image/svg+xml"
+    svg = base64.b64decode(images[0].image_data)
+    assert b'fill="#00C000"' in svg and b'fill="#FF0000"' not in svg
+    assert not [w for w in options.warnings if w.code.startswith("metafile")]
+
+
+def test_an_emf_plus_file_whose_emf_plus_records_draw_nothing_draws_its_gdi_records_and_says_so(basic_theme):
     emf_plus = struct.pack("<II", 28, 0x2B464D45) + struct.pack("<HHII", 0x4001, 1, 28, 16) + bytes(16)
     options = ConvertOptions(slide_numbers=[1])
     resolved = convert_pptx_to_model(

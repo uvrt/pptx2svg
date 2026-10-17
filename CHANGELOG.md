@@ -5,6 +5,13 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- EMF+ pictures are drawn from their EMF+ records (round 7, L9 step 2; ooxml-common 0.22.0,
+  now the floor), as Windows PowerPoint draws them: a dual file's GDI fallback is no longer
+  what is drawn, and an EMF+-only file is no longer a grey box. Gradients (linear and path),
+  hatches, textures, pens with caps, joins, dashes and compound bands, curves, paths, clips,
+  containers, bitmaps and text. A file whose EMF+ records draw nothing is still drawn from
+  its GDI records, with a `metafile-records` warning saying so. Goldens and VRT snapshots: no
+  fixture carries a metafile, none changed.
 - EMF and WMF pictures are drawn from their GDI records (round 7, L9; ooxml-common 0.21.0,
   now the floor): pens, brushes, hatches, lines, polygons, rectangles, ellipses, arcs,
   paths, clips, mapping modes, world transforms, bitmaps and text, as **Windows**
