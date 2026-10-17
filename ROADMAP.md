@@ -73,7 +73,7 @@ rendering approaches.
 | Tables: merged cells, borders, fills, **table styles** | Complete; **all 74** built-in styles carried, every one measured out of PowerPoint; an id in neither the deck nor the catalogue now warns `table-style-unknown` instead of rendering a bare grid in silence; cell text takes a table style's `tcTxStyle` over the master's `otherStyle` |
 | Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. **Combo charts** -- several groups over one plot area with a secondary value axis -- are drawn, measured over 76 probe slides. Category labels wrap at whitespace, turn 45° only when their widest unbreakable token still will not fit, and are **cut with an ellipsis** when a turned one is wider than the frame's height allows. Every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
-| EMF / WMF | GDI records drawn as SVG (ooxml-common's player, round 7); embedded previews where records are left out; EMF+ not played yet |
+| EMF / WMF | GDI records drawn as SVG (ooxml-common's player, round 7); an EMF+ file from its EMF+ records, as Windows draws it; embedded previews where records are left out |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
 | Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
