@@ -36,6 +36,7 @@ from __future__ import annotations
 import warnings
 from typing import Iterable, Literal, Sequence
 
+from ooxml_common.metafile import inline_metafile_images
 from ooxml_common.svgimage import with_pixel_sized_images
 
 from .fonts import GENERIC_FAMILY_DEFAULTS, font_dirs as bundled_font_dirs
@@ -181,6 +182,9 @@ def _svg_to_png(
     # An SVG picture's root size in units other than px (`width="72pt"`) makes resvg drop
     # the picture, and CairoSVG draws one with no viewBox unscaled; both get it restated in
     # pixels as PowerPoint reads it (:mod:`ooxml_common.svgimage`).
+    # A metafile drawn as SVG (ooxml_common.metafile) goes inline: resvg draws no text in an
+    # SVG it reads through <image>.
+    svg = inline_metafile_images(svg)
     svg = with_pixel_sized_images(svg)
 
     chosen = backend

@@ -5,6 +5,20 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- EMF and WMF pictures are drawn from their GDI records (round 7, L9; ooxml-common 0.21.0,
+  now the floor): pens, brushes, hatches, lines, polygons, rectangles, ellipses, arcs,
+  paths, clips, mapping modes, world transforms, bitmaps and text, as **Windows**
+  PowerPoint draws them (`ooxml_common.metafile`; Mac PowerPoint's player differs). A
+  metafile with no embedded preview -- a template's dot grid, corner brackets -- was a
+  grey box; it is now drawn. The order (`resolve/view.py`, `_metafile_preview`): a
+  `metafile_converter`; the records, when every one was understood; an embedded PDF
+  (Office's own rendition beats a drawing that left records out); the partial drawing,
+  with a new `metafile-records` warning naming what it left out (EMF+ among them: a dual
+  file is drawn from its GDI records, not yet its EMF+ ones); the embedded bitmap; the
+  grey box. An EMF that is one bitmap is now an SVG placing it where its record says,
+  not the bitmap lifted out. `svg_to_png` writes such pictures inline, since resvg draws
+  no text in an SVG `<image>`. `pptx2svg.metafile.dib` moved to ooxml-common (re-exported).
+  Goldens and VRT snapshots: no fixture carries a metafile, none changed.
 - A rich chart title is drawn in PowerPoint's own fonts (ooxml-common 0.18.0, now the
   floor), measured on PowerPoint 16 for Mac's PDF export, 16 October 2026, in a deck whose
   text boxes are Aptos. A `c:title/c:tx/c:rich` whose paragraphs state no `a:defRPr` and

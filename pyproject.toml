@@ -66,7 +66,7 @@ classifiers = [
 # is rasterised (`svgimage.with_pixel_sized_images`; tests/test_svg_picture_png.py).
 # 0.14 draws a table style's background and effects under the table (`TableData.background`
 # and `.effects`; the built-in "Themed Style" tables, tests/test_resolve.py).
-dependencies = ["ooxml-common>=0.18.0"]
+dependencies = ["ooxml-common>=0.21.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

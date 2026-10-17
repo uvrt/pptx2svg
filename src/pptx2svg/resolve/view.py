@@ -42,6 +42,8 @@ from ooxml_common.locales import EN_US, Locale
 
 from .. import model as m
 from ..fonts.embedded import NO_EMBEDDED_FONTS, EmbeddedFonts
+from ooxml_common.metafile import metafile_to_svg
+
 from ..metafile import extract_metafile_preview
 from ..metafile.pdf import PdfRasterizerNotAvailable, rasterise_pdf
 from ..opc import OpcPackage
@@ -1971,17 +1973,19 @@ def _metafile_preview(
 ) -> tuple[bytes, str] | None:
     """Turn EMF/WMF bytes into something renderable, or ``None`` to draw a placeholder.
 
-    Three routes, in descending order of the caller's authority over the result:
+    In descending order of authority over the result:
 
     1. A ``metafile_converter`` the caller installed.  It was configured deliberately, so
        it wins outright; it can return SVG, PNG, anything the renderer can embed.
-    2. The preview Office already embedded -- a PDF, which still needs rasterising, or a
-       DIB, which :mod:`pptx2svg.metafile.dib` turns into a PNG with no dependencies.
-    3. Nothing, which keeps the historical grey rectangle and a warning.
-
-    The distinction between "no preview in the file" and "preview found but no rasteriser
-    installed" is kept in the warning text, because the fix differs: the first needs an
-    external converter, the second needs ``pip install pptx2svg[metafile]``.
+    2. The metafile's GDI records drawn as SVG (:func:`ooxml_common.metafile.metafile_to_svg`)
+       when every record was understood: that is what Windows PowerPoint draws -- it plays
+       the records and never looks at an embedded preview -- in vectors, with no
+       dependency.
+    3. The PDF Office embedded (rasterised with pypdfium2): the artwork as its source
+       drew it, which beats a drawing that left records out (EMF+, a record not played).
+    4. That partial drawing, with a ``metafile-records`` warning naming what is missing.
+    5. The embedded bitmap, where the records drew nothing.
+    6. Nothing: the grey rectangle and a ``metafile-image`` warning saying why.
     """
     if context.metafile_converter is not None:
         try:
@@ -1996,35 +2000,47 @@ def _metafile_preview(
         if converted is not None:
             return converted
 
-    preview = extract_metafile_preview(payload)
-    if preview is None:
-        context.warn(
-            "metafile-image",
-            f"{described_as} is an EMF/WMF metafile with no embedded preview, and "
-            "vector metafile records are not interpreted; drawing a placeholder",
-        )
-        return None
+    drawing = metafile_to_svg(payload)
+    drawn = drawing is not None and drawing.drawn > 0
+    if drawn and drawing.complete:
+        return drawing.svg, "image/svg+xml"
 
-    if preview.mime_type != "application/pdf":
+    preview = extract_metafile_preview(payload)
+    missing_rasterizer = False
+    if preview is not None and preview.mime_type == "application/pdf":
+        try:
+            png = rasterise_pdf(preview.data, width_emu=width_emu)
+        except PdfRasterizerNotAvailable:
+            png, missing_rasterizer = None, True
+        if png is not None:
+            return png, "image/png"
+        preview = None
+
+    if drawn:
+        context.warn(
+            "metafile-records",
+            f"{described_as} is drawn from its metafile records, but {drawing.warning()}",
+        )
+        return drawing.svg, "image/svg+xml"
+
+    if preview is not None:
         return preview.data, preview.mime_type
 
-    try:
-        png = rasterise_pdf(preview.data, width_emu=width_emu)
-    except PdfRasterizerNotAvailable:
+    if missing_rasterizer:
         context.warn(
             "metafile-rasterizer-missing",
             f"{described_as} carries an embedded PDF preview, but rendering it needs "
             "pypdfium2 (pip install pptx2svg[metafile]); drawing a placeholder",
         )
         return None
-    if png is None:
-        context.warn(
-            "metafile-image",
-            f"{described_as} carries an embedded PDF preview that could not be "
-            "rendered; drawing a placeholder",
-        )
-        return None
-    return png, "image/png"
+    reason = drawing.warning() if drawing is not None else None
+    context.warn(
+        "metafile-image",
+        f"{described_as} is an EMF/WMF metafile that draws nothing this renderer plays"
+        + (f" ({reason})" if reason else " and has no embedded preview")
+        + "; drawing a placeholder",
+    )
+    return None
 
 
 def _resolve_hyperlink(context: ResolveContext, rel_id: str | None) -> m.Hyperlink | None:
