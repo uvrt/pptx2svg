@@ -1982,7 +1982,8 @@ def _metafile_preview(
        the records and never looks at an embedded preview -- in vectors, with no
        dependency.
     3. The PDF Office embedded (rasterised with pypdfium2): the artwork as its source
-       drew it, which beats a drawing that left records out (EMF+, a record not played).
+       drew it, which beats a drawing that left records out (a record not played, an EMF+ file
+       drawn from its GDI fallback because its EMF+ records draw nothing).
     4. That partial drawing, with a ``metafile-records`` warning naming what is missing.
     5. The embedded bitmap, where the records drew nothing.
     6. Nothing: the grey rectangle and a ``metafile-image`` warning saying why.
