@@ -8,9 +8,10 @@ Office writes a *ready-made preview* into the very same file, either an embedded
 Pulling that out needs no drawing-record interpretation at all, only a walk over the
 record list, skipping each record by its declared size.
 
-So this package deliberately does not interpret geometry.  See :mod:`.emf_preview` for
-the record walk and :mod:`.dib` for turning a device-independent bitmap into a PNG with
-nothing but the standard library.
+This package extracts that preview (:mod:`.emf_preview`, the record walk) and rasterises
+a PDF one (:mod:`.pdf`).  The records themselves are drawn by
+:mod:`ooxml_common.metafile`'s GDI player, which the resolver tries first (round 7,
+``pptx2svg.resolve.view._metafile_preview``); :mod:`.dib` now lives there too.
 """
 
 from .emf_preview import MetafilePreview, extract_metafile_preview

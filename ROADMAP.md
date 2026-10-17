@@ -73,7 +73,7 @@ rendering approaches.
 | Tables: merged cells, borders, fills, **table styles** | Complete; **all 74** built-in styles carried, every one measured out of PowerPoint; an id in neither the deck nor the catalogue now warns `table-style-unknown` instead of rendering a bare grid in silence; cell text takes a table style's `tcTxStyle` over the master's `otherStyle` |
 | Charts | `barChart`, `lineChart`, `pieChart`, `doughnutChart` and `radarChart` read and drawn with their data labels, **verified against PowerPoint** across 190 probe charts and every chart in the corpus; **no deck warns `chart-unsupported-type` any more**. **Combo charts** -- several groups over one plot area with a secondary value axis -- are drawn, measured over 76 probe slides. Category labels wrap at whitespace, turn 45° only when their widest unbreakable token still will not fit, and are **cut with an ellipsis** when a turned one is wider than the frame's height allows. Every other chart type warns and draws an empty frame |
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
-| EMF / WMF | Embedded previews rendered (Phase 4); **no vector interpreter** |
+| EMF / WMF | GDI records drawn as SVG (ooxml-common's player, round 7); embedded previews where records are left out; EMF+ not played yet |
 | 3-D, bevel, reflection | **Not rendered** |
 | Shape identity on output (`data-pptx-id`) | Complete |
 | Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
@@ -4915,8 +4915,19 @@ so embedded-PDF EMFs cost nothing extra.
 3. ✅ **`metafile_converter` on `ConvertOptions`** — `(bytes, mime) -> (bytes, mime) | None`.
    It takes precedence over the built-in extraction, may return SVG, and a hook that
    raises warns instead of aborting the deck.
-4. **Full vector interpreter** (L) — still not built, and the measurement that would
-   justify it has not been possible: see below.
+4. ✅ **Vector interpreter, GDI records** (round 7, L9 step 1) — `ooxml_common.metafile`
+   plays an EMF's or WMF's GDI records into SVG, measured against **Windows** PowerPoint
+   (PDF export and slide show of 23 made-up metafiles; Mac's player differs). The resolver
+   now tries it first: a fully understood metafile is drawn from its records (what Windows
+   draws, in vectors); one with records left out falls back to an embedded PDF when there
+   is one, else is drawn partially with a `metafile-records` warning; the embedded bitmap
+   and the grey box come last. For the PNG, `svg_to_png` writes these SVG pictures inline
+   (resvg draws no text in an `<image>` SVG).
+5. **EMF+** (step 2) — not played: a dual file is drawn from its GDI records. Windows
+   draws only the EMF+ records of a dual file (measured: slide 22 of the round-7 deck), so
+   step 2 is an EMF+ record player (header, object table — brushes, pens, paths, fonts,
+   images — fill/draw rects, paths, polygons, ellipses, text, images, world transforms,
+   clips, GetDC hand-over to GDI records) on the same SVG writer.
 
 WMF has no equivalent preview convention. `extract_metafile_preview` accepts WMF bytes and
 returns `None` for them, which costs nothing and correctly handles the real case of a

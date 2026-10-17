@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import struct
 import zlib
@@ -443,15 +444,19 @@ def _emf_images(slide):
     ]
 
 
-def test_an_emf_with_a_dib_preview_resolves_to_an_image(basic_theme):
+def test_an_emf_of_one_bitmap_is_drawn_from_its_records(basic_theme):
+    """Its one record understood, the metafile is drawn as Windows plays it -- the bitmap
+    where STRETCHDIBITS puts it, in an SVG -- not by lifting the bitmap out."""
     emf = build_emf([stretch_dib_record(4, 2, 24, bytes([255, 0, 0] * 4 + [0, 255, 0] * 4))])
     options = ConvertOptions(slide_numbers=[1])
     resolved = convert_pptx_to_model(deck_with_emf(basic_theme, emf), options)
 
     images = _emf_images(resolved.slides[0])
     assert len(images) == 1
-    assert images[0].mime_type == "image/png"
-    assert not [w for w in options.warnings if w.code == "metafile-image"]
+    assert images[0].mime_type == "image/svg+xml"
+    svg = base64.b64decode(images[0].image_data)
+    assert b"data:image/png;base64," in svg and b"data-ooxml-metafile" in svg
+    assert not [w for w in options.warnings if w.code.startswith("metafile")]
 
 
 def test_an_emf_without_a_preview_keeps_the_placeholder_and_warns(basic_theme):
@@ -495,7 +500,7 @@ def test_a_converter_returning_none_falls_back_to_the_embedded_preview(basic_the
     resolved = convert_pptx_to_model(deck_with_emf(basic_theme, emf), options)
 
     images = _emf_images(resolved.slides[0])
-    assert len(images) == 1 and images[0].mime_type == "image/png"
+    assert len(images) == 1 and images[0].mime_type == "image/svg+xml"
 
 
 def test_a_raising_converter_warns_and_does_not_abort_the_deck(basic_theme):
@@ -509,7 +514,7 @@ def test_a_raising_converter_warns_and_does_not_abort_the_deck(basic_theme):
 
     assert [w for w in options.warnings if w.code == "metafile-converter-failed"]
     images = _emf_images(resolved.slides[0])
-    assert len(images) == 1 and images[0].mime_type == "image/png"
+    assert len(images) == 1 and images[0].mime_type == "image/svg+xml"
 
 
 def test_the_rendered_svg_embeds_the_extracted_preview(basic_theme):
@@ -518,7 +523,7 @@ def test_the_rendered_svg_embeds_the_extracted_preview(basic_theme):
         deck_with_emf(basic_theme, emf), ConvertOptions(slide_numbers=[1])
     )[0]
     assert 'data-pptx-id="256.9001"' in svg
-    assert "data:image/png;base64," in svg
+    assert "data:image/svg+xml;base64," in svg
 
 
 def test_svg_output_for_a_metafile_is_reproducible(basic_theme):
@@ -527,3 +532,75 @@ def test_svg_output_for_a_metafile_is_reproducible(basic_theme):
     first = convert_pptx_to_svg(deck, ConvertOptions(slide_numbers=[1]))[0]
     second = convert_pptx_to_svg(deck, ConvertOptions(slide_numbers=[1]))[0]
     assert first == second
+
+
+# --------------------------------------------------------------------------------------
+# GDI records (ooxml_common.metafile), as the resolver uses them
+# --------------------------------------------------------------------------------------
+
+
+def _record(kind: int, payload: bytes) -> bytes:
+    payload += b"\0" * ((-len(payload)) % 4)
+    return struct.pack("<II", kind, 8 + len(payload)) + payload
+
+
+def _red_rectangle() -> list[bytes]:
+    return [
+        _record(39, struct.pack("<4I", 1, 0, 0x0000FF, 0)),       # CREATEBRUSHINDIRECT red
+        _record(37, struct.pack("<I", 1)),                        # SELECTOBJECT
+        _record(37, struct.pack("<I", 0x80000008)),               # NULL_PEN
+        _record(43, struct.pack("<4i", 10, 10, 90, 90)),          # RECTANGLE
+    ]
+
+
+def test_vector_records_are_drawn_as_svg(basic_theme):
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(deck_with_emf(basic_theme, build_emf(_red_rectangle())), options)
+    images = _emf_images(resolved.slides[0])
+    assert len(images) == 1 and images[0].mime_type == "image/svg+xml"
+    assert b'fill="#FF0000"' in base64.b64decode(images[0].image_data)
+    assert not [w for w in options.warnings if w.code.startswith("metafile")]
+
+
+def test_records_not_played_are_named_in_a_warning(basic_theme):
+    emf = build_emf(_red_rectangle() + [_record(53, bytes(16))])   # EXTFLOODFILL
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(deck_with_emf(basic_theme, emf), options)
+    assert _emf_images(resolved.slides[0])[0].mime_type == "image/svg+xml"
+    found = [w for w in options.warnings if w.code == "metafile-records"]
+    assert found and "EMR_EXTFLOODFILL" in found[0].message
+
+
+def test_an_emf_plus_dual_file_draws_its_gdi_records_and_says_so(basic_theme):
+    emf_plus = struct.pack("<II", 28, 0x2B464D45) + struct.pack("<HHII", 0x4001, 1, 28, 16) + bytes(16)
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(
+        deck_with_emf(basic_theme, build_emf([_record(70, emf_plus)] + _red_rectangle())), options)
+    assert _emf_images(resolved.slides[0])[0].mime_type == "image/svg+xml"
+    found = [w for w in options.warnings if w.code == "metafile-records"]
+    assert found and "EMF+" in found[0].message
+
+
+@pytest.mark.skipif(not pdf_rasterizer_available(), reason="pypdfium2 not installed")
+def test_an_embedded_pdf_beats_a_partial_drawing(basic_theme):
+    emf = build_emf(_red_rectangle() + [_record(53, bytes(16)), comment_record(COMMENT_MULTIFORMATS, MINI_PDF)])
+    options = ConvertOptions(slide_numbers=[1])
+    resolved = convert_pptx_to_model(deck_with_emf(basic_theme, emf), options)
+    assert _emf_images(resolved.slides[0])[0].mime_type == "image/png"
+
+
+def test_a_metafiles_text_is_inlined_for_the_png():
+    from pptx2svg import png as png_module
+    from ooxml_common.metafile import metafile_to_svg
+
+    font = struct.pack("<I5i8B", 2, -20, 0, 0, 0, 400, 0, 0, 0, 0, 0, 0, 0, 0) + "Arial".encode("utf-16-le").ljust(64, b"\0")
+    text = "ab".encode("utf-16-le")
+    body = struct.pack("<4iIff", 0, 0, -1, -1, 1, 0, 0) + struct.pack("<iiIII4iI", 10, 10, 2, 76, 0, 0, 0, -1, -1, 80)
+    emf = build_emf([_record(82, font), _record(37, struct.pack("<I", 2)), _record(84, body + text + struct.pack("<2i", 9, 9))])
+    drawing = metafile_to_svg(emf)
+    href = "data:image/svg+xml;base64," + base64.b64encode(drawing.svg).decode()
+    page = f'<svg xmlns="http://www.w3.org/2000/svg"><image width="10" height="10" href="{href}"/></svg>'
+    from ooxml_common.metafile import inline_metafile_images
+
+    assert "<text" in inline_metafile_images(page)
+    assert "inline_metafile_images" in png_module.__dict__
