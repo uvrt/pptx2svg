@@ -303,3 +303,80 @@ def test_stack_names_unquote_and_unescape():
     assert office.stack_names("'Aptos Display', Aptos, &quot;Noto Sans JP&quot;, sans-serif") == [
         "Aptos Display", "Aptos", "Noto Sans JP", "sans-serif"
     ]
+
+
+# -- A pass leaves out the texts it draws nothing of --------------------------------------
+
+SEPARATE_TEXTS = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200" width="400" height="200">'
+    '<defs><filter id="f"><feGaussianBlur in="SourceAlpha" stdDeviation="2"/></filter>'
+    '<clipPath id="c"><text x="0" y="190"><tspan font-family="Tinos, serif" font-size="40">'
+    'clip</tspan></text></clipPath></defs>'
+    '<rect width="400" height="200" fill="#fff"/>'
+    '<text x="10" y="40"><tspan font-size="28" font-family="Carlito, sans-serif">Handgloves</tspan></text>'
+    '<g transform="translate(0, 10)"><text x="10" y="80"><tspan font-size="28" '
+    'font-family="Tinos, serif">Handgloves</tspan></text></g>'
+    '<text x="200" y="40"><tspan font-size="20" font-family="Carlito, sans-serif">mixed </tspan>'
+    '<tspan font-size="20" font-family="Tinos, serif">runs</tspan></text>'
+    '<g filter="url(#f)"><text x="200" y="120"><tspan font-size="20" font-family="Tinos, serif">'
+    'shadowed</tspan></text></g>'
+    '<rect y="150" width="400" height="50" fill="#36c" clip-path="url(#c)"/>'
+    '</svg>'
+)
+
+
+def test_a_pass_leaves_out_only_the_texts_it_draws_nothing_of():
+    plan = office.DrawingPlan(passes=[["c"], ["t"]],
+                              stacks={"Carlito, sans-serif": 0, "Tinos, serif": 1},
+                              ahead_of_system=False)
+    first = office.pass_svg(SEPARATE_TEXTS, plan, 0, None)
+    # The Tinos-only text in the open goes; the mixed one, the filtered one (a filter may
+    # paint its whole region) and the one in a clip path (drawn where it is used) stay.
+    assert first.count("<text") == SEPARATE_TEXTS.count("<text") - 1
+    assert 'y="80"' not in first
+    later = office.pass_svg(SEPARATE_TEXTS, plan, 1, b"\x89PNG")
+    assert later.count("<text") == SEPARATE_TEXTS.count("<text") - 1
+    assert 'x="10" y="40"' not in later
+
+
+@pytest.mark.parametrize("svg", [
+    '<svg xmlns="http://www.w3.org/2000/svg"><!-- note --><text visibility="hidden">a</text></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><text id="t" visibility="hidden">a</text><use href="#t"/></svg>',
+    '<svg xmlns="http://www.w3.org/2000/svg"><text visibility="hidden">a</svg>',
+])
+def test_what_the_scanner_does_not_follow_is_left_as_it_is(svg):
+    assert office.without_undrawn_text(svg) == svg
+
+
+def test_a_text_whose_characters_are_all_hidden_is_left_out():
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg"><text visibility="hidden">a<tspan>b</tspan></text>'
+           '<text visibility="hidden"><tspan visibility="visible">c</tspan></text>'
+           '<text><tspan visibility="hidden">d</tspan></text><text/></svg>')
+    assert office.without_undrawn_text(svg) == (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<text visibility="hidden"><tspan visibility="visible">c</tspan></text><text/></svg>')
+
+
+@needs_bundle
+@needs_resvg
+def test_leaving_undrawn_texts_out_draws_the_same_pixels(monkeypatch):
+    files = sorted(str(path) for path in Path(bundle_dir()).iterdir())
+    carlito = [path for path in files if "Carlito" in path]
+    tinos = [path for path in files if "Tinos" in path]
+    stacks = {"Carlito, sans-serif": 0, "Tinos, serif": 1}
+    two = office.DrawingPlan(passes=[carlito, tinos], stacks=stacks, ahead_of_system=False)
+    from pptx2svg.png import _render_plan
+
+    def draw(chosen):
+        return _render_plan(SEPARATE_TEXTS, chosen, width=800, height=None, scale=None,
+                            background=None, font_dirs=[], font_files=[],
+                            skip_system_fonts=True, generic_families=None)
+
+    from PIL import Image
+
+    def pixels(data):
+        return Image.open(io.BytesIO(data)).convert("RGBA").tobytes()
+
+    dropped = draw(two)
+    monkeypatch.setattr(office, "without_undrawn_text", lambda svg: svg)
+    assert pixels(dropped) == pixels(draw(two))

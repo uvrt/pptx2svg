@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from pathlib import Path
 import struct
 
 import pytest
@@ -138,6 +139,52 @@ def test_caller_font_dirs_take_precedence_over_the_bundle(tmp_path):
     image = svg_to_png(TEXT_SVG, backend="resvg", font_dirs=[str(tmp_path)])
     assert image[:8] == PNG_MAGIC
     assert image == svg_to_png(TEXT_SVG, backend="resvg")
+
+
+MANY_FACES_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 160" width="400" height="160">'
+    '<rect width="400" height="160" fill="#fff"/>'
+    '<text x="10" y="30" font-size="20" font-family="Carlito, sans-serif">Handgloves</text>'
+    '<text x="10" y="60" font-size="20" font-family="\'Not Installed\', serif">Handgloves</text>'
+    '<text x="10" y="90" font-size="20" font-family="Lato, sans-serif">Lato <tspan '
+    'font-weight="bold" font-style="italic">bold</tspan> \u3042\u3044 \u2192</text>'
+    '<text x="10" y="120" font-size="20">no family</text>'
+    '<text x="10" y="150" font-size="20" font-family="monospace">mono</text>'
+    '</svg>'
+)
+
+
+@pytest.mark.skipif("resvg" not in available_backends(), reason="resvg-py is not installed")
+def test_the_rasteriser_is_handed_only_the_faces_the_svg_can_use(monkeypatch, tmp_path):
+    """resvg-py opens every file it is handed on every call; handed only the faces a run
+    can resolve to and those its missing characters fall back to, in the order it loads
+    them, it draws the same pixels (ooxml_common.fonts.rasterdb)."""
+    import resvg_py
+
+    from ooxml_common.fonts import rasterdb
+
+    calls = []
+    real = resvg_py.svg_to_bytes
+
+    def spy(**options):
+        calls.append(options)
+        return real(**options)
+
+    monkeypatch.setattr(resvg_py, "svg_to_bytes", spy)
+    (tmp_path / "not-a-font.txt").write_text("x")
+    options = dict(backend="resvg", font_dirs=[str(tmp_path)], host_fonts=False, check_glyphs=False)
+    subset = svg_to_png(MANY_FACES_SVG, **options)
+    handed = calls[-1]
+    monkeypatch.setattr(rasterdb, "needed_font_files", lambda *args, **kwargs: None)
+    everything = svg_to_png(MANY_FACES_SVG, **options)
+    assert subset == everything
+    if handed.get("skip_system_fonts"):          # the bundle is installed
+        assert "font_dirs" not in handed
+        names = {Path(path).name for path in handed["font_files"]}
+        assert any(name.startswith("Lato-") for name in names)
+        assert any(name.startswith("NotoSansJP") for name in names)    # あい fall back to it
+        assert not any(name.startswith("Caladea") for name in names)  # nothing reaches it
+        assert "font_dirs" in calls[-1]
 
 
 # --------------------------------------------------------------------------------------

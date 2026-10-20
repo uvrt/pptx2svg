@@ -498,7 +498,7 @@ def pass_svg(svg: str, plan: DrawingPlan, number: int, underlay: bytes | None) -
 
     out = _FAMILY_ATTRIBUTE.sub(element, svg)
     if number == 0 or underlay is None:
-        return out
+        return without_undrawn_text(out)
     import base64
 
     root = _ROOT.search(out)
@@ -523,4 +523,77 @@ def pass_svg(svg: str, plan: DrawingPlan, number: int, underlay: bytes | None) -
             f"<{tag}>", f'<{tag} visibility="visible">')
     head = out[: root.end()]
     head = head[:-1] + ' visibility="hidden">'
-    return head + image + out[root.end():]
+    return without_undrawn_text(head + image + out[root.end():])
+
+
+_TAG = re.compile(r"""<(?:[^>"']|"[^"]*"|'[^']*')*>""")
+_TAG_NAME = re.compile(r"<\s*(/?)\s*([^\s/>]+)")
+_ATTRIBUTE = re.compile(r"""([^\s=/<>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+#: Attributes on a text element or around it whose result depends on the bounding box of
+#: everything inside, hidden or not, or that paint without the text's glyphs (a filter
+#: floods its region): a text under one is never left out.
+_BOX_DEPENDENT = frozenset({"filter", "mask", "clip-path", "opacity", "style", "mix-blend-mode",
+                            "isolation"})
+#: Where a hidden text still takes part: a definition is drawn where it is used.
+_DEFINITIONS = frozenset({"defs", "clipPath", "mask", "pattern", "marker", "symbol"})
+
+
+def without_undrawn_text(svg: str) -> str:
+    """``svg`` without the ``<text>`` elements a pass draws nothing of: none of their
+    characters is under a visible element (:func:`pass_svg`).  resvg lays a hidden text out all the same -- its
+    faces found, every run shaped, at the cost of a drawn one where opening a font file
+    is slow -- and draws none of it, so leaving it out changes no pixel.  A text is kept
+    where it might still count: under a filter, mask, clip, opacity, style or blend
+    (what they do depends on the box of all they hold), in a definition, or in an SVG
+    this scanner does not follow (``<!`` sections, ``<use>``)."""
+    if "<!" in svg or "<use" in svg:
+        return svg
+    pieces: list[str] = []
+    kept_to = 0
+    # Per open element: (name, effectively visible, guarded).
+    stack: list[tuple[str, bool, bool]] = [("", True, False)]
+    text_start = None                    # where the open <text> begins, if one is open
+    text_depth = 0
+    text_drawn = False
+    data_from = 0
+    for match in _TAG.finditer(svg):
+        token = match.group(0)
+        if text_start is not None and stack[-1][1] and match.start() > data_from:
+            text_drawn = True            # characters under a visible element
+        data_from = match.end()
+        if token.startswith("<?"):
+            continue
+        head = _TAG_NAME.match(token)
+        if head is None:
+            return svg
+        closing, name = head.group(1) == "/", head.group(2).rpartition(":")[2]
+        if closing:
+            if len(stack) <= 1 or stack[-1][0] != name:
+                return svg               # not well formed: leave it to the rasteriser
+            stack.pop()
+            if text_start is not None and len(stack) == text_depth:
+                if not text_drawn:
+                    pieces.append(svg[kept_to:text_start])
+                    kept_to = match.end()
+                text_start = None
+            continue
+        attributes = {key: first if first is not None else second
+                      for key, first, second in _ATTRIBUTE.findall(token)}
+        parent_visible, parent_guarded = stack[-1][1], stack[-1][2]
+        value = attributes.get("visibility", "inherit").strip()
+        visible = parent_visible if value == "inherit" else value == "visible"
+        guarded = parent_guarded or name in _DEFINITIONS or bool(_BOX_DEPENDENT & attributes.keys())
+        if text_start is None and name == "text" and not guarded:
+            text_start, text_depth, text_drawn = match.start(), len(stack), False
+        if text_start is not None and guarded:
+            text_drawn = True
+        if token.endswith("/>"):
+            if text_start is not None and len(stack) == text_depth:
+                # A self-closed <text/> draws nothing either way.
+                text_start = None
+            continue
+        stack.append((name, visible, guarded))
+    if text_start is not None or len(stack) != 1:
+        return svg
+    pieces.append(svg[kept_to:])
+    return "".join(pieces)
