@@ -208,6 +208,7 @@ def _svg_to_png(
             from .fonts import office
 
             host_fonts = office.available() or not skip_system_fonts
+        plan = None
         if host_fonts:
             from .fonts import office
 
@@ -218,28 +219,36 @@ def _svg_to_png(
                 svg, supplied=office.supplied_faces(font_files, font_dirs)
             )
             font_files = [*(font_files or ()), *emoji]
+            own = office.supplied_faces(font_files, font_dirs)
+            plan = office.drawing_plan(svg, supplied=frozenset(own), own=own)
+        elif font_dirs:
+            from .fonts import office
+
+            # The caller's folders alone: faces in them filed under one name (Aptos and
+            # Aptos Display) are drawn apart, as the installed ones are.
             plan = office.drawing_plan(
-                svg, supplied=office.supplied_families(font_files, font_dirs)
+                svg, own=office.supplied_faces(font_files, font_dirs), host=False
             )
-            if plan is not None:
-                missing = _missing(
-                    check_glyphs, svg,
-                    [*(font_files or ()), *(path for files in plan.passes for path in files)],
-                    list(font_dirs or ()) + bundled, not skip_system_fonts,
-                    GENERIC_FAMILY_DEFAULTS if bundled else None,
-                )
-                return _render_plan(
-                    svg,
-                    plan,
-                    width=width,
-                    height=height,
-                    scale=scale,
-                    background=background,
-                    font_dirs=list(font_dirs or ()) + bundled,
-                    font_files=list(font_files or ()),
-                    skip_system_fonts=skip_system_fonts,
-                    generic_families=GENERIC_FAMILY_DEFAULTS if bundled else None,
-                ), missing
+        if plan is not None:
+            missing = _missing(
+                check_glyphs, svg,
+                [*(font_files or ()), *(path for files in plan.passes for path in files)],
+                list(font_dirs or ()) + bundled, not skip_system_fonts,
+                GENERIC_FAMILY_DEFAULTS if bundled else None,
+            )
+            return _render_plan(
+                svg,
+                plan,
+                width=width,
+                height=height,
+                scale=scale,
+                background=background,
+                font_dirs=list(font_dirs or ()) + bundled,
+                font_files=list(font_files or ()),
+                skip_system_fonts=skip_system_fonts,
+                generic_families=GENERIC_FAMILY_DEFAULTS if bundled else None,
+                own_dirs=list(font_dirs or ()),
+            ), missing
         missing = _missing(check_glyphs, svg, list(font_files or ()),
                            list(font_dirs or ()) + bundled, not skip_system_fonts,
                            GENERIC_FAMILY_DEFAULTS if bundled else None)
@@ -285,6 +294,7 @@ def _render_plan(
     font_files: list[str],
     skip_system_fonts: bool,
     generic_families: dict[str, str] | None,
+    own_dirs: "list[str] | None" = None,
 ) -> bytes:
     """Draw ``svg`` with the host faces ``plan`` names (:func:`pptx2svg.fonts.office.drawing_plan`).
 
@@ -295,7 +305,10 @@ def _render_plan(
     Symbol are not macOS's) the system's folders are handed over as directories after
     them instead of being loaded first.  Faces that would shadow one another (Aptos
     Display and Aptos) are drawn in separate passes, each over the last
-    (:func:`pptx2svg.fonts.office.pass_svg`).
+    (:func:`pptx2svg.fonts.office.pass_svg`).  Where a pass leaves faces of the caller's
+    folders out (:attr:`~pptx2svg.fonts.office.DrawingPlan.withheld`), those folders --
+    ``own_dirs``, the first of ``font_dirs`` -- are handed over as their files, in the
+    order resvg loads them, without those.
     """
     from .fonts import office
 
@@ -303,17 +316,25 @@ def _render_plan(
     skip = skip_system_fonts
     if plan.ahead_of_system and not skip_system_fonts:
         skip, system_dirs = True, office.resvg_system_dirs()
+    own_dirs = list(own_dirs or ())
     image: bytes | None = None
     for number, files in enumerate(plan.passes):
         document = svg if len(plan.passes) == 1 else office.pass_svg(svg, plan, number, image)
+        dirs, extra = font_dirs, []
+        withheld = set(plan.withheld[number]) if plan.withheld else set()
+        if withheld and own_dirs and font_dirs[:len(own_dirs)] == own_dirs:
+            from ooxml_common.fonts.rasterdb import load_order
+
+            dirs = font_dirs[len(own_dirs):]
+            extra = [path for path in load_order((), own_dirs) if path not in withheld]
         image = _render_with_resvg(
             document,
             width=width,
             height=height,
             scale=scale,
             background=background if number == 0 else None,
-            font_dirs=font_dirs + system_dirs,
-            font_files=font_files + files,
+            font_dirs=dirs + system_dirs,
+            font_files=font_files + files + extra,
             skip_system_fonts=skip,
             generic_families=generic_families,
         )
