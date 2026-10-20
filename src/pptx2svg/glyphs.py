@@ -89,8 +89,10 @@ def text_by_stack(svg: str) -> dict[str, str]:
     """Every character an SVG's text draws, by its ``font-family`` stack, each once, in
     order: ``{"'Noto Sans JP', Calibri, sans-serif": "サンプル拡張..."}``.  Whitespace and
     format characters, which need no glyph, are left out."""
+    from ooxml_common.fonts.rasterdb import parsed_svg
+
     try:
-        root = ET.fromstring(svg)
+        root = parsed_svg(svg)       # the parse the rasteriser's file list reads too
     except ET.ParseError:
         return {}
     out: dict[str, dict[str, None]] = {}
