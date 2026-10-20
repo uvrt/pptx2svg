@@ -340,6 +340,18 @@ def _render_with_resvg(
             "resvg-py is not installed; run `pip install pptx2svg[png]`"
         ) from error
 
+    # resvg-py opens and parses every file it is handed on every call; hand it only those
+    # that can take part in drawing this SVG, in the order it would have loaded them,
+    # which draws the same pixels (:mod:`ooxml_common.fonts.rasterdb`).
+    from ooxml_common.fonts.rasterdb import needed_font_files
+
+    needed = needed_font_files(svg, font_files=list(font_files or ()),
+                               font_dirs=list(font_dirs or ()),
+                               system_fonts=not skip_system_fonts,
+                               families=generic_families)
+    if needed is not None:
+        font_files, font_dirs = needed, None
+
     options: dict = {"svg_string": svg}
     if width is not None:
         options["width"] = int(width)
