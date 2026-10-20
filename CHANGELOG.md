@@ -5,6 +5,19 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- **Rasterising loads only the fonts a slide can use** (round 10, O2; ooxml-common 0.23.0,
+  now the floor). resvg-py builds a new font database on every call from every file of
+  every folder it is handed; `svg_to_png` now hands it only the files a slide can use --
+  the faces filed under a name its runs can resolve to and those its missing characters
+  fall back to -- in the order resvg loads them (`ooxml_common.fonts.rasterdb`): 26 bundle
+  files become 10, a 280-file Office folder plus the bundle 22. And a slide drawn in two
+  passes (Aptos Display and Aptos answer to the same name in resvg) no longer lays out in
+  each pass the texts that pass draws nothing of (`fonts.office.without_undrawn_text`;
+  kept under a filter, mask, clip, opacity or in a definition). Same pixels: 535 slide
+  renders (fixtures, local decks, five font setups) byte-identical to before. On this Mac,
+  where opening a file is cheap, one 26-text slide 159 -> 147 ms and 41 slides 6.8-7.3 ->
+  6.4-6.5 s; the work removed is file opening and text layout, which is what was slow
+  where production measured it.
 - EMF+ pictures are drawn from their EMF+ records (round 7, L9 step 2; ooxml-common 0.22.0,
   now the floor), as Windows PowerPoint draws them: a dual file's GDI fallback is no longer
   what is drawn, and an EMF+-only file is no longer a grey box. Gradients (linear and path),
