@@ -69,7 +69,7 @@ import functools
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ooxml_common.fonts import office as _shared
@@ -261,29 +261,46 @@ class DrawingPlan:
     #: Whether the files must be loaded *ahead of* the system's fonts, because a system
     #: face answers to the same name: the rasteriser keeps the first it loads.
     ahead_of_system: bool
+    #: Per pass, files of the caller's folders left out of it: faces filed under a name a
+    #: face of the pass is filed under, which would otherwise answer for it (Aptos for
+    #: Aptos Display, the caller's folder holding both).  Empty: the folders as given.
+    withheld: list = field(default_factory=list)
 
 
-def drawing_plan(svg: str, *, supplied: frozenset = frozenset()) -> DrawingPlan | None:
-    """The installed faces ``svg`` asks for (:func:`find`), grouped into passes; ``None``
-    where it asks for none.
+def drawing_plan(svg: str, *, supplied: frozenset = frozenset(), own: "dict | None" = None,
+                 host: bool = True) -> DrawingPlan | None:
+    """The faces ``svg`` asks for, grouped into passes; ``None`` where one pass of what the
+    rasteriser is handed draws them as they are.
 
     Each ``font-family`` stack is resolved to the first name in it that something
-    installed answers to.  A name in ``supplied`` -- family keys of faces the caller
-    hands the rasteriser itself, a deck's embedded fonts among them -- stops the search:
-    those win, as they do for measurement.
+    installed answers to (:func:`find`, unless ``host`` is false).  A name in ``supplied``
+    -- family keys of faces the caller hands the rasteriser itself, a deck's embedded
+    fonts among them -- stops the search: those win, as they do for measurement.  Where
+    ``own`` (:func:`supplied_faces`) holds the caller's faces, they take part too: two
+    families the caller supplies (or one the caller supplies and one installed) filed
+    under one name -- a folder holding Aptos and Aptos Display -- are drawn in passes of
+    their own, and each pass leaves out of the caller's folders the faces that would
+    answer for its own (:attr:`DrawingPlan.withheld`), as the installed faces are split.
     """
-    if not enabled():
+    host = host and enabled()
+    own = own or {}
+    if not host and not own:
         return None
     from ..text.fontmap import family_key
 
     chosen: dict[str, tuple[str, tuple[HostFace, ...]]] = {}
+    mine: set[str] = set()
     for value in dict.fromkeys(_FAMILY_ATTRIBUTE.findall(svg)):
         for name in stack_names(value):
-            if family_key(name) in supplied:
+            key = family_key(name)
+            if key in supplied or key in own:
+                if own.get(key):
+                    chosen[value] = (key, tuple(own[key]))
+                    mine.add(key)
                 break
-            faces = find(name)
+            faces = find(name) if host else ()
             if faces:
-                chosen[value] = (family_key(name), faces)
+                chosen[value] = (key, faces)
                 break
     if not chosen:
         return None
@@ -304,15 +321,35 @@ def drawing_plan(svg: str, *, supplied: frozenset = frozenset()) -> DrawingPlan 
             passes.append({key: faces})
             family_pass[key] = len(passes) - 1
 
-    system_names = _system_rasteriser_names()
+    # The caller's faces filed under a name a pass's faces are, and not among them.
+    withheld: list[list[str]] = []
+    for members in passes:
+        drawn = {face.path for faces in members.values() for face in faces}
+        names = set().union(*(face.rasteriser_families for faces in members.values() for face in faces))
+        by_path: dict[str, list[HostFace]] = {}
+        for faces in own.values():
+            for face in faces:
+                by_path.setdefault(face.path, []).append(face)
+        withheld.append([path for path, faces in by_path.items() if path not in drawn
+                         and any(face.rasteriser_families & names for face in faces)])
+    if not any(withheld):
+        withheld = []
+    if len(passes) == 1 and not withheld:
+        if not set(passes[0]) - mine:
+            return None              # the caller's faces alone, nothing between them: as given
+        # One pass: the caller's own faces stay where the caller put them.
+        passes = [{key: faces for key, faces in passes[0].items() if key not in mine}]
+
+    system_names = _system_rasteriser_names() if set(family_pass) - mine else frozenset()
     ahead = any(
         face.location != "system" and face.rasteriser_families & system_names
-        for members in passes for faces in members.values() for face in faces
+        for members in passes for key, faces in members.items() if key not in mine for face in faces
     )
     return DrawingPlan(
         passes=[list(dict.fromkeys(f.path for fs in members.values() for f in fs)) for members in passes],
         stacks={value: family_pass[key] for value, (key, _) in chosen.items()},
         ahead_of_system=ahead,
+        withheld=withheld,
     )
 
 
@@ -326,17 +363,7 @@ def _system_rasteriser_names() -> frozenset:
 
 def supplied_families(font_files=(), font_dirs=()) -> frozenset:
     """Family keys of the faces in ``font_files`` and ``font_dirs`` (a caller's own)."""
-    out: set[str] = set()
-    paths = [Path(path) for path in font_files or ()]
-    for directory in font_dirs or ():
-        try:
-            paths.extend(p for p in Path(directory).rglob("*") if p.suffix.lower() in _SUFFIXES)
-        except OSError:
-            continue
-    for path in paths:
-        for face in _faces_in(path, "caller"):
-            out.update(face.families)
-    return frozenset(out)
+    return frozenset(supplied_faces(font_files, font_dirs))
 
 
 # --------------------------------------------------------------------------------------
@@ -351,10 +378,24 @@ _TSPAN = re.compile(r'(<tspan\b[^>]*\bfont-family="([^"]*)"[^>]*>)([^<]*)(</tspa
 
 def emoji_face() -> HostFace | None:
     """macOS's Apple Color Emoji, where it is installed and host faces are in use."""
-    if not enabled() or sys.platform != "darwin" or not APPLE_COLOR_EMOJI.is_file():
+    if not enabled() or sys.platform != "darwin":
         return None
-    faces = _faces_in(APPLE_COLOR_EMOJI, "system")
+    try:
+        stat = APPLE_COLOR_EMOJI.stat()
+    except OSError:
+        return None
+    faces = _emoji_faces(str(APPLE_COLOR_EMOJI), stat.st_mtime_ns, stat.st_size)
     return faces[0] if faces else None
+
+
+@functools.lru_cache(maxsize=4)
+def _emoji_faces(path: str, mtime: int, size: int) -> tuple:
+    """The faces of the emoji file, read once while it is unchanged."""
+    return tuple(_faces_in(Path(path), "system")) if os.path.isfile(path) else ()
+
+
+#: A character no ASCII document holds: what :func:`with_emoji` looks for first.
+_NON_ASCII = re.compile(r"[^\x00-\x7f]")
 
 
 @functools.lru_cache(maxsize=64)
@@ -383,11 +424,13 @@ def with_emoji(svg: str, *, supplied: dict | None = None) -> tuple[str, list[str
     resvg falls back to the first face it loaded that has a glyph, and the emoji face,
     loaded among the caller's files, then drew ↔ ♥ ⚠ that the bundle's Noto Sans JP has.
     """
+    if svg.isascii():
+        return svg, []               # no emoji, and no character to look up (pictures are base64)
     emoji = emoji_face()
     if emoji is None:
         return svg, []
     emoji_map = _cmap(emoji)
-    if not any(ord(char) > 0x7F and ord(char) in emoji_map for char in svg):
+    if not any(ord(char) in emoji_map for char in set(_NON_ASCII.findall(svg))):
         return svg, []
     from ..text.fontmap import family_key
 
@@ -444,19 +487,30 @@ def _bundle_faces() -> dict:
 
 
 def supplied_faces(font_files=(), font_dirs=()) -> dict:
-    """``family key -> faces`` of the faces in ``font_files`` and ``font_dirs`` (a caller's own)."""
+    """``family key -> faces`` of the faces in ``font_files`` and ``font_dirs`` (a caller's
+    own): the files resvg loads from them, in its order
+    (:func:`ooxml_common.fonts.rasterdb.file_stamps`).  Kept while no file or folder
+    changes -- read per slide, it was every file's headers opened again."""
+    from ooxml_common.fonts.rasterdb import file_stamps
+
+    stamps = tuple(file_stamps([str(path) for path in font_files or ()],
+                               [str(path) for path in font_dirs or ()]))
+    return _supplied_faces(stamps)
+
+
+@functools.lru_cache(maxsize=32)
+def _supplied_faces(stamps: tuple) -> dict:
     out: dict[str, list[HostFace]] = {}
-    paths = [Path(path) for path in font_files or ()]
-    for directory in font_dirs or ():
-        try:
-            paths.extend(p for p in Path(directory).rglob("*") if p.suffix.lower() in _SUFFIXES)
-        except OSError:
-            continue
-    for path in paths:
-        for face in _faces_in(path, "caller"):
+    for path, mtime, size in dict.fromkeys(stamps):
+        for face in _caller_faces(path, mtime, size):
             for key in face.families:
                 out.setdefault(key, []).append(face)
     return {key: tuple(faces) for key, faces in out.items()}
+
+
+@functools.lru_cache(maxsize=2048)
+def _caller_faces(path: str, mtime: int, size: int) -> tuple:
+    return tuple(_faces_in(Path(path), "caller"))
 
 
 #: macOS's font folders as resvg's font database reads them when it loads "the system's
@@ -546,8 +600,8 @@ def without_undrawn_text(svg: str) -> str:
     where it might still count: under a filter, mask, clip, opacity, style or blend
     (what they do depends on the box of all they hold), in a definition, or in an SVG
     this scanner does not follow (``<!`` sections, ``<use>``)."""
-    if "<!" in svg or "<use" in svg:
-        return svg
+    if "<!" in svg or "<use" in svg or "<text" not in svg or "visibility" not in svg:
+        return svg                   # nothing hidden, or nothing this scanner follows
     pieces: list[str] = []
     kept_to = 0
     # Per open element: (name, effectively visible, guarded).

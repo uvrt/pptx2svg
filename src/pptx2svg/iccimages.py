@@ -53,8 +53,10 @@ def srgb_images(svg: str) -> str:
     replaced by the same picture converted to sRGB (see the module docstring)."""
     if "base64," not in svg:
         return svg
+    changed = False
 
     def replace(match: re.Match) -> str:
+        nonlocal changed
         encoded = match.group(2)
         if encoded not in _CACHE:
             if len(_CACHE) >= _CACHE_LIMIT:
@@ -64,9 +66,11 @@ def srgb_images(svg: str) -> str:
         found = _CACHE[encoded]
         if found is None:
             return match.group(0)
+        changed = True
         return f"data:image/png;base64,{found}"
 
-    return _DATA_URI.sub(replace, svg)
+    out = _DATA_URI.sub(replace, svg)
+    return out if changed else svg   # the same string: the next scan's parse is the cached one
 
 
 def srgb_picture(data: bytes) -> bytes | None:

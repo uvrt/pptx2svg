@@ -91,7 +91,9 @@ def test_the_default_is_office_s_fonts_where_they_are_installed(monkeypatch, tmp
     like PowerPoint -- and elsewhere exactly when the PNG is drawn from this machine's
     fonts.  ``host_fonts=False`` and ``PPTX2SVG_OFFICE_FONTS=0`` are the reproducible
     render."""
-    from pptx2svg import _host_fonts
+    from pptx2svg import _host_fonts, uses_host_fonts
+
+    assert _host_fonts is uses_host_fonts
 
     monkeypatch.delenv("PPTX2SVG_OFFICE_FONTS", raising=False)
     assert _host_fonts(ConvertOptions(host_fonts=True)) is True
@@ -380,3 +382,102 @@ def test_leaving_undrawn_texts_out_draws_the_same_pixels(monkeypatch):
     dropped = draw(two)
     monkeypatch.setattr(office, "without_undrawn_text", lambda svg: svg)
     assert pixels(dropped) == pixels(draw(two))
+
+
+# -- The caller's folder holding two faces filed under one name ---------------------------
+
+
+def _named(source: Path, family: str, typographic: str) -> bytes:
+    """An OFL face of the bundle under made-up names: name ID 1 ``family``, ID 16
+    ``typographic`` -- how Aptos Display and Aptos are both "Aptos" to the rasteriser."""
+    import struct
+
+    from ooxml_common.fonts.sfnt import _directory, write_sfnt
+
+    records = [(1, family), (2, "Regular"), (4, f"{family} Regular"), (6, family.replace(" ", "")),
+               (16, typographic), (17, "Regular")]
+    strings = b""
+    entries = b""
+    for name_id, text in records:
+        raw = text.encode("utf-16-be")
+        entries += struct.pack(">HHHHHH", 3, 1, 0x409, name_id, len(raw), len(strings))
+        strings += raw
+    name = struct.pack(">HHH", 0, len(records), 6 + 12 * len(records)) + entries + strings
+    tables = _directory(source.read_bytes())
+    tables[b"name"] = name
+    return write_sfnt(list(tables.items()))
+
+
+@pytest.fixture
+def one_folder(tmp_path):
+    """A caller's folder with "Body Face" and "Body Face Display", both filed under "Body
+    Face" at the same weight, width and style (Carlito's and Tinos' outlines)."""
+    folder = tmp_path / "fonts"
+    folder.mkdir()
+    (folder / "a-display.ttf").write_bytes(_named(bundle_dir() / "Tinos-Regular.ttf", "Body Face Display",
+                                                  "Body Face"))
+    (folder / "b-body.ttf").write_bytes(_named(bundle_dir() / "Carlito-Regular.ttf", "Body Face", "Body Face"))
+    return folder
+
+
+TITLE = ("<tspan x=\"10\" y=\"40\" font-size=\"28\" font-family=\"'Body Face Display', 'Body Face', "
+         "sans-serif\">Handgloves</tspan>")
+BODY = ("<tspan x=\"10\" y=\"85\" font-size=\"28\" font-family=\"'Body Face', sans-serif\">"
+        "Handgloves</tspan>")
+
+
+def _page(*spans: str) -> str:
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" width="400" height="100">'
+            f'<rect width="400" height="100" fill="#fff"/><text>{"".join(spans)}</text></svg>')
+
+
+@needs_bundle
+def test_two_faces_of_one_name_in_the_callers_folder_are_planned_apart(one_folder, no_office):
+    own = office.supplied_faces((), [str(one_folder)])
+    plan = office.drawing_plan(_page(TITLE, BODY), own=own, host=False)
+    assert plan is not None and len(plan.passes) == 2
+    display, body = str(one_folder / "a-display.ttf"), str(one_folder / "b-body.ttf")
+    assert plan.passes == [[display], [body]]
+    assert plan.withheld == [[body], [display]]
+    # One family alone, its namesake unused: still drawn without the namesake.
+    alone = office.drawing_plan(_page(TITLE), own=own, host=False)
+    assert alone.passes == [[display]] and alone.withheld == [[body]]
+    # Faces that share no name need no plan: the folder is handed over as it is.
+    assert office.drawing_plan(TWO_FACES, own=office.supplied_faces((), [str(bundle_dir())]), host=False) is None
+
+
+@needs_bundle
+@needs_resvg
+def test_each_face_of_the_callers_folder_draws_its_own_text(one_folder, no_office, tmp_path):
+    """The title in the display face and the body in the body face -- each as it draws
+    with its own face alone in the folder -- not both in whichever the rasteriser met
+    first."""
+    from PIL import Image
+
+    def draw(svg: str, folder: Path) -> "Image.Image":
+        return Image.open(io.BytesIO(svg_to_png(svg, font_dirs=[str(folder)], host_fonts=False))).convert("RGB")
+
+    def only(name: str) -> Path:
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / name).write_bytes((one_folder / name).read_bytes())
+        return folder
+
+    both = draw(_page(TITLE, BODY), one_folder)
+    title = draw(_page(TITLE), only("a-display.ttf"))
+    body = draw(_page(BODY), only("b-body.ttf"))
+    top, bottom = (0, 0, 400, 50), (0, 50, 400, 100)
+    assert both.crop(top).tobytes() == title.crop(top).tobytes()
+    assert both.crop(bottom).tobytes() == body.crop(bottom).tobytes()
+    assert title.crop(top).tobytes() != draw(_page(TITLE.replace("Display', ", "Xx', ")), one_folder).crop(top).tobytes()
+
+
+def test_an_ascii_slide_is_not_scanned_for_emoji(monkeypatch):
+    """A slide's pictures are base64: an SVG with no character past ASCII has no emoji, and
+    is not walked character by character (megabytes, every slide)."""
+    def unexpected():
+        raise AssertionError("the emoji face was looked up")
+
+    monkeypatch.setattr(office, "emoji_face", unexpected)
+    svg = TWO_FACES.replace("</svg>", '<image href="data:image/png;base64,iVBORw0KGgo="/></svg>')
+    assert office.with_emoji(svg) == (svg, [])

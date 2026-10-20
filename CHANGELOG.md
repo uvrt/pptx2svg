@@ -5,6 +5,35 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- **A public API for rendering in two halves** (round 10): `render_svgs(source, options)`
+  (the SVGs and the resolved presentation: `convert_pptx_to_svg`'s and the model),
+  `rasterise_svgs(documents, options, numbers=..., font_files=..., ...)` (byte for byte
+  `convert_pptx_to_png`'s for them) and `uses_host_fonts(options)` -- what a render tool
+  keeping images by their SVG calls (docs/usage.md, "Rendering in two halves"). The
+  private names pptx-agent used (`_render`, `_rasterise`, `_host_fonts`) still work.
+- **Two faces of one name in the caller's folder are drawn apart** (round 10; a fidelity
+  fix): where `font_dirs` (or `OOXML_FONT_DIRS`) holds both Aptos and Aptos Display --
+  both filed under "Aptos" in the rasteriser, at one weight, width and style -- no drawing
+  plan ran and body text drew in Aptos Display. Now the caller's faces take part in the
+  plan as the installed ones do (`fonts.office.drawing_plan(..., own=...)`, with or
+  without host fonts): each family the slide uses gets the pass its namesake is not in,
+  and a pass leaves out of the caller's folders the faces that would answer for its own
+  (`DrawingPlan.withheld`), so headings draw in Aptos Display and body text in Aptos, as
+  with the bundle's and Office's copies. Tested with made-up faces carrying those name records. Nothing changes where no two
+  faces of the caller's folders share a name. `supplied_faces` reads each file once while
+  it is unchanged (it opened every file of the folders per slide).
+- **Cheaper scans before rasterising** (round 10, survey 7; ooxml-common 0.25.0, now the
+  floor): `with_emoji` returns at once for an SVG with no character past ASCII (a
+  picture is base64) and otherwise looks only at its non-ASCII characters, not every
+  character of megabytes of pictures; the glyph check and the rasteriser's file list share
+  one parse (`ooxml_common.fonts.rasterdb.parsed_svg`); `srgb_images` hands the same string
+  on when it converts nothing; a pass with nothing hidden is not scanned for undrawn text.
+  An effect's filter region fits its reach (ooxml-common 0.25.0): a full-slide shadow
+  rasterised over four slides of pixels; one such slide 2.67 -> 0.67 s on this Mac, its
+  nine-slide deck 4.8 -> 2.4 s; the font mapping is indexed (SVG conversion of three
+  templates 0.48/0.46/0.33 -> 0.37/0.35/0.27 s). Same pixels: 177 slides of 31 decks
+  byte-identical to before with the host's fonts, without them, and with a font folder
+  (but for the fix above).
 - **Rasterising loads only the fonts a slide can use** (round 10, O2; ooxml-common 0.23.0,
   now the floor). resvg-py builds a new font database on every call from every file of
   every folder it is handed; `svg_to_png` now hands it only the files a slide can use --

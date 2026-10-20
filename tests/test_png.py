@@ -105,7 +105,8 @@ def test_office_fonts_draw_by_default_where_they_are_installed(monkeypatch):
     from pptx2svg.fonts import office
 
     asked = []
-    monkeypatch.setattr(office, "drawing_plan", lambda svg, supplied=frozenset(): asked.append(svg))
+    monkeypatch.setattr(office, "drawing_plan", lambda svg, supplied=frozenset(), own=None, host=True:
+                        asked.append(svg) if host else None)
     monkeypatch.setattr(office, "available", lambda: True)
     svg_to_png(TEXT_SVG, backend="resvg")
     assert len(asked) == 1
@@ -229,3 +230,22 @@ def test_auto_does_not_import_a_backend_it_will_not_use(broken_cairo):
     broken_cairo.clear()
     assert _preferred_backend() == "resvg"
     assert "cairosvg" not in broken_cairo
+
+
+def test_the_public_two_halves_draw_what_convert_pptx_to_png_draws(product_page):
+    """:func:`pptx2svg.render_svgs` then :func:`pptx2svg.rasterise_svgs` -- what a render
+    tool keeping images by their SVG calls -- are :func:`convert_pptx_to_png` byte for
+    byte; the agents' old private names still work."""
+    import tempfile
+
+    import pptx2svg
+
+    assert (pptx2svg._render, pptx2svg._host_fonts) == (pptx2svg.render_svgs, pptx2svg.uses_host_fonts)
+    whole = convert_pptx_to_png(product_page, ConvertOptions(width=480))
+    options = ConvertOptions(width=480)
+    documents, resolved = pptx2svg.render_svgs(product_page, options)
+    assert documents == pptx2svg.convert_pptx_to_svg(product_page, ConvertOptions(width=480))
+    with tempfile.TemporaryDirectory() as folder:
+        files = resolved.embedded_fonts.write(folder) if resolved.embedded_fonts else None
+        numbers = [(slide.slide_number, slide.template_part) for slide in resolved.slides]
+        assert pptx2svg.rasterise_svgs(documents, options, numbers=numbers, font_files=files) == whole

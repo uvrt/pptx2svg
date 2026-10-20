@@ -113,6 +113,27 @@ no Hangul). It comes once per face and script, on the first slide that has it, a
 check, which reads the fonts' `name` and `cmap` tables -- the host's only when the bundle
 and the files passed in leave something unfound.
 
+### Rendering in two halves
+
+A caller that keeps images by their SVG -- a render tool drawing only the slides an edit
+changed -- writes the SVGs first and rasterises those it lacks:
+
+```python
+import tempfile
+from pptx2svg import ConvertOptions, render_svgs, rasterise_svgs
+
+options = ConvertOptions(width=1280)
+svgs, resolved = render_svgs("deck.pptx", options)       # convert_pptx_to_svg's, and the model
+with tempfile.TemporaryDirectory() as folder:
+    embedded = resolved.embedded_fonts.write(folder) if resolved.embedded_fonts else None
+    numbers = [(slide.slide_number, slide.template_part) for slide in resolved.slides]
+    pngs = rasterise_svgs(svgs[:2], options, numbers=numbers[:2], font_files=embedded)
+```
+
+`rasterise_svgs` draws what `convert_pptx_to_png` draws for the same documents, byte for
+byte; its `font_dirs` default to the conversion's (`user_font_dirs(options)`) and its
+`host_fonts` to `uses_host_fonts(options)`, and `glyphs-missing` goes to `options.warnings`.
+
 ### Locale and clock
 
 PowerPoint takes a few things from the machine it runs on rather than from the file: the
