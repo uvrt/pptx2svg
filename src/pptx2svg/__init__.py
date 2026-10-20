@@ -84,10 +84,13 @@ __all__ = [
     "convert_pptx_to_svg",
     "create_font_mapping",
     "model",
+    "rasterise_svgs",
     "render_slide_to_svg",
+    "render_svgs",
     "svg_to_png",
     "table_row_heights",
     "user_font_dirs",
+    "uses_host_fonts",
 ]
 
 
@@ -184,15 +187,21 @@ def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> l
     return [str(path) for path in _user_font_dirs(font_dirs)]
 
 
-def _host_fonts(options: ConvertOptions) -> bool:
-    """Whether this conversion measures (and draws) with the host's faces: as asked, or,
-    left to the default, wherever Office's fonts are installed, and otherwise when the
-    host's fonts draw the PNG anyway (no font bundle)."""
+def uses_host_fonts(options: ConvertOptions | None = None) -> bool:
+    """Whether a conversion with ``options`` measures (and draws) with the host's faces
+    (``ConvertOptions.host_fonts``): as asked, or, left to the default, wherever Office's
+    fonts are installed, and otherwise when the host's fonts draw the PNG anyway (no
+    font bundle).  What :func:`rasterise_svgs` draws with by default."""
+    options = options if options is not None else ConvertOptions()
     if options.host_fonts is not None:
         return options.host_fonts
     from .fonts import office
 
     return office.available() or fonts.bundle_mode() == "system"
+
+
+#: The name the agents called :func:`uses_host_fonts` by; kept.
+_host_fonts = uses_host_fonts
 
 
 def _open_package(source) -> OpcPackage:
@@ -214,7 +223,7 @@ def convert_pptx_to_model(
     options = options or ConvertOptions()
     package = _open_package(source)
     presentation = read_presentation(package)
-    host_fonts = _host_fonts(options)
+    host_fonts = uses_host_fonts(options)
     resolved = resolve_presentation(
         package,
         presentation,
@@ -262,16 +271,21 @@ def convert_pptx_to_model(
 
 def convert_pptx_to_svg(source, options: ConvertOptions | None = None) -> list[str]:
     """Render a deck to one SVG document per slide."""
-    return _render(source, options or ConvertOptions())[0]
+    return render_svgs(source, options)[0]
 
 
-def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresentation]":
-    """The SVG pass, keeping the resolved model.
+def render_svgs(source, options: ConvertOptions | None = None) -> "tuple[list[str], ResolvedPresentation]":
+    """``(svgs, resolved)``: what :func:`convert_pptx_to_svg` returns, and the resolved
+    presentation they were drawn from -- one per view in ``resolved.slides``' order (each
+    slide's ``slide_number``, a template view's ``template_part``), its embedded faces in
+    ``resolved.embedded_fonts``.
 
-    ``convert_pptx_to_png`` needs it: the deck's embedded faces have to be written to
-    disk for the rasteriser, and they live on the resolved presentation.  Re-parsing to
-    get them would decode every font a second time.
+    The SVG pass of :func:`convert_pptx_to_png`, for a caller that rasterises the
+    documents itself, some of them or later (:func:`rasterise_svgs`): a render tool that
+    keeps images by their SVG's content and draws only those it lacks.  Re-parsing for the
+    embedded faces would decode every font a second time.
     """
+    options = options if options is not None else ConvertOptions()
     resolved = convert_pptx_to_model(source, options)
 
     font_mapping = create_font_mapping(options.font_mapping)
@@ -313,7 +327,7 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
 
             for key, table in office.user_layout_metrics(resolved_families(resolved), user_dirs).items():
                 extra.setdefault(key, table)
-        if _host_fonts(options):
+        if uses_host_fonts(options):
             from .fonts import office
 
             for key, table in office.layout_metrics(resolved_families(resolved)).items():
@@ -347,6 +361,10 @@ def _render(source, options: ConvertOptions) -> "tuple[list[str], ResolvedPresen
     return documents, resolved
 
 
+#: The name the agents called :func:`render_svgs` by; kept.
+_render = render_svgs
+
+
 def _absent_symbol_faces(
     resolved: ResolvedPresentation, options: ConvertOptions, user_dirs: Sequence[str] = ()
 ) -> dict[str, str]:
@@ -362,7 +380,7 @@ def _absent_symbol_faces(
         from ooxml_common.fonts.office import user_families
 
         available |= set(user_families(user_dirs))
-    absent = absent_faces(used, available=available, host=_host_fonts(options))
+    absent = absent_faces(used, available=available, host=uses_host_fonts(options))
     options.warnings.extend(
         Warning(code="symbol-font-mapped", message=mapped_warning(family, used[face][1]))
         for face, family in absent.items()
@@ -454,8 +472,8 @@ def convert_pptx_to_png(
         # measure as it will draw.
         # A shallow copy: `warnings` is still the caller's own list.
         options = dataclasses.replace(options, host_fonts=not skip_system_fonts)
-    documents, resolved = _render(source, options)
-    host_fonts = _host_fonts(options)
+    documents, resolved = render_svgs(source, options)
+    host_fonts = uses_host_fonts(options)
     numbers = [(slide.slide_number, slide.template_part) for slide in resolved.slides]
 
     if not resolved.embedded_fonts:
@@ -483,6 +501,42 @@ def convert_pptx_to_png(
         )
 
 
+def rasterise_svgs(
+    documents: Sequence[str],
+    options: ConvertOptions | None = None,
+    *,
+    numbers: "Sequence[tuple[int, str | None]] | None" = None,
+    backend: str = "auto",
+    font_dirs: Sequence[str] | None = None,
+    font_files: Sequence[str] | None = None,
+    skip_system_fonts: bool | None = None,
+    use_bundled_fonts: bool = True,
+    host_fonts: bool | None = None,
+) -> list[bytes]:
+    """The PNG of each of ``documents`` (SVGs of :func:`render_svgs`), byte for byte what
+    :func:`convert_pptx_to_png` draws for them with the same arguments.
+
+    ``font_files`` holds the deck's embedded faces where it has any
+    (``resolved.embedded_fonts.write(folder)``, for as long as this runs), then the
+    caller's own files.  ``font_dirs`` defaults to the conversion's
+    (:func:`user_font_dirs`), ``host_fonts`` to :func:`uses_host_fonts`.  Text no loaded
+    font can draw is a ``glyphs-missing`` warning in ``options.warnings`` -- once per
+    face and script over the documents, on the first that has it -- and a
+    :class:`~pptx2svg.glyphs.MissingGlyphsWarning`, unless ``options.check_glyphs`` is
+    off.  ``numbers`` is each document's ``(slide number, template part)`` for those
+    warnings (default: 1, 2, 3...).
+    """
+    options = options if options is not None else ConvertOptions()
+    if font_dirs is None:
+        font_dirs = user_font_dirs(options)
+    if host_fonts is None:
+        host_fonts = uses_host_fonts(options)
+    if numbers is None:
+        numbers = [(number, None) for number in range(1, len(documents) + 1)]
+    return _rasterise(documents, backend, list(font_dirs), font_files, skip_system_fonts, use_bundled_fonts,
+                      host_fonts, options, numbers)
+
+
 def _rasterise(
     documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
     host_fonts, options: ConvertOptions, numbers: Sequence[tuple[int, str | None]],
@@ -490,7 +544,8 @@ def _rasterise(
     """Each slide's PNG; text no loaded font can draw reported once per face and script
     for the whole deck, on the first slide that has it (:mod:`pptx2svg.glyphs`).
     ``numbers`` is each image's slide number and template part (a template view's
-    warning names its part, its slide number 0)."""
+    warning names its part, its slide number 0).  :func:`rasterise_svgs` with every
+    argument given, by position: the name the agents called it by."""
     import warnings
 
     from .glyphs import MissingGlyphsWarning
