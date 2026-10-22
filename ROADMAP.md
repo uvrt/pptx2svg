@@ -75,7 +75,8 @@ rendering approaches.
 | SmartArt | Cached drawing rendered and verified against 46 real decks; **no layout engine**, so diagrams without a cache draw nothing and say so |
 | EMF / WMF | GDI records drawn as SVG (ooxml-common's player, round 7); an EMF+ file from its EMF+ records, as Windows draws it; embedded previews where records are left out |
 | 3-D, bevel, reflection | **Not rendered** |
-| Shape identity on output (`data-pptx-id`) | Complete |
+| Shape identity on output (`data-pptx-id`) | Complete; with `edit_marks` also table cells, sources, text bodies and per-shape definition ids (round 13) |
+| A live, editable view (pictures by reference, the slide by shape, no links) | Complete, opt-in (round 13; docs/usage.md) |
 | Fonts: bundled, metric-generated, diagnosed | Complete; **Aptos and Cambria approximate** |
 
 2,059 tests pass. The pipeline is `opc → parse → resolve → render → png`; each stage is
@@ -92,6 +93,15 @@ dispatch point, so every nesting depth is covered for free, and written out in
 The path is not redundant: **`cNvPr@id` is not unique in real decks.** In
 `real-financial-report.pptx` slide 2 a `p:sp` and a `p:graphicFrame` both carry `id="3"`. The
 pair `(id, path)` is unique, and a downstream consumer needs both to address a shape.
+
+For a live, editable view (round 13, `ConvertOptions(edit_marks=True)`) the path is left
+out -- it is the shape's position, which an added or removed shape changes -- and the id
+alone addresses a shape: pptx-agent's `Slide.render_svg` rewrites the ids to its own,
+which are unique. The contract, with cells (`<table id>/cell<row>,<column>`),
+`data-pptx-source`, `data-pptx-text` and `data-pptx-size`, is in docs/usage.md ("A live,
+editable view"). Open: pptx2svg's ids are not pptx-agent's where a shape has a stamp or an
+`a16:creationId` (most shapes PowerPoint wrote); pptx-agent maps them after rendering. Its
+layout and master shapes keep pptx2svg's `lay:`/`mst:` ids, which no tool takes.
 
 ### Measured baseline
 

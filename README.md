@@ -65,8 +65,10 @@ never read from the server. A date field shows `ConvertOptions(now=...)`, else t
 current time in the server's local time zone: pin it, or pass an aware datetime in the
 user's zone ([docs/usage.md](docs/usage.md#locale-and-clock)).
 
-Also: the resolved model (`convert_pptx_to_model`) and a compact agent view for a language
-model to read (`convert_pptx_to_agent_svg`) -- see [docs/usage.md](docs/usage.md).
+Also: the resolved model (`convert_pptx_to_model`), a compact agent view for a language
+model to read (`convert_pptx_to_agent_svg`), and, for a live view people edit, pictures by
+reference, edit marks with a stable id contract, the slide by shape and no links
+(`images=`, `edit_marks=`, `slide_groups`, `hyperlinks=`) -- see [docs/usage.md](docs/usage.md).
 
 ## What is rendered
 
