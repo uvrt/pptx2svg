@@ -19,6 +19,7 @@ from ooxml_common.drawingml.elements import (  # noqa: F401  (moved; re-exported
 )
 
 from .. import model as m
+from ..liveview import id_scope, mark_sources
 from ..units import emu_to_px
 from .context import RenderContext, escape_xml_attr, num
 from .fill import render_fill_attrs
@@ -44,9 +45,18 @@ def render_slide_to_svg(
     view_height = emu_to_px(slide_size.height)
     out_width, out_height = _output_size(view_width, view_height, width, height)
 
+    # Marked for an editor (RenderContext.edit_marks), each shape mints its definitions'
+    # ids under a scope of its own, so they do not depend on what is drawn before it.
+    marks = getattr(context, "edit_marks", False)
+    scopes: set[str] = set()
+    if marks:
+        context.scope_ids("bg-")
     body: list[str] = [_render_background(slide, view_width, view_height, context)]
 
     for element in slide.elements:
+        if marks:
+            context.scope_ids(id_scope(getattr(element, "element_id", None),
+                                       getattr(element, "element_path", None), scopes))
         rendered = render_element(element, context)
         if rendered:
             body.append(rendered)
@@ -60,12 +70,18 @@ def render_slide_to_svg(
         f'data-template-name="{escape_xml_attr(slide.template_name or "")}" '
         if getattr(slide, "template", None) else ""
     )
-    return (
+    # The slide's size in points, for an editor that works in them (12,700 EMU a point).
+    size = (
+        f'data-pptx-size="{num(slide_size.width / 12700)}x{num(slide_size.height / 12700)}" '
+        if marks else ""
+    )
+    document = (
         '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-        f'{template}viewBox="0 0 {num(view_width)} {num(view_height)}" '
+        f'{template}{size}viewBox="0 0 {num(view_width)} {num(view_height)}" '
         f'width="{num(out_width)}" height="{num(out_height)}">'
         f"{defs}{''.join(body)}</svg>"
     )
+    return mark_sources(document) if marks else document
 
 
 def _output_size(

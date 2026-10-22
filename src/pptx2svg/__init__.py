@@ -36,7 +36,7 @@ import os
 from datetime import datetime
 import tempfile
 from dataclasses import dataclass, field
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 from . import model
 from .model import Slide, SlideSize
@@ -46,6 +46,7 @@ from . import fonts
 from .fonts.check import FontReport, check_families, resolved_families
 from .fonts.embedded import EmbeddedFonts, extract_embedded_fonts
 from .glyphs import MissingGlyphsWarning
+from .liveview import embed_images, externalise_images, slide_groups
 from .png import RasterizerNotAvailable, available_backends, svg_to_png
 from .render.context import RenderContext
 from .render.svg import render_slide_to_svg
@@ -83,10 +84,12 @@ __all__ = [
     "convert_pptx_to_png",
     "convert_pptx_to_svg",
     "create_font_mapping",
+    "embed_images",
     "model",
     "rasterise_svgs",
     "render_slide_to_svg",
     "render_svgs",
+    "slide_groups",
     "svg_to_png",
     "table_row_heights",
     "user_font_dirs",
@@ -174,6 +177,28 @@ class ConvertOptions:
     #: never read from the operating system, so a deck draws the same on every server.
     #: Frozen and picklable: it travels with the options into a worker process.
     locale: Locale = EN_US
+    #: Pictures by reference (:func:`pptx2svg.liveview.externalise_images`): a dict, and
+    #: every picture the SVG would carry as a ``data:`` URI is written once, as
+    #: ``href="img/<hash>.<format>"``, its bytes stored in this dict under that name -- the
+    #: same picture on several slides is one entry.  ``None`` (the default) embeds them.
+    #: The dict is the caller's, filled in place, as ``warnings`` is; hand it to
+    #: :func:`rasterise_svgs` (``images=``) to draw such an SVG.
+    images: "dict[str, bytes] | None" = None
+    #: What each picture's name starts with when ``images`` is given.
+    image_prefix: str = "img/"
+    #: Mark the SVG for an editor (:mod:`pptx2svg.liveview`): ``data-pptx-source``
+    #: (``slide``/``layout``/``master``) beside every ``data-pptx-id``, the slide's size in
+    #: points on the root (``data-pptx-size="960x540"``), each table cell a group with its
+    #: address (``256.7/cell1,2``), each text body marked ``data-pptx-text``, and every
+    #: shape's definitions under ids of its own (``grad-s256_4-1``), so an unchanged shape
+    #: draws the same bytes whatever changed around it -- which is also why
+    #: ``data-pptx-path``, the shape's position, is left out.  Attributes and attribute-only
+    #: groups are added and definitions renamed: the drawing does not change.  Off by
+    #: default.
+    edit_marks: bool = False
+    #: Draw hyperlinks as ``<a href>`` around what they cover.  ``False`` leaves the links
+    #: out and keeps the shapes and text, for a preview in which a click must stay put.
+    hyperlinks: bool = True
 
 
 def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> list[str]:
@@ -348,16 +373,19 @@ def render_svgs(source, options: ConvertOptions | None = None) -> "tuple[list[st
             font_mapping=font_mapping,
             jpan_fallback_font=jpan_fallback,
             mapped_symbol_faces=frozenset(symbol_faces),
+            hyperlinks=options.hyperlinks,
+            edit_marks=options.edit_marks,
         )
-        documents.append(
-            render_slide_to_svg(
-                slide,
-                resolved.slide_size,
-                context,
-                width=options.width,
-                height=options.height,
-            )
+        document = render_slide_to_svg(
+            slide,
+            resolved.slide_size,
+            context,
+            width=options.width,
+            height=options.height,
         )
+        if options.images is not None:
+            document = externalise_images(document, options.images, options.image_prefix)
+        documents.append(document)
     return documents, resolved
 
 
@@ -473,6 +501,8 @@ def convert_pptx_to_png(
         # A shallow copy: `warnings` is still the caller's own list.
         options = dataclasses.replace(options, host_fonts=not skip_system_fonts)
     documents, resolved = render_svgs(source, options)
+    if options.images is not None:
+        documents = [embed_images(document, options.images) for document in documents]
     host_fonts = uses_host_fonts(options)
     numbers = [(slide.slide_number, slide.template_part) for slide in resolved.slides]
 
@@ -512,9 +542,15 @@ def rasterise_svgs(
     skip_system_fonts: bool | None = None,
     use_bundled_fonts: bool = True,
     host_fonts: bool | None = None,
+    images: "Mapping[str, bytes] | None" = None,
 ) -> list[bytes]:
     """The PNG of each of ``documents`` (SVGs of :func:`render_svgs`), byte for byte what
     :func:`convert_pptx_to_png` draws for them with the same arguments.
+
+    ``images`` resolves pictures by reference (``ConvertOptions.images``): each name is
+    embedded again from it before drawing (:func:`embed_images`), so the PNG is the
+    embedded SVG's; a name it lacks raises ``KeyError``.  Left out, it is
+    ``options.images``.
 
     ``font_files`` holds the deck's embedded faces where it has any
     (``resolved.embedded_fonts.write(folder)``, for as long as this runs), then the
@@ -533,6 +569,10 @@ def rasterise_svgs(
         host_fonts = uses_host_fonts(options)
     if numbers is None:
         numbers = [(number, None) for number in range(1, len(documents) + 1)]
+    if images is None:
+        images = getattr(options, "images", None)
+    if images is not None:
+        documents = [embed_images(document, images) for document in documents]
     return _rasterise(documents, backend, list(font_dirs), font_files, skip_system_fonts, use_bundled_fonts,
                       host_fonts, options, numbers)
 

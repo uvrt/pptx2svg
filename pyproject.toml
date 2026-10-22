@@ -68,7 +68,10 @@ classifiers = [
 # and `.effects`; the built-in "Themed Style" tables, tests/test_resolve.py).
 # 0.25 parses an SVG once for the glyph check and the rasteriser's file list
 # (`fonts.rasterdb.parsed_svg`), and fits an effect's filter region to its reach.
-dependencies = ["ooxml-common>=0.25.0"]
+# 0.26 marks cells and text bodies, scopes definition ids and leaves hyperlinks out on
+# request (`RenderContext.edit_marks`, `scope_ids`, `hyperlinks`; docs/usage.md, "A live,
+# editable view").
+dependencies = ["ooxml-common>=0.26.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler
