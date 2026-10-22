@@ -5,6 +5,21 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- **A live, editable view** (round 13; docs/usage.md, "A live, editable view"), all
+  opt-in, the default output unchanged:
+  `ConvertOptions(images={})` writes each picture once by reference
+  (`href="img/<sha256, 32 hex>.<format>"`, `image_prefix`), its bytes in the caller's dict
+  -- a 151 KB fixture slide becomes 3.5 KB; `rasterise_svgs(..., images=)` and
+  `embed_images(svg, images)` resolve them, the PNG the embedded form's byte for byte.
+  `ConvertOptions(edit_marks=True)` marks the SVG for an editor: table cells as
+  `<g data-pptx-id="<table>/cell<row>,<column>">`, `data-pptx-source`
+  (`slide`/`layout`/`master`), `data-pptx-text` on text bodies, `data-pptx-size` (points)
+  on the root, no `data-pptx-path`, and each shape's definitions under ids of its own
+  (`grad-s258_7-1`), so an unchanged shape draws the same bytes after an unrelated edit.
+  `slide_groups(svg)` gives a slide's shapes by id in drawing order with the definitions
+  each uses. `ConvertOptions(hyperlinks=False)` leaves the `<a href>` out. New module
+  `pptx2svg.liveview`. Needs ooxml-common 0.26.0 (`RenderContext.edit_marks`,
+  `hyperlinks`, `scope_ids`).
 - **A public API for rendering in two halves** (round 10): `render_svgs(source, options)`
   (the SVGs and the resolved presentation: `convert_pptx_to_svg`'s and the model),
   `rasterise_svgs(documents, options, numbers=..., font_files=..., ...)` (byte for byte

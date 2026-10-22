@@ -134,6 +134,96 @@ with tempfile.TemporaryDirectory() as folder:
 byte; its `font_dirs` default to the conversion's (`user_font_dirs(options)`) and its
 `host_fonts` to `uses_host_fonts(options)`, and `glyphs-missing` goes to `options.warnings`.
 
+### A live, editable view
+
+For a page that shows each slide as SVG, re-renders a slide after an edit and sends only
+the shapes that changed, four opt-in options; with none of them the output is unchanged.
+
+```python
+from pptx2svg import ConvertOptions, render_svgs, rasterise_svgs, slide_groups
+
+images: dict[str, bytes] = {}                     # filled in place, as `warnings` is
+options = ConvertOptions(slide_numbers=[3], images=images, edit_marks=True, hyperlinks=False)
+svgs, resolved = render_svgs("deck.pptx", options)
+# svgs[0]: <svg data-pptx-size="960x540" ...><image href="img/3fa1c9....png" .../>...
+# images:  {"img/3fa1c9....png": b"\x89PNG...", ...}
+view = slide_groups(svgs[0])
+# {"root": "<svg ...>", "order": ["background", "258.2", "258.7", ...],
+#  "groups": {"258.7": "<g data-pptx-id=\"258.7\" ...>...</g>", ...},
+#  "defs":   {"258.7": "<linearGradient id=\"grad-s258_7-1\" ...>...", ...}}
+pngs = rasterise_svgs(svgs, options, images=images)  # the embedded form's PNG, byte for byte
+```
+
+**`images={}`: pictures by reference.** Every picture the SVG would carry as a `data:`
+URI -- a picture, a picture fill, the background, a picture bullet, a metafile's drawing or
+preview -- is written once as `href="img/<hash>.<format>"`: the first 32 hex digits of the
+SHA-256 of its bytes and the format the bytes are (`png`, `jpg`, `gif`, `bmp`, `tif`,
+`webp`, `svg`; else the media type's subtype). Its bytes go into the dict under that name,
+so the same picture on several slides, or across renders sharing one dict, is one entry.
+`image_prefix` sets the folder (`"img/"`). Nothing else is embedded in the SVG: fonts are
+named, never embedded; gradients, patterns, masks, clip paths and filters are markup in
+`<defs>`; what a referenced SVG picture (a metafile's drawing) embeds stays inside that
+file. `embed_images(svg, images)` puts the pictures back exactly -- the plain render's
+bytes -- and `rasterise_svgs(..., images=images)` does so before drawing, so the PNG is
+the embedded one's; a name the dict lacks raises `KeyError` rather than drawing nothing.
+On the fixture corpus a picture-heavy slide goes from 151,399 bytes to 3,529; a template
+slide with full-bleed photographs from 2,453,564 to 4,908.
+
+**`edit_marks=True`: the id contract.** Attributes and attribute-only groups are added
+and definitions renamed; the drawing does not change (the PNG is the plain one's, byte for
+byte, on every slide of the corpus):
+
+- `data-pptx-id` is on every drawn shape: each top-level shape, each member of a group,
+  each graphic frame (table, chart, SmartArt) and each piece of a SmartArt drawing
+  (`<frame>/<drawing>/<shape>`). It is there without `edit_marks` too. pptx2svg writes
+  `<sldId>.<cNvPr id>` for a slide's shapes, `lay:<id>`/`mst:<id>` for its layout's and
+  master's. **pptx-agent's tools address shapes by their own ids** (a stamp, PowerPoint's
+  `a16:creationId`, or `cNvPr@id` with the tree path where it is not unique: `257.c8060F849-…`,
+  `257.3#5`); its `Slide.render_svg(**options)` takes these options and rewrites the ids
+  to those, cells included. Use that render where ids go back to the tools.
+- Each table cell drawn is a `<g data-pptx-id="<table id>/cell<row>,<column>">` holding its
+  fill (a box drawn as nothing where it has none) and its text: grid positions from 0, as
+  pptx-agent addresses cells; a position a merge hides is not drawn.
+- `data-pptx-source` beside every `data-pptx-id`: `slide`, `layout` or `master`.
+- `data-pptx-text` on the element holding a text body: `shape` (a shape's text frame),
+  `cell` (a cell's), `diagram` (a SmartArt drawing's piece, whose text pptx-agent edits by
+  node, not by this id). The text's address is the nearest `data-pptx-id` at or above it.
+  A chart's text, which no id owns, is not marked.
+- `data-pptx-size="960x540"` on the root: the slide's size in points.
+- `data-pptx-path` is left out, and every shape's definitions get ids of their own
+  (`grad-s258_7-1`, the background's `grad-bg-1`): neither then depends on what is drawn
+  before the shape.
+
+An id is the shape's for as long as the shape exists: editing its text, moving or resizing
+it, restyling it, or adding and removing other shapes leaves it as it was. pptx-agent's id
+for a shape whose `cNvPr@id` is duplicated carries its tree path until it is first edited
+(and stamped), so adding or removing a shape before it can change that id.
+
+Cost: a few dozen bytes a shape and about 60 a table cell -- 0.2% to 13.5% of a slide on
+the fixture corpus, 3.3% at the median (`table test`, 25 cells, 12,956 to 14,702 bytes; a
+42-shape slide 14,676 to 15,881), less where pictures are embedded. Small, but not
+nothing for a renderer whose default output is held byte for byte by snapshots and read by
+other tools, so the marks are opt-in.
+
+**`slide_groups(svg)`: the slide by shape.** Each top-level shape's markup by its key, in
+drawing order (the background first, as `"background"`), and the definitions each uses,
+transitively. The key is the `data-pptx-id` (an id drawn twice gets `#2`, `#3`...). The
+definitions stay in the document's one `<defs>`: a page swapping a group swaps its
+definitions there too. Rendered with `edit_marks`, a shape that did not change has
+byte-identical markup and definitions from render to render; without it, definitions are
+numbered across the slide, and every shape after a changed one may differ. Measured
+through pptx-agent on the corpus' slides with three or more shapes: an edit of one
+shape's text, a move of another and a gradient on a third left 226 of the 227 other
+groups byte-identical with `edit_marks` (the last was a connector glued to the moved
+shape, which pptx-agent rerouted) and changed 18 without; removing one shape and adding
+one at the back changed 6 of 268 (the shapes whose duplicated `cNvPr@id` gives them a
+path in pptx-agent's id) with `edit_marks`, 243 without. It works on pptx-agent's
+rewritten SVG too. A pass is string work on the renderer's own output: about 0.3 ms for
+a slide with its pictures by reference, 26 ms for one embedding 2.4 MB of them.
+
+**`hyperlinks=False`**: no `<a href>` around a shape or a run; what it covered is drawn as
+before.
+
 ### Locale and clock
 
 PowerPoint takes a few things from the machine it runs on rather than from the file: the
@@ -252,4 +342,6 @@ the deck it came from:
 inherited from the layout or master. `data-pptx-path` is the index path through the shape
 tree, and it is **not** redundant — `cNvPr@id` is not unique in real decks, so the pair is
 what addresses a shape unambiguously. Alt text is still emitted as `aria-label` alongside.
+The ids as a contract for an editor -- cells, sources, text bodies, what stays stable --
+are under "A live, editable view" above.
 
