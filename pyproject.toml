@@ -71,7 +71,7 @@ classifiers = [
 # 0.26 marks cells and text bodies, scopes definition ids and leaves hyperlinks out on
 # request (`RenderContext.edit_marks`, `scope_ids`, `hyperlinks`; docs/usage.md, "A live,
 # editable view").
-dependencies = ["ooxml-common>=0.26.0"]
+dependencies = ["ooxml-common>=0.27.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

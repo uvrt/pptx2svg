@@ -5,6 +5,17 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- **A text box's inherited colour, size and face as PowerPoint draws them** (round 15; a
+  fidelity fix; docs/rendering.md, "Where inherited text formatting comes from"): text in
+  a shape that is not a placeholder no longer takes the master's `otherStyle`, and a list
+  style's or `defaultTextStyle`'s `defPPr` no longer stands in for a level the style lacks.
+  A deck whose `defaultTextStyle` levels say white and whose `otherStyle` says `tx1` drew
+  its text boxes black; PowerPoint draws them white (measured, PowerPoint 16.106 for Mac,
+  51 probes in 9 made-up decks: 20 matched before, 50 after; the one left is a table
+  with no table style, drawn with a header band PowerPoint does not draw -- a follow-up). The order is ooxml-common 0.27.0's
+  `drawingml.text_chain`. Every fixture and corpus slide (27 decks, 157 slides) draws the
+  same SVG, byte for byte: none has an `otherStyle` that differs from its
+  `defaultTextStyle` where a text box reads it.
 - **A live, editable view** (round 13; docs/usage.md, "A live, editable view"), all
   opt-in, the default output unchanged:
   `ConvertOptions(images={})` writes each picture once by reference

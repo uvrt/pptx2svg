@@ -11,6 +11,12 @@ order, in:
 6. the master's ``p:txStyles`` (title / body / other, chosen by placeholder type);
 7. the presentation's ``a:defaultTextStyle``.
 
+That is a placeholder's chain.  Text in a shape that is not one -- a text box, an
+autoshape, a group's member -- walks only 1-3, its ``a:fontRef``, and 7: the master's
+``otherStyle`` is not on its way, and a style's ``defPPr`` does not stand in for a level
+it lacks (measured, round 15).  The order lives in
+:mod:`ooxml_common.drawingml.text_chain`, which pptx-agent reports from too.
+
 Levels 4-7 are "inherited defaults" rather than the shape's own styling, and pptx-glimpse
 draws a distinction there: underline/strike/baseline/highlight are *not* inherited from
 them, only size, typeface and colour are.
@@ -50,6 +56,7 @@ from .east_asian import EastAsianFaces
 from .fields import SLIDE_NUMBER, evaluate_field, fallback_language
 from ..units import ROTATION_UNIT
 from .naming import resolve_color
+from ooxml_common.drawingml import text_chain
 
 #: Properties inherited from every level of the chain, including the layout's and
 #: master's.  ``bold`` and ``italic`` belong here -- see the module docstring for the
@@ -77,6 +84,9 @@ class _StyleEntry:
     #: The part the style was read from, whose relationships its ``r:`` ids name (an
     #: ``a:buBlip`` picture bullet); ``None`` for the part being drawn.
     part_path: str | None = None
+    #: Whether the style's ``defPPr`` stands in for a level it does not have
+    #: (:func:`ooxml_common.drawingml.text_chain.default_paragraph_fallback`).
+    level_fallback: bool = True
 
 
 def resolve_text_body(
@@ -86,11 +96,15 @@ def resolve_text_body(
     placeholder_type: str | None,
     extra_defaults: s.SourceRunProperties | None = None,
     inherited_parts: Sequence[str | None] = (),
+    table_cell: bool = False,
 ) -> m.TextBody:
     """``inherited_parts`` names the part each of ``inherited`` was read from, in order,
-    so a relationship id in an inherited list style resolves where it was written."""
+    so a relationship id in an inherited list style resolves where it was written.
+    ``extra_defaults`` is a shape's ``fontRef`` or, with ``table_cell``, a table style's
+    ``a:tcTxStyle``."""
     chain = _build_style_chain(
-        context, text_body, inherited, placeholder_type, extra_defaults, inherited_parts
+        context, text_body, inherited, placeholder_type, extra_defaults, inherited_parts,
+        table_cell,
     )
 
     # Whether this body is a plain text box: no placeholder to inherit a face from, and
@@ -173,61 +187,61 @@ def _build_style_chain(
     placeholder_type: str | None,
     extra_defaults: s.SourceRunProperties | None = None,
     inherited_parts: Sequence[str | None] = (),
+    table_cell: bool = False,
 ) -> list[_StyleEntry]:
+    """The styles a body's runs inherit from, nearest first, in the order
+    :func:`ooxml_common.drawingml.text_chain.inherited_layers` gives -- the one PowerPoint
+    was measured to walk, shared with pptx-agent.  For a shape that is not a placeholder
+    that is its own list style, its ``fontRef`` (``extra_defaults``) and the presentation's
+    ``defaultTextStyle``: the master's ``otherStyle`` is not on the way (it used to be
+    here, between the two, which drew a text box black over a ``defaultTextStyle`` that
+    says white)."""
+    kind = text_chain.holder_kind(placeholder_type, table_cell=table_cell)
+    fallback = text_chain.default_paragraph_fallback(kind)
     chain: list[_StyleEntry] = []
-
-    if text_body.list_style is not None:
-        chain.append(_StyleEntry(text_body.list_style, include_decorations=True))
-
-    for index, body in enumerate(inherited):
-        if body is not None and body.list_style is not None:
-            part = inherited_parts[index] if index < len(inherited_parts) else None
-            chain.append(
-                _StyleEntry(body.list_style, include_decorations=False, part_path=part)
-            )
-
-    if extra_defaults is not None:
-        # A table style's `a:tcTxStyle`.  It sits *above* the master's `p:otherStyle` and
-        # the presentation default, not below them: a table cell is not a placeholder, and
-        # the region that styles it is the more specific statement.  It used to be last,
-        # which cost `real-college-template` slide 5 its header -- that deck's
-        # "Medium Style 2 - Accent 1" puts `<a:schemeClr val="lt1"/>` on `a:firstRow` and
-        # PowerPoint inks "Column A" white on the #C00000 band, while the master's
-        # `otherStyle` reached the run first and made it #151515.  The `b="on"` from the
-        # same element did land, because nothing above it says anything about weight,
-        # which is why the region looked like it was working.
-        #
-        # Its decorations apply, unlike the other inherited layers': a header row styled
-        # bold really does bold the cell's text, which is the whole point of the region.
-        chain.append(
-            _StyleEntry(
-                s.SourceTextStyle(
-                    default_paragraph=s.SourceParagraphProperties(
-                        default_run_properties=extra_defaults
+    for layer in text_chain.inherited_layers(placeholder_type, table_cell=table_cell):
+        if layer == text_chain.LIST_STYLE:
+            if text_body.list_style is not None:
+                chain.append(_StyleEntry(text_body.list_style, include_decorations=True,
+                                         level_fallback=fallback))
+        elif layer in (text_chain.LAYOUT, text_chain.MASTER):
+            index = 0 if layer == text_chain.LAYOUT else 1
+            body = inherited[index] if index < len(inherited) else None
+            if body is not None and body.list_style is not None:
+                part = inherited_parts[index] if index < len(inherited_parts) else None
+                chain.append(_StyleEntry(body.list_style, include_decorations=False,
+                                         part_path=part, level_fallback=fallback))
+        elif layer in (text_chain.FONT_REF, text_chain.TABLE_STYLE):
+            if extra_defaults is not None:
+                # A shape's `fontRef` or a table style's `a:tcTxStyle`: the region that
+                # styles a cell is the more specific statement than the master's style
+                # (`real-college-template` slide 5's "Medium Style 2 - Accent 1" inks its
+                # header white over `otherStyle`'s #151515).  Its decorations apply, unlike
+                # the other inherited layers': a header row styled bold really does bold
+                # the cell's text.
+                chain.append(
+                    _StyleEntry(
+                        s.SourceTextStyle(
+                            default_paragraph=s.SourceParagraphProperties(
+                                default_run_properties=extra_defaults
+                            )
+                        ),
+                        include_decorations=True,
                     )
-                ),
-                include_decorations=True,
-            )
-        )
-
-    master_style = _tx_style_for_placeholder(context.master, placeholder_type)
-    if master_style is not None:
-        chain.append(
-            _StyleEntry(
-                master_style, include_decorations=False, part_path=context.master.part_path
-            )
-        )
-
-    default_style = context.presentation.default_text_style
-    if default_style is not None:
-        chain.append(
-            _StyleEntry(
-                default_style,
-                include_decorations=False,
-                part_path=context.presentation.part_path,
-            )
-        )
-
+                )
+        elif layer.startswith("master "):
+            master_style = _tx_style_for_placeholder(
+                context.master, placeholder_type if kind == text_chain.PLACEHOLDER else None)
+            if master_style is not None:
+                chain.append(_StyleEntry(master_style, include_decorations=False,
+                                         part_path=context.master.part_path,
+                                         level_fallback=fallback))
+        elif layer == text_chain.DEFAULT_TEXT_STYLE:
+            default_style = context.presentation.default_text_style
+            if default_style is not None:
+                chain.append(_StyleEntry(default_style, include_decorations=False,
+                                         part_path=context.presentation.part_path,
+                                         level_fallback=fallback))
     return chain
 
 
@@ -245,9 +259,16 @@ def _tx_style_for_placeholder(
     return master.other_style
 
 
-def _style_level(style: s.SourceTextStyle, level: int) -> s.SourceParagraphProperties | None:
+def _style_level(style: s.SourceTextStyle, level: int,
+                 fallback: bool = True) -> s.SourceParagraphProperties | None:
     if 0 <= level < len(style.levels) and style.levels[level] is not None:
         return style.levels[level]
+    if not fallback:
+        # A list style's `defPPr` is not a level: a plain shape's paragraph at a level its
+        # list style or `defaultTextStyle` does not have takes nothing from it (measured,
+        # `ooxml_common.drawingml.text_chain`).  A `fontRef` or `tcTxStyle` entry is only
+        # its `defPPr` and keeps the fallback.
+        return None
     return style.default_paragraph
 
 
@@ -256,7 +277,8 @@ def _resolve_paragraph(
 ) -> m.Paragraph:
     level = paragraph.properties.level if paragraph.properties and paragraph.properties.level else 0
     level_entries = [
-        (_style_level(entry.style, level), entry.include_decorations) for entry in chain
+        (_style_level(entry.style, level, entry.level_fallback), entry.include_decorations)
+        for entry in chain
     ]
     level_properties = [properties for properties, _ in level_entries]
 

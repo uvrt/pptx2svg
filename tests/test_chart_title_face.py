@@ -29,8 +29,12 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SLIDE = 2
 DELETED = "<c:autoTitleDeleted val='1'/>"
 #: The deck's default text style, made to name the theme's minor face (Aptos) as the
-#: probe decks' did -- so a text box there is Aptos.
-DEFAULT_STYLE = ('<a:defRPr lang="en-US"/>', '<a:defRPr lang="en-US"><a:latin typeface="+mn-lt"/></a:defRPr>')
+#: probe decks' did -- so a text box there is Aptos.  In ``lvl1pPr``, the level a text
+#: box's paragraph takes: ``defPPr`` is not a fallback for it (measured, round 15,
+#: ``ooxml_common.drawingml.text_chain``).
+DEFAULT_STYLE = ('<a:defPPr><a:defRPr lang="en-US"/></a:defPPr>',
+                 '<a:defPPr><a:defRPr lang="en-US"/></a:defPPr>'
+                 '<a:lvl1pPr><a:defRPr><a:latin typeface="+mn-lt"/></a:defRPr></a:lvl1pPr>')
 FACES = "<a:latin typeface='+mn-lt'/><a:ea typeface='+mn-ea'/><a:cs typeface='+mn-cs'/>"
 WIDE_FACE = ("<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz='1000'/>",
              "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz='1000'>"

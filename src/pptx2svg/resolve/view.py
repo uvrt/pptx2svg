@@ -536,13 +536,13 @@ def _font_reference_defaults(style: s.SourceShapeStyle | None) -> s.SourceRunPro
     """A shape's ``a:fontRef`` as the run defaults it stands for: its colour and the face
     of the theme font collection it names.
 
-    Measured (``tools/make_style_probe.py``, ``font-*``): they sit where a table style's
-    ``a:tcTxStyle`` does -- over the master's ``p:otherStyle``, which says ``tx1`` and
-    ``+mn-lt``, and under the shape's own ``a:lstStyle`` and its runs.  So a default shape's
+    Measured (``tools/make_style_probe.py``, ``font-*``; round 15's probes): they sit over
+    the presentation's ``defaultTextStyle`` and under the shape's own ``a:lstStyle`` and
+    its runs (``ooxml_common.drawingml.text_chain``).  So a default shape's
     ``fontRef idx="minor"`` over ``lt1`` inks its text white, ``idx="major"`` draws it in
-    the theme's heading face (Calibri Light, where ``otherStyle`` alone gives Calibri),
-    ``idx="none"`` keeps the face and still gives the colour, and a reference with no
-    colour leaves the colour to ``otherStyle``.
+    the theme's heading face (Calibri Light, where the default text style alone gives
+    Calibri), ``idx="none"`` keeps the face and still gives the colour, and a reference
+    with no colour leaves the colour to ``defaultTextStyle``.
 
     Only for a shape that is not a placeholder: where a placeholder's ``fontRef`` would sit
     against its ``titleStyle`` or ``bodyStyle`` has not been measured.
@@ -995,6 +995,7 @@ def _resolve_table_cell(
             inherited=[],
             placeholder_type=None,
             extra_defaults=style.text,
+            table_cell=True,
         )
         # Cell margins and anchor live on `a:tcPr`, not on the cell's `a:bodyPr`.
         body_properties = text_body.body_properties
