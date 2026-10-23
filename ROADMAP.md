@@ -65,7 +65,7 @@ rendering approaches.
 | --- | --- |
 | Package, relationships, parts | Complete |
 | Theme colours, colour maps, transforms | Complete |
-| Placeholder / background / text inheritance | Complete |
+| Placeholder / background / text inheritance | Complete; a text box's or autoshape's inherited colour, size and face **measured against PowerPoint** (round 15: run, paragraph, list style, `fontRef`, `defaultTextStyle` -- not the master's `otherStyle`; docs/rendering.md). Open: a table with no `tableStyleId` is drawn with a header band PowerPoint does not draw (its text black, a thin black grid) |
 | Shapes: all 187 presets PowerPoint accepts + custom geometry | Complete and **verified against PowerPoint**: every preset matches its own PDF export at two aspect ratios, median 0.999 silhouette overlap |
 | Text: cascade, bullets, wrapping (Latin + CJK), autofit, vertical, tabs, columns | Complete for the common path |
 | Fills, outlines, arrowheads, shadows, glow, soft edge | Complete |

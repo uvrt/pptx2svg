@@ -80,6 +80,27 @@ leaving a blank rectangle unexplained.
 **EMF/WMF pictures** render the preview Office embeds in the metafile. A DIB preview
 needs nothing extra; a PDF preview needs `pptx2svg[metafile]`.
 
+## Where inherited text formatting comes from
+
+A run that states no colour, size or face takes each, property by property, from the
+first layer below it that states one. Measured on PowerPoint 16.106 for Mac (round 15,
+23 October 2026: made-up decks giving each candidate layer its own colour and size, read
+from the slide show on screen, the PDF export and PowerPoint's own `font color`, which
+agreed on every probe; PowerPoint's resave writes no colour, so it is resolved when drawn):
+
+| Text in | Layers, nearest first |
+|---|---|
+| a text box, an autoshape, a group's member | run, paragraph (`a:pPr/a:defRPr`), the shape's `a:lstStyle` at the paragraph's level, the shape's `p:style/a:fontRef`, the presentation's `defaultTextStyle` at the paragraph's level (`lvl1pPr` for level 0); then black, 18 pt |
+| a placeholder | run, paragraph, its own list style, the layout's and the master's placeholder, the master's `titleStyle`/`bodyStyle`/`otherStyle` by type, `defaultTextStyle` |
+| a table cell | run, paragraph, its list style, the table style's `a:tcTxStyle`, the master's `otherStyle`, `defaultTextStyle` |
+
+For the first row: the master's `otherStyle` is **not** on the way (a `defaultTextStyle`
+whose levels say white draws a text box white over an `otherStyle` that says `tx1`), and
+neither a list style's nor `defaultTextStyle`'s `defPPr` stands in for a level the style
+does not have. A theme colour goes through the slide's colour map (master, layout, slide
+override). The placeholder and table rows were not re-measured and keep their order. The
+order is `ooxml_common.drawingml.text_chain`, which pptx-agent reports colours from.
+
 ## Not rendered
 
 Four things, and each of them is a real gap rather than a rough edge:
