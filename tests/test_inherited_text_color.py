@@ -42,8 +42,9 @@ def _shape(sid: int, name: str, *, level: int | None = None, lst: str = "",
         color = f'<a:schemeClr val="{font_ref}"/>' if font_ref else ""
         style = f'<p:style><a:lnRef idx="0"/><a:fillRef idx="0"/><a:effectRef idx="0"/>' \
                 f'<a:fontRef idx="minor">{color}</a:fontRef></p:style>'
+    box = ' txBox="1"' if textbox else ""
     return (f'<p:sp><p:nvSpPr><p:cNvPr id="{sid}" name="{name}"/>'
-            f'<p:cNvSpPr{" txBox=\"1\"" if textbox else ""}/><p:nvPr/></p:nvSpPr>'
+            f'<p:cNvSpPr{box}/><p:nvPr/></p:nvSpPr>'
             f'<p:spPr><a:xfrm><a:off x="0" y="{sid * 500000}"/><a:ext cx="2000000" cy="400000"/>'
             f'</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>{style}'
             f'<p:txBody><a:bodyPr/><a:lstStyle>{lst}</a:lstStyle><a:p>{ppr}<a:r>'
