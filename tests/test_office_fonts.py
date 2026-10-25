@@ -392,7 +392,7 @@ def _named(source: Path, family: str, typographic: str) -> bytes:
     ``typographic`` -- how Aptos Display and Aptos are both "Aptos" to the rasteriser."""
     import struct
 
-    from ooxml_common.fonts.sfnt import _directory, write_sfnt
+    from ooxml_common.fonts.sfnt import read_tables, write_sfnt
 
     records = [(1, family), (2, "Regular"), (4, f"{family} Regular"), (6, family.replace(" ", "")),
                (16, typographic), (17, "Regular")]
@@ -403,7 +403,7 @@ def _named(source: Path, family: str, typographic: str) -> bytes:
         entries += struct.pack(">HHHHHH", 3, 1, 0x409, name_id, len(raw), len(strings))
         strings += raw
     name = struct.pack(">HHH", 0, len(records), 6 + 12 * len(records)) + entries + strings
-    tables = _directory(source.read_bytes())
+    tables = read_tables(source.read_bytes())
     tables[b"name"] = name
     return write_sfnt(list(tables.items()))
 

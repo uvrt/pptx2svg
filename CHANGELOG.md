@@ -5,6 +5,12 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- **The names pptx-agent imports are declared and held** (review, N2): docs/usage.md,
+  "Used by pptx-agent", lists the 29 names pptx-agent's `src`, `tests` and `tools` import
+  or patch here, and `tests/test_public_api.py` imports each one, so a rename fails this
+  repository's CI rather than pptx-agent's next run; the test holds the section and its
+  list to the same names. The tests use ooxml-common 0.28.0's public
+  `fonts.sfnt.read_tables` (was `_directory`). No code change.
 - **CI runs nightly** (02:37 UTC) and on demand, so a change in ooxml-common that breaks
   this suite shows the next morning; ooxml-common's own CI now runs this suite on its
   pull requests too. No code change.

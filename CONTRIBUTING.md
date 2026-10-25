@@ -30,3 +30,12 @@ redistribute live in the gitignored `scratch/`, and the tests that need them ski
 
 Open pull requests against `main`. CI must be green on every OS and Python version in the
 matrix. Keep constants tied to the measurement that produced them.
+
+## Names pptx-agent imports
+
+`tests/test_public_api.py` imports every name pptx-agent imports from here, and
+[docs/usage.md](docs/usage.md), "Used by pptx-agent", lists the same names, so renaming or
+removing one fails this repository's CI instead of pptx-agent's. To rename one, keep the
+old name as an alias for one release, with a comment saying who it is kept for, and move
+pptx-agent over; a name pptx-agent starts importing is added to both. pptx-agent imports
+no name that starts with an underscore: give it a public name first.
