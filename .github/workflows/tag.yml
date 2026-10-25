@@ -7,7 +7,8 @@ name: Tag
 # top section, so a tag names a version the changelog describes.
 #
 # The tag is pushed with this run's GITHUB_TOKEN, and pushes made with it start no other
-# workflow, so the tag itself runs nothing.
+# workflow, so the tag itself runs nothing: not release.yml either, which publishes to PyPI
+# on a v* tag.  Publishing stays a step of its own.
 
 on:
   push:
