@@ -29,7 +29,7 @@ classifiers = [
 ]
 # Standard-library only at runtime; why ooxml-common is a dependency, and why at this
 # version: CONTRIBUTING.md, "Dependencies".
-dependencies = ["ooxml-common>=0.27.0"]
+dependencies = ["ooxml-common>=0.28.0"]
 
 [project.optional-dependencies]
 # SVG -> PNG rasterisation. resvg-py ships prebuilt wheels, so this needs no compiler

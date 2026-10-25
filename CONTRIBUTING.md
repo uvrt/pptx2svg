@@ -59,9 +59,10 @@ yet, so it is installed first, from a sibling checkout or from its repository as
 `pyproject.toml` names a version, never a URL, since PyPI refuses a distribution whose
 dependencies name one.
 
-- `ooxml-common>=0.27.0`: `drawingml.text_chain`, where a run's inherited colour, size and
-  face come from (round 15), which every text body is drawn with. What each earlier
-  version added is in ooxml-common's CHANGELOG.
+- `ooxml-common>=0.28.0`: 0.27.0's `drawingml.text_chain`, where a run's inherited colour,
+  size and face come from (round 15), which every text body is drawn with, and 0.28.0's
+  public `fonts.sfnt.read_tables`, which the tests read font tables with (review, N2).
+  What each earlier version added is in ooxml-common's CHANGELOG.
 
 The extras (`png`, `cairo`, `fonts`, `measure`, `metafile`, `fidelity`, `dev`) are
 described where `pyproject.toml` lists them.

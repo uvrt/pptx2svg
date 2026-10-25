@@ -12,7 +12,8 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
   `ConvertOptions.templates`). Each version that reaches `main` is tagged by the new tag
   workflow, and CI's `build` job checks that `pyproject.toml`'s version is the one this
   file's top version section names (`tools/check_version.py`). The dependency notes moved
-  from `pyproject.toml` to CONTRIBUTING.md, "Dependencies". No code change.
+  from `pyproject.toml` to CONTRIBUTING.md, "Dependencies". The ooxml-common floor is raised
+  from 0.27.0 to 0.28.0, which the tests' `fonts.sfnt.read_tables` needs. No code change.
 
 - **The names pptx-agent imports are declared and held** (review, N2): docs/usage.md,
   "Used by pptx-agent", lists the 29 names pptx-agent's `src`, `tests` and `tools` import
