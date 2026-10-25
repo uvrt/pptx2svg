@@ -874,8 +874,8 @@ def main() -> int:
             style = infer(measured[slide_no])
             styles[style["guid"]] = style
         body = emit(styles)
-        print("\n# paste into BUILTIN_TABLE_STYLES in "
-              "src/pptx2svg/parse/table_styles_builtin.py\n", file=sys.stderr)
+        print("\n# paste into BUILTIN_TABLE_STYLES in ooxml-common's "
+              "src/ooxml_common/drawingml/table_styles.py\n", file=sys.stderr)
         print(body)
     return 0
 

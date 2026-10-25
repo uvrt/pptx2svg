@@ -52,13 +52,6 @@ USED_BY: dict[str, dict[str, str]] = {
     "pptx2svg.glyphs": {
         "system_font_dirs": "pptx-agent",
     },
-    "pptx2svg.parse.source": {
-        "TABLE_STYLE_REGIONS": "pptx-agent",
-    },
-    "pptx2svg.parse.table_styles_builtin": {
-        "BUILTIN_TABLE_STYLES": "pptx-agent",
-        "builtin_table_style": "pptx-agent",
-    },
     "pptx2svg.png": {
         "RasterizerNotAvailable": "pptx-agent",
         "svg_to_png": "pptx-agent",

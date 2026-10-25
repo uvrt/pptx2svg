@@ -359,7 +359,5 @@ with a comment saying who it is kept for, and move pptx-agent to the new name.
 - `pptx2svg.fonts.check` -- pptx-agent: `resolved_families`
 - `pptx2svg.fonts.office` -- pptx-agent: `emoji_face`, `search_dirs`, `user_layout_metrics`
 - `pptx2svg.glyphs` -- pptx-agent: `system_font_dirs`
-- `pptx2svg.parse.source` -- pptx-agent: `TABLE_STYLE_REGIONS`
-- `pptx2svg.parse.table_styles_builtin` -- pptx-agent: `BUILTIN_TABLE_STYLES`, `builtin_table_style`
 - `pptx2svg.png` -- pptx-agent: `RasterizerNotAvailable`, `svg_to_png`
 - `pptx2svg.resolve.fields` -- pptx-agent: `DATE_FORMATS`, `NAMES`, `date_format_index`, `fallback_language`, `format_date`, `table_language`

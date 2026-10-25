@@ -52,8 +52,8 @@ shadow (which effect style, in which colour), the background down the rows of th
 renders the same decks with pptx2svg and reports every cell fill, edge, shadow and text
 colour, weight and face that differs from PowerPoint's.
 
-What it found, which ``src/pptx2svg/parse/table_styles_builtin.py`` carries as
-``_THEMED_STYLE_XML``: see the comment there.  The background is one gradient down the
+What it found, which ooxml-common's ``src/ooxml_common/drawingml/table_styles.py`` carries
+as ``THEMED_STYLE_XML``: see the comment there.  The background is one gradient down the
 whole table, not one per cell; no bevel is drawn; all six accents of each family measure
 alike but for the accent.
 

@@ -69,7 +69,7 @@ python3 tools/extract_font_metrics.py --write    # regenerate
 A test runs `--check`, so a font update that is not accompanied by a regenerated table
 fails the suite rather than silently making layout wrong. The same idea applies to the
 two other generated tables: ooxml-common's `drawingml/preset_specs.py` and
-`drawingml/presets.py` come from `tools/derive_preset_geometry.py`, and `parse/table_styles_builtin.py` from
-`tools/derive_table_styles.py`, which measures the styles by rendering them through
+`drawingml/presets.py` come from `tools/derive_preset_geometry.py`, and its
+`drawingml/table_styles.py` from `tools/derive_table_styles.py`, which measures the styles by rendering them through
 PowerPoint. Edit the tool, not the table.
 
