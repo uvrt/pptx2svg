@@ -88,7 +88,7 @@ closing each gap involves: [ROADMAP.md](ROADMAP.md).
 
 ## Status
 
-Version 0.1.0, in active development, not yet released to PyPI. CI runs the suite on
+Version 0.2.0, in active development, not yet released to PyPI. CI runs the suite on
 Linux, macOS and Windows for Python 3.10 to 3.15. Fidelity against PowerPoint is measured
 locally on a Mac with Office ([docs/fidelity.md](docs/fidelity.md)); CI checks regressions
 only. Changes: [CHANGELOG.md](CHANGELOG.md).
