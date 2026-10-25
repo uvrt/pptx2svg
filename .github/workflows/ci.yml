@@ -46,7 +46,9 @@ jobs:
         # (`@<branch>`) on the pull request, and back at @main before merging.
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@main"
+          # TEMPORARY (s3): ooxml-common 0.31.0 (drawingml.table_styles) is on its
+          # office-data-s3 branch until it is merged; point this line back at @main then.
+          python -m pip install "ooxml-common @ git+https://github.com/uvrt/ooxml-common@office-data-s3"
           python -m pip install -e .[dev]
           python -m pip install -e packages/pptx2svg-fonts
 
