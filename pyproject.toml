@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pptx2svg"
-version = "0.1.0"
+version = "0.2.0"
 description = "Render PowerPoint (.pptx) slides to SVG (and PNG) in pure Python"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,50 +27,8 @@ classifiers = [
   "Topic :: Office/Business :: Office Suites",
   "Typing :: Typed",
 ]
-# Still standard-library only at runtime: ooxml-common is the format-neutral half of this
-# library (OPC, units, DrawingML data, fonts, the measured text metrics), extracted with
-# its history so docx2svg can share it, and it has no dependencies of its own.  See
-# ROADMAP.md, "The shared package".
-#
-# It is not on PyPI yet, so until it is this requirement is satisfied by installing it
-# first -- from a sibling checkout (`pip install -e ../ooxml-common`) or, as CI does,
-# from its repository URL.  A direct URL cannot go here instead: PyPI refuses to publish
-# a distribution whose dependencies name one.
-#
-# 0.2 is the first ooxml-common that carries DrawingML's value types and renderers
-# (ROADMAP.md, "The shared package"), which pptx2svg now imports: an older one fails at
-# import, so the requirement says so first.  0.3 carries the DrawingML reader too
-# (parse/drawing.py and the DrawingML half of parse/source.py moved there).  0.3.2 carries
-# `geometry.text_area` and `DrawingRules.text_outline_inset`, which lay a shape's text out
-# in its geometry's text rectangle, and `icc` with `imagemeta.icc_profile`, which convert a
-# profiled picture to sRGB before it is rasterised.  0.4 carries the chart reader and layout,
-# the shape tree and text body readers, and the shape, text body and group renderers
-# (parse/{chart,shapes,text}.py, resolve/chart.py, render/{context,shape,text}.py,
-# text/wrap.py and most of render/svg.py moved there).  0.4.2 keeps the font collection
-# an `a:fontRef` names, which a shape's text takes its face from.  0.4.3 composes colour
-# transforms as PowerPoint does, flows a Latin run on across a change of face, and
-# measures Consolas (ROADMAP.md, 5.6 and 5.7).  0.4.5 draws autofit as the file stores it
-# (`DrawingRules.autofit`; ROADMAP.md, 5.8).  0.5 kerns as PowerPoint does
-# (`DrawingRules.kerning`, `LEGACY_KERNING`; 5.10) and carries the Office font lookup
-# fonts/office.py now sits on (`ooxml_common.fonts.office`).  0.6 resolves a run's
-# Japanese face as PowerPoint does (`theme_east_asian`, `japanese_fallback`, a run's
-# `lang`), finds a face by its English typographic family and draws synthetic bold.  0.7
-# draws chart text in its `c:txPr` colour and a number format's text round the number,
-# and places a radar's category labels as PowerPoint does (tests/test_chart.py).
-# 0.8 resolves an application's own font folders, `font_dirs` or `OOXML_FONT_DIRS`
-# (`office.user_font_dirs`, `check_families(supplied=...)`; tests/test_font_dirs.py).
-# 0.9 reads a text field's type (`SourceTextRun.field_type`, which resolve/fields.py
-# evaluates), draws an absent symbol face as Unicode (`text.symbol_fonts`; pptx2svg/
-# symbols.py) and a data label's own text (tests/test_point_labels.py).
-# 0.12 restates an SVG picture's root size in pixels as PowerPoint reads it before a page
-# is rasterised (`svgimage.with_pixel_sized_images`; tests/test_svg_picture_png.py).
-# 0.14 draws a table style's background and effects under the table (`TableData.background`
-# and `.effects`; the built-in "Themed Style" tables, tests/test_resolve.py).
-# 0.25 parses an SVG once for the glyph check and the rasteriser's file list
-# (`fonts.rasterdb.parsed_svg`), and fits an effect's filter region to its reach.
-# 0.26 marks cells and text bodies, scopes definition ids and leaves hyperlinks out on
-# request (`RenderContext.edit_marks`, `scope_ids`, `hyperlinks`; docs/usage.md, "A live,
-# editable view").
+# Standard-library only at runtime; why ooxml-common is a dependency, and why at this
+# version: CONTRIBUTING.md, "Dependencies".
 dependencies = ["ooxml-common>=0.27.0"]
 
 [project.optional-dependencies]

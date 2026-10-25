@@ -1,9 +1,18 @@
 # Changelog
 
-pptx2svg has no tagged release yet; every change so far is on the way to 0.1.0.
+pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<version>`,
+from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
-## 0.1.0 -- unreleased (in development since 2026-09-11)
+## 0.2.0 -- 2026-10-25 (in development since 2026-09-11)
+
+- **Versions that mean something** (review, N3): this is 0.2.0, the first version tagged
+  (`v0.2.0`); pptx-agent's `render` extra now asks for `pptx2svg>=0.2.0`, which carries
+  everything it uses (`table_row_heights`, `convert_pptx_to_agent_svg`,
+  `ConvertOptions.templates`). Each version that reaches `main` is tagged by the new tag
+  workflow, and CI's `build` job checks that `pyproject.toml`'s version is the one this
+  file's top version section names (`tools/check_version.py`). The dependency notes moved
+  from `pyproject.toml` to CONTRIBUTING.md, "Dependencies". No code change.
 
 - **The names pptx-agent imports are declared and held** (review, N2): docs/usage.md,
   "Used by pptx-agent", lists the 29 names pptx-agent's `src`, `tests` and `tools` import
