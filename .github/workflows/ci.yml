@@ -60,8 +60,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # pyproject.toml's version is the one CHANGELOG.md's top version section names (and
-      # __version__'s), so the tag the tag workflow gives it at merge names a described version.
+      # pyproject.toml's version, and __version__, must be the one CHANGELOG.md's top
+      # version section names: the tag workflow tags that version when it reaches main.
       - name: The version agrees with CHANGELOG.md
         run: python tools/check_version.py
       - name: Build distributions
