@@ -5,6 +5,9 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.1.0 -- unreleased (in development since 2026-09-11)
 
+- **CI runs nightly** (02:37 UTC) and on demand, so a change in ooxml-common that breaks
+  this suite shows the next morning; ooxml-common's own CI now runs this suite on its
+  pull requests too. No code change.
 - **A text box's inherited colour, size and face as PowerPoint draws them** (round 15; a
   fidelity fix; docs/rendering.md, "Where inherited text formatting comes from"): text in
   a shape that is not a placeholder no longer takes the master's `otherStyle`, and a list
