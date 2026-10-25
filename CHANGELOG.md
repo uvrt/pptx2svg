@@ -4,6 +4,21 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.2.1 -- unreleased
+
+- **The built-in table styles live in ooxml-common** (review, S3): the catalogue of
+  PowerPoint's 74 built-in table styles, with where each number was measured, moved to
+  `ooxml_common.drawingml.table_styles`, which pptx-agent reads too, so a re-measurement
+  reaches both. `parse/table_styles_builtin.py` keeps `BUILTIN_TABLE_STYLES` (now the
+  shared table) and `builtin_table_style`, which expands an entry into this renderer's
+  model as before; `tools/derive_table_styles.py` and `tools/derive_themed_table_styles.py`
+  still measure it and now say to paste into ooxml-common. A test compared the copy with
+  the shared table, once, on the pull request, before the copy went. The ooxml-common floor
+  is raised to 0.31.0. Output unchanged: the VRT goldens and every other test are as they
+  were. `TABLE_STYLE_REGIONS`, `BUILTIN_TABLE_STYLES` and `builtin_table_style` leave the
+  names pptx-agent imports (docs/usage.md, `tests/test_public_api.py`): it reads ooxml-common
+  instead; the names stay.
+
 ## 0.2.0 -- 2026-10-25 (in development since 2026-09-11)
 
 - **Versions that mean something** (review, N3): this is 0.2.0, the first version tagged

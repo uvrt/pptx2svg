@@ -977,7 +977,8 @@ def test_builtin_table_style_medium_2_accent_1_matches_powerpoint():
 
     ``table test.pptx`` names ``{5C22544A-...}`` ("Medium Style 2 - Accent 1"), sets
     ``firstRow`` and ``bandRow``, and gives no cell an explicit fill -- so every colour
-    below comes out of ``parse/table_styles_builtin.py`` and from nowhere else.  The
+    below comes out of the built-in catalogue (``ooxml_common.drawingml.table_styles``,
+    through ``parse/table_styles_builtin.py``) and from nowhere else.  The
     fixture was exported through PowerPoint and sampled cell by cell: all twenty-five
     fills came back byte-identical to these, with white rules throughout and the only
     differences anywhere in the table being sub-pixel anti-aliasing on the rules.
