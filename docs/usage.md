@@ -345,3 +345,21 @@ what addresses a shape unambiguously. Alt text is still emitted as `aria-label` 
 The ids as a contract for an editor -- cells, sources, text bodies, what stays stable --
 are under "A live, editable view" above.
 
+## Used by pptx-agent
+
+pptx-agent imports these names from pptx2svg, in its `src`, `tests` and `tools`, beyond the
+functions above. They are pptx2svg's surface across repositories: pptx-agent's CI installs
+pptx2svg from `main`, so renaming or removing one breaks it at its next run.
+`tests/test_public_api.py` lists the same names and fails when one is gone, or when this
+list and that one disagree. To rename one, keep the old name as an alias for one release,
+with a comment saying who it is kept for, and move pptx-agent to the new name.
+
+- `pptx2svg` -- pptx-agent: `ConvertOptions`, `convert_pptx_to_agent_svg`, `convert_pptx_to_model`, `convert_pptx_to_png`, `convert_pptx_to_svg`, `png`, `rasterise_svgs`, `render_svgs`, `table_row_heights`, `user_font_dirs`, `uses_host_fonts`
+- `pptx2svg.fonts` -- pptx-agent: `bundle_dir`, `font_dirs`
+- `pptx2svg.fonts.check` -- pptx-agent: `resolved_families`
+- `pptx2svg.fonts.office` -- pptx-agent: `emoji_face`, `search_dirs`, `user_layout_metrics`
+- `pptx2svg.glyphs` -- pptx-agent: `system_font_dirs`
+- `pptx2svg.parse.source` -- pptx-agent: `TABLE_STYLE_REGIONS`
+- `pptx2svg.parse.table_styles_builtin` -- pptx-agent: `BUILTIN_TABLE_STYLES`, `builtin_table_style`
+- `pptx2svg.png` -- pptx-agent: `RasterizerNotAvailable`, `svg_to_png`
+- `pptx2svg.resolve.fields` -- pptx-agent: `DATE_FORMATS`, `NAMES`, `date_format_index`, `fallback_language`, `format_date`, `table_language`
