@@ -135,7 +135,7 @@ def test_the_two_ways_resvg_leaves_text_out_are_the_two_the_check_reports():
 
 def test_text_by_stack_reads_every_run_once_each():
     svg = ('<svg xmlns="http://www.w3.org/2000/svg"><g font-family="A, serif">'
-           '<text>ab <tspan font-family="B">cd</tspan> ba​</text></g>'
+           '<text>ab <tspan font-family="B">cd</tspan> ba\u200b</text></g>'
            '<text font-family="B">dc</text></svg>')
     assert text_by_stack(svg) == {"A, serif": "ab", "B": "cd"}
 

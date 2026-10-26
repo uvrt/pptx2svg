@@ -34,7 +34,7 @@ import pypdfium2.raw as raw
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from make_combo_probe import FRAME_OFF, METER, probes_for, values_for  # noqa: E402
+from make_combo_probe import FRAME_OFF, probes_for  # noqa: E402
 from read_axis_probe import _mul, _number, labels, path_points  # noqa: E402
 
 from pptx2svg.resolve import chart as chartmod  # noqa: E402

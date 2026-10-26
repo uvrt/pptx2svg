@@ -33,7 +33,6 @@ to the probes whose key contains it::
 from __future__ import annotations
 
 import ctypes
-import math
 import re
 import sys
 from pathlib import Path

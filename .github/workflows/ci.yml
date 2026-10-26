@@ -64,6 +64,12 @@ jobs:
       # version section names: the tag workflow tags that version when it reaches main.
       - name: The version agrees with CHANGELOG.md
         run: python tools/check_version.py
+      # pyflakes and a few bug-finding rules ([tool.ruff] in pyproject.toml), at the dev
+      # extra's pin.  Type checking is not on here yet: mypy still reports too much.
+      - name: Lint (ruff)
+        run: |
+          python -m pip install "ruff==0.17.2"
+          ruff check .
       - name: Build distributions
         run: |
           python -m pip install --upgrade pip build twine

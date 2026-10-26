@@ -36,7 +36,6 @@ from .source import (
     SourceColorMap,
     SourceEmbeddedFont,
     SourceFontScheme,
-    SourceFormatScheme,
     SourcePresentation,
     SourceRunProperties,
     SourceSlide,
