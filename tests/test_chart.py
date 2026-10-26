@@ -1902,8 +1902,6 @@ def _fake_fill(fill):
 
 
 def _fake_outline(outline):
-    from pptx2svg.parse import source as s
-
     if outline is None:
         return None
     fill = _fake_fill(outline.fill)
@@ -7282,9 +7280,6 @@ def test_the_two_axes_do_not_share_a_tick_count():
 
 def test_a_secondary_axis_reserves_the_same_band_on_the_right_as_the_left_one():
     """Measured to 0.04 pt over five label widths on ``combo-domain`` and ``combo-plot``."""
-    from pptx2svg.resolve.chart import ChartFont, font_box
-
-    font = ChartFont(family="Aptos", box=font_box("Aptos", 10.0))
     for high, reserve in ((5.0, 21.07), (50.0, 26.41), (500.0, 31.75)):
         line = combo_group(
             "line",

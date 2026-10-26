@@ -470,7 +470,6 @@ def mesh(path: Path, probes: list[dict], only: str | None) -> None:
         page = doc[index]
         images = scene_images(page)
         read = read_page(page.raw, probe)
-        values, positions = read["values"], None
         text = labels(page.raw)
         ticks = []
         for label, _left, y, _height, _width, _x in text:

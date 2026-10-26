@@ -15,19 +15,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..model import (
-    ArrowEndpoint,
-    BulletType,
-    CompoundLineType,
-    CustomGeometryPath,
-    DashStyle,
-    LineCap,
-    LineJoin,
-    RectangleAlignment,
-    SpacingValue,
-    TabStop,
-    TextVerticalType,
-)
 
 # --------------------------------------------------------------------------------------
 # DrawingML

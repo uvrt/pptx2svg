@@ -33,10 +33,10 @@ def clr(value: str, **mods: int) -> str:
 
 def styled(
     *,
-    ln=(0, clr("accent1")),
-    fill=(1, clr("accent1")),
-    effect=(0, clr("accent1")),
-    font=("minor", clr("lt1")),
+    ln=(0, clr("accent1")),  # noqa: B008 -- clr() returns a str, so the default is immutable
+    fill=(1, clr("accent1")),  # noqa: B008 -- clr() returns a str, so the default is immutable
+    effect=(0, clr("accent1")),  # noqa: B008 -- clr() returns a str, so the default is immutable
+    font=("minor", clr("lt1")),  # noqa: B008 -- clr() returns a str, so the default is immutable
     sp_pr: str = "",
     run: str = "",
     list_style: str = "<a:lstStyle/>",

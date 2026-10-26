@@ -48,7 +48,7 @@ from ..metafile import extract_metafile_preview
 from ..metafile.pdf import PdfRasterizerNotAvailable, rasterise_pdf
 from ..opc import OpcPackage
 from ..parse import source as s
-from ..parse.chart import is_three_d_kind, parse_chart_space
+from ..parse.chart import parse_chart_space
 from ..parse.shapes import parse_shape_tree
 from ..parse.table_styles_builtin import BUILTIN_TABLE_STYLES, builtin_table_style
 from ..text.fontmap import east_asian_family

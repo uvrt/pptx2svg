@@ -382,7 +382,7 @@ class _Writer:
         right -= _pt(props.margin_right)
         top += _pt(props.margin_top)
         bottom -= _pt(props.margin_bottom)
-        area_w, area_h = max(0.0, right - left), max(0.0, bottom - top)
+        area_w = max(0.0, right - left)
         scale = props.font_scale or 1.0
         paragraphs = []
         for index, paragraph in enumerate(body.paragraphs):

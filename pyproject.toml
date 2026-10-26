@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pptx2svg"
-version = "0.3.0"
+version = "0.3.1"
 description = "Render PowerPoint (.pptx) slides to SVG (and PNG) in pure Python"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -81,6 +81,8 @@ dev = [
   "numpy>=1.24",
   "pillow>=10",
   "pypdfium2>=4",
+  # The linter (CI's build job runs it, at the same pin; [tool.ruff] below).
+  "ruff==0.17.2",
 ]
 # `pptx2svg-fonts` is deliberately NOT listed above.  It is a sibling distribution that
 # lives in this repository at packages/pptx2svg-fonts and is not published yet, so naming
@@ -105,6 +107,20 @@ pptx2svg = "pptx2svg.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# py.typed: the package's annotations are for its callers' type checkers (PEP 561).
+[tool.setuptools.package-data]
+pptx2svg = ["py.typed"]
+
+# A small set of bug-finding rules, not a style: pyflakes (F), syntax errors (E9),
+# mutable or called defaults (B006, B008), return in finally (B012), comparisons that do
+# nothing (B015) and pylint's errors (PLE).  No formatter and no import sorting.
+[tool.ruff]
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["F", "E9", "B006", "B008", "B012", "B015", "PLE"]
 
 
 [tool.pytest.ini_options]

@@ -101,9 +101,11 @@ def emu(points: float) -> int:
 
 
 def run_xml(text: str, size_pt: float, *, bold: bool = False, face: str = FACE) -> str:
+    # Outside the f-string: a backslash inside one is Python 3.12+ syntax.
+    bold_attribute = ' b="1"' if bold else ""
     return (
         f"<a:r><a:rPr lang='ja-JP' sz='{int(round(size_pt * 100))}'"
-        f"{' b=\"1\"' if bold else ''} dirty='0'>"
+        f"{bold_attribute} dirty='0'>"
         f"<a:latin typeface='{face}'/><a:ea typeface='{face}'/>"
         f"<a:cs typeface='{face}'/></a:rPr><a:t>{text}</a:t></a:r>"
     )

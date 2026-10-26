@@ -65,7 +65,6 @@ from xml.sax.saxutils import escape
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_chart_gallery import (  # noqa: E402
-    A,
     C,
     NO_TITLE,
     QUARTERS,

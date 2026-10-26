@@ -4,6 +4,18 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.3.1 -- unreleased
+
+- **A linter, and `py.typed`** (review, S8): ruff checks pyflakes and a few bug-finding rules
+  (`[tool.ruff]` in pyproject.toml; no formatter, no import sorting), as a step of CI's build
+  job, pinned in the dev extra. What it found is fixed: unused imports and locals (among
+  them `parse/source.py`'s unused `model` names and `resolve/view.py`'s `is_three_d_kind`),
+  a zero-width space written raw in a test string, and `tools/make_cjk_wrap_probe.py`'s
+  backslash inside an f-string, which is Python 3.12 syntax although the project claims
+  3.10 (the probe it writes is the same). The wheel and sdist now carry `py.typed`, so a
+  caller's type checker reads the annotations. mypy is not run here yet. Rendering is
+  unchanged.
+
 ## 0.3.0 -- unreleased
 
 - **One raster backend for both renderers** (review, S7): finding the backends, calling
