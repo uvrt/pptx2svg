@@ -249,3 +249,32 @@ def test_the_public_two_halves_draw_what_convert_pptx_to_png_draws(product_page)
         files = resolved.embedded_fonts.write(folder) if resolved.embedded_fonts else None
         numbers = [(slide.slide_number, slide.template_part) for slide in resolved.slides]
         assert pptx2svg.rasterise_svgs(documents, options, numbers=numbers, font_files=files) == whole
+
+
+# -- On ooxml-common's rasterisers (review, S7) -------------------------------------------
+
+
+def test_the_public_names_are_the_shared_ones():
+    import pptx2svg
+    from ooxml_common import raster
+
+    assert pptx2svg.RasterizerNotAvailable is raster.RasterizerNotAvailable
+    assert pptx2svg.available_backends is raster.available_backends
+
+
+def test_no_backend_says_how_to_install_one(monkeypatch):
+    import sys
+
+    import pptx2svg
+
+    monkeypatch.setitem(sys.modules, "resvg_py", None)
+    monkeypatch.setitem(sys.modules, "cairosvg", None)
+    with pytest.raises(pptx2svg.RasterizerNotAvailable, match=r"pip install pptx2svg\[png\]"):
+        svg_to_png(SIMPLE_SVG)
+    with pytest.raises(pptx2svg.RasterizerNotAvailable, match=r"pip install pptx2svg\[png\]"):
+        svg_to_png(SIMPLE_SVG, backend="resvg")
+
+
+def test_an_unknown_backend_is_a_value_error():
+    with pytest.raises(ValueError, match="unknown rasterizer backend"):
+        svg_to_png(SIMPLE_SVG, backend="pdf")  # type: ignore[arg-type]

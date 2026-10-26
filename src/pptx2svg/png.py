@@ -34,66 +34,27 @@ keeps the picture as it came, profile and all, for a colour-managed reader to co
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, Literal, Sequence
+from typing import Sequence
 
+from ooxml_common import raster
 from ooxml_common.metafile import inline_metafile_images
+from ooxml_common.raster import (  # noqa: F401  (this module's public names, kept)
+    Backend,
+    RasterizerNotAvailable,
+    available_backends,
+)
 from ooxml_common.svgimage import with_pixel_sized_images
 
 from .fonts import GENERIC_FAMILY_DEFAULTS, font_dirs as bundled_font_dirs
 from .glyphs import MissingGlyphs, MissingGlyphsWarning, missing_glyphs
 from .iccimages import srgb_images
 
-Backend = Literal["resvg", "cairosvg", "auto"]
-
-
-class RasterizerNotAvailable(RuntimeError):
-    """No SVG-to-PNG backend is installed."""
-
-
-#: Backends in preference order.  resvg first: it takes the font arguments, so it is the
-#: only one that renders reproducibly, and it ships prebuilt wheels with no system
-#: library behind them.
-_BACKEND_MODULES: tuple[tuple[str, str], ...] = (
-    ("resvg", "resvg_py"),
-    ("cairosvg", "cairosvg"),
-)
-
-
-def _importable(module: str) -> bool:
-    """Whether *module* imports, treating **any** failure as "not available".
-
-    Deliberately not ``except ImportError``.  cairosvg is a Python wheel in front of a
-    *system* library, and with the wheel installed but libcairo missing -- the normal
-    state of a Mac or a slim container that never ran `brew install cairo` -- importing
-    it raises ``OSError('no library called "cairo-2" was found')``.  That is not an
-    ``ImportError``, so it escaped this probe and took down every caller, including the
-    ones that were about to choose resvg and never touch cairo at all.  A backend that
-    cannot be imported is unavailable; why it cannot is not this function's business.
-    """
-    try:
-        __import__(module)
-    except Exception:
-        return False
-    return True
-
-
-def available_backends() -> list[str]:
-    """Which rasterisation backends can be imported right now, best first."""
-    return [name for name, module in _BACKEND_MODULES if _importable(module)]
-
-
-def _preferred_backend() -> str | None:
-    """The best backend that imports, without importing the others.
-
-    Separate from :func:`available_backends` because ``backend="auto"`` only needs the
-    winner, and probing further costs an import of a library we are not going to use --
-    which for cairosvg means loading a system library, the slowest and most fragile
-    import of the two.
-    """
-    for name, module in _BACKEND_MODULES:
-        if _importable(module):
-            return name
-    return None
+# Probing, the backends' order, the call to each and the passes are ooxml-common's
+# (:mod:`ooxml_common.raster`), shared with docx2svg; the names this module had stay.
+_BACKEND_MODULES = raster.BACKENDS
+_importable = raster.importable
+_preferred_backend = raster.preferred_backend
+_as_bytes = raster.as_bytes
 
 
 def svg_to_png(
@@ -187,15 +148,11 @@ def _svg_to_png(
     svg = inline_metafile_images(svg)
     svg = with_pixel_sized_images(svg)
 
-    chosen = backend
-    if chosen == "auto":
-        preferred = _preferred_backend()
-        if preferred is None:
-            raise RasterizerNotAvailable(
-                "no SVG rasterizer installed; run `pip install pptx2svg[png]` for resvg-py "
-                "(prebuilt wheels, no system dependencies) or `pip install pptx2svg[cairo]`"
-            )
-        chosen = preferred  # type: ignore[assignment]
+    chosen = raster.choose_backend(
+        backend,
+        none_installed="no SVG rasterizer installed; run `pip install pptx2svg[png]` for resvg-py "
+        "(prebuilt wheels, no system dependencies) or `pip install pptx2svg[cairo]`",
+    )
 
     if chosen == "resvg":
         bundled = bundled_font_dirs() if use_bundled_fonts else []
@@ -269,7 +226,7 @@ def _svg_to_png(
         return _render_with_cairosvg(
             svg, width=width, height=height, scale=scale, background=background
         ), missing
-    raise ValueError(f"unknown rasterizer backend: {backend!r}")
+    raise ValueError(f"unknown rasterizer backend: {backend!r}")  # pragma: no cover
 
 
 def _missing(check: bool, svg: str, font_files: list, font_dirs: list,
@@ -305,7 +262,7 @@ def _render_plan(
     Symbol are not macOS's) the system's folders are handed over as directories after
     them instead of being loaded first.  Faces that would shadow one another (Aptos
     Display and Aptos) are drawn in separate passes, each over the last
-    (:func:`pptx2svg.fonts.office.pass_svg`).  Where a pass leaves faces of the caller's
+    (:func:`ooxml_common.raster.draw_in_passes`).  Where a pass leaves faces of the caller's
     folders out (:attr:`~pptx2svg.fonts.office.DrawingPlan.withheld`), those folders --
     ``own_dirs``, the first of ``font_dirs`` -- are handed over as their files, in the
     order resvg loads them, without those.
@@ -317,9 +274,9 @@ def _render_plan(
     if plan.ahead_of_system and not skip_system_fonts:
         skip, system_dirs = True, office.resvg_system_dirs()
     own_dirs = list(own_dirs or ())
-    image: bytes | None = None
-    for number, files in enumerate(plan.passes):
-        document = svg if len(plan.passes) == 1 else office.pass_svg(svg, plan, number, image)
+
+    def draw(number: int, document: str) -> bytes:
+        files = plan.passes[number]
         dirs, extra = font_dirs, []
         withheld = set(plan.withheld[number]) if plan.withheld else set()
         if withheld and own_dirs and font_dirs[:len(own_dirs)] == own_dirs:
@@ -327,7 +284,7 @@ def _render_plan(
 
             dirs = font_dirs[len(own_dirs):]
             extra = [path for path in load_order((), own_dirs) if path not in withheld]
-        image = _render_with_resvg(
+        return _render_with_resvg(
             document,
             width=width,
             height=height,
@@ -338,8 +295,8 @@ def _render_plan(
             skip_system_fonts=skip,
             generic_families=generic_families,
         )
-    assert image is not None
-    return image
+
+    return raster.draw_in_passes(svg, plan.stacks, len(plan.passes), draw)
 
 
 def _render_with_resvg(
@@ -354,59 +311,18 @@ def _render_with_resvg(
     skip_system_fonts: bool,
     generic_families: dict[str, str] | None = None,
 ) -> bytes:
-    try:
-        import resvg_py
-    except ImportError as error:  # pragma: no cover - exercised only without the extra
-        raise RasterizerNotAvailable(
-            "resvg-py is not installed; run `pip install pptx2svg[png]`"
-        ) from error
-
-    # resvg-py opens and parses every file it is handed on every call; hand it only those
-    # that can take part in drawing this SVG, in the order it would have loaded them,
-    # which draws the same pixels (:mod:`ooxml_common.fonts.rasterdb`).
-    from ooxml_common.fonts.rasterdb import needed_font_files
-
-    needed = needed_font_files(svg, font_files=list(font_files or ()),
-                               font_dirs=list(font_dirs or ()),
-                               system_fonts=not skip_system_fonts,
-                               families=generic_families)
-    if needed is not None:
-        font_files, font_dirs = needed, None
-
-    options: dict = {"svg_string": svg}
-    if width is not None:
-        options["width"] = int(width)
-    if height is not None:
-        options["height"] = int(height)
-    if scale is not None:
-        options["zoom"] = float(scale)
-    if background is not None:
-        options["background"] = background
-    if font_dirs:
-        options["font_dirs"] = list(font_dirs)
-    if font_files:
-        options["font_files"] = list(font_files)
-    if skip_system_fonts:
-        options["skip_system_fonts"] = True
-    if generic_families:
-        # `font-family="..., sans-serif"` is the end of every stack this library emits.
-        # resvg resolves those keywords against its own defaults -- "Arial", "Times New
-        # Roman", "Courier New" -- none of which we ship, so with system fonts off the
-        # keyword resolves to nothing and the text silently does not draw.  Pointing them
-        # at the bundle turns "invisible" into "approximately right".
-        options.update(generic_families)
-
-    result = resvg_py.svg_to_bytes(**options)
-    return _as_bytes(result)
-
-
-def _as_bytes(value) -> bytes:
-    """resvg-py has returned both ``bytes`` and ``list[int]`` across releases."""
-    if isinstance(value, (bytes, bytearray)):
-        return bytes(value)
-    if isinstance(value, Iterable):
-        return bytes(value)
-    raise TypeError(f"unexpected rasterizer result type: {type(value)!r}")
+    """resvg's call (:func:`ooxml_common.raster.render_with_resvg`).  ``generic_families``
+    points the generic keywords at the bundle: ``font-family="..., sans-serif"`` ends
+    every stack this library emits, and resvg resolves the keywords against its own
+    defaults -- "Arial", "Times New Roman", "Courier New" -- none of which we ship, so with
+    system fonts off the keyword would resolve to nothing and the text silently not draw.
+    Pointing them at the bundle turns "invisible" into "approximately right"."""
+    return raster.render_with_resvg(
+        svg, width=width, height=height, scale=scale, background=background,
+        font_dirs=font_dirs, font_files=font_files, skip_system_fonts=skip_system_fonts,
+        families=generic_families,
+        not_installed="resvg-py is not installed; run `pip install pptx2svg[png]`",
+    )
 
 
 def _render_with_cairosvg(
@@ -417,19 +333,5 @@ def _render_with_cairosvg(
     scale: float | None,
     background: str | None,
 ) -> bytes:
-    try:
-        import cairosvg
-    except ImportError as error:  # pragma: no cover - exercised only without the extra
-        raise RasterizerNotAvailable("cairosvg is not installed") from error
-
-    options: dict = {"bytestring": svg.encode("utf-8")}
-    if width is not None:
-        options["output_width"] = int(width)
-    if height is not None:
-        options["output_height"] = int(height)
-    if scale is not None:
-        options["scale"] = float(scale)
-    if background is not None:
-        options["background_color"] = background
-
-    return cairosvg.svg2png(**options)
+    return raster.render_with_cairosvg(svg, width=width, height=height, scale=scale,
+                                       background=background)

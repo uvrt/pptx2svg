@@ -1438,6 +1438,7 @@ def our_components(svg: str, options: dict, fonts: dict) -> dict:
     sys.path.insert(0, SOURCE_ROOT)
     import ooxml_common.icc
     import ooxml_common.imagemeta
+    import ooxml_common.raster
     import pptx2svg.iccimages
     import pptx2svg.png
 
@@ -1450,6 +1451,8 @@ def our_components(svg: str, options: dict, fonts: dict) -> dict:
         "font_dirs_content": fonts["dirs"],
         "font_files": [[str(path), fonts["files"][str(path)]] for path in options.get("font_files") or ()],
         "png_py": _source_digest(pptx2svg.png.__file__),
+        # The backends' call and the passes are ooxml-common's, from 0.33.0.
+        "raster_py": _source_digest(ooxml_common.raster.__file__),
         "icc_py": [_source_digest(module.__file__) for module in
                    (pptx2svg.iccimages, ooxml_common.icc, ooxml_common.imagemeta)],
         **_rasteriser_versions(),
