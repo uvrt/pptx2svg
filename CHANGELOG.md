@@ -4,6 +4,23 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.3.0 -- unreleased
+
+- **One raster backend for both renderers** (review, S7): finding the backends, calling
+  resvg-py and cairosvg with their options, `RasterizerNotAvailable`, and drawing a slide
+  in passes where two faces it uses answer to one name in resvg (Aptos Display and Aptos)
+  are now `ooxml_common.raster`, which docx2svg uses too. `png.py` keeps what is
+  PowerPoint's: the font bundle, Office's faces and their plan (`fonts.office.drawing_plan`),
+  emoji, the glyph check, and the pictures' colour profiles and sizes. Every public name stays,
+  with what it raises. `RasterizerNotAvailable` is now ooxml-common's class, so it is
+  docx2svg's as well. `fonts.office.pass_svg` and `without_undrawn_text` call the shared ones;
+  the private names the tests use (`_render_plan`, `_render_with_resvg`, `_preferred_backend`)
+  are still there. PNGs are byte for byte what they were, per backend: every fixture deck at
+  640 px, with Office's faces and without, plus a small SVG with each size, scale and
+  background option, through resvg and through cairosvg (218 images). `tools/fidelity.py`
+  adds `ooxml_common/raster.py`'s source to the cache key of our raster. The ooxml-common
+  floor is raised to 0.33.0.
+
 ## 0.2.1 -- unreleased
 
 - **The built-in table styles live in ooxml-common** (review, S3): the catalogue of

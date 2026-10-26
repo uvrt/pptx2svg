@@ -72,6 +72,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ooxml_common import raster as _raster
 from ooxml_common.fonts import office as _shared
 from ooxml_common.fonts.office import (  # noqa: F401  (re-exported)
     MACOS_FONT_DIRS,
@@ -531,123 +532,16 @@ def resvg_system_dirs() -> list[str]:
     return [path for path in out if Path(path).is_dir()]
 
 
-_ROOT = re.compile(r"<svg\b[^>]*>")
-_VIEWBOX = re.compile(r'viewBox="\s*([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)[\s,]+([-\d.eE]+)\s*"')
-
-
 def pass_svg(svg: str, plan: DrawingPlan, number: int, underlay: bytes | None) -> str:
-    """``svg`` for pass ``number`` of ``plan``.
+    """``svg`` for pass ``number`` of ``plan`` (:func:`ooxml_common.raster.pass_svg`).
 
     Pass 0 is the SVG with the text of every later pass hidden.  A later pass is the SVG
     with *everything* hidden but its own text, over ``underlay`` -- the passes before it,
     as PNG, drawn pixel for pixel beneath.  ``visibility`` hides without moving: hidden
     glyphs keep their advance, so nothing after them shifts.
     """
-    def element(match: re.Match) -> str:
-        value = match.group(1)
-        own = plan.stacks.get(value, 0)
-        if number == 0:
-            return match.group(0) + (' visibility="hidden"' if own != 0 else "")
-        return match.group(0) + (' visibility="visible"' if own == number else ' visibility="hidden"')
-
-    out = _FAMILY_ATTRIBUTE.sub(element, svg)
-    if number == 0 or underlay is None:
-        return without_undrawn_text(out)
-    import base64
-
-    root = _ROOT.search(out)
-    if root is None:
-        return out
-    box = _VIEWBOX.search(root.group(0))
-    if box is not None:
-        x, y, width, height = box.groups()
-    else:
-        x = y = "0"
-        width = re.search(r'\bwidth="([\d.]+)', root.group(0)).group(1)  # type: ignore[union-attr]
-        height = re.search(r'\bheight="([\d.]+)', root.group(0)).group(1)  # type: ignore[union-attr]
-    image = (
-        f'<image x="{x}" y="{y}" width="{width}" height="{height}" preserveAspectRatio="none" '
-        f'image-rendering="optimizeSpeed" visibility="visible" '
-        f'href="data:image/png;base64,{base64.b64encode(underlay).decode("ascii")}"/>'
-    )
-    # Definitions inherit `visibility` from where they are written, not from where they
-    # are used, and a hidden shape in a clip path clips everything away.
-    for tag in ("clipPath", "mask", "pattern", "marker", "symbol"):
-        out = out.replace(f"<{tag} ", f'<{tag} visibility="visible" ').replace(
-            f"<{tag}>", f'<{tag} visibility="visible">')
-    head = out[: root.end()]
-    head = head[:-1] + ' visibility="hidden">'
-    return without_undrawn_text(head + image + out[root.end():])
+    return _raster.pass_svg(svg, plan.stacks, number, underlay)
 
 
-_TAG = re.compile(r"""<(?:[^>"']|"[^"]*"|'[^']*')*>""")
-_TAG_NAME = re.compile(r"<\s*(/?)\s*([^\s/>]+)")
-_ATTRIBUTE = re.compile(r"""([^\s=/<>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
-#: Attributes on a text element or around it whose result depends on the bounding box of
-#: everything inside, hidden or not, or that paint without the text's glyphs (a filter
-#: floods its region): a text under one is never left out.
-_BOX_DEPENDENT = frozenset({"filter", "mask", "clip-path", "opacity", "style", "mix-blend-mode",
-                            "isolation"})
-#: Where a hidden text still takes part: a definition is drawn where it is used.
-_DEFINITIONS = frozenset({"defs", "clipPath", "mask", "pattern", "marker", "symbol"})
-
-
-def without_undrawn_text(svg: str) -> str:
-    """``svg`` without the ``<text>`` elements a pass draws nothing of: none of their
-    characters is under a visible element (:func:`pass_svg`).  resvg lays a hidden text out all the same -- its
-    faces found, every run shaped, at the cost of a drawn one where opening a font file
-    is slow -- and draws none of it, so leaving it out changes no pixel.  A text is kept
-    where it might still count: under a filter, mask, clip, opacity, style or blend
-    (what they do depends on the box of all they hold), in a definition, or in an SVG
-    this scanner does not follow (``<!`` sections, ``<use>``)."""
-    if "<!" in svg or "<use" in svg or "<text" not in svg or "visibility" not in svg:
-        return svg                   # nothing hidden, or nothing this scanner follows
-    pieces: list[str] = []
-    kept_to = 0
-    # Per open element: (name, effectively visible, guarded).
-    stack: list[tuple[str, bool, bool]] = [("", True, False)]
-    text_start = None                    # where the open <text> begins, if one is open
-    text_depth = 0
-    text_drawn = False
-    data_from = 0
-    for match in _TAG.finditer(svg):
-        token = match.group(0)
-        if text_start is not None and stack[-1][1] and match.start() > data_from:
-            text_drawn = True            # characters under a visible element
-        data_from = match.end()
-        if token.startswith("<?"):
-            continue
-        head = _TAG_NAME.match(token)
-        if head is None:
-            return svg
-        closing, name = head.group(1) == "/", head.group(2).rpartition(":")[2]
-        if closing:
-            if len(stack) <= 1 or stack[-1][0] != name:
-                return svg               # not well formed: leave it to the rasteriser
-            stack.pop()
-            if text_start is not None and len(stack) == text_depth:
-                if not text_drawn:
-                    pieces.append(svg[kept_to:text_start])
-                    kept_to = match.end()
-                text_start = None
-            continue
-        attributes = {key: first if first is not None else second
-                      for key, first, second in _ATTRIBUTE.findall(token)}
-        parent_visible, parent_guarded = stack[-1][1], stack[-1][2]
-        value = attributes.get("visibility", "inherit").strip()
-        visible = parent_visible if value == "inherit" else value == "visible"
-        guarded = parent_guarded or name in _DEFINITIONS or bool(_BOX_DEPENDENT & attributes.keys())
-        if text_start is None and name == "text" and not guarded:
-            text_start, text_depth, text_drawn = match.start(), len(stack), False
-        if text_start is not None and guarded:
-            text_drawn = True
-        if token.endswith("/>"):
-            if text_start is not None and len(stack) == text_depth:
-                # A self-closed <text/> draws nothing either way.
-                text_start = None
-            continue
-        stack.append((name, visible, guarded))
-    if text_start is not None or len(stack) != 1:
-        return svg
-    pieces.append(svg[kept_to:])
-    return "".join(pieces)
+#: The texts a pass draws nothing of, left out (:func:`ooxml_common.raster.without_undrawn_text`).
+without_undrawn_text = _raster.without_undrawn_text

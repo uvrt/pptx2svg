@@ -380,7 +380,9 @@ def test_leaving_undrawn_texts_out_draws_the_same_pixels(monkeypatch):
         return Image.open(io.BytesIO(data)).convert("RGBA").tobytes()
 
     dropped = draw(two)
-    monkeypatch.setattr(office, "without_undrawn_text", lambda svg: svg)
+    from ooxml_common import raster
+
+    monkeypatch.setattr(raster, "without_undrawn_text", lambda svg: svg)
     assert pixels(dropped) == pixels(draw(two))
 
 
