@@ -17,6 +17,12 @@ import types
 from ooxml_common import fonts as _shared
 from ooxml_common.fonts import __all__  # noqa: F401  -- `from pptx2svg.fonts import *`
 
+#: The shared module's names as it defines them.  A shared name cannot be absent here, so
+#: deleting one through this package puts the shared module's own value back: pytest 9.2's
+#: ``monkeypatch.setattr`` reads the old value from this module's ``__dict__``, finds none,
+#: and undoes a patch of ``pptx2svg.fonts.bundle_dir`` by deleting it.
+_ORIGINALS = dict(vars(_shared))
+
 
 def _is_shared(name: str) -> bool:
     # Submodules are the exception: the import system sets `pptx2svg.fonts.check` on
@@ -55,7 +61,10 @@ class _SharedFonts(types.ModuleType):
 
     def __delattr__(self, name: str) -> None:
         if _is_shared(name):
-            delattr(_shared, name)
+            if name in _ORIGINALS:
+                setattr(_shared, name, _ORIGINALS[name])
+            else:
+                delattr(_shared, name)
         else:
             super().__delattr__(name)
 
