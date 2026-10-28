@@ -7,7 +7,7 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 ## 0.3.2 -- unreleased
 
 - **Font tests under pytest 9.2**: pytest 9.2's `monkeypatch.setattr` reads a target's old
-  value from its `__dict__` and, finding none, undoes a patch by deleting the name.
+  value from its `__dict__` and, when it holds none, undoes a patch by deleting the name.
   `pptx2svg.fonts` forwards the names it shares with `ooxml_common.fonts`, so undoing a
   patch of `pptx2svg.fonts.bundle_dir` deleted `ooxml_common.fonts.bundle_dir`, and every
   later font call raised `NameError` (this repository's tests, and the sibling repositories'
