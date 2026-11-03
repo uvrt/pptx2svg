@@ -46,6 +46,7 @@ _DATA_URI = re.compile(r"data:image/(png|jpeg|jpg);base64,([A-Za-z0-9+/=]+)")
 #: Converted pictures by their base64 text: a deck repeats its pictures across slides.
 _CACHE: dict[str, str | None] = {}
 _CACHE_LIMIT = 64
+_MISSING = object()
 
 
 def srgb_images(svg: str) -> str:
@@ -58,12 +59,15 @@ def srgb_images(svg: str) -> str:
     def replace(match: re.Match) -> str:
         nonlocal changed
         encoded = match.group(2)
-        if encoded not in _CACHE:
+        # The value found or made is the one used, never read back from the cache: with
+        # the GIL off (Python 3.15t) another thread's clear() in between raised KeyError.
+        found = _CACHE.get(encoded, _MISSING)
+        if found is _MISSING:
+            converted = srgb_picture(base64.b64decode(encoded))
+            found = None if converted is None else base64.b64encode(converted).decode("ascii")
             if len(_CACHE) >= _CACHE_LIMIT:
                 _CACHE.clear()
-            converted = srgb_picture(base64.b64decode(encoded))
-            _CACHE[encoded] = None if converted is None else base64.b64encode(converted).decode("ascii")
-        found = _CACHE[encoded]
+            _CACHE[encoded] = found
         if found is None:
             return match.group(0)
         changed = True

@@ -258,6 +258,12 @@ passes `now` as an aware datetime in the user's zone
 (`datetime.now(ZoneInfo("Europe/Brussels"))`), or a fixed value for reproducible output.
 
 
+### Threads
+
+Decks can be converted from several threads at once, with the GIL off too (Python 3.15t;
+`tests/test_threads.py`): the module caches are safe, and EMF PDF previews take turns, since
+PDFium is not thread-safe. A `FontToolsTextMeasurer` you pass in is one thread's: give each its own.
+
 ## Command line
 
 ```bash

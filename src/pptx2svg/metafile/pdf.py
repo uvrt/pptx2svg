@@ -14,6 +14,7 @@ own PDF export, so on a development machine it is present regardless.
 from __future__ import annotations
 
 import importlib.util
+import threading
 
 from .dib import encode_png
 
@@ -31,6 +32,12 @@ EMU_PER_INCH = 914400
 #: a gigapixel page, and the floor so a degenerate zero extent still produces something.
 MIN_RENDER_PX = 16
 MAX_RENDER_PX = 4096
+
+
+#: Held around every use of PDFium, from opening a document to closing it: PDFium is not
+#: thread-safe, and with the GIL off (Python 3.15t), or in a C call that releases it, two
+#: threads would be in it at once.
+_PDFIUM_LOCK = threading.Lock()
 
 
 class PdfRasterizerNotAvailable(RuntimeError):
@@ -64,37 +71,38 @@ def rasterise_pdf(data: bytes, *, width_emu: float | None = None) -> bytes | Non
             "pip install pptx2svg[metafile]"
         ) from error
 
-    document = None
-    try:
-        document = pdfium.PdfDocument(data)
-        if len(document) == 0:
-            return None
-        page = document[0]
-        page_width, page_height = page.get_size()
-        if page_width <= 0 or page_height <= 0:
-            return None
+    with _PDFIUM_LOCK:
+        document = None
+        try:
+            document = pdfium.PdfDocument(data)
+            if len(document) == 0:
+                return None
+            page = document[0]
+            page_width, page_height = page.get_size()
+            if page_width <= 0 or page_height <= 0:
+                return None
 
-        scale = _render_scale(page_width, width_emu)
-        # A transparent ground, not pdfium's default opaque white.  An EMF preview is
-        # artwork placed on a slide, not a page: `real-college-template` slide 2 puts its
-        # logo on a near-black backdrop and PowerPoint draws only the letters, while the
-        # white fill painted a 650x140 px card behind them -- 1.5% of the slide at full
-        # contrast, and the single largest term in that slide's score.  Asking for a
-        # non-opaque fill also switches pdfium to a BGRA buffer, which
-        # :func:`_bitmap_to_png` already unpacks.
-        bitmap = page.render(scale=scale, fill_color=(255, 255, 255, 0))
-        return _bitmap_to_png(bitmap)
-    except Exception:
-        # pdfium reports malformed documents as PdfiumError, but the helper layer can
-        # also raise ValueError/TypeError on odd input.  A bad preview must degrade to
-        # the placeholder, never abort the conversion of the deck.
-        return None
-    finally:
-        if document is not None:
-            try:
-                document.close()
-            except Exception:
-                pass
+            scale = _render_scale(page_width, width_emu)
+            # A transparent ground, not pdfium's default opaque white.  An EMF preview is
+            # artwork placed on a slide, not a page: `real-college-template` slide 2 puts its
+            # logo on a near-black backdrop and PowerPoint draws only the letters, while the
+            # white fill painted a 650x140 px card behind them -- 1.5% of the slide at full
+            # contrast, and the single largest term in that slide's score.  Asking for a
+            # non-opaque fill also switches pdfium to a BGRA buffer, which
+            # :func:`_bitmap_to_png` already unpacks.
+            bitmap = page.render(scale=scale, fill_color=(255, 255, 255, 0))
+            return _bitmap_to_png(bitmap)
+        except Exception:
+            # pdfium reports malformed documents as PdfiumError, but the helper layer can
+            # also raise ValueError/TypeError on odd input.  A bad preview must degrade to
+            # the placeholder, never abort the conversion of the deck.
+            return None
+        finally:
+            if document is not None:
+                try:
+                    document.close()
+                except Exception:
+                    pass
 
 
 def _render_scale(page_width_pt: float, width_emu: float | None) -> float:
