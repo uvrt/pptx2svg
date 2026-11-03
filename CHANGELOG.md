@@ -4,6 +4,18 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.3.5 -- unreleased
+
+- **Slides rasterised in threads with the GIL off** (free threading, step 2; the production
+  team asked): on a free-threaded Python with the GIL off (`python3.15t`), `rasterise_svgs`
+  and `convert_pptx_to_png` draw several slides at once in threads of this process -- by
+  default as many as the CPUs this process may use, at most one a slide; `threads=n` sets it,
+  `threads=1` draws one at a time. With the GIL on (every regular build) nothing changes:
+  resvg holds the GIL while it draws, so they draw one at a time whatever `threads` says;
+  CairoSVG always does. The images are the same byte for byte, and `glyphs-missing` is still
+  reported once per face and script, on the first slide that has it, in the same order (the
+  slides are drawn first, then reported in order). New `tests/test_raster_threads.py`.
+
 ## 0.3.2 -- unreleased
 
 - **Font tests under pytest 9.2**: pytest 9.2's `monkeypatch.setattr` reads a target's old

@@ -59,7 +59,7 @@ from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
 from ooxml_common.locales import EN_US, Locale
 from ooxml_common.text.symbol_fonts import recorded_font_metrics
 
-__version__ = "0.3.2"
+__version__ = "0.3.5"
 
 __all__ = [
     "ConvertOptions",
@@ -472,6 +472,7 @@ def convert_pptx_to_png(
     font_files: Sequence[str] | None = None,
     skip_system_fonts: bool | None = None,
     use_bundled_fonts: bool = True,
+    threads: int | None = None,
 ) -> list[bytes]:
     """Render a deck to one PNG image per slide.
 
@@ -489,6 +490,8 @@ def convert_pptx_to_png(
     the bundle and the system's fonts, and measured from as ``options.font_dirs`` is --
     takes precedence over ``options.font_dirs``; without either, ``OOXML_FONT_DIRS`` is
     read.
+
+    ``threads``: how many slides are rasterised at once (:func:`rasterise_svgs`).
     """
     options = options or ConvertOptions()
     if font_dirs is not None:
@@ -509,7 +512,7 @@ def convert_pptx_to_png(
     if not resolved.embedded_fonts:
         return _rasterise(
             documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
-            host_fonts, options, numbers,
+            host_fonts, options, numbers, threads=threads,
         )
 
     # The rasteriser's font database indexes files, so the extracted faces have to touch
@@ -528,6 +531,7 @@ def convert_pptx_to_png(
             host_fonts,
             options,
             numbers,
+            threads=threads,
         )
 
 
@@ -543,6 +547,7 @@ def rasterise_svgs(
     use_bundled_fonts: bool = True,
     host_fonts: bool | None = None,
     images: "Mapping[str, bytes] | None" = None,
+    threads: int | None = None,
 ) -> list[bytes]:
     """The PNG of each of ``documents`` (SVGs of :func:`render_svgs`), byte for byte what
     :func:`convert_pptx_to_png` draws for them with the same arguments.
@@ -561,6 +566,14 @@ def rasterise_svgs(
     :class:`~pptx2svg.glyphs.MissingGlyphsWarning`, unless ``options.check_glyphs`` is
     off.  ``numbers`` is each document's ``(slide number, template part)`` for those
     warnings (default: 1, 2, 3...).
+
+    ``threads``: how many documents are drawn at once, in threads of this process -- by
+    default (``None``) as many as there are CPUs, where the interpreter has the GIL off (a
+    free-threaded Python, ``python3.15t``); ``1`` draws one at a time.  With the GIL on --
+    every regular build -- they are drawn one at a time whatever ``threads`` says: resvg
+    holds the GIL while it draws, so threads would only take turns.  The images, and the
+    warnings and their order, are the same either way; only resvg draws in threads
+    (CairoSVG one at a time).
     """
     options = options if options is not None else ConvertOptions()
     if font_dirs is None:
@@ -574,27 +587,55 @@ def rasterise_svgs(
     if images is not None:
         documents = [embed_images(document, images) for document in documents]
     return _rasterise(documents, backend, list(font_dirs), font_files, skip_system_fonts, use_bundled_fonts,
-                      host_fonts, options, numbers)
+                      host_fonts, options, numbers, threads=threads)
+
+
+def _gil_enabled() -> bool:
+    """Whether this interpreter runs with the GIL (always, on a regular build)."""
+    import sys
+
+    enabled = getattr(sys, "_is_gil_enabled", None)
+    return True if enabled is None else bool(enabled())
+
+
+def _raster_threads(threads: int | None, count: int, backend: str = "auto") -> int:
+    """How many of ``count`` documents :func:`rasterise_svgs` draws at once: 1 with the GIL
+    on, with fewer than two documents, or where CairoSVG draws (``backend``, as
+    :func:`~pptx2svg.png.svg_to_png` chooses it); else ``threads``, by default (``None``) the
+    CPUs this process may use, at most ``count``."""
+    if count < 2 or (threads is not None and threads <= 1) or _gil_enabled():
+        return 1
+    from ooxml_common import raster
+
+    try:
+        if raster.choose_backend(backend, none_installed="") != "resvg":
+            return 1
+    except Exception:  # noqa: BLE001 -- none installed, or unknown: the draw itself says so
+        return 1
+    if threads is None:
+        cpus = getattr(os, "process_cpu_count", None)                  # 3.13+
+        threads = (cpus() if cpus is not None else None) or os.cpu_count() or 1
+    return max(1, min(int(threads), count))
 
 
 def _rasterise(
     documents, backend, font_dirs, font_files, skip_system_fonts, use_bundled_fonts,
     host_fonts, options: ConvertOptions, numbers: Sequence[tuple[int, str | None]],
+    threads: int | None = 1,
 ) -> list[bytes]:
     """Each slide's PNG; text no loaded font can draw reported once per face and script
     for the whole deck, on the first slide that has it (:mod:`pptx2svg.glyphs`).
     ``numbers`` is each image's slide number and template part (a template view's
     warning names its part, its slide number 0).  :func:`rasterise_svgs` with every
-    argument given, by position: the name the agents called it by."""
+    argument given, by position: the name the agents called it by; ``threads``
+    (:func:`_raster_threads`) one at a time unless given."""
     import warnings
 
     from .glyphs import MissingGlyphsWarning
     from .png import _svg_to_png
 
-    images: list[bytes] = []
-    reported: set[tuple[str, str]] = set()
-    for document, (number, part) in zip(documents, numbers):
-        png, missing = _svg_to_png(
+    def draw(document: str):
+        return _svg_to_png(
             document,
             width=None,
             height=None,
@@ -608,6 +649,20 @@ def _rasterise(
             host_fonts=host_fonts,
             check_glyphs=options.check_glyphs,
         )
+
+    documents = list(documents)
+    count = _raster_threads(threads, len(documents), backend)
+    if count > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        # All drawn first, side by side; then reported in order, as one at a time does.
+        with ThreadPoolExecutor(max_workers=count, thread_name_prefix="pptx2svg-raster") as pool:
+            drawn = list(pool.map(draw, documents))
+    else:
+        drawn = map(draw, documents)  # type: ignore[assignment]  # lazily: each reported as drawn
+    images: list[bytes] = []
+    reported: set[tuple[str, str]] = set()
+    for (png, missing), (number, part) in zip(drawn, numbers):
         images.append(png)
         for item in missing:
             if (item.face, item.script) in reported:
