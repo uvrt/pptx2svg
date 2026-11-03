@@ -134,6 +134,14 @@ with tempfile.TemporaryDirectory() as folder:
 byte; its `font_dirs` default to the conversion's (`user_font_dirs(options)`) and its
 `host_fonts` to `uses_host_fonts(options)`, and `glyphs-missing` goes to `options.warnings`.
 
+On a free-threaded Python with the GIL off (`python3.15t`), `rasterise_svgs` and
+`convert_pptx_to_png` draw several slides at once, in threads of this process -- as many as
+there are CPUs, or `threads=n`; `threads=1` draws one at a time. With the GIL on, every
+regular build, they draw one at a time whatever `threads` says: resvg holds the GIL while it
+draws, so threads would only take turns. The images, and the warnings and their order, are
+the same either way. Only resvg draws in threads; CairoSVG draws one at a time. A caller
+that already spreads slides over worker processes or threads passes `threads=1`.
+
 ### A live, editable view
 
 For a page that shows each slide as SVG, re-renders a slide after an edit and sends only
