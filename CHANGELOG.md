@@ -15,7 +15,8 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
   a thread note in [docs/usage.md](docs/usage.md). New
   `.github/workflows/freethreading.yml`: the suite on Python 3.15t, Linux and macOS, with
   the GIL off and `RuntimeWarning` an error, after checking that importing the package and
-  its extras leaves the GIL off; not a required check yet. No output change.
+  its extras leaves the GIL off; not a required check yet. It is green, so the package is
+  classified `Programming Language :: Python :: Free Threading :: 2 - Beta`. No output change.
 
 ## 0.3.2 -- unreleased
 
