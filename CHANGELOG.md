@@ -4,6 +4,20 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.3.3 -- unreleased
+
+- **Safe with the GIL off** (free threading, step 1). On Python 3.15t
+  `iccimages.srgb_images` read a converted picture back from its cache after another
+  thread could have cleared it (`KeyError`); it now uses the value it found or made.
+  `metafile.pdf.rasterise_pdf` holds one module lock from opening a PDF to closing it:
+  PDFium is not thread-safe, and from eight threads the old code crashed the process or
+  drew wrong pixels. New `tests/test_threads.py` (eight threads, about a second each);
+  a thread note in [docs/usage.md](docs/usage.md). New
+  `.github/workflows/freethreading.yml`: the suite on Python 3.15t, Linux and macOS, with
+  the GIL off and `RuntimeWarning` an error, after checking that importing the package and
+  its extras leaves the GIL off; not a required check yet. It is green, so the package is
+  classified `Programming Language :: Python :: Free Threading :: 2 - Beta`. No output change.
+
 ## 0.3.2 -- unreleased
 
 - **Font tests under pytest 9.2**: pytest 9.2's `monkeypatch.setattr` reads a target's old
