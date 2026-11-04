@@ -160,7 +160,7 @@ The outlines are drawn from the fonts the PNG is drawn with -- the deck's embedd
 `font_dirs`, the bundle, the host's faces where `host_fonts` says so, in the same passes --
 and with resvg's face choice, fallback, shaping and layout
 (`ooxml_common.outlines`), so the SVG looks like the PNG. Rasterised, an outlined slide
-draws the PNG's pixels to an anti-aliased edge pixel. Each glyph is defined once per slide
+draws the PNG's pixels to an anti-aliased edge pixel. A metafile picture drawn as SVG goes inline first, its text outlined too, as the PNG draws it. Each glyph is defined once per slide
 (`<defs data-outline-glyphs>`) and used by reference. A text it cannot draw so stays text,
 with one `text-not-outlined` warning per reason and face: right-to-left and
 complex-script text, an emoji (Apple Color Emoji draws pictures), `CFF2` faces. With

@@ -262,6 +262,8 @@ def outline_svg(
     from ooxml_common.fonts.office import user_font_dirs
     from ooxml_common.outlines import FontSetup, outline_text
 
+    # A metafile drawn as SVG goes inline, as svg_to_png draws it: its text is outlined too.
+    svg = inline_metafile_images(svg)
     dirs = [str(path) for path in user_font_dirs(font_dirs)]
     svg, plan, files, skip, bundled = _resvg_fonts(
         svg, font_dirs=dirs, font_files=font_files, skip_system_fonts=skip_system_fonts,
