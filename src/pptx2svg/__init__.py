@@ -59,7 +59,7 @@ from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
 from ooxml_common.locales import EN_US, Locale
 from ooxml_common.text.symbol_fonts import recorded_font_metrics
 
-__version__ = "0.3.5"
+__version__ = "0.3.6"
 
 __all__ = [
     "ConvertOptions",
@@ -199,6 +199,17 @@ class ConvertOptions:
     #: Draw hyperlinks as ``<a href>`` around what they cover.  ``False`` leaves the links
     #: out and keeps the shapes and text, for a preview in which a click must stay put.
     hyperlinks: bool = True
+    #: How text is written: ``"text"`` (the default) as ``<text>``, drawn by the viewer
+    #: with its own fonts; ``"outlines"`` as the paths of the glyphs the PNG is drawn with
+    #: -- the same faces, fallbacks, shaping and positions resvg uses with this
+    #: conversion's fonts (:func:`pptx2svg.png.outline_svg`) -- so the SVG needs no font
+    #: to be viewed.  Glyph shapes go into the SVG, never font files.  A text that cannot
+    #: be drawn so (right-to-left or complex-script text, an emoji or other colour face)
+    #: stays text, with a ``text-not-outlined`` warning.  PNG output is the same either way.
+    text: str = "text"
+    #: With ``text="outlines"``: each text also kept, transparent, over its outlines, so
+    #: a viewer can select, search and copy it (and a screen reader read it).
+    selectable_text: bool = False
 
 
 def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> list[str]:
@@ -365,6 +376,8 @@ def render_svgs(source, options: ConvertOptions | None = None) -> "tuple[list[st
                 extra.setdefault(family_key(family), table)
         measurer = DefaultTextMeasurer(extra, kerning=POWERPOINT_RULES.kerning)
 
+    if options.text not in TEXT_MODES:
+        raise ValueError(f"ConvertOptions.text must be one of {', '.join(TEXT_MODES)}, not {options.text!r}")
     documents: list[str] = []
     for slide in resolved.slides:
         # A fresh context per slide keeps ids stable and defs scoped to their document.
@@ -386,7 +399,42 @@ def render_svgs(source, options: ConvertOptions | None = None) -> "tuple[list[st
         if options.images is not None:
             document = externalise_images(document, options.images, options.image_prefix)
         documents.append(document)
+    if options.text == "outlines":
+        documents = _outlined(documents, resolved, options)
     return documents, resolved
+
+
+#: ``ConvertOptions.text``'s values.
+TEXT_MODES = ("text", "outlines")
+
+
+def _outlined(documents: list[str], resolved: ResolvedPresentation, options: ConvertOptions) -> list[str]:
+    """The documents with their text as outlines, drawn with the fonts
+    :func:`rasterise_svgs` would draw them with (the deck's embedded faces written to a
+    temporary folder while they are read); every kind of text kept as text reported once,
+    as ``text-not-outlined``."""
+    from .png import outline_svg
+
+    numbers = [slide.slide_number for slide in resolved.slides]
+    reported: set[tuple[str, str]] = set()
+    out: list[str] = []
+    directory = tempfile.TemporaryDirectory(prefix="pptx2svg-fonts-") if resolved.embedded_fonts else None
+    try:
+        extracted = resolved.embedded_fonts.write(directory.name) if directory is not None else []
+        for document, number in zip(documents, numbers):
+            outlined = outline_svg(document, font_dirs=user_font_dirs(options), font_files=extracted,
+                                   host_fonts=uses_host_fonts(options), selectable=options.selectable_text)
+            out.append(outlined.svg)
+            for kept in outlined.kept:
+                if (kept.reason, kept.family) in reported:
+                    continue
+                reported.add((kept.reason, kept.family))
+                options.warnings.append(Warning(code="text-not-outlined", message=kept.message(),
+                                                slide_number=number))
+    finally:
+        if directory is not None:
+            directory.cleanup()
+    return out
 
 
 #: The name the agents called :func:`render_svgs` by; kept.
@@ -503,6 +551,9 @@ def convert_pptx_to_png(
         # measure as it will draw.
         # A shallow copy: `warnings` is still the caller's own list.
         options = dataclasses.replace(options, host_fonts=not skip_system_fonts)
+    if options.text != "text":
+        # The PNG is drawn from the text itself: outlines would draw the same pixels.
+        options = dataclasses.replace(options, text="text")
     documents, resolved = render_svgs(source, options)
     if options.images is not None:
         documents = [embed_images(document, options.images) for document in documents]

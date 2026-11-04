@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import ConvertOptions, __version__, _render, user_font_dirs
-from .png import RasterizerNotAvailable, _svg_to_png, available_backends
+from .png import RasterizerNotAvailable, _svg_to_png, available_backends, outline_svg
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,6 +95,20 @@ def build_parser() -> argparse.ArgumentParser:
             "the date and time a date field (a footer's date) shows; default: now. Pin it "
             "for output that must not change from day to day"
         ),
+    )
+    parser.add_argument(
+        "--text",
+        choices=("text", "outlines"),
+        default="text",
+        help=(
+            "how the SVG writes text: as <text> (default), or as the outlines of the glyphs "
+            "the PNG is drawn with, so that it needs no font to be viewed"
+        ),
+    )
+    parser.add_argument(
+        "--selectable-text",
+        action="store_true",
+        help="with --text outlines, keep each text, transparent, over its outlines for selecting",
     )
     parser.add_argument(
         "-q", "--quiet", action="store_true", help="suppress warnings about unsupported content"
@@ -172,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
     # deck with no embedded fonts never creates the directory.
     with contextlib.ExitStack() as stack:
         embedded_files: list[str] = []
-        if wants_png and resolved.embedded_fonts:
+        if (wants_png or args.text == "outlines") and resolved.embedded_fonts:
             directory = stack.enter_context(
                 tempfile.TemporaryDirectory(prefix="pptx2svg-fonts-")
             )
@@ -189,10 +203,24 @@ def _write_outputs(args, options, documents, numbers, stem, wants_png, embedded_
     from .resolve import Warning
 
     unreadable: set[tuple[str, str]] = set()
+    kept: set[tuple[str, str]] = set()
     for number, document in zip(numbers, documents):
         if args.format in ("svg", "both"):
             path = args.output / f"{stem}-{number}.svg"
-            path.write_text(document, encoding="utf-8")
+            written = document
+            if args.text == "outlines":
+                # Outlined with the fonts the PNG is drawn with (the arguments below).
+                outlined = outline_svg(
+                    document, font_dirs=user_font_dirs(None, args.font_dirs), font_files=embedded_files or None,
+                    skip_system_fonts=False if args.system_fonts else None,
+                    use_bundled_fonts=not args.no_bundled_fonts, selectable=args.selectable_text)
+                written = outlined.svg
+                for item in outlined.kept:
+                    if (item.reason, item.family) not in kept:
+                        kept.add((item.reason, item.family))
+                        options.warnings.append(Warning(code="text-not-outlined", message=item.message(),
+                                                        slide_number=number))
+            path.write_text(written, encoding="utf-8")
             print(path)
         if wants_png:
             path = args.output / f"{stem}-{number}.png"
