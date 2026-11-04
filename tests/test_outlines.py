@@ -83,3 +83,65 @@ def test_selectable_text_is_kept_transparent_over_the_outlines(product_page):
 def test_png_output_is_the_same_whatever_the_text_mode(product_page):
     assert convert_pptx_to_png(product_page, _options(text="outlines")) == convert_pptx_to_png(
         product_page, _options())
+
+
+# -- Round 32: one glyph set per deck, and a shape's definitions its own ---------------
+
+FIXTURES = __import__("pathlib").Path(__file__).parent / "fixtures"
+
+
+def _edited_first_text(deck, text: str) -> bytes:
+    import zipfile
+
+    from deckbuilder import SLIDE_PATH, derive_deck
+
+    xml = zipfile.ZipFile(deck).read(SLIDE_PATH).decode("utf-8")
+    xml = re.sub(r"<a:t>[^<]*</a:t>", f"<a:t>{text}</a:t>", xml, count=1)
+    return derive_deck(deck, parts={SLIDE_PATH: xml.encode("utf-8")})
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_a_text_edit_leaves_every_other_shape_byte_identical(shared):
+    from datetime import datetime
+
+    from pptx2svg import slide_groups
+
+    deck = FIXTURES / "real-financial-report.pptx"
+
+    def groups(source):
+        options = _options(slide_numbers=[1], edit_marks=True, text="outlines", now=datetime(2026, 1, 31),
+                           glyphs={} if shared else None)
+        return slide_groups(render_svgs(source, options)[0][0])
+
+    before = groups(deck)
+    assert groups(deck) == before
+    # The first text now draws the digits and signs the shapes after it draw, in
+    # another order: the slide's first use of each glyph changes, not theirs.
+    after = groups(_edited_first_text(deck, "9 8 7 6 5 4 3 2 1 0 % , ▲ FINANCIAL"))
+    changed = [key for key in before["order"]
+               if (before["groups"][key], before["defs"][key]) != (after["groups"].get(key), after["defs"].get(key))]
+    assert changed == ["256.3"]      # the shape whose text changed, and no other
+    # A shape's glyph definitions follow its own first use of them.
+    for key in before["order"]:
+        used = re.findall(r'href="#(g[0-9A-Za-z]+)"', before["groups"][key])
+        defined = re.findall(r'<path id="(g[0-9A-Za-z]+)"', before["defs"][key])
+        assert defined == ([] if shared else list(dict.fromkeys(used)))
+
+
+def test_one_glyph_set_for_the_deck():
+    from pptx2svg import embed_glyphs, glyph_sheet
+
+    deck = FIXTURES / "sample.pptx"
+    alone = render_svgs(deck, _options(text="outlines"))[0]
+    glyphs: dict = {}
+    shared = render_svgs(deck, _options(text="outlines", glyphs=glyphs))[0]
+    assert glyphs and not any("<path id=\"g" in svg for svg in shared)
+    assert [embed_glyphs(svg, glyphs) for svg in shared] == alone
+    sheet = glyph_sheet(glyphs)
+    assert sheet.count("<path id=") == len(glyphs)
+    # The deck's slides and the sheet, inlined in one page: every id defined once.
+    ids = re.findall(r'\bid="(g[0-9A-Za-z]+)"', sheet + "".join(shared))
+    assert len(ids) == len(set(ids))
+    # rasterise_svgs takes the set as it takes pictures by reference.
+    assert rasterise_svgs(shared, _options(), glyphs=glyphs) == rasterise_svgs(alone, _options())
+    assert rasterise_svgs(shared, _options(glyphs=glyphs)) == rasterise_svgs(alone, _options())

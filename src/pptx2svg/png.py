@@ -251,11 +251,14 @@ def outline_svg(
     use_bundled_fonts: bool = True,
     host_fonts: bool | None = None,
     selectable: bool = False,
+    glyphs: "dict[str, str] | None" = None,
 ):
     """``svg`` with its text drawn as glyph outlines: the faces, fallbacks, shaping and
     positions resvg draws it with when :func:`svg_to_png` is given the same arguments
     (:func:`ooxml_common.outlines.outline_text`), so the SVG needs no font to be viewed.
-    ``selectable`` keeps each text, transparent, over its outlines.  Returns an
+    ``selectable`` keeps each text, transparent, over its outlines; ``glyphs``, a dict
+    shared by a deck's slides, takes the glyph definitions in place of the SVG's own
+    ``<defs>`` (:func:`ooxml_common.outlines.outline_text`).  Returns an
     :class:`ooxml_common.outlines.Outlined`: the SVG and the texts kept as text, with why.
 
     ``font_dirs`` left out reads ``OOXML_FONT_DIRS``, as :func:`svg_to_png` does."""
@@ -272,13 +275,14 @@ def outline_svg(
     all_dirs = dirs + list(bundled)
     if plan is None:
         setup = FontSetup.of(list(files or ()), all_dirs, not skip, generic)
-        return outline_text(svg, setup, selectable=selectable)
+        return outline_text(svg, setup, selectable=selectable, glyphs=glyphs)
     setups = [FontSetup.of(*_plan_pass_fonts(plan, number, all_dirs, list(files or ()), skip, dirs), generic)
               for number in range(len(plan.passes))]
     import html
 
     stacks = {html.unescape(value): number for value, number in plan.stacks.items()}
-    return outline_text(svg, lambda value: setups[stacks.get(value or "", 0)], selectable=selectable)
+    return outline_text(svg, lambda value: setups[stacks.get(value or "", 0)], selectable=selectable,
+                        glyphs=glyphs)
 
 
 def _missing(check: bool, svg: str, font_files: list, font_dirs: list,
