@@ -4,6 +4,28 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.3.6 -- unreleased
+
+- **Text as outlines** (production round 31, R2). `ConvertOptions(text="outlines")` writes
+  each text as the paths of its glyphs, so the SVG needs no font where it is viewed: a
+  browser view of a deck whose faces may not be served as web fonts. The default stays
+  `"text"`, and the default SVG is byte for byte what it was. The outlines are drawn from
+  the fonts `rasterise_svgs` draws the PNG with -- the deck's embedded faces (written to a
+  temporary folder while they are read), `font_dirs`, the bundle, the host's faces where
+  `host_fonts` says so, an emoji's face, each pass of the plan with its own files -- by
+  `ooxml_common.outlines` 0.37.0 (resvg's face choice and fallback, harfrust's shaping,
+  usvg's layout), so the SVG looks like the PNG. A text it cannot draw so stays text, with
+  one `text-not-outlined` warning per reason and face: right-to-left and complex-script
+  text, an emoji (Apple Color Emoji draws pictures), a `CFF2` face. `selectable_text=True`
+  keeps each text, transparent, after its outlines for selecting, searching and copying.
+  PNG output is unchanged either way (`convert_pptx_to_png` draws from the text). New
+  `pptx2svg.png.outline_svg(svg, ...)`, which outlines one SVG with `svg_to_png`'s font
+  arguments; the font set-up `_svg_to_png` and it share is `png._resvg_fonts`, and a pass's
+  files `png._plan_pass_fonts` (what `_render_plan` drew with: its PNGs are byte for byte
+  what they were). Command line: `--text outlines`, `--selectable-text`. Measured on every third deck of the local corpus (191 decks, 995 slides, this machine's host fonts): rasterised by resvg from the text and from the outlines with the same fonts, no pixel differs by more than 64 of 255 (an anti-aliased edge pixel) and 560 slides are identical; the mean difference is 0.00003 per channel. The SVGs are 2.0 times the size (12.3 MB to 24.7 MB) and take 2.0 times as long to write (ROADMAP.md, "Text as outlines").
+  docs/usage.md, "Text as outlines"; docs/licensing.md says what goes into the SVG. New
+  `tests/test_outlines.py`. Needs ooxml-common 0.37.0.
+
 ## 0.3.5 -- unreleased
 
 - **Slides rasterised in threads with the GIL off** (free threading, step 2; the production

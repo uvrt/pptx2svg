@@ -6393,6 +6393,31 @@ waved through.
 
 ---
 
+## Text as outlines (round 31)
+
+Production asked for an SVG that needs no font in the browser (a face whose licence does not
+allow serving it as a web font). `ConvertOptions(text="outlines")` (0.3.6) draws each text as
+its glyph paths through `ooxml_common.outlines` (0.37.0), from the fonts the PNG is drawn
+with, following resvg's own face choice, fallback, shaping and layout rather than this
+library's measurer: the reference is the PNG, which resvg draws from the `<text>`.
+
+- **Measured** (round 31, lane B): every slide rasterised twice by resvg, from the SVG with
+  its text and from the outlined SVG, with the same fonts -- the host's faces, as `ConvertOptions()` uses them on this machine.
+  Every third deck of the local corpus (`~/Documents`' decks, deduplicated: 191 decks, 995
+  slides): no pixel differs by more than 64 of 255, the mean difference is 0.00003 per
+  channel, 560 slides are identical and 60 have a pixel more than 16 apart -- anti-aliased
+  edge pixels, a glyph placed through another chain of float32 transforms than resvg's.
+  No text was kept as text. Size: 12.3 MB of SVG became 24.7 MB (2.0 times; a glyph is a
+  few hundred bytes once per slide, then a reference); writing them took 2.0 times as long
+  (61 s to 124 s, on a heavily loaded machine).
+- **Left undone.** Right-to-left and complex-script text (Arabic, Hebrew, the Indic
+  scripts, Thai...) stays text: their shaping (HarfBuzz's script shapers) is not
+  reimplemented, and none of the corpus has any. Emoji stay text: Apple Color Emoji's glyphs
+  are pictures (`sbix`), which could be embedded as images but are not. `CFF2` faces stay
+  text. Each slide carries its own glyph definitions; a viewer showing a deck could share
+  them across slides (one `<defs>` document) and does not yet. A gradient's box leaves the
+  decorations out (usvg adds an underline's box to the text's).
+
 ## Suggested order
 
 ```

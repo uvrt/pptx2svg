@@ -17,6 +17,12 @@ renamed or otherwise modified, so the Reserved Font Name clauses are satisfied.
 
 No Microsoft font is bundled, vendored or committed anywhere in this repository.
 
+**Text as outlines** (`ConvertOptions(text="outlines")`) puts the shapes of the glyphs a
+slide uses into its SVG as paths. It does not put a font file, or any table of one, into
+the SVG: the glyphs cannot be set as text again from it. Whether a face's licence allows
+its glyph shapes to be shown this way is a question for that licence; pptx2svg does not
+answer it.
+
 Neither is ECMA-376 itself. `pptx2svg/render/preset_specs.py` is *compiled* from the
 standard's `presetShapeDefinitions.xml`, but that source is not redistributed here --
 `tools/derive_preset_geometry.py` requires a copy you obtained yourself and verifies its

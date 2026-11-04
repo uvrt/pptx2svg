@@ -155,37 +155,9 @@ def _svg_to_png(
     )
 
     if chosen == "resvg":
-        bundled = bundled_font_dirs() if use_bundled_fonts else []
-        if skip_system_fonts is None:
-            # Reproducible by default, but only when we actually have fonts to be
-            # reproducible *with*: an installation whose package data went missing must
-            # fall back to the host rather than render every slide blank.
-            skip_system_fonts = bool(bundled)
-        if host_fonts is None:
-            from .fonts import office
-
-            host_fonts = office.available() or not skip_system_fonts
-        plan = None
-        if host_fonts:
-            from .fonts import office
-
-            # Emoji the run's face cannot draw, in macOS's colour emoji face, as
-            # PowerPoint draws them (:func:`pptx2svg.fonts.office.with_emoji`).  Last
-            # among the files, so it shadows nothing.
-            svg, emoji = office.with_emoji(
-                svg, supplied=office.supplied_faces(font_files, font_dirs)
-            )
-            font_files = [*(font_files or ()), *emoji]
-            own = office.supplied_faces(font_files, font_dirs)
-            plan = office.drawing_plan(svg, supplied=frozenset(own), own=own)
-        elif font_dirs:
-            from .fonts import office
-
-            # The caller's folders alone: faces in them filed under one name (Aptos and
-            # Aptos Display) are drawn apart, as the installed ones are.
-            plan = office.drawing_plan(
-                svg, own=office.supplied_faces(font_files, font_dirs), host=False
-            )
+        svg, plan, font_files, skip_system_fonts, bundled = _resvg_fonts(
+            svg, font_dirs=font_dirs, font_files=font_files, skip_system_fonts=skip_system_fonts,
+            use_bundled_fonts=use_bundled_fonts, host_fonts=host_fonts)
         if plan is not None:
             missing = _missing(
                 check_glyphs, svg,
@@ -229,6 +201,84 @@ def _svg_to_png(
     raise ValueError(f"unknown rasterizer backend: {backend!r}")  # pragma: no cover
 
 
+def _resvg_fonts(svg: str, *, font_dirs, font_files, skip_system_fonts: bool | None, use_bundled_fonts: bool,
+                 host_fonts: bool | None):
+    """What resvg is handed for ``svg``: ``(svg, plan, font_files, skip_system_fonts,
+    bundle folders)`` -- the SVG with the emoji its faces cannot draw named in the emoji
+    face, the faces' plan of passes (:func:`pptx2svg.fonts.office.drawing_plan`, ``None``
+    for one pass of what is handed over), the files and whether the system's fonts are
+    left out.  :func:`_svg_to_png` draws with it, :func:`outline_svg` outlines with it."""
+    bundled = bundled_font_dirs() if use_bundled_fonts else []
+    if skip_system_fonts is None:
+        # Reproducible by default, but only when we actually have fonts to be
+        # reproducible *with*: an installation whose package data went missing must
+        # fall back to the host rather than render every slide blank.
+        skip_system_fonts = bool(bundled)
+    if host_fonts is None:
+        from .fonts import office
+
+        host_fonts = office.available() or not skip_system_fonts
+    plan = None
+    if host_fonts:
+        from .fonts import office
+
+        # Emoji the run's face cannot draw, in macOS's colour emoji face, as
+        # PowerPoint draws them (:func:`pptx2svg.fonts.office.with_emoji`).  Last
+        # among the files, so it shadows nothing.
+        svg, emoji = office.with_emoji(
+            svg, supplied=office.supplied_faces(font_files, font_dirs)
+        )
+        font_files = [*(font_files or ()), *emoji]
+        own = office.supplied_faces(font_files, font_dirs)
+        plan = office.drawing_plan(svg, supplied=frozenset(own), own=own)
+    elif font_dirs:
+        from .fonts import office
+
+        # The caller's folders alone: faces in them filed under one name (Aptos and
+        # Aptos Display) are drawn apart, as the installed ones are.
+        plan = office.drawing_plan(
+            svg, own=office.supplied_faces(font_files, font_dirs), host=False
+        )
+    return svg, plan, font_files, skip_system_fonts, bundled
+
+
+def outline_svg(
+    svg: str,
+    *,
+    font_dirs: Sequence[str] | None = None,
+    font_files: Sequence[str] | None = None,
+    skip_system_fonts: bool | None = None,
+    use_bundled_fonts: bool = True,
+    host_fonts: bool | None = None,
+    selectable: bool = False,
+):
+    """``svg`` with its text drawn as glyph outlines: the faces, fallbacks, shaping and
+    positions resvg draws it with when :func:`svg_to_png` is given the same arguments
+    (:func:`ooxml_common.outlines.outline_text`), so the SVG needs no font to be viewed.
+    ``selectable`` keeps each text, transparent, over its outlines.  Returns an
+    :class:`ooxml_common.outlines.Outlined`: the SVG and the texts kept as text, with why.
+
+    ``font_dirs`` left out reads ``OOXML_FONT_DIRS``, as :func:`svg_to_png` does."""
+    from ooxml_common.fonts.office import user_font_dirs
+    from ooxml_common.outlines import FontSetup, outline_text
+
+    dirs = [str(path) for path in user_font_dirs(font_dirs)]
+    svg, plan, files, skip, bundled = _resvg_fonts(
+        svg, font_dirs=dirs, font_files=font_files, skip_system_fonts=skip_system_fonts,
+        use_bundled_fonts=use_bundled_fonts, host_fonts=host_fonts)
+    generic = GENERIC_FAMILY_DEFAULTS if bundled else None
+    all_dirs = dirs + list(bundled)
+    if plan is None:
+        setup = FontSetup.of(list(files or ()), all_dirs, not skip, generic)
+        return outline_text(svg, setup, selectable=selectable)
+    setups = [FontSetup.of(*_plan_pass_fonts(plan, number, all_dirs, list(files or ()), skip, dirs), generic)
+              for number in range(len(plan.passes))]
+    import html
+
+    stacks = {html.unescape(value): number for value, number in plan.stacks.items()}
+    return outline_text(svg, lambda value: setups[stacks.get(value or "", 0)], selectable=selectable)
+
+
 def _missing(check: bool, svg: str, font_files: list, font_dirs: list,
              system_fonts: bool, generic_families) -> "list[MissingGlyphs]":
     """What of ``svg``'s text the rasteriser will not draw (:mod:`.glyphs`)."""
@@ -237,6 +287,28 @@ def _missing(check: bool, svg: str, font_files: list, font_dirs: list,
     return missing_glyphs(svg, font_files=[str(path) for path in font_files],
                           font_dirs=[str(path) for path in font_dirs],
                           system_fonts=system_fonts, generic_families=generic_families)
+
+
+def _plan_pass_fonts(plan, number: int, font_dirs: list[str], font_files: list[str], skip_system_fonts: bool,
+                     own_dirs: "list[str] | None" = None) -> "tuple[list[str], list[str], bool]":
+    """``(font_files, font_dirs, system fonts loaded)`` of pass ``number`` of ``plan``:
+    what :func:`_render_plan` hands resvg for it."""
+    from .fonts import office
+
+    system_dirs: list[str] = []
+    skip = skip_system_fonts
+    if plan.ahead_of_system and not skip_system_fonts:
+        skip, system_dirs = True, office.resvg_system_dirs()
+    own_dirs = list(own_dirs or ())
+    files = plan.passes[number]
+    dirs, extra = font_dirs, []
+    withheld = set(plan.withheld[number]) if plan.withheld else set()
+    if withheld and own_dirs and font_dirs[:len(own_dirs)] == own_dirs:
+        from ooxml_common.fonts.rasterdb import load_order
+
+        dirs = font_dirs[len(own_dirs):]
+        extra = [path for path in load_order((), own_dirs) if path not in withheld]
+    return font_files + files + extra, dirs + system_dirs, not skip
 
 
 def _render_plan(
@@ -267,32 +339,18 @@ def _render_plan(
     ``own_dirs``, the first of ``font_dirs`` -- are handed over as their files, in the
     order resvg loads them, without those.
     """
-    from .fonts import office
-
-    system_dirs: list[str] = []
-    skip = skip_system_fonts
-    if plan.ahead_of_system and not skip_system_fonts:
-        skip, system_dirs = True, office.resvg_system_dirs()
-    own_dirs = list(own_dirs or ())
 
     def draw(number: int, document: str) -> bytes:
-        files = plan.passes[number]
-        dirs, extra = font_dirs, []
-        withheld = set(plan.withheld[number]) if plan.withheld else set()
-        if withheld and own_dirs and font_dirs[:len(own_dirs)] == own_dirs:
-            from ooxml_common.fonts.rasterdb import load_order
-
-            dirs = font_dirs[len(own_dirs):]
-            extra = [path for path in load_order((), own_dirs) if path not in withheld]
+        files, dirs, system = _plan_pass_fonts(plan, number, font_dirs, font_files, skip_system_fonts, own_dirs)
         return _render_with_resvg(
             document,
             width=width,
             height=height,
             scale=scale,
             background=background if number == 0 else None,
-            font_dirs=dirs + system_dirs,
-            font_files=font_files + files + extra,
-            skip_system_fonts=skip,
+            font_dirs=dirs,
+            font_files=files,
+            skip_system_fonts=not system,
             generic_families=generic_families,
         )
 

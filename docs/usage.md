@@ -142,6 +142,34 @@ draws, so threads would only take turns. The images, and the warnings and their 
 the same either way. Only resvg draws in threads; CairoSVG draws one at a time. A caller
 that already spreads slides over worker processes or threads passes `threads=1`.
 
+### Text as outlines
+
+`ConvertOptions(text="outlines")` writes each text as the paths of its glyphs, so the SVG
+needs no font where it is viewed -- for a browser view of a deck whose faces may not be
+served as web fonts:
+
+```python
+from pptx2svg import ConvertOptions, convert_pptx_to_svg
+
+options = ConvertOptions(text="outlines", selectable_text=True)
+svgs = convert_pptx_to_svg("deck.pptx", options)
+kept = [w for w in options.warnings if w.code == "text-not-outlined"]
+```
+
+The outlines are drawn from the fonts the PNG is drawn with -- the deck's embedded faces,
+`font_dirs`, the bundle, the host's faces where `host_fonts` says so, in the same passes --
+and with resvg's face choice, fallback, shaping and layout
+(`ooxml_common.outlines`), so the SVG looks like the PNG. Rasterised, an outlined slide
+draws the PNG's pixels to an anti-aliased edge pixel. Each glyph is defined once per slide
+(`<defs data-outline-glyphs>`) and used by reference. A text it cannot draw so stays text,
+with one `text-not-outlined` warning per reason and face: right-to-left and
+complex-script text, an emoji (Apple Color Emoji draws pictures), `CFF2` faces. With
+`selectable_text=True` each text is kept after its outlines, transparent, for selecting,
+searching and copying. PNG output does not change (`convert_pptx_to_png` draws from the
+text either way), nor does the default SVG. `pptx2svg.png.outline_svg(svg, ...)` outlines
+one SVG with `svg_to_png`'s font arguments; on the command line, `--text outlines`
+(`--selectable-text`). [docs/licensing.md](licensing.md) says what goes into the SVG.
+
 ### A live, editable view
 
 For a page that shows each slide as SVG, re-renders a slide after an edit and sends only
