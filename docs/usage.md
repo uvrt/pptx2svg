@@ -183,7 +183,7 @@ ordered by id; `<use href="#g…">` in any inline `<svg>` of the page finds them
 renders, the dict gains only the glyphs an edit added: send those. `embed_glyphs` gives
 the slide outlined alone, byte for byte; `rasterise_svgs(..., glyphs=glyphs)` (or
 `options.glyphs`) draws such slides. A made-up 49-slide deck: text 548 KB (68 KB gzipped
-slide by slide), outlines 2,843 KB (711 KB) with a set per slide, 2,009 KB (319 KB) with
+slide by slide), outlines 2,533 KB (670 KB) with a set per slide, 1,698 KB (281 KB) with
 one set. A text it cannot draw so stays text,
 with one `text-not-outlined` warning per reason and face: right-to-left and
 complex-script text, an emoji (Apple Color Emoji draws pictures), `CFF2` faces. With

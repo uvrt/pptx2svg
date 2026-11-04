@@ -18,14 +18,15 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
   ooxml-common 0.38.0: a glyph's id is made of its outline, so it is the same on every slide
   and in every render (a deck's embedded faces are read from a new temporary folder each
   render, which renamed every glyph of them each time) and one id never names two outlines;
-  path data uses `t`/`s` for smooth curves. Measured: a made-up 49-slide deck's SVGs, text
-  548 KB (68 KB gzipped slide by slide), outlines 2,894 KB (729 KB) in 0.3.6, 2,843 KB
-  (711 KB) with a set per slide, 2,009 KB (319 KB) with one set -- 3.7 times the text, 4.7
-  gzipped, from 5.3 and 10.8. Every third deck of the local corpus (191 decks, 995 slides,
-  this machine's host fonts): text 12.33 MB (4.47 MB gzipped), outlines 22.24 MB (8.43 MB) a
-  set per slide, 17.07 MB (6.08 MB) one set; every slide with one set, embedded again, is
-  byte for byte the slide outlined alone; rasterised by resvg against the text, no pixel
-  differs by more than 64 of 255 and 526 slides are identical (ROADMAP.md, "Text as
+  path data uses `t`/`s` for smooth curves. The drawing does not change: every outlined
+  slide's PNG is 0.3.6's, byte for byte (every third deck of the local corpus, 191 decks,
+  995 slides; and the made-up deck below). Measured: a made-up 49-slide deck's SVGs, text
+  548 KB (68 KB gzipped slide by slide), outlines 2,894 KB (729 KB) in 0.3.6, 2,533 KB
+  (670 KB) with a set per slide, 1,698 KB (281 KB) with one set -- 3.1 times the text, 4.1
+  gzipped, from 5.3 and 10.8. Every third deck of the local corpus (this machine's host
+  fonts): text 12.33 MB (4.47 MB gzipped), outlines 24.73 MB (9.05 MB) in 0.3.6, 22.01 MB
+  (8.36 MB) with a set per slide, 16.83 MB (6.03 MB) with one set; every slide with one
+  set, embedded again, is byte for byte the slide outlined alone (ROADMAP.md, "Text as
   outlines").
 - **A shape's glyph definitions are its own** (R11). `slide_groups(svg)["defs"]` listed a
   shape's definitions in the slide's order, so with text as outlines a text edit in one shape
