@@ -75,9 +75,23 @@ def _drawn(monkeypatch, threads):
 def test_threads_draw_the_same_images_and_say_the_same_in_the_same_order(monkeypatch):
     names = set()
     draw = pptx2svg.png._svg_to_png
+    # The first two pool threads to draw wait for each other, so two slides are proven to be
+    # drawn side by side; how many of the three workers the pool then hands work to depends
+    # on timing.  The timeout keeps a pool that draws one at a time from hanging the test.
+    meet = threading.Barrier(2, timeout=30)
+    arrived = []
+    lock = threading.Lock()
 
     def recording(*args, **kwargs):
-        names.add(threading.current_thread().name)
+        name = threading.current_thread().name
+        with lock:
+            first = name not in names
+            names.add(name)
+            if first and name.startswith("pptx2svg-raster"):
+                arrived.append(name)
+            wait = first and name in arrived[:2]
+        if wait:
+            meet.wait()
         return draw(*args, **kwargs)
 
     monkeypatch.setattr("pptx2svg.png._svg_to_png", recording)
@@ -87,7 +101,8 @@ def test_threads_draw_the_same_images_and_say_the_same_in_the_same_order(monkeyp
     names.clear()
     monkeypatch.setattr(pptx2svg, "_gil_enabled", lambda: False)
     side_by_side = _drawn(monkeypatch, 3)
-    assert len(names) == 3 and all(name.startswith("pptx2svg-raster") for name in names)
+    assert 2 <= len(names) <= 3 and all(name.startswith("pptx2svg-raster") for name in names)
+    assert not meet.broken
     assert side_by_side == alone
     images, said, warned = alone
     missing = [entry for entry in said if entry[0] == "glyphs-missing"]
