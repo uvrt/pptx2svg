@@ -161,7 +161,30 @@ The outlines are drawn from the fonts the PNG is drawn with -- the deck's embedd
 and with resvg's face choice, fallback, shaping and layout
 (`ooxml_common.outlines`), so the SVG looks like the PNG. Rasterised, an outlined slide
 draws the PNG's pixels to an anti-aliased edge pixel. A metafile picture drawn as SVG goes inline first, its text outlined too, as the PNG draws it. Each glyph is defined once per slide
-(`<defs data-outline-glyphs>`) and used by reference. A text it cannot draw so stays text,
+(`<defs data-outline-glyphs>`) and used by reference, under an id made of its outline
+(`g` and six base 62 digits), so a glyph has the same id on every slide and in every
+render, and one id never names two outlines.
+
+**One glyph set for the deck** (`glyphs={}`): every glyph definition goes into the dict,
+as `images={}` collects pictures, and the slides only reference them -- a deck's slides
+shown in one HTML page carry each glyph once:
+
+```python
+from pptx2svg import ConvertOptions, embed_glyphs, glyph_sheet, render_svgs
+
+glyphs: dict[str, str] = {}                     # id -> '<path id="g…" d="…"/>', filled in place
+svgs, _ = render_svgs("deck.pptx", ConvertOptions(text="outlines", glyphs=glyphs))
+page = glyph_sheet(glyphs) + "".join(svgs)      # the set once, then the slides inline
+alone = embed_glyphs(svgs[0], glyphs)           # one slide standalone again (to save or draw)
+```
+
+`glyph_sheet` writes an `<svg>` that draws nothing and takes no room, its definitions
+ordered by id; `<use href="#g…">` in any inline `<svg>` of the page finds them. Kept across
+renders, the dict gains only the glyphs an edit added: send those. `embed_glyphs` gives
+the slide outlined alone, byte for byte; `rasterise_svgs(..., glyphs=glyphs)` (or
+`options.glyphs`) draws such slides. A made-up 49-slide deck: text 548 KB (68 KB gzipped
+slide by slide), outlines 2,533 KB (670 KB) with a set per slide, 1,698 KB (281 KB) with
+one set. A text it cannot draw so stays text,
 with one `text-not-outlined` warning per reason and face: right-to-left and
 complex-script text, an emoji (Apple Color Emoji draws pictures), `CFF2` faces. With
 `selectable_text=True` each text is kept after its outlines, transparent, for selecting,
@@ -229,6 +252,10 @@ byte, on every slide of the corpus):
 - `data-pptx-path` is left out, and every shape's definitions get ids of their own
   (`grad-s258_7-1`, the background's `grad-bg-1`): neither then depends on what is drawn
   before the shape.
+- With text as outlines, a shape's glyph definitions in `slide_groups(svg)["defs"]` come
+  first, in the order the shape itself first uses them (round 32, R11), not the slide's:
+  an edit of another shape's text leaves the shape's markup and definitions byte for byte
+  as they were. With `glyphs={}` the slide has none; the set is the deck's.
 
 An id is the shape's for as long as the shape exists: editing its text, moving or resizing
 it, restyling it, or adding and removing other shapes leaves it as it was. pptx-agent's id

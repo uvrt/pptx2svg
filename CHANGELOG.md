@@ -4,6 +4,41 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.3.7 -- unreleased
+
+- **One glyph set for the deck, and smaller outlines** (production round 32, R10). Text as
+  outlines was 5 to 6.5 times the text's size on a text-heavy deck, every slide carrying its
+  own glyph definitions. `ConvertOptions(text="outlines", glyphs={})`: every glyph definition
+  goes into the dict, by id, as `images={}` collects pictures, and the slides only reference
+  them (`<use href="#g…">`). New `glyph_sheet(glyphs)`, the set as one `<svg>` that draws
+  nothing and takes no room, to put once in the HTML page that shows the slides inline, and
+  `embed_glyphs(svg, glyphs)`, a slide standalone again -- byte for byte the slide outlined
+  alone; `rasterise_svgs(..., glyphs=)` (or `options.glyphs`) draws such slides, as it takes
+  `images=`. Kept across renders, the dict gains only the glyphs an edit added. From
+  ooxml-common 0.38.0: a glyph's id is made of its outline, so it is the same on every slide
+  and in every render (a deck's embedded faces are read from a new temporary folder each
+  render, which renamed every glyph of them each time) and one id never names two outlines;
+  path data uses `t`/`s` for smooth curves. The drawing does not change: every outlined
+  slide's PNG is 0.3.6's, byte for byte (every third deck of the local corpus, 191 decks,
+  995 slides; and the made-up deck below). Measured: a made-up 49-slide deck's SVGs, text
+  548 KB (68 KB gzipped slide by slide), outlines 2,894 KB (729 KB) in 0.3.6, 2,533 KB
+  (670 KB) with a set per slide, 1,698 KB (281 KB) with one set -- 3.1 times the text, 4.1
+  gzipped, from 5.3 and 10.8. Every third deck of the local corpus (this machine's host
+  fonts): text 12.33 MB (4.47 MB gzipped), outlines 24.73 MB (9.05 MB) in 0.3.6, 22.01 MB
+  (8.36 MB) with a set per slide, 16.83 MB (6.03 MB) with one set; every slide with one
+  set, embedded again, is byte for byte the slide outlined alone (ROADMAP.md, "Text as
+  outlines").
+- **A shape's glyph definitions are its own** (R11). `slide_groups(svg)["defs"]` listed a
+  shape's definitions in the slide's order, so with text as outlines a text edit in one shape
+  that changed the slide's first use of a glyph reordered another shape's identical glyph
+  definitions, and a live view sent that unchanged shape again. A shape's glyph definitions
+  (the slide's `<defs data-outline-glyphs="">`) now come first, in the order the shape itself
+  first uses them; every other definition keeps the slide's order, so nothing changes without
+  outlines. Tested: an edit of one shape's text leaves every other shape's markup and
+  definitions byte for byte (`tests/test_outlines.py`; on 0.3.6 eight other shapes changed).
+  Needs ooxml-common 0.38.0. The default SVG is byte for byte what it was (573 decks, 2,958
+  slides).
+
 ## 0.3.6 -- unreleased
 
 - **Text as outlines** (production round 31, R2). `ConvertOptions(text="outlines")` writes

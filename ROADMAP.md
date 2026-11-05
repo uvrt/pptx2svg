@@ -6417,6 +6417,21 @@ library's measurer: the reference is the PNG, which resvg draws from the `<text>
   text. Each slide carries its own glyph definitions; a viewer showing a deck could share
   them across slides (one `<defs>` document) and does not yet. A gradient's box leaves the
   decorations out (usvg adds an underline's box to the text's).
+- **Round 32: one glyph set, ids that do not move, smaller paths** (R10, R11; 0.3.7 with
+  ooxml-common 0.38.0). `ConvertOptions(glyphs={})` collects the deck's glyph definitions
+  in one dict, the slides referencing them; `glyph_sheet` and `embed_glyphs` put them in an
+  HTML page once, or back into one slide. A glyph's id is its outline's (it was its font
+  file's path's: an embedded face read from a new temporary folder renamed every glyph each
+  render). Path data uses `t`/`s`; whole font units were measured not to pay (under a fifth
+  of a set's bytes, and they move the implied midpoints and lose the `t`). `slide_groups`
+  orders a shape's glyph definitions by the shape's own first use. Measured, every third
+  deck of the local corpus (191 decks, 995 slides): every outlined slide's PNG is 0.3.6's,
+  byte for byte (so against the text: 559 slides identical, the largest difference 64 of
+  255, none above); SVG 12.33 MB as text, 24.73 MB outlined in 0.3.6, 22.01 MB slide by
+  slide, 16.83 MB with one set (gzipped slide by slide 4.47, 9.05, 8.36 and 6.03 MB). A
+  made-up 49-slide text-heavy deck: 548 KB as text, 2,894 KB outlined in 0.3.6, 1,698 KB
+  with one set (gzipped 68, 729 and 281 KB). What is left is the references, about 31
+  bytes a glyph drawn where the character was one.
 
 ## Suggested order
 

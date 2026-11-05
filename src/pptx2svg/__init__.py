@@ -46,7 +46,7 @@ from . import fonts
 from .fonts.check import FontReport, check_families, resolved_families
 from .fonts.embedded import EmbeddedFonts, extract_embedded_fonts
 from .glyphs import MissingGlyphsWarning
-from .liveview import embed_images, externalise_images, slide_groups
+from .liveview import embed_glyphs, embed_images, externalise_images, glyph_sheet, slide_groups
 from .png import RasterizerNotAvailable, available_backends, svg_to_png
 from .render.context import RenderContext
 from .render.svg import render_slide_to_svg
@@ -59,7 +59,7 @@ from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
 from ooxml_common.locales import EN_US, Locale
 from ooxml_common.text.symbol_fonts import recorded_font_metrics
 
-__version__ = "0.3.6"
+__version__ = "0.3.7"
 
 __all__ = [
     "ConvertOptions",
@@ -84,7 +84,9 @@ __all__ = [
     "convert_pptx_to_png",
     "convert_pptx_to_svg",
     "create_font_mapping",
+    "embed_glyphs",
     "embed_images",
+    "glyph_sheet",
     "model",
     "rasterise_svgs",
     "render_slide_to_svg",
@@ -210,6 +212,16 @@ class ConvertOptions:
     #: With ``text="outlines"``: each text also kept, transparent, over its outlines, so
     #: a viewer can select, search and copy it (and a screen reader read it).
     selectable_text: bool = False
+    #: With ``text="outlines"``: one glyph set for the whole deck, as ``images`` is one
+    #: picture store.  A dict, and every glyph definition goes into it, by id, instead of
+    #: into each slide's ``<defs>``; the slides only reference them (``<use
+    #: href="#g…">``).  An id is made of the glyph's outline, so it is the same on every
+    #: slide and in every render, and the dict, kept across renders, gains only the
+    #: glyphs an edit added.  Put :func:`glyph_sheet` of it once in the HTML page that
+    #: shows the slides inline; :func:`embed_glyphs` makes one slide standalone again, and
+    #: :func:`rasterise_svgs` (``glyphs=``) draws such slides.  ``None`` (the default):
+    #: each slide holds its own definitions.
+    glyphs: "dict[str, str] | None" = None
 
 
 def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> list[str]:
@@ -423,7 +435,8 @@ def _outlined(documents: list[str], resolved: ResolvedPresentation, options: Con
         extracted = resolved.embedded_fonts.write(directory.name) if directory is not None else []
         for document, number in zip(documents, numbers):
             outlined = outline_svg(document, font_dirs=user_font_dirs(options), font_files=extracted,
-                                   host_fonts=uses_host_fonts(options), selectable=options.selectable_text)
+                                   host_fonts=uses_host_fonts(options), selectable=options.selectable_text,
+                                   glyphs=options.glyphs)
             out.append(outlined.svg)
             for kept in outlined.kept:
                 if (kept.reason, kept.family) in reported:
@@ -599,6 +612,7 @@ def rasterise_svgs(
     host_fonts: bool | None = None,
     images: "Mapping[str, bytes] | None" = None,
     threads: int | None = None,
+    glyphs: "Mapping[str, str] | None" = None,
 ) -> list[bytes]:
     """The PNG of each of ``documents`` (SVGs of :func:`render_svgs`), byte for byte what
     :func:`convert_pptx_to_png` draws for them with the same arguments.
@@ -606,7 +620,9 @@ def rasterise_svgs(
     ``images`` resolves pictures by reference (``ConvertOptions.images``): each name is
     embedded again from it before drawing (:func:`embed_images`), so the PNG is the
     embedded SVG's; a name it lacks raises ``KeyError``.  Left out, it is
-    ``options.images``.
+    ``options.images``.  ``glyphs`` likewise resolves the glyphs of slides outlined with
+    one glyph set (``ConvertOptions.glyphs``, :func:`embed_glyphs`); left out, it is
+    ``options.glyphs``.
 
     ``font_files`` holds the deck's embedded faces where it has any
     (``resolved.embedded_fonts.write(folder)``, for as long as this runs), then the
@@ -637,6 +653,10 @@ def rasterise_svgs(
         images = getattr(options, "images", None)
     if images is not None:
         documents = [embed_images(document, images) for document in documents]
+    if glyphs is None:
+        glyphs = getattr(options, "glyphs", None)
+    if glyphs:
+        documents = [embed_glyphs(document, dict(glyphs)) for document in documents]
     return _rasterise(documents, backend, list(font_dirs), font_files, skip_system_fonts, use_bundled_fonts,
                       host_fonts, options, numbers, threads=threads)
 

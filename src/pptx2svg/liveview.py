@@ -16,6 +16,10 @@ shapes that changed needs four things the plain render does not give it:
 * **the slide by shape** (:func:`slide_groups`): each top-level shape's markup by its id,
   in drawing order, with the definitions it uses.
 * **no hyperlinks** (``ConvertOptions(hyperlinks=False)``).
+* **one glyph set** (``ConvertOptions(text="outlines", glyphs={})``): with text as
+  outlines, every glyph defined once for the deck, under an id made of its outline,
+  and the slides referencing them; :func:`glyph_sheet` writes the set once for the page,
+  :func:`embed_glyphs` puts a slide's own back into it.
 
 Standard library only, string work on the renderer's own output: its attribute values
 escape ``<`` and ``>``, and it writes no comments, CDATA or processing instructions.
@@ -28,7 +32,7 @@ import hashlib
 import re
 from typing import Mapping, MutableMapping
 
-__all__ = ["embed_images", "externalise_images", "mark_sources", "slide_groups"]
+__all__ = ["embed_glyphs", "embed_images", "externalise_images", "glyph_sheet", "mark_sources", "slide_groups"]
 
 #: A picture as the renderer embeds it: ``href`` or ``xlink:href``, a media type, base64.
 _DATA_HREF = re.compile(r'((?:xlink:)?href)="data:([^";,]+);base64,([A-Za-z0-9+/=]*)"')
@@ -189,7 +193,11 @@ def slide_groups(svg: str) -> dict:
     pptx-agent's ids are) takes ``#2``, ``#3``...; a top-level element with no id, ``#``
     and its position.  ``defs`` maps each key to the definitions its markup uses
     (gradients, patterns, clip paths, masks, filters, markers -- and those they use), in
-    document order, as one string, ``""`` for none.  ``root`` is the ``<svg …>`` tag.
+    document order, as one string, ``""`` for none -- but for the glyph outlines of text
+    drawn as outlines (``ConvertOptions(text="outlines")``, the slide's ``<defs
+    data-outline-glyphs="">``), which come first, in the order the shape first uses
+    them, so that a shape's definitions do not depend on what other shapes draw.
+    ``root`` is the ``<svg …>`` tag.
 
     The definitions stay in the document's one ``<defs>``: a page that swaps a group
     swaps its definitions there too.  Rendered with ``ConvertOptions(edit_marks=True)``
@@ -207,18 +215,23 @@ def slide_groups(svg: str) -> dict:
 
     definitions: dict[str, str] = {}
     def_order: list[str] = []
+    # The definitions text drawn as outlines added: in the order a shape first uses them.
+    outline_defs: set[str] = set()
     groups: dict[str, str] = {}
     order: list[str] = []
     for start, stop, tag in children:
         markup = svg[start:stop]
         if tag == "defs":
             open_end = svg.index(">", start) + 1
+            outlines = "data-outline-glyphs" in svg[start:open_end]
             for inner_start, inner_end, _ in _children(svg, open_end, stop - len("</defs>")):
                 definition = svg[inner_start:inner_end]
                 found = _ATTRIBUTE_ID.search(definition)
                 if found is not None:
                     definitions[found.group(1)] = definition
                     def_order.append(found.group(1))
+                    if outlines:
+                        outline_defs.add(found.group(1))
             continue
         if not order:
             key = "background"
@@ -237,13 +250,34 @@ def slide_groups(svg: str) -> dict:
     position = {name: index for index, name in enumerate(def_order)}
     used_by: dict[str, str] = {}
     for key in order:
-        seen: set[str] = set()
-        pending = [name for pair in _REFERENCE.findall(groups[key]) for name in pair if name]
+        # Every definition the shape uses, in the order of first use (depth first).
+        seen: dict[str, None] = {}
+        pending = [name for pair in _REFERENCE.findall(groups[key]) for name in pair if name][::-1]
         while pending:
             name = pending.pop()
             if name in seen or name not in definitions:
                 continue
-            seen.add(name)
-            pending.extend(n for pair in _REFERENCE.findall(definitions[name]) for n in pair if n)
-        used_by[key] = "".join(definitions[name] for name in sorted(seen, key=position.__getitem__))
+            seen[name] = None
+            pending.extend([n for pair in _REFERENCE.findall(definitions[name]) for n in pair if n][::-1])
+        first = [name for name in seen if name in outline_defs]
+        rest = sorted((name for name in seen if name not in outline_defs), key=position.__getitem__)
+        used_by[key] = "".join(definitions[name] for name in first + rest)
     return {"root": root.group(0), "order": order, "groups": groups, "defs": used_by}
+
+
+def glyph_sheet(glyphs: Mapping[str, str]) -> str:
+    """The glyph set of slides outlined with ``ConvertOptions(glyphs={})`` as one
+    ``<svg>`` element that draws nothing and takes no room, to put once in the HTML page
+    that shows them inline (:func:`ooxml_common.outlines.glyph_sheet`)."""
+    from ooxml_common.outlines import glyph_sheet as _glyph_sheet
+
+    return _glyph_sheet(dict(glyphs))
+
+
+def embed_glyphs(svg: str, glyphs: Mapping[str, str]) -> str:
+    """A slide outlined with ``ConvertOptions(glyphs={})`` with the glyph definitions it
+    uses put back into it: standalone again, as it would be outlined without the shared
+    set (:func:`ooxml_common.outlines.embed_glyphs`)."""
+    from ooxml_common.outlines import embed_glyphs as _embed_glyphs
+
+    return _embed_glyphs(svg, dict(glyphs))
