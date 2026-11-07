@@ -26,6 +26,12 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
   0.3.7 drew it, with and without a cache, the agent view too (two decks whose time fields
   show the clock compared at a pinned `now`); resolving and drawing change neither a kept
   slide nor a kept parse (pickled before and after, 83 decks); `tests/test_model_cache.py`.
+- **`table_row_heights` from several threads at once, first in a process.** Its table layout
+  was imported by the first call from `pptx2svg.render.shape`, an alias module that replaces
+  itself in `sys.modules` with ooxml-common's; two threads making that first import at once
+  could hand the second the stand-in, and it failed with `cannot import name '_row_heights'`
+  (seen with six deck builders measuring tables at once, once the measuring got fast). It
+  is imported with pptx2svg now (`tests/test_threads.py`).
 
 ## 0.3.7 -- unreleased
 
