@@ -142,6 +142,40 @@ draws, so threads would only take turns. The images, and the warnings and their 
 the same either way. Only resvg draws in threads; CairoSVG draws one at a time. A caller
 that already spreads slides over worker processes or threads passes `threads=1`.
 
+### Converting a deck again and again
+
+An editor that measures or draws slides of the deck it holds after every edit converts
+mostly the same slides each time. Two things make that cheap:
+
+```python
+from pptx2svg import ConvertOptions, ModelCache, convert_pptx_to_model, open_parts
+
+cache = ModelCache()                         # one per process, shared by every deck
+options = ConvertOptions(slide_numbers=[3], cache=cache)
+model = convert_pptx_to_model(open_parts(parts), options)   # parts: {name: bytes}
+```
+
+- `open_parts(parts)` is a package of parts already in memory, `{part name: bytes}` as a
+  zip holds them: no zip is written or read, and the mapping is read only for the parts the
+  conversion needs, so an editor can serialise a part when it is asked for. Every entry
+  point also takes such a mapping as its source directly.
+- `ConvertOptions(cache=ModelCache())` keeps each resolved slide under a key made of what
+  its resolution reads: the bytes of the slide's part and of every part its relationships
+  reach (layout, master, the master's layouts, theme, pictures, charts, diagrams) with
+  their relationships and content types, the presentation's settings as read (slide size,
+  default text style, table styles, embedded font list, first slide number, application
+  version), the slide's number, id and part, and the conversion's locale and font choice.
+  Another slide's part is not in the key: a hyperlink to it is in the relationships.
+  A conversion resolves only the slides whose key it has not kept, and gives back the kept
+  ones as the very objects it resolved before -- **read-only**. Layouts, masters and themes
+  are parsed once per their bytes too, so decks made from one template share those parses.
+  Not kept: a slide on which a date field drew the clock (`now`), and every slide of a
+  conversion with a `metafile_converter` or `templates`. Bounded (512 slides, 256 parsed
+  parts by default; least recently used out first) and safe to share between threads.
+
+The output is the same with or without either, byte for byte. Without a cache, a
+conversion still reads only the slides it is asked for.
+
 ### Text as outlines
 
 `ConvertOptions(text="outlines")` writes each text as the paths of its glyphs, so the SVG
@@ -423,7 +457,7 @@ pptx2svg from `main`, so renaming or removing one breaks it at its next run.
 list and that one disagree. To rename one, keep the old name as an alias for one release,
 with a comment saying who it is kept for, and move pptx-agent to the new name.
 
-- `pptx2svg` -- pptx-agent: `ConvertOptions`, `convert_pptx_to_agent_svg`, `convert_pptx_to_model`, `convert_pptx_to_png`, `convert_pptx_to_svg`, `png`, `rasterise_svgs`, `render_svgs`, `table_row_heights`, `user_font_dirs`, `uses_host_fonts`
+- `pptx2svg` -- pptx-agent: `ConvertOptions`, `ModelCache`, `convert_pptx_to_agent_svg`, `convert_pptx_to_model`, `convert_pptx_to_png`, `convert_pptx_to_svg`, `open_parts`, `png`, `rasterise_svgs`, `render_svgs`, `table_row_heights`, `user_font_dirs`, `uses_host_fonts`
 - `pptx2svg.fonts` -- pptx-agent: `bundle_dir`, `font_dirs`
 - `pptx2svg.fonts.check` -- pptx-agent: `resolved_families`
 - `pptx2svg.fonts.office` -- pptx-agent: `emoji_face`, `search_dirs`, `user_layout_metrics`

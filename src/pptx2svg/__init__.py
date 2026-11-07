@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Mapping, Sequence
 
 from . import model
+from .cache import ModelCache
 from .model import Slide, SlideSize
 from .opc import OpcPackage
 from .parse.parts import read_presentation
@@ -59,7 +60,7 @@ from ooxml_common.drawingml.rules import POWERPOINT as POWERPOINT_RULES
 from ooxml_common.locales import EN_US, Locale
 from ooxml_common.text.symbol_fonts import recorded_font_metrics
 
-__version__ = "0.3.7"
+__version__ = "0.3.8"
 
 __all__ = [
     "ConvertOptions",
@@ -69,6 +70,7 @@ __all__ = [
     "FontReport",
     "FontToolsTextMeasurer",
     "MissingGlyphsWarning",
+    "ModelCache",
     "OpcPackage",
     "RasterizerNotAvailable",
     "RenderContext",
@@ -88,6 +90,7 @@ __all__ = [
     "embed_images",
     "glyph_sheet",
     "model",
+    "open_parts",
     "rasterise_svgs",
     "render_slide_to_svg",
     "render_svgs",
@@ -222,6 +225,13 @@ class ConvertOptions:
     #: :func:`rasterise_svgs` (``glyphs=``) draws such slides.  ``None`` (the default):
     #: each slide holds its own definitions.
     glyphs: "dict[str, str] | None" = None
+    #: Keep resolved slides, and parsed layouts, masters and themes, across conversions
+    #: (:class:`~pptx2svg.cache.ModelCache`): a slide whose part, layout, master, theme,
+    #: pictures and charts -- the bytes its resolution reads -- are those of a slide
+    #: resolved before is not resolved again.  The same output either way.  ``None`` (the
+    #: default) keeps nothing.  A slide :func:`convert_pptx_to_model` gives back from it
+    #: is shared with earlier conversions: read-only.
+    cache: "ModelCache | None" = None
 
 
 def user_font_dirs(options: "ConvertOptions | None" = None, font_dirs=None) -> list[str]:
@@ -257,7 +267,21 @@ def _open_package(source) -> OpcPackage:
         return source
     if isinstance(source, (str, os.PathLike)):
         return OpcPackage.open(os.fspath(source))
+    if isinstance(source, Mapping):
+        return open_parts(source)
     return OpcPackage.open(source)
+
+
+def open_parts(parts: "Mapping[str, bytes]") -> OpcPackage:
+    """A package of parts already in memory -- ``{part name: bytes}``, names without a
+    leading slash, as a zip holds them -- without writing and reading a zip: what an
+    editor holding the deck hands a conversion.  The mapping is read as the conversion
+    needs a part, never changed; any mapping will do, so an editor can serialise a part
+    only when it is asked for.  Every entry point takes such a mapping as ``source``."""
+    package = OpcPackage(parts=parts)  # type: ignore[arg-type]  # read with get() and in
+    # Content types as OpcPackage.open reads them from a zip.
+    package._load_content_types()
+    return package
 
 
 def convert_pptx_to_model(
@@ -270,20 +294,26 @@ def convert_pptx_to_model(
     """
     options = options or ConvertOptions()
     package = _open_package(source)
-    presentation = read_presentation(package)
     host_fonts = uses_host_fonts(options)
-    resolved = resolve_presentation(
-        package,
-        presentation,
-        slide_numbers=options.slide_numbers,
-        metafile_converter=options.metafile_converter,
-        # Which face draws a run's Japanese depends on what is installed: as PowerPoint
-        # would find it here when the host's faces are in use, else from what we know.
-        east_asian=EastAsianFaces(host=host_fonts),
-        now=options.now,
-        locale=options.locale,
-        templates=options.templates,
-    )
+    # Which face draws a run's Japanese depends on what is installed: as PowerPoint
+    # would find it here when the host's faces are in use, else from what we know.
+    east_asian = EastAsianFaces(host=host_fonts)
+    if options.cache is not None and options.metafile_converter is None and not options.templates:
+        presentation, resolved = options.cache.resolve(
+            package, options, east_asian=east_asian, host_fonts=host_fonts, now=options.now)
+    else:
+        # Only the slides asked for are read: one slide's drawing reads nothing of another.
+        presentation = read_presentation(package, options.slide_numbers)
+        resolved = resolve_presentation(
+            package,
+            presentation,
+            slide_numbers=options.slide_numbers,
+            metafile_converter=options.metafile_converter,
+            east_asian=east_asian,
+            now=options.now,
+            locale=options.locale,
+            templates=options.templates,
+        )
     if options.use_embedded_fonts and presentation.embedded_fonts:
         # After resolution, not during it: `resolved_families` is what tells us which of
         # the embedded families a slide actually asks for, and decoding one costs about a

@@ -26,10 +26,12 @@ SECTION = "## Used by pptx-agent"
 USED_BY: dict[str, dict[str, str]] = {
     "pptx2svg": {
         "ConvertOptions": "pptx-agent",
+        "ModelCache": "pptx-agent",
         "convert_pptx_to_agent_svg": "pptx-agent",
         "convert_pptx_to_model": "pptx-agent",
         "convert_pptx_to_png": "pptx-agent",
         "convert_pptx_to_svg": "pptx-agent",
+        "open_parts": "pptx-agent",
         "png": "pptx-agent",
         "rasterise_svgs": "pptx-agent",
         "render_svgs": "pptx-agent",

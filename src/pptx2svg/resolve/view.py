@@ -163,6 +163,8 @@ class ResolveContext:
     locale: Locale = EN_US
     #: Languages a date field fell back from, so each is reported once per slide.
     field_languages_warned: set[str] = field(default_factory=set)
+    #: Whether a date field drew the clock (``now``) on this slide.
+    shows_clock: bool = False
 
     def warn(self, code: str, message: str) -> None:
         self.warnings.append(
@@ -191,6 +193,9 @@ class ResolvedPresentation:
     #: faces in use; see :func:`pptx2svg.convert_pptx_to_model`).  As faithful as an
     #: embedded face: the font report counts them with it.
     installed_families: frozenset = frozenset()
+    #: The numbers of the slides a date field drew the clock on (``now``): what
+    #: :class:`pptx2svg.cache.ModelCache` does not keep.
+    dated: frozenset = frozenset()
 
 
 def resolve_presentation(
@@ -217,6 +222,7 @@ def resolve_presentation(
     warnings: list[Warning] = []
     slides: list[m.Slide] = []
     font_scheme = m.FontScheme()
+    dated: set[int] = set()
 
     for source_slide in presentation.slides:
         if wanted is not None and source_slide.slide_number not in wanted:
@@ -230,6 +236,8 @@ def resolve_presentation(
         context.locale = locale
         slides.append(resolve_slide(context))
         warnings.extend(context.warnings)
+        if context.shows_clock:
+            dated.add(source_slide.slide_number)
         if context.theme is not None:
             font_scheme = _font_scheme(context.theme)
 
@@ -251,7 +259,8 @@ def resolve_presentation(
                 font_scheme = _font_scheme(theme)
 
     return ResolvedPresentation(
-        slide_size=slide_size, slides=slides, warnings=warnings, font_scheme=font_scheme
+        slide_size=slide_size, slides=slides, warnings=warnings, font_scheme=font_scheme,
+        dated=frozenset(dated),
     )
 
 

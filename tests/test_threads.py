@@ -85,3 +85,31 @@ def test_pdf_previews_from_threads():
         assert rasterise_pdf(MINI_PDF, width_emu=widths[key]) == expected[key]
 
     assert hammer(call, len(widths), calls=200) == []
+
+
+def test_table_rows_from_threads_in_a_fresh_interpreter():
+    """The first ``table_row_heights`` calls of a process, from several threads at once: the
+    table layout it reaches through ``pptx2svg.render.shape`` -- an alias module, which
+    replaces itself in ``sys.modules`` with ooxml-common's -- is imported with pptx2svg,
+    not by the first call, so no thread is handed the stand-in (``cannot import name
+    '_row_heights'``, seen with six builders measuring tables at once)."""
+    import subprocess
+    import sys
+
+    script = (
+        "import sys, threading\n"
+        "import pptx2svg\n"
+        "assert 'pptx2svg.render.shape' in sys.modules\n"
+        "from pptx2svg import model as m\n"
+        "errors = []\n"
+        "def rows():\n"
+        "    try:\n"
+        "        pptx2svg.table_row_heights(m.TableData(rows=[m.TableRow(height=100.0)]))\n"
+        "    except BaseException as error:\n"
+        "        errors.append(error)\n"
+        "threads = [threading.Thread(target=rows) for _ in range(8)]\n"
+        "[thread.start() for thread in threads]\n"
+        "[thread.join() for thread in threads]\n"
+        "assert not errors, errors\n"
+    )
+    subprocess.run([sys.executable, "-c", script], check=True, timeout=120)

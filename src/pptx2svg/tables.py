@@ -15,6 +15,10 @@ from __future__ import annotations
 
 from . import model as m
 from .render.context import RenderContext
+# At import, not in the function: ``render.shape`` is an alias module (it replaces itself in
+# ``sys.modules`` with ooxml-common's), and a first import of one from two threads at once
+# can hand the second the stand-in, without the names (``cannot import name``).
+from .render.shape import _row_heights
 
 __all__ = ["table_row_heights"]
 
@@ -35,7 +39,5 @@ def table_row_heights(
         table = next(e for e in model.slides[0].elements if isinstance(e, m.TableElement))
         heights = table_row_heights(table)          # [370840.0, 1005840.0, ...]
     """
-    from .render.shape import _row_heights
-
     data = table.table if isinstance(table, m.TableElement) else table
     return list(_row_heights(data, context or RenderContext()))
