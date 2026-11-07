@@ -53,7 +53,7 @@ from ..parse import source as s
 from ..text.fontmap import theme_east_asian
 from ..text.measure import is_cjk
 from .east_asian import EastAsianFaces
-from .fields import SLIDE_NUMBER, evaluate_field, fallback_language
+from .fields import SLIDE_NUMBER, date_format_index, evaluate_field, fallback_language
 from ..units import ROTATION_UNIT
 from .naming import resolve_color
 from ooxml_common.drawingml import text_chain
@@ -421,6 +421,8 @@ def _field_text(
         if properties is not None:
             lang = properties.lang
     now = getattr(context, "now", None) or datetime.now()
+    if date_format_index(field_type) is not None and hasattr(context, "shows_clock"):
+        context.shows_clock = True                 # drawn from the clock: not kept
     locale = getattr(context, "locale", None)
     # Where the field states no language PowerPoint uses its machine's; here the caller's.
     fallback = fallback_language(locale.language if locale is not None else None)

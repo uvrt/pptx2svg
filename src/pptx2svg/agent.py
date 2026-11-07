@@ -71,9 +71,9 @@ def convert_pptx_to_agent_svg(source, options=None) -> list[str]:
         package = OpcPackage.open(os.fspath(source))
     else:
         package = OpcPackage.open(source)
-    presentation = read_presentation(package)
     names: dict = {}
     slide_numbers = getattr(options, "slide_numbers", None) if options is not None else None
+    presentation = read_presentation(package, slide_numbers)
     resolved = resolve_presentation(package, presentation, slide_numbers=slide_numbers,
                                     color_names=names,
                                     now=getattr(options, "now", None) if options else None,

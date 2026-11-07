@@ -4,6 +4,29 @@ pptx2svg is not on PyPI yet. Each version that reaches `main` is tagged `v<versi
 from 0.2.0, the first tagged; 0.1.0 was never tagged, and its changes are 0.2.0's.
 The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/pulls?q=is%3Apr+is%3Amerged).
 
+## 0.3.8 -- unreleased
+
+- **A deck converted again after an edit resolves only what the edit changed** (round 39).
+  An editor measuring or drawing slides of the deck it holds read the whole deck again for
+  every slide it asked for: pptx-agent's 25-slide builds converted a deck 165 times and parsed
+  3,059 slides for it. Three changes, the output the same byte for byte:
+  - only the slides asked for are read (`read_presentation(package, slide_numbers)`): a
+    slide's drawing reads nothing of another slide, so the others are no longer parsed;
+  - `open_parts({name: bytes})`, a package of parts already in memory, and every entry point
+    takes such a mapping as its source: no zip round trip, and only the parts the conversion
+    needs are read from it;
+  - `ConvertOptions(cache=ModelCache())` keeps resolved slides by what their resolution reads
+    (`pptx2svg.cache`: the bytes of the slide's part and of everything its relationships
+    reach, the presentation's settings, the slide's place, the locale and font choice) and
+    parses each layout, master, theme, table style part and default text style once per its
+    bytes, across decks. A slide drawn from the clock (a date field) is never kept;
+    `ResolvedPresentation.dated` names such slides. Bounded and shared between threads;
+    what it gives back is read-only.
+  Checked: every slide of the local corpus (579 decks, 3,040 slides) draws byte for byte as
+  0.3.7 drew it, with and without a cache, the agent view too (two decks whose time fields
+  show the clock compared at a pinned `now`); resolving and drawing change neither a kept
+  slide nor a kept parse (pickled before and after, 83 decks); `tests/test_model_cache.py`.
+
 ## 0.3.7 -- unreleased
 
 - **One glyph set for the deck, and smaller outlines** (production round 32, R10). Text as

@@ -8,6 +8,7 @@ master, and each master at its theme.  Layouts and masters are read once and sha
 
 from __future__ import annotations
 
+from typing import Callable, Iterable
 from xml.etree.ElementTree import Element
 
 from ..opc import (
@@ -69,8 +70,20 @@ COLOR_MAP_SLOTS = (
 
 
 
-def read_presentation(package: OpcPackage) -> SourcePresentation:
-    """Read a whole deck into the source model."""
+def read_presentation(
+    package: OpcPackage,
+    slide_numbers: Iterable[int] | None = None,
+    *,
+    parsed: PartReader | None = None,
+) -> SourcePresentation:
+    """Read a deck into the source model: every slide, or with ``slide_numbers`` (1-based,
+    presentation order) only those, each with its layout, master and theme.  A slide not
+    asked for is not parsed: resolution draws only the slides asked for, and a slide
+    reads nothing of another.
+
+    ``parsed``, when given, reads each layout, master and theme
+    (:meth:`pptx2svg.cache.ModelCache.parsed`): one parse shared by every conversion of
+    the same bytes."""
     presentation_path = package.presentation_part()
     if presentation_path is None:
         raise ValueError("package has no presentation part; is this a .pptx?")
@@ -80,26 +93,52 @@ def read_presentation(package: OpcPackage) -> SourcePresentation:
         raise ValueError(f"presentation part {presentation_path!r} is missing")
 
     sld_sz = child(root, "sldSz")
+    if parsed is None:
+        default_text_style = parse_text_style(child(root, "defaultTextStyle"))
+        table_styles = read_table_styles(package, presentation_path)
+    else:
+        default_text_style = parsed(package, presentation_path, _default_text_style)
+        styles_path = package.first_related_part(presentation_path, REL_TABLE_STYLES)
+        table_styles = (parsed(package, styles_path, _table_styles_part)
+                        if styles_path is not None else None)
     presentation = SourcePresentation(
         part_path=presentation_path,
         slide_width=num_attr(sld_sz, "cx") or 9144000,
         slide_height=num_attr(sld_sz, "cy") or 6858000,
-        default_text_style=parse_text_style(child(root, "defaultTextStyle")),
-        table_styles=read_table_styles(package, presentation_path),
+        default_text_style=default_text_style,
+        table_styles=table_styles,
         embedded_fonts=read_embedded_fonts(root, presentation_path),
         app_version=read_app_version(package),
         first_slide_number=_first_slide_number(root),
     )
 
+    wanted = None if slide_numbers is None else set(slide_numbers)
     entries = _slide_paths(package, presentation_path, root)
     for number, (slide_id, slide_path) in enumerate(entries, start=1):
+        if wanted is not None and number not in wanted:
+            continue
         slide = read_slide(package, slide_path, number, slide_id)
         if slide is None:
             continue
         presentation.slides.append(slide)
-        _ensure_ancestry(package, presentation, slide)
+        _ensure_ancestry(package, presentation, slide, parsed)
 
     return presentation
+
+
+#: How :func:`read_presentation` reads a layout, master or theme when it is handed one:
+#: ``(package, part path, reader) -> what reader(package, part path) returns``.
+PartReader = Callable[[OpcPackage, str, Callable], object]
+
+
+def slide_entries(package: OpcPackage) -> list[tuple[int | None, str]]:
+    """``(sldId, part path)`` of every slide, in presentation order -- slide number ``n``
+    is entry ``n - 1`` -- without parsing a slide."""
+    presentation_path = package.presentation_part()
+    root = package.read_xml(presentation_path) if presentation_path is not None else None
+    if root is None:
+        return []
+    return _slide_paths(package, presentation_path, root)
 
 
 def _first_slide_number(root) -> int:
@@ -253,14 +292,18 @@ def read_template(
 
 
 def _ensure_ancestry(
-    package: OpcPackage, presentation: SourcePresentation, slide: SourceSlide
+    package: OpcPackage, presentation: SourcePresentation, slide: SourceSlide,
+    parsed: PartReader | None = None,
 ) -> None:
     """Read the slide's layout, master and theme once each, caching by part path."""
+    def read(reader, path):
+        return reader(package, path) if parsed is None else parsed(package, path, reader)
+
     layout_path = slide.layout_part_path
     if layout_path is None or layout_path in presentation.layouts:
         layout = presentation.layouts.get(layout_path) if layout_path else None
     else:
-        layout = read_slide_layout(package, layout_path)
+        layout = read(read_slide_layout, layout_path)
         if layout is not None:
             presentation.layouts[layout_path] = layout
 
@@ -272,14 +315,14 @@ def _ensure_ancestry(
         return
     master = presentation.masters.get(master_path)
     if master is None:
-        master = read_slide_master(package, master_path)
+        master = read(read_slide_master, master_path)
         if master is None:
             return
         presentation.masters[master_path] = master
 
     theme_path = master.theme_part_path
     if theme_path is not None and theme_path not in presentation.themes:
-        theme = read_theme(package, theme_path)
+        theme = read(read_theme, theme_path)
         if theme is not None:
             presentation.themes[theme_path] = theme
 
@@ -404,6 +447,16 @@ def read_table_styles(package: OpcPackage, presentation_path: str) -> SourceTabl
     part_path = package.first_related_part(presentation_path, REL_TABLE_STYLES)
     if part_path is None:
         return None
+    return _table_styles_part(package, part_path)
+
+
+def _default_text_style(package: OpcPackage, presentation_path: str):
+    """``p:defaultTextStyle`` of the presentation part (a :data:`PartReader`'s reader)."""
+    return parse_text_style(child(package.read_xml(presentation_path), "defaultTextStyle"))
+
+
+def _table_styles_part(package: OpcPackage, part_path: str) -> SourceTableStyles | None:
+    """The table styles part ``part_path`` (see :func:`read_table_styles`)."""
     root = package.read_xml(part_path)
     if root is None:
         return None
