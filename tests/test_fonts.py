@@ -318,7 +318,7 @@ DIVERGENT = {
 
 #: Tables with no font behind them.  See the note on :data:`DIVERGENT`.
 MEASURED_ONLY = {
-    "Aptos", "Aptos Display", "Cambria",
+    "Aptos", "Aptos Display", "Aptos Narrow", "Cambria",
     "ＭＳ ゴシック", "ＭＳ Ｐゴシック", "ＭＳ 明朝", "ＭＳ Ｐ明朝",
     "SimSun", "NSimSun", "SimHei", "KaiTi", "FangSong",
     "MingLiU", "MingLiU_HKSCS",

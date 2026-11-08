@@ -6,6 +6,13 @@ The full history is the [merged pull requests](https://github.com/uvrt/pptx2svg/
 
 ## 0.3.8 -- unreleased
 
+- `tools/extract_font_metrics.py` measures Aptos Narrow too (round 44, for xlsx-agent's
+  fitted column widths: Excel's default body face), into ooxml-common 0.41.0's tables, from
+  the face Office installs, as Aptos's. Nothing pptx2svg draws or measures changes: its
+  substitution row keeps measuring Aptos Narrow with Aptos's table (ooxml-common's
+  `metrics_for`), and where Office is installed the installed face, as before. Tests and
+  the tool only.
+
 - **A deck converted again after an edit resolves only what the edit changed** (round 39).
   An editor measuring or drawing slides of the deck it holds read the whole deck again for
   every slide it asked for: pptx-agent's 25-slide builds converted a deck 165 times and parsed
