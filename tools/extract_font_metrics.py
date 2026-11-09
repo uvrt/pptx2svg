@@ -727,6 +727,13 @@ def verify_fixed_pitch(key: str, face: dict) -> None:
 #: export embeds "AptosDisplay", so PowerPoint had it even while every font directory
 #: said otherwise.  Two of the corpus's seven decks use it, and they are the two that
 #: scored worst.
+#: Aptos Narrow is Excel's default body face since 2023 (a new workbook's ``Normal`` style
+#: names it), and a condensed cut of its own: over a 40-letter word it is 15% narrower
+#: than Aptos.  It joined for xlsx-agent, whose fitted column widths are Excel's AutoFit
+#: computed from these advances (production round 44).  Office installs it with Excel,
+#: PowerPoint and Word (``Aptos-Narrow.ttf``, ``Aptos-Narrow-Bold.ttf``).  The renderers'
+#: substitution row keeps measuring it with Aptos's table: what PowerPoint and Word draw
+#: with it is a separate question (``text/fontmap.py``).
 #: The Japanese faces are here because a deck can need one without ever naming it.
 #: ``sample.pptx`` declares ``<a:ea typeface=""/>`` -- no East-Asian face at all -- and
 #: then sets Japanese body text, so both renderers fall back: PowerPoint to MS Gothic,
@@ -747,6 +754,7 @@ MEASURED_ONLY = (
     "Cambria",
     "Aptos",
     "Aptos Display",
+    "Aptos Narrow",
     "ＭＳ Ｐゴシック",
     "ＭＳ ゴシック",
     "ＭＳ Ｐ明朝",
@@ -951,6 +959,7 @@ NOTES = {
     "Cambria": "MEASURED ONLY -- proprietary; Caladea is 4.5% narrower, so it is not it",
     "Aptos": "MEASURED ONLY -- proprietary, no clone exists, drawn with a substitute",
     "Aptos Display": "MEASURED ONLY -- Office cloud font, no clone exists",
+    "Aptos Narrow": "MEASURED ONLY -- Excel's default body face, a condensed cut of its own",
     "ＭＳ Ｐゴシック": "MEASURED ONLY -- proportional: kana run 0.648-1.0 em, not full-width",
     "ＭＳ ゴシック": "MEASURED ONLY -- fixed pitch 128/256 of 256, the non-proportional cut",
     "ＭＳ Ｐ明朝": "MEASURED ONLY -- proportional serif; PowerPoint falls back to it too",
